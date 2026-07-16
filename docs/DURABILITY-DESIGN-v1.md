@@ -1,0 +1,247 @@
+# EZjobsite — Durability & Sync Design (the pre-code design gate)
+
+> **What this is.** The design pass Codex #6 required before any Spike A code. It answers the 9 artifacts from `SPIKE-A-BUILD-PLAN.md §0.5` at the protocol level, so the build derives from written invariants instead of improvising durability in code. Decisions locked 2026-07-16: **append-only sync (ADR-2)** · **honest save-invariant (CLAUDE #1)** · **immutable media + versioned records + approval-freeze** · **DECISION 4 (Option B)** · **DECISION 7 (Supabase Storage)**.
+>
+> ## ⛔ STATUS: NOT READY TO BUILD — the second Codex pass FAILED this design (2026-07-16)
+>
+> **`CRITIC-REVIEW-07-CODEX.md` reviewed this document and found only 2 of 20 Review-#6 findings actually closed (C2, H1).** C1/C3/C4/C5/C6/C7/C8 remain open or partial. **The artifacts previously marked "✅ COMPLETE" were protocol sketches, not crash-safe specifications** — the labels have been corrected to **⚠️ DRAFT** so the false-complete problem is not repeated. **Do not begin A0.2 (schema).**
+>
+> **The three pre-code blockers** (genuine protocol design — deliberately NOT fixed in this pass, and gated behind a pending decision on the ADR-2 / PowerSync-bakeoff direction):
+> 1. **The `seq` pull is not commit-ordered → a capture can be silently lost forever.** §2.3's claim that concurrent inserts always receive a *higher* seq than the cursor is **false**: Postgres sequence allocation is not commit-ordered. Txn A takes seq 10 and stalls; B takes 11 and commits; the device pulls 11 and advances its checkpoint; A then commits 10; `seq > 11` never returns it. *(Codex's pick for the single most likely field failure.)*
+> 2. **`MEDIA_COMMITTED` is not atomic.** §1.1 correctly states the filesystem and SQLite cannot share a transaction — then §1.3 step 6 recombines them ("one SQLite transaction … **and** advance manifest"). Two commits, two systems. §1.4's recovery table assumes "rows + manifest agree" and has **no row** for either half-committed state.
+> 3. **L5 ("sync is append-only") is false for the actual data model.** Append-only holds for *evidence* (media, capture receipts, record versions, approvals) but **not** for operational state, which SPEC §8 makes mutable: `Capture.processing_state` / `remote_uri` / `resolution_status`, `Decision.current_value`, `Notification.read_state`, `Project.status`, `ProcessingJob.state`, `content_version`. §2.6's "what append-only let us delete from the design" was banked against a premise that does not hold model-wide.
+>
+> Full findings + reconciliation: `CRITIC-REVIEW-07-CODEX.md` and `IMPLEMENTATION_NOTES.md §4`.
+
+---
+
+## 0. The data-model laws everything obeys
+
+These come from hadar's append-only decision and make the durability problem tractable.
+
+- **L1 — Media is immutable.** An audio file or image, once captured, is **never edited, re-encoded in place, or merged.** It is content-addressed (named by its own hash) and write-once. We never merge an audio file.
+- **L2 — The only thing that merges is derived text.** After transcription, the *text/decision record* may be revised or aggregated. That is a small, structured, text-level operation — not a media operation.
+- **L3 — Records are versioned; history is retained.** A change to a record creates a **new version row**; prior versions are kept. The original recording + images are retained as **tamper-proof evidence** — if anyone disputes what was said or shown, the original stands.
+- **L4 — Approval freezes AND makes permanent.** Once a record is **digitally approved/signed**, that version is **frozen** — never edited in place, **and never deleted.** A later change is a **new appended record/version** carrying its own approval; a "removal" is a new superseding record, never destruction of the approved one. (Composes with "frozen `shown_content` = the binding signed artifact.") **The one lawful exception:** a valid GDPR/CCPA erasure request **crypto-shreds the personal content + media** (destroys the per-record key) **but retains the hash + metadata stub** — so the evidence-chain skeleton (that an approved record existed, when, by whom, its hash) survives even though the personal data is destroyed. That is the *only* path by which an approved record's data leaves, and it is a controlled destruction-with-tombstone, not an edit or a delete.
+- **L5 — Therefore sync is append-only.** Every sync operation is an **append of a new immutable row** (a capture receipt, or a new version). Nothing already synced-and-approved is ever mutated. This is what lets the sync protocol (artifact 2) avoid a general two-way merge engine.
+
+  > ### ⚠️ L5 IS FALSE AS STATED — OPEN GAP (Codex #7, blocker 3)
+  > Append-only is true of the **evidence** (media, capture receipts, record versions, approvals) but **not of the whole model.** SPEC §8 defines genuinely **mutable operational state**: `Capture.processing_state` / `remote_uri` / `resolution_status` · `Decision.current_value` · `Notification.read_state` · `Project.status` (active/archived) · `ProcessingJob.state` · `content_version` · translation cache · grant/revocation state · usage counters. These change in place and must sync.
+  > **This matters because L5 is the premise Artifact 2 rests on** — §2.6's "what append-only let us delete from the design" (oplog merge, LWW, vector clocks, base/overlay reconciliation, edit-conflict resolution) was banked against a property the model does not have. Codex: *"C5 has merely been moved behind an invalid premise."*
+  > Resolution requires a decision (**not made here** — it is entangled with the pending ADR-2 / PowerSync-bakeoff call): either **(a)** scope append-only to an immutable **evidence ledger** and define a separate versioned change log for mutable operational state, or **(b)** event-source/version **every** synchronized entity so L5 becomes literally true. Until then, treat every "because append-only…" justification in Artifact 2 as **unproven**.
+
+**The honest save-invariant (CLAUDE #1):** *Never acknowledge a capture ("saved ✓") unless a verified recoverable copy + durable recovery intent exist; refuse to start loudly when capacity/permission can't be reserved.* Residual-loss boundaries (named, not hidden): total device loss/destruction, app-data deletion, encryption-key loss, correlated filesystem destruction.
+
+---
+
+## Artifact 1 — The capture-commit state machine  ⚠️ DRAFT — open gaps per Codex #7
+
+*This is the crux — the exact ordered sequence from "user hits record" to a trustworthy "saved ✓," designed so that a kill/crash/power-loss at **any** point leaves either a fully-committed capture or a **recoverable** one, never a phantom "saved" pointing at nothing. It fixes Codex #6 C1 (premature "saved") and is built to survive C2/H3/H4 (single-device fault domain).*
+
+### 1.1 Why a state machine + a sidecar manifest (not a boolean)
+
+The four durability events the old plan conflated — **journal commit, media-file commit, DB-row commit, outbound-intent commit** — happen on **two storage systems that cannot share a transaction**: the **filesystem** (media files) and **SQLite** (rows). No single `COMMIT` can make both atomic. So we need:
+
+1. An **ordered state machine** where each transition is durable and idempotent, and
+2. A **per-capture sidecar manifest** — a tiny, authenticated, content-addressed file written next to the media — that is the **recovery source of truth**, independent of the SQLite database. If SQLite is corrupted or its key is lost (Codex H3/H4), the manifest + media files are enough to reconstruct the capture. The manifest, not a DB boolean, records "how far did this capture get."
+
+### 1.2 The states (per capture)
+
+| State | Meaning | Durable artifact written | UI shows |
+|---|---|---|---|
+| `RESERVED` | Storage quota + permissions reserved. If they can't be → **refuse loudly**, never a silent half-start (honest invariant). | disk-space lease | (arming…) |
+| `STARTED` | **Write-ahead journal + sidecar manifest** written *before the recorder is armed and before any network* (REQ-CAP8): capture id, project, author, start time, modality, intent, capture-key id. | journal row + sidecar manifest v0 | "recording" |
+| `RECORDING` | Encrypted media streams to a **temp file** in chunks; each chunk's `(seq, length, hash)` is appended to the manifest as it lands. | media temp + manifest chunk log | "recording" |
+| `FINALIZING` | Recorder stopped. Container footer written; **`fsync` the file, then `fsync` the parent directory** (so the file's existence itself is durable). | finalized media file | "finishing…" |
+| `VERIFIED` | Media re-opened and checked: decodable, duration credible, full-file hash matches the chunk log. A truncated/garbled file is caught **here**, not after "saved." | manifest marked `media-verified` + final content hash | "finishing…" |
+| `MEDIA_COMMITTED` | **One SQLite transaction** creates: the `Capture` row, the `Attachment` row (pointing at the content-addressed media), and the **outbound append-mutation** (the capture-receipt to sync). Manifest advanced to `MEDIA_COMMITTED`. | SQLite txn (3 rows) + manifest | **"Saved on this phone ✓ — not backed up yet"** ← *the ONLY place "saved" fires* |
+| `QUEUED` | *(Same transaction as above.)* The outbound append-mutation IS the queue entry — created atomically with the domain rows, so there is **no window** where a capture is "saved" but has no sync intent. | (part of the MEDIA_COMMITTED txn) | "saved — waiting to back up" |
+| `UPLOADED` | Media object uploaded to storage; object existence + checksum verified server-side. | server object + local state | "backing up…" |
+| `SYNCED` | Server receipt for the append-mutation received; capture-receipt durably on the server. | server receipt | **"Backed up ✓"** |
+
+**"Saved ✓" fires only at `MEDIA_COMMITTED`.** Everything before it shows an in-progress state. Nothing downstream (upload, server) is required for "saved" — that's the offline guarantee — but everything *local* (verified media + committed rows + committed outbound intent) **is** required.
+
+### 1.3 The commit order (the 7 steps, mapped to states)
+
+1. **Reserve** storage + permissions (`RESERVED`) — or refuse loudly.
+2. **Commit `STARTED`** journal + sidecar manifest **before arming the recorder** (REQ-CAP8).
+3. **Stream** encrypted chunks with `(seq, hash)` (`RECORDING`).
+4. **Finalize + `fsync`** file and parent dir (`FINALIZING`).
+5. **Verify** decodable + duration + hash (`VERIFIED`).
+6. **One SQLite transaction:** `Capture` + `Attachment` + outbound append-mutation; advance manifest to `MEDIA_COMMITTED`.
+7. **Only then emit "saved ✓."**
+
+> ### ⚠️ STEP 6 IS NOT ATOMIC — OPEN GAP (Codex #7, blocker 2)
+> §1.1 correctly states the filesystem and SQLite **cannot share a transaction** — and step 6 then recombines them: "one SQLite transaction … **and** advance manifest to `MEDIA_COMMITTED`." Those are **two commits on two storage systems.** Two crash states are unhandled, and §1.4's recovery table has **no row for either** (it assumes "rows + manifest agree"):
+> - **SQLite commits, manifest advance fails** → recovery sees `VERIFIED` but the rows + mutation already exist.
+> - **Manifest commits, SQLite rolls back** → recovery sees `MEDIA_COMMITTED` with **no rows** — a phantom "saved."
+>
+> Also undefined: atomic temp-write → `fsync` → rename → dir-`fsync` for manifest generations; the manifest is described as both content-addressed *and* continuously appended (incompatible unless explicitly versioned); no paired durability order between chunk data and chunk-log entries (a torn manifest can claim an absent chunk); the finalized temp file is never atomically renamed to its content-addressed permanent path; "disk-space lease" reserves no blocks, so ENOSPC can still strike the manifest or the final rename.
+> **A single ordered commit protocol + a complete recovery truth table must be written before this is built. Not designed here. C1 remains open (partial).**
+
+### 1.4 Crash behavior + recovery (what relaunch does per last state)
+
+On every launch, a **recovery sweep** reconciles journal + sidecar manifests against SQLite and the media directory. Rule: **never initialize a fresh database over an existing one whose key is missing** (enter a hard recovery state instead — Codex H3). Per capture, keyed off the manifest's last durable state:
+
+| Crash happened at | On relaunch | Result |
+|---|---|---|
+| Before `STARTED` | Nothing recorded; disk lease reclaimed. | No capture existed. No loss (nothing was acknowledged). |
+| During `RECORDING` (kill/power-loss mid-record) | Manifest + partial chunks found; media truncated to the last **verified** chunk boundary (chunk log). Offer **keep partial / discard**. | Recoverable partial — the ezQuotePro-killer case. Never a lost "saved." |
+| During `FINALIZING` (footer/fsync interrupted) | Manifest says `RECORDING`; re-run finalize from chunks, or fall back to last verified boundary. | Recovered or recoverable-partial. |
+| During `VERIFIED`→`MEDIA_COMMITTED` (media done, txn not committed) | Media verified on disk, no SQLite rows. Re-run step 6 (idempotent, keyed by capture id). | Fully recovered — "saved" had **not** yet been shown, so no phantom. |
+| After `MEDIA_COMMITTED` | Rows + manifest agree. If `QUEUED` not yet `UPLOADED`, the queue worker resumes. | Durable; upload resumes. |
+| SQLite corrupted / key lost (H3/H4) | Hard recovery state; rebuild the index from **sidecar manifests + content-addressed media**; never clobber. | Recovered from manifests (or an honest, named residual-loss boundary if manifests+media are also gone). |
+
+**Idempotency:** every transition is safe to re-run — step 6 upserts by capture id; uploads use immutable content-addressed object keys (artifact 3); the append-mutation carries a stable mutation id (artifact 2). Re-running never duplicates or corrupts.
+
+### 1.5 What the fault-harness oracle checks (ties to artifact 8)
+
+For a capture the app claims is `MEDIA_COMMITTED`, the oracle verifies **all** of: expected audio sample-count/duration, media decodable, stored hash == recomputed hash, `Capture`+`Attachment` rows present and consistent, outbound append-mutation present, manifest state == `MEDIA_COMMITTED`. "A row exists" is **not** acceptance. Any capture the app showed "saved ✓" for that fails any check = a **loss** (the worst-severity fault), even if a row exists.
+
+### 1.6 Open sub-decisions this artifact hands to others
+
+- The **media-encryption scheme** (how chunks are encrypted, where the key lives) = artifact 4 — it determines exactly what "encrypted chunk" means in step 3.
+- The **sidecar manifest format** (authenticated how; content-addressing scheme) is finalized with artifact 3 (identity rules).
+- The **outbound mutation shape** = artifact 2.
+
+---
+
+## Artifact 2 — The append-only sync protocol  ⚠️ DRAFT — open gaps per Codex #7
+
+*How new immutable rows get from the phone to the server and back. Because of L5 (append-only), this is **not** a two-way merge engine — it is "push new facts, pull new facts since last time." That single property dissolves the hardest findings Codex raised (C5 clobbering, base/overlay reconciliation, oplog merge). Fixes C4 (idempotency) and C5 (real protocol).*
+
+### 2.1 The unit of sync: an immutable append-mutation
+
+Every sync operation moves an **append-mutation** — a self-contained immutable fact:
+
+- a **capture-receipt** (a capture happened: id, project, author, time, media pointer, hash),
+- a **new record version** (the versioned text/decision from L3),
+- an **approval** (a signature over a specific record version — L4),
+- a **tombstone** (windowing/revocation only — see 2.4).
+
+No mutation ever *edits* a prior row. A "change" is a new version-append; a "removal" is a superseding append (approved rows: never destroyed except the lawful crypto-shred, L4). This is why the protocol needs no conflict resolution for edits — **there are no edits.**
+
+### 2.2 Push (device → server)
+
+- Each mutation carries a **stable mutation ID** minted at local commit (Artifact 1, step 6) — globally unique, deterministic, unchanged across retries.
+- `POST /sync/push` sends a **batch**. The server applies each mutation in **one Postgres transaction**: insert the idempotency receipt (unique on mutation ID) **and** the domain row(s) together (Codex C4/C8). Replaying the same mutation ID → no-op that returns the stored receipt. So a kill after the server commits but before the device hears back is safe: the retry deduplicates.
+- **Per-mutation results, not all-or-nothing:** the response reports each mutation's outcome; the device advances each independently (Codex H2). One bad mutation can't block the batch.
+- **Dependency order (a partial order, not a merge):** a child references its parent by stable ID (attachment→capture, version→record, approval→version). The device pushes parents before children; if a child arrives first, the server parks it and the client retries — because IDs are stable, the parent always reconciles. No merge, just ordering.
+- **Media** is uploaded separately to immutable content-addressed object keys (Artifact 3) and the capture-receipt is only finalized server-side after the object's existence+checksum verify (no orphan rows).
+
+### 2.3 Pull (server → device)
+
+- The server stamps every row with a **monotonic change sequence** (`seq`, a per-tenant bigint). The device keeps a **high-watermark checkpoint** = the last `seq` it has fully consumed.
+- `GET /sync/pull?since=<checkpoint>&limit=N` returns rows with `seq > checkpoint`, **keyset-paginated by `(seq, id)`** — stable under concurrent inserts because new rows always get a *higher* seq, never one inserted "behind" the cursor. This is the property append-only buys us: **pagination can't miss or duplicate rows** the way it could over mutable data.
+
+  > ### ⛔ THE CLAIM IN THE BULLET ABOVE IS FALSE — DO NOT BUILD IT (Codex #7, blocker 1)
+  > **Postgres sequence allocation is not commit-ordered**, so a row *can* appear "behind" the cursor: txn A takes seq 10 and stalls → txn B takes 11 and commits → the device pulls 11 and advances its checkpoint → A commits 10 → `seq > 11` **never returns A**. That capture is silently lost forever. Codex's pick for the **single most likely remaining field failure.**
+  > Also unresolved here: `since=<seq>` vs `(seq,id)` pagination can skip rows sharing a seq at a page boundary; applying pulled rows and advancing the checkpoint are not required to be one transaction (checkpoint-first loses rows); no fixed response high-watermark; pull-side parent-before-child ordering unspecified; a revoked user may be unauthorized to pull the very tombstone meant to purge their device; time-based window exit has no DB mutation, so re-entry never resends rows below the checkpoint.
+  > **A commit-ordered cursor must be designed before this is built** (known approaches: commit-timestamp watermark, snapshot-`xmin` boundary, or WAL/logical-replication ordering). **Not designed here** — pending the ADR-2 direction decision. **C5 remains fully open.**
+- **A pulled row never overwrites a local pending mutation** (Codex C5's clobber): local pending mutations are *also* new appends with their own IDs — they don't collide with pulled appends. The whole base-state-vs-overlay reconciliation problem disappears.
+- The device inserts pulled rows **idempotently** (insert-if-absent by ID) and advances the checkpoint. Client clock is **never** the ordering authority — server `seq` is (Codex C5).
+
+### 2.4 Tombstones — only two non-edit reasons
+
+Because nothing is ever edited or (normally) deleted, tombstones exist for exactly two purposes, and both carry a `seq` so they flow through the same pull:
+
+1. **Windowing** — a row leaves the device's working set (project archived, or older than the last-N-days window). "Stop showing / purge locally," not "this changed."
+2. **Revocation** — access removed (member/collaborator offboarded — REQ-MEMBER-5). Purge the revoked scope locally; **suspend, don't push,** any queued outbound mutations for a revoked scope (never push A's data under B's credentials — Codex H7).
+
+*(The lawful crypto-shred erasure, L4, also produces a tombstone-with-hash-stub — the evidence skeleton survives.)*
+
+### 2.5 The one real "conflict" — and why it's not a sync problem
+
+The only genuine collision left is **semantic**: two offline devices each create a *project* at the same address. That is **not** a sync-layer merge — it's an explicit, confirmed **project-merge flow** (Codex H8): tenant-scoped candidates → human confirm → an **alias/tombstone map** + transactional child-repointing, with captures that arrive later against the losing project ID resolving through the alias. It, too, works by **appending** (an alias record), never by editing. Immutable *captures* are **never** semantically de-duplicated — only projects merge, and only with confirmation.
+
+### 2.6 What append-only let us delete from the design
+
+Gone, versus a general two-way engine: oplog merge · last-writer-wins · vector clocks · base/overlay reconciliation of mutable rows · edit-conflict resolution · re-snapshot-without-losing-local-edits. What remains is small and boring: append with a stable ID, pull by a server sequence, two kinds of tombstone. That is the whole point of the append-only decision.
+
+---
+
+## Artifact 3 — Mutation & object identity  ⚠️ DRAFT — open gaps per Codex #7
+
+*Permanent, collision-proof names for media files and mutations, so retries/duplicates/orphans are impossible by construction. Fixes C4.*
+
+- **Media object keys are content-addressed + namespaced:** `{tenant_id}/{capture_id}/{asset_type}/{sha256}.{ext}`. The `sha256` is the hash of the **exact bytes uploaded** (ciphertext, per Artifact 4). Consequences: the same bytes always map to the same key (dedup), the key **proves integrity** (server recomputes on finalize), and media is **write-once — never overwritten** (a different byte-stream is a different key). No `upsert`/last-writer-wins on objects (Codex C4).
+- **Mutation IDs:** a **UUIDv7** minted **on-device at the local commit** (Artifact 1, step 6). Time-ordered (helps server locality), globally unique across devices, stable across retries, not cross-tenant-guessable. Stored on the mutation row; the server's idempotency receipt is keyed on it.
+- **Server finalize is a verify-then-link step:** the attachment row is linked to a capture **only after** the object's existence + byte-size + checksum are confirmed. So there is never a row pointing at a missing/half-uploaded object, nor an object with no row (the sweeper, Artifact 6, catches any straggler from a crash between the two).
+- **Stored idempotent responses:** each mutation ID's outcome is persisted; a replay returns the same response rather than re-doing work.
+- **Integrity chain:** the on-device **sidecar manifest** (Artifact 1) stores both the **plaintext hash** (to verify the capture decrypts to what was recorded) and the **ciphertext hash** (= the object key), tying the local recovery record, the uploaded object, and the server row into one verifiable chain.
+
+## Artifact 4 — Media encryption + key lifecycle  ⚠️ DRAFT — open gaps per Codex #7 *(DECISION 4 itself is LOCKED; the key LIFECYCLE is not designed)*
+
+*SQLCipher protects the database, not the audio/image files (Codex C3). This artifact decides how the media itself is protected, and how keys live and die — which also unblocks the op-sqlite-vs-expo-sqlite library choice.*
+
+**▶ DECISION 4 — media encryption scheme. ✅ LOCKED 2026-07-16 (hadar): Option B — per-capture-key envelope encryption.**
+
+- **Option A — OS file protection only.** Rely on iOS Data Protection + Android encrypted storage; media is encrypted at rest by the OS. *Simplest*, but: not app-level encrypted, weaker if a device is compromised while unlocked, and it means **crypto-shred (the L4 lawful-erasure carve-out) is not truly enforceable** — you can't destroy one capture's key to make it unreadable everywhere. Would require rewording REQ-CAP4 to "OS-file-protection at rest."
+- **Option B — per-capture-key envelope encryption (recommended).** Each capture gets its own **data key (DEK)**; media chunks are encrypted with it; the DEK is **wrapped** (a) by a device master key in Keychain/Keystore **and** (b) for the **server ingest identity**. **Ciphertext is uploaded unchanged** (so background upload never needs the plaintext or even the key — it just ships bytes). *Why recommended:* it makes **crypto-shred real** (destroy the DEK → that capture is unreadable everywhere the key never went), which the immutability/erasure model (L4) depends on; and it gives a **nice durability bonus** — because the DEK is also wrapped for the server, a **synced** capture stays recoverable even if the device's key is lost; only **not-yet-synced** captures are exposed to device key-loss. Cost: more work than Option A.
+
+**Key lifecycle (applies to Option B):**
+- Device master key in **Keychain (iOS)** / **Keystore (Android, StrongBox if present)**, with an accessibility class that permits **background access after first unlock** (e.g. `AfterFirstUnlock`) — **not** the `WhenUnlocked` default (Codex flagged Expo SecureStore defaults to `WHEN_UNLOCKED`, which would break locked-device background upload; this needs explicit config or a small native module).
+- **Key loss = hard recovery state, never init a new DB over the old one** (Codex H3). On restore-without-key: synced captures recover server-side (their DEK was wrapped for the server); unsynced captures with only local ciphertext become an **honest, named residual-loss boundary**.
+- Keys **excluded from cloud backup** (a restored-but-undecryptable key is worse than none). Rekey/rotation is a defined, interrupt-safe operation.
+- **This decides the SQLite library:** SQLCipher needs a native prebuild (not in Expo Go) and `expo-sqlite`'s `PRAGMA key` passes the key through JS. With Option B we're already doing native crypto for media, so **`op-sqlite` (with its SQLCipher build)** is the natural fit for the DB too — one native crypto story. *(Provisional: op-sqlite; confirm in the A0.3 spike.)*
+
+## Artifact 5 — Action/resource authorization matrix  ⚠️ DRAFT — open gaps per Codex #7
+
+*Codex C7: a TypeScript middleware "predicate" is not the same thing as Postgres RLS, and a top-level `org_id` check misses nested resources. This makes authorization a real, enforced model.*
+
+- **Canonical authz lives in Postgres functions** — `can_read(actor, resource)`, `can_append(actor, record)`, `can_approve(actor, record)`. **RLS policies call these functions, and service-role code (Edge Functions, jobs) calls the *same* functions explicitly** (service-role bypasses RLS, so it must opt in). One source of truth, two callers.
+- **Validate the whole chain, not the top:** actor → tenant membership → project membership/assignment → the specific capture/attachment/record belongs to that project. A nested `capture_id` from another tenant is rejected even if the top-level tenant matches.
+- **Every transport path enumerated, each with a negative test:** the sync push/pull Edge Functions; **PostgREST is NOT exposed publicly** (all access via Edge Functions) to shrink the surface; Storage/TUS object issuance **re-checks membership on the specific object every time**; the homeowner **one-record scoped JWT** (a single disposition, nothing else); durable-job callbacks (service-role → must call `can_*`); R2/Storage media reads via an authorizing endpoint. Negative contract tests: collaborator-removed, cross-tenant `capture_id`, object-key enumeration, homeowner over-fetch, **revoked-member pull** (REQ-MEMBER-5).
+- **Append-only interaction:** `can_append` enforces L4 — no mutation may target an approved record version except a **new-version append**; `can_approve` restricts approvals to the designated approver.
+- **Deliverable:** a generated **policy matrix** (roles × resources × actions) checked in CI, so a new endpoint can't ship without a row + a negative test.
+
+## Artifact 6 — Transactional outbox (server side)  ⚠️ DRAFT — open gaps per Codex #7
+
+*Codex C8: "put the pipeline in durable jobs" doesn't make the trigger durable — if an Edge Function commits a capture then dies before starting the job, it's permanently unprocessed. The outbox makes the trigger a row, not an in-memory call.*
+
+- When a push finalizes a capture/attachment, the **same Postgres transaction** inserts an **outbox event** (`process capture X version Y`). Commit is atomic: either both the capture and its "needs processing" marker exist, or neither does.
+- A **durable dispatcher** claims outbox rows with a lease (`SELECT … FOR UPDATE SKIP LOCKED`), delivers to the jobs runtime (Trigger.dev/Inngest — ADR-3), marks delivered on ack, retries with exponential backoff + jitter on failure, and surfaces a **dead-letter** state for anything that keeps failing.
+- Jobs are **idempotent on `(capture_id, content_version)`** — redelivery never double-processes.
+- An **orphan sweeper** runs periodically and repairs/alerts on: objects-without-rows, rows-without-objects, finalized attachments with no outbox event, and outbox events stuck undelivered.
+
+## Artifact 7 — Storage provider + resumable protocol  ✅ DECISION 7 LOCKED *(the provider choice is settled; the resumable/fault protocol against it is not yet written)*
+
+*Codex H6: Supabase Storage (TUS) and R2 (S3-multipart) are NOT an isolated swap — issuance, resume tokens, part receipts, checksums, and background-client support differ. Lock ONE before the durability gate.*
+
+**▶ DECISION 7 — P1 storage provider. ✅ LOCKED 2026-07-16 (hadar): Supabase Storage for P1; R2 as the P1.5 egress optimization.**
+
+- **Supabase Storage (recommended for P1):** one vendor (Spike A is already all-Supabase → keeps the spike small), **TUS resumable uploads** with good background support, integrated auth. Downside: egress costs on heavy media playback, less battle-tested at large scale.
+- **Cloudflare R2 (defer to P1.5):** zero egress (cheap for high-volume media playback), S3-compatible multipart, scales — but a second vendor with separate auth and a different resumable model.
+- **Rationale:** P1 is voice-first (small audio), so egress isn't yet the cost driver; start on Supabase Storage, and design the **RemoteStorage abstraction** now to cover issuance / resume-token / part-state / checksum / abort / finalize / orphan-cleanup (not just `put()`), so the R2 swap is bounded when media volume (video, playback) justifies zero-egress. **Whichever is chosen, the full fault suite runs against that one provider** — no "swap later, test later."
+
+## Artifact 8 — Failpoint matrix + statistical target  ⚠️ DRAFT — open gaps per Codex #7
+
+*Codex H9/H10/H11: the old gate could certify a broken design, had no real numeric target, and was missing whole fault classes. This is the pass/fail bar.*
+
+- **Two-tier testing:** (1) an **automated failpoint harness** — deterministic crash injection **after every state transition** (Artifact 1) plus randomized kills — run in CI for **volume**; (2) **physical-device runs** (smaller N) for platform **realism** (real OS eviction, real storage-full, real background scheduler). Release builds + the **production entrypoint** only (a test-only queue proves nothing — the ezQuotePro trap).
+- **The oracle** (from §1.5) verifies audio sample-count/duration, decodability, hash match, DB rows, queue state, remote object, and server receipt — never "a row exists."
+- **Predeclared targets, per fault class, per platform** (no pooling into one flattering N):
+  - Core capture-loss faults (kill mid-record / mid-finalize / mid-commit): **< 1e-4 at 95%** → ~30,000 zero-failure automated-failpoint trials, + hundreds on device.
+  - Sync duplication/loss faults (mid-push / mid-pull / lost-response): zero dup/loss across a declared N with the oracle.
+  - Recovery faults (DB corruption, key loss): recovers from manifests, or hits a **named** residual-loss boundary — never silent.
+- **The expanded fault list (Codex H11)**, by category:
+  - *Local:* kill mid-record, OS memory eviction, storage-full at each write boundary, power loss, DB/WAL corruption, mic interruption / route change / permission revocation / phone call mid-record, OS purge of a misplaced cache file, clock moved back/forward.
+  - *Storage/upload:* mid-upload kill, TUS/signed-URL expiry, object-complete-but-row-absent (and vice-versa), checksum mismatch.
+  - *Sync/server:* server commit then lost HTTP response, auth-token expiry mid-push/upload, two simultaneous queue drainers, 401/409/413/429/5xx/timeout/malformed-partial, old-client mutation vs new schema, app-upgrade/kill during SQLite migration.
+  - *Account:* logout, user switch, membership revocation mid-sync, device sharing.
+  - *Network:* wifi→cell with cellular-consent off, captive portal, false-positive reachability.
+  - *Backlog:* queue backlog exhausting storage days later.
+
+## Artifact 9 — Append-only decision record  ✅ DECISION LOGGED *(Codex #7 confirms H1 closed as a decision — but see the L5 challenge below)*
+
+P1 sync = **append-only** (ADR-2, resolved 2026-07-16). PowerSync stays a **P1.5+** option, and only if genuinely *mutable* multi-device relational sync ever earns it (the append-only model means it may never be needed). Traceable here so the choice isn't silently revisited.
+
+---
+
+## Status
+
+- **Both embedded decisions LOCKED 2026-07-16 (hadar) and unaffected by the #7 findings:** Decision 4 = **Option B** (per-capture-key envelope encryption); Decision 7 = **Supabase Storage** for P1 (R2 = P1.5 egress optimization). op-sqlite is the provisional SQLite library (confirm in A0.3). These two are settled and have now been **propagated into `ARCHITECTURE.md`** (which previously contradicted both).
+- **The second Codex pass RAN and FAILED this design** (`CRITIC-REVIEW-07-CODEX.md`, gpt-5.6-sol @ high, 2026-07-16): **2 of 20 findings closed (C2, H1)**; artifacts 1–6 + 8 downgraded **✅ COMPLETE → ⚠️ DRAFT**. See the blockers in the header.
+- **Done since:** the **doc-drift cleanup** — the Codex #6 decisions that were logged as ADOPT in `IMPLEMENTATION_NOTES §4` but never propagated (video wording/C6, storage provider, client-side encryption, Postgres-canonical authz, `MEDIA_COMMITTED`-gated save confirm) are now applied across `ARCHITECTURE.md` / `SPEC-capture-core-v1.md` / `SPIKE-A-BUILD-PLAN.md`. This closes the **contradiction** class of #7 findings only.
+- **NOT done (deliberately) — genuine protocol design, pending a user decision on the ADR-2 / PowerSync-bakeoff direction:** commit-ordered sync cursor · the SQLite↔manifest commit truth table · the immutable-evidence-vs-mutable-operational-state boundary (L5) · key lifecycle depth · client queue behavior · failpoint granularity · an enforceable database API. **A DURABILITY-DESIGN v2 is required before A0.2.**
+- This doc replaced "improvise durability in code" with written, reviewable invariants — and the review then proved several of those invariants wrong on paper, which is exactly what the design-first gate is for. **That is the gate working, not the gate failing.**
