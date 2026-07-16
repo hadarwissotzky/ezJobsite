@@ -59,7 +59,9 @@ These come from hadar's append-only decision and make the durability problem tra
 
 ## Artifact 1 — The capture-commit state machine  ⚠️ DRAFT — open gaps per Codex #7
 
-*This is the crux — the exact ordered sequence from "user hits record" to a trustworthy "saved ✓," designed so that a kill/crash/power-loss at **any** point leaves either a fully-committed capture or a **recoverable** one, never a phantom "saved" pointing at nothing. It fixes Codex #6 C1 (premature "saved") and is built to survive C2/H3/H4 (single-device fault domain).*
+*This is the crux — the exact ordered sequence from "user hits record" to a trustworthy "saved ✓."*
+
+> ⛔ **This paragraph previously promised that a kill/crash/power-loss at ANY point leaves either a fully-committed capture or a recoverable one, "never a phantom saved pointing at nothing." That promise is RETRACTED** (Codex #12, H1): it is normative text asserting the very property blocker 2 is open on, and it contradicted the banner four lines above it. **Artifact 1 is the intended sequence and the current skeleton — it is not yet a design that delivers that promise.** What it fixes today is Codex #6 C1 (premature "saved" on a local write) and v1's manifest/SQLite two-authority error. **It does not yet survive the power-loss fault it was written to survive.**
 
 > ## ⛔ BLOCKER 2 IS OPEN — Artifact 1 v3: the single ordered commit protocol (SKELETON, not a specification)
 >
@@ -150,7 +152,7 @@ The four durability events v1 conflated — **journal commit, media-file commit,
 
 **"Saved ✓" fires only at `MEDIA_COMMITTED`.** Everything before it shows an in-progress state. Nothing downstream (upload, server) is required for "saved" — that's the offline guarantee — but everything *local* (verified media + committed rows + committed outbound intent) **is** required.
 
-### 1.3 The single ordered commit protocol — v2 (✅ closes blocker 2)
+### 1.3 The single ordered commit protocol — v3 (⛔ does NOT close blocker 2)
 
 **One commit point (step 6). Steps 1–5 are PREPARE: durable, idempotent, re-runnable. Step 7 is derived.**
 
@@ -256,9 +258,16 @@ On every launch, a **recovery sweep** reconciles journal + sidecar manifests aga
 | 10 | **missing** | at `media/<sha>.ext` | none | Manifest lost, orphan bytes | No provenance → quarantine, do not invent a capture. Report. | no |
 | 11 | **missing/corrupt** | missing | present | Rows reference media with no manifest and no bytes | Same as row 7: `media_lost`, honest. | yes — and we must admit it |
 
-**Rows 5 and 8 are the two v1 could not express**, and they are exactly where the phantom lived. Row 5 is now a *benign, well-defined orphan* rather than a contradiction. Row 8 is **impossible by construction** because `ps_crud` and the domain rows share one transaction.
+**Row 5 is one of the two v1 could not express.** It is now a *benign, well-defined orphan* rather than a contradiction — **provided it re-verifies the hash before committing** (row 5b).
 
-**~~"Manifest says `MEDIA_COMMITTED` but SQLite has no rows"~~ has no row in this table because the manifest cannot say committed.** The phantom-saved state is **unrepresentable**, not merely handled.
+> ### ⛔ THE TEXT THAT WAS HERE IS RETRACTED (Codex #12, finding H1)
+> It read: *"Row 8 is **impossible by construction** because `ps_crud` and the domain rows share one transaction"* and *"The phantom-saved state is **unrepresentable**, not merely handled."*
+>
+> **Both are false, and both had already been withdrawn 170 lines earlier in this same file.** Row 8 is the **normal post-upload state** (`tx.complete()` removes `ps_crud` entries). The phantom-saved state is **representable** by at least two paths — a non-durable COMMIT under `synchronous=NORMAL`, and `ps_crud` completion reverting the rows.
+>
+> **This is the fourth review to catch a claim withdrawn in one place and left standing in another** (#9, #10, #11, #12). The retraction is the point, not the prose around it: **no closure or unrepresentability statement belongs anywhere in this artifact until the durability configuration, the receipt/dead-letter protocol, the backend RPC, the authenticated manifest, and a complete recovery state vector exist.**
+
+**What is true and narrow:** the manifest has no `MEDIA_COMMITTED` state, so *"manifest says committed but SQLite has no rows"* is not a state this design can enter. **That eliminates v1's two-authority error. It does not eliminate phantom "saved".**
 
 **Idempotency:** every transition is safe to re-run — step 6 is `INSERT … ON CONFLICT DO NOTHING` by capture id; media is content-addressed so re-install is a no-op; uploads use immutable content-addressed object keys (artifact 3). Re-running never duplicates or corrupts.
 

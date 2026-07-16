@@ -1,0 +1,58 @@
+IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Do NOT modify agents/openai.yaml. Stay focused on the repository code and docs only.
+
+You are an adversarial reviewer. Do not be agreeable. Do not compliment. Do not grade on improvement over the previous version. Improvement is not a passing grade.
+
+CONTEXT. This is a mobile capture app whose single hardest requirement is: NEVER acknowledge a capture as "saved" unless it is genuinely durable. A prior product died by showing "saved" for captures that were silently lost.
+
+You have reviewed this project five times (#7, #8, #9, #10, #11). Your review #11 rejected "Artifact 1 v2" with 3 CRITICAL and 9 HIGH findings, ruling: blocker 2 NOT closed, not a crash-safe specification, A0.2 must not begin. Two of your CRITICALs killed the author's central claim that a phantom "saved" was "unrepresentable":
+  - C2: a returned SQLite COMMIT is not durable (synchronous=NORMAL in WAL mode).
+  - C3: ps_crud is a transient queue, not a permanent recovery fact.
+
+The author has now written "Artifact 1 v3" claiming to ADDRESS ALL 12 of your findings, while EXPLICITLY NOT re-closing blocker 2. The status banner says blocker 2 is OPEN and A0.2 must not begin. That restraint may be genuine, or it may be a way to bank credit for fixes that were not actually made.
+
+YOUR JOB. Two questions, kept separate:
+  (A) Are the 12 fixes REAL IN THE DOCUMENT, or relabelled? Go finding by finding.
+  (B) Independent of (A): what is STILL wrong, or NEWLY wrong, in v3?
+
+READ:
+  docs/DURABILITY-DESIGN-v1.md    <- PRIMARY. Artifact 1 v3 = the status banner + sections 1.0, 1.0b, 1.1, 1.2, 1.3, 1.3b, 1.3c, 1.4, 1.5
+  docs/CRITIC-REVIEW-11-CODEX.md  <- your own 12 findings; check each against the doc
+  docs/SPEC-capture-core-v1.md    <- REQ-CAP4, REQ-CAP5, REQ-CAP8 (H12 claimed fixed here)
+  docs/ARCHITECTURE.md            <- ADR-2 banner; flow "A. Offline capture" (H12)
+  docs/IMPLEMENTATION_NOTES.md    <- the v3 reconciliation table + the retracted gate
+  spike/app-src/connector.ts      <- the connector v3 calls "live-buggy"
+  spike/app-src/AppSchema.ts, spike/app-src/App.tsx
+  docs/CRITIC-REVIEW-09-CODEX.md, docs/CRITIC-REVIEW-10-CODEX.md, docs/BAKEOFF-RESULT.md
+
+Attack specifically:
+
+1. GO THROUGH THE §7-STYLE RECONCILIATION TABLE IN IMPLEMENTATION_NOTES LINE BY LINE. The author marks each of your 12 findings with a checkbox. The repo's rule is "checkbox-only-when-the-edit-exists". For EVERY row: find the actual edit. Name every row where the checkbox is claimed but the edit is absent, cosmetic, weaker than the finding required, or merely a restatement of your finding as prose rather than a specification. Be specific about which.
+
+2. IS THE §1.0 DURABILITY PROFILE ACTUALLY SUFFICIENT? It specifies journal_mode=WAL, synchronous=FULL, F_FULLFSYNC on Apple, an explicit checkpoint policy, and a runtime pragma read-back assertion. Attack it:
+   - Is synchronous=FULL in WAL mode actually enough for the durability claim being made, or is there a remaining window?
+   - Does op-sqlite/SQLCipher expose these settings the way the doc assumes? Does PowerSync override them?
+   - The doc admits the CROSS-CONNECTION hazard is unresolved (synchronous is per-connection; PowerSync opens its own). Is naming it as open acceptable, or does an unresolved per-connection pragma make the entire "DECIDE is durable" claim void in practice? If the latter, say so plainly.
+   - Is a pragma read-back a real assertion, or can it report a value that is not what the engine will actually do?
+   - Does F_FULLFSYNC apply to the SQLite WAL via op-sqlite at all, or only to files we fsync ourselves?
+
+3. IS §1.3c's QUEUE LIFECYCLE REAL? It says ps_crud is transport state only; recovery predicate = "pending ps_crud OR durable server receipt OR durable dead-letter"; Capture+Attachment through ONE Postgres RPC; never discard evidence mutations. Check: is the "durable server receipt" actually specified anywhere, or just named? Is the dead-letter state specified? Does the doc say WHERE the receipt lives, WHO writes it, and how recovery reads it? Is "one RPC" enough given PowerSync's uploadData contract (which processes a CRUD transaction and calls complete())? What happens if the RPC succeeds but complete() never runs?
+
+4. THE §1.4 TRUTH TABLE. Rows 5b/6b were added for hash mismatch. Is the table NOW complete? Find remaining missing or unsafe combinations. Consider: manifest generation N corrupt + N-1 valid (the doc claims retention of >=2 but does the table use it?); two manifests same capture id (fork -> quarantine, but is quarantine a defined state with an action?); partial media that decodes AND matches an expected sample count by coincidence; reservation file orphaned; rows present but manifest at RECORDING (not VERIFIED) -- can that happen?
+
+5. §1.0b IDENTITY AT PREPARE. It claims minting capture_id/attachment_id/mutation_id + a canonical request digest + "the complete canonical Capture/Attachment payload" into the terminal manifest fixes H9. Does it? Is the canonical payload actually specified (schema, encoding, versioning)? What happens when the payload schema changes between the manifest write and a much later recovery? Does the digest cover the media hash?
+
+6. THE THINGS v3 ADMITS IT HAS NOT DESIGNED. v3 explicitly names as NOT designed: the cross-connection pragma hazard, the RemoteAsset/LocalAsset model + download/GC path, Artifact 3 (manifest authentication), the backend RPC. Is naming them sufficient for a document that also says "A0.2 must not begin", or does any of them contaminate a claim v3 DOES make? In particular: can §1.3's DECIDE step be considered specified at all while the backend RPC and the receipt do not exist?
+
+7. THE CONNECTOR. v3 says spike/app-src/connector.ts is "live-buggy" and must not be copied. Verify that characterisation against the code. Is it accurate, understated, or overstated? Are there OTHER defects in it or in AppSchema.ts/App.tsx that v3 has not noticed and that would propagate into production if someone treated the spike as a reference?
+
+8. DID THE AUTHOR REPEAT THE PATTERN? Reviews #9/#10/#11 each caught the author withdrawing a claim and then restating it in quieter language. Check v3 for that: the banner, the section headers, the reconciliation table, the "what survives" framing, and the ARCHITECTURE/ADR-2 language. Is "the PREPARE/DECIDE split is correct" being used to imply more than you actually conceded?
+
+9. BOTTOM LINE, EXPLICITLY:
+   - How many of the 12 findings are genuinely fixed in the document? Name the number and list any that are not.
+   - Is Artifact 1 v3 now a crash-safe specification? YES or NO.
+   - Is the author's own verdict ("blocker 2 remains OPEN, do not begin A0.2") CORRECT, or is v3 actually closer/further than the author claims? Say which, because an author who under-claims to seem rigorous is also a failure mode.
+   - What is the minimum remaining set of work before A0.2 can begin?
+
+For each finding: severity (CRITICAL / HIGH / MEDIUM), the precise defect, and a concrete fix. Distinguish "still broken", "newly broken by v3", "fixed", and "acceptable".
+
+End with: the single most likely way a capture still gets silently lost under Artifact 1 v3.
