@@ -61,9 +61,11 @@ These come from hadar's append-only decision and make the durability problem tra
 
 *This is the crux — the exact ordered sequence from "user hits record" to a trustworthy "saved ✓," designed so that a kill/crash/power-loss at **any** point leaves either a fully-committed capture or a **recoverable** one, never a phantom "saved" pointing at nothing. It fixes Codex #6 C1 (premature "saved") and is built to survive C2/H3/H4 (single-device fault domain).*
 
-> ## ✅ BLOCKER 2 CLOSED 2026-07-16 — Artifact 1 v2: the single ordered commit protocol
+> ## ⛔ BLOCKER 2 IS OPEN — Artifact 1 v3: the single ordered commit protocol (SKELETON, not a specification)
 >
-> `CRITIC-REVIEW-07-CODEX` blocker 2 (*"`MEDIA_COMMITTED` is not atomic"*) is **resolved**, and with it C1. §1.1–§1.4 below are **v2**. The v1 text is preserved in git (`a5a8198^`).
+> *(This header previously read "✅ BLOCKER 2 CLOSED". **Retracted** — `CRITIC-REVIEW-11-CODEX` rejected that closure with 3 CRITICALs. Leaving a green header above a rejected protocol is exactly the finding-H12 defect this section was corrected for. See the status banner at the top of the file.)*
+>
+> `CRITIC-REVIEW-07-CODEX` blocker 2 (*"`MEDIA_COMMITTED` is not atomic"*) is **diagnosed and its v1 two-authority error is eliminated** — Codex #11 confirms *"splitting authority is the right architecture."* **It is not resolved.** §1.0–§1.4 below are **v3**, which addresses all 12 of #11's findings but has **not been reviewed**. v1/v2 are preserved in git (`a5a8198^`, `84f4c27`).
 >
 > **The bug, named precisely.** v1's §1.1 declared the manifest *"the recovery source of truth, independent of SQLite"* — and then §1.2 made `MEDIA_COMMITTED` a **manifest state**. So the manifest was asked to record *"is this capture committed?"*, which is a fact **only SQLite can know**, because SQLite holds the rows. **Two authorities for one fact.** Both unhandled crash states fall directly out of that, and no amount of ordering fixes it — you cannot make two storage systems agree by trying harder.
 >
