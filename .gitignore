@@ -1,0 +1,27 @@
+# deps / build
+node_modules/
+.expo/
+dist/
+build/
+*.log
+
+# env / secrets — never commit
+.env
+.env.*
+*.pem
+*.keystore
+google-services.json
+GoogleService-Info.plist
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# supabase local
+supabase/.branches
+supabase/.temp
+
+# repo-import leftover (safe to delete)
+_import.tar
