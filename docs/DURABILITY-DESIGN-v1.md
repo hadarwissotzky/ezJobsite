@@ -78,11 +78,14 @@ These come from hadar's append-only decision and make the durability problem tra
 >
 > **Therefore: the filesystem is PREPARE; SQLite's transaction is DECIDE.** One commit point. Everything before it is idempotent and re-doable; everything after it is derived. This is the standard two-system resolution and v1 missed it by trying to make the manifest a co-committer.
 >
-> **The two unhandled crash states become unrepresentable:**
+> **v1's two *manifest-vs-SQLite* crash states become unrepresentable** — and **only those two.** Codex #11 confirms this much: *"The two v1 half-commit states identified in review #7 really are eliminated."*
 > - ~~"SQLite commits, manifest advance fails"~~ → **there is no manifest advance after the SQLite commit.**
 > - ~~"Manifest says `MEDIA_COMMITTED`, SQLite rolled back → phantom saved"~~ → **the manifest cannot say committed.**
 >
 > A verified manifest with no SQLite row is not a contradiction — it is a **well-defined orphan awaiting commit**, and `"saved ✓"` was never shown for it.
+>
+> > ### ⚠️ SCOPE THIS CLAIM NARROWLY — it does NOT mean "no phantom is possible"
+> > Eliminating v1's *two-authority* states is **not** the same as eliminating phantom "saved". **Two other phantoms remain open** and are unaffected by this split: a **non-durable SQLite COMMIT** (`synchronous=NORMAL`) and **`ps_crud` completion/discard reverting the rows**. See the status banner. **The general claim was withdrawn; this narrow one stands.**
 >
 > **PowerSync (ADR-2) makes step 6 genuinely one transaction, for free.** `ps_crud` is a local table **in the same SQLite database**, so the outbound intent commits in the *same* transaction as the domain rows. There is no separate queue to write, and therefore **no window where a capture is "saved" but has no sync intent** — v1 had to hand-build that property; we now get it from the transport.
 
