@@ -171,8 +171,24 @@ def run_server_owned_trial(conn, udid1, udid2, cid) -> dict:
     t["evidence"]["rejections_baseline_count"] = len(baseline)
 
     C.send_command(udid1, "edit_processing", capture_id=cid, value="processed")
-    C.wait_for(lambda: (op_state_on_device(udid1, cid) or {}).get("processing_state") == "processed",
-               30, what="local (unauthorized) edit applied")
+
+    # Observing the transient local 'processed' value is BEST-EFFORT, not an
+    # assertion. PowerSync can revert it faster than the 500ms status poll, so
+    # requiring it made the harness racy (trial 1 caught it, trial 2 did not) —
+    # a defect in the harness, not in PowerSync. What Q2 must actually prove is
+    # the rejection, PG staying unchanged, and convergence back. Whether we
+    # happen to catch the intermediate frame is irrelevant to all three.
+    local_seen = False
+    _deadline = time.time() + 5
+    while time.time() < _deadline:
+        if (op_state_on_device(udid1, cid) or {}).get("processing_state") == "processed":
+            local_seen = True
+            break
+        time.sleep(0.2)
+    t["evidence"]["transient_local_value_observed"] = local_seen
+    t["evidence"]["transient_note"] = (
+        "best-effort only; a miss means the revert outran the 500ms poll, not that "
+        "the write never applied locally")
 
     # Require a NEW rejection that matches THIS row and THIS field.
     def new_matching():
