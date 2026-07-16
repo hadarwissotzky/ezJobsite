@@ -208,6 +208,24 @@
 
 **NET:** the doc set now tells one story about the **decisions already made**; it still has **no crash-safe protocol** for the three blockers. **A `DURABILITY-DESIGN-v2` is required before A0.2 — do not start schema code.** **hadar decision owed (blocking v2): the ADR-2 direction** — PowerSync bakeoff vs. append-only-P1-sync (which now needs the L5 evidence-vs-operational split designed) vs. full owned relational protocol. Codex #7's L5 finding materially weakens the "append-only makes it simple" rationale that closed H1, so this is worth re-deciding, not assuming. | Codex #7 run + reconciliation + doc-drift cleanup by Claude. | **hadar (1 decision: ADR-2 direction)** |
 
+> ## ✅ THIS GATE IS SATISFIED (2026-07-16, later the same day) — A0.2 MAY BEGIN
+>
+> The decision this gate was blocked on (**the ADR-2 direction**) is **made: ADR-2 → PowerSync**. It closed two of the three blockers outright, and the third is closed by **Artifact 1 v2** written into `DURABILITY-DESIGN-v1.md` (§1.1–§1.4). **The "v2" that was owed is that rewrite, not a new file** — so the `DURABILITY-DESIGN-v2` requirement is **met in place**; do not go looking for a file by that name.
+>
+> | Blocker | Closed how |
+> |---|---|
+> | **1 — `seq` pull not commit-ordered** | **Dissolved, transport-owned.** We no longer write a `seq` cursor; PowerSync orders by the Postgres commit log. **The fault is unreachable, not patched.** 40/40 under a deliberate stalled-commit inversion. |
+> | **2 — `MEDIA_COMMITTED` not atomic** | **Artifact 1 v2.** Root cause was **two authorities for one fact** — the manifest was made to record commitment, which only SQLite can know. v2 splits the questions; **one commit point** (the SQLite txn, which PowerSync's `ps_crud` joins atomically). The phantom-saved state is now **unrepresentable**; recovery truth table complete at 11 rows incl. the two v1 could not express. |
+> | **3 — L5 false for the data model** | **Option (a).** Append-only scoped to the **evidence ledger**, enforced by our rules; mutable operational state syncs via PowerSync (bakeoff Q2). |
+>
+> **Also resolved:** Q4's "does our commit machine compose with PowerSync's local write model" → **we do not compose.** PowerSync syncs rows; media is ours end-to-end (its attachment queue's only route to upload takes a whole-file `ArrayBuffer` and wants file-then-row; we need verify-then-row, and we are building our own uploader anyway since PowerSync has no resume). **This also drops the alpha attachments dependency.**
+>
+> **The §207 doc contradictions above are now resolvable** (they presupposed the ADR-2 direction) — Spike A's A2.2–A2.3 "dedups and upserts" and "ADR-2 is reopened" language should be updated when A0.2 starts. **Not blocking.**
+>
+> **Carried into Spike A, named not hidden:** `REQ-MEMBER-5` revocation undefined (cited 4×, defined 0×) · *"last-N-days"* not expressible server-side in Sync Streams · server-owned writes silently revert with no rejection hook (UX defect to design around) · **whole-file media memory on-device untested**.
+>
+> **No Codex pass has reviewed Artifact 1 v2.** Given `CRITIC-REVIEW-09/10` caught real defects in far simpler work, that review is **worth running before the recovery sweep is coded** — but it does not block A0.2 schema.
+
 ---
 
 **2026-07-16 — CODEX CROSS-MODEL REVIEW #8 (NARROW TEST-VALIDITY CHECK — `CRITIC-REVIEW-08-CODEX.md`).** gpt-5.6-sol @ high, 35,103 tokens, sandbox read-only. **Deliberately narrow scope:** can the sync bakeoff (`SPIKE-SYNC-BAKEOFF.md`) **false-pass** — green-light PowerSync without proving it fixes the faults that killed our hand-built design? Not an architecture review; Codex stayed in scope and raised **no** new architecture findings.
