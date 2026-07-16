@@ -1,0 +1,22 @@
+.env
+app/.env
+app/node_modules/
+app/ios/
+app/android/
+app/.expo/
+__pycache__/
+.venv/
+# Evidence artifacts ARE tracked — BAKEOFF-RESULT.md cites them, and an
+# uncheckable citation is the exact defect Codex #9 caught (the smoke-run trail).
+out/*
+!out/q1.json
+!out/q2.json
+!out/.gitignore
+
+# The live app is a symlink to ~/bakeoff-app (outside the repo) because Expo's
+# EXConstants build script is not space-safe and every path here has spaces.
+# The reviewed source lives in spike/app-src/. Codex #10 correctly noted git
+# cannot prove which executable/dependency tree produced the evidence — an
+# accepted limitation of a closed throwaway spike, not a live risk.
+app
+backup/

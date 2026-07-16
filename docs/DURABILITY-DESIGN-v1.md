@@ -1,6 +1,6 @@
 # EZjobsite — Durability & Sync Design (the pre-code design gate)
 
-> **What this is.** The design pass Codex #6 required before any Spike A code. It answers the 9 artifacts from `SPIKE-A-BUILD-PLAN.md §0.5` at the protocol level, so the build derives from written invariants instead of improvising durability in code. Decisions locked 2026-07-16: **append-only sync (ADR-2)** · **honest save-invariant (CLAUDE #1)** · **immutable media + versioned records + approval-freeze** · **DECISION 4 (Option B)** · **DECISION 7 (Supabase Storage)**.
+> **What this is.** The design pass Codex #6 required before any Spike A code. It answers the 9 artifacts from `SPIKE-A-BUILD-PLAN.md §0.5` at the protocol level, so the build derives from written invariants instead of improvising durability in code. Decisions locked 2026-07-16: **append-only sync (ADR-2)** · **honest save-invariant (CLAUDE #1)** · **immutable media + versioned records + approval-freeze** · **DECISION 4 (~~Option B~~ → **Option A**, re-decided 2026-07-16 — client-side media encryption dropped for v1)** · **DECISION 7 (Supabase Storage)**.
 >
 > ## ⛔ STATUS: NOT READY TO BUILD — the second Codex pass FAILED this design (2026-07-16)
 >
@@ -22,7 +22,11 @@ These come from hadar's append-only decision and make the durability problem tra
 - **L1 — Media is immutable.** An audio file or image, once captured, is **never edited, re-encoded in place, or merged.** It is content-addressed (named by its own hash) and write-once. We never merge an audio file.
 - **L2 — The only thing that merges is derived text.** After transcription, the *text/decision record* may be revised or aggregated. That is a small, structured, text-level operation — not a media operation.
 - **L3 — Records are versioned; history is retained.** A change to a record creates a **new version row**; prior versions are kept. The original recording + images are retained as **tamper-proof evidence** — if anyone disputes what was said or shown, the original stands.
-- **L4 — Approval freezes AND makes permanent.** Once a record is **digitally approved/signed**, that version is **frozen** — never edited in place, **and never deleted.** A later change is a **new appended record/version** carrying its own approval; a "removal" is a new superseding record, never destruction of the approved one. (Composes with "frozen `shown_content` = the binding signed artifact.") **The one lawful exception:** a valid GDPR/CCPA erasure request **crypto-shreds the personal content + media** (destroys the per-record key) **but retains the hash + metadata stub** — so the evidence-chain skeleton (that an approved record existed, when, by whom, its hash) survives even though the personal data is destroyed. That is the *only* path by which an approved record's data leaves, and it is a controlled destruction-with-tombstone, not an edit or a delete.
+- **L4 — Approval freezes AND makes permanent.** Once a record is **digitally approved/signed**, that version is **frozen** — never edited in place, **and never deleted.** A later change is a **new appended record/version** carrying its own approval; a "removal" is a new superseding record, never destruction of the approved one. (Composes with "frozen `shown_content` = the binding signed artifact.") **The one lawful exception (REVISED 2026-07-16 with DECISION 4 → Option A):** a valid GDPR/CCPA erasure request **hard-deletes the personal content + media** **but retains the hash + metadata stub** — so the evidence-chain skeleton (that an approved record existed, when, by whom, its hash) survives even though the personal data is destroyed. That is the *only* path by which an approved record's data leaves, and it is a controlled destruction-with-tombstone, not an edit or a delete.
+
+> **Why hard-delete, not crypto-shred.** This carve-out previously specified crypto-shred, which is what forced Option B. But the **plaintext class (transcripts, `canonical_en`, FTS index) was always hard-deleted anyway** (`CRITIC-REVIEW-02` H1), so crypto-shred only ever covered the media blob — and its sole advantage over deletion (reaching unreachable backups) was already conceded (`CRITIC-REVIEW-04-CODEX`: *"document backup expiry rather than claiming immediate complete erasure"*). Hard-delete reaches the live object and every replica we control; **backups expire on a documented schedule.** That is an **honest, named residual boundary**, not a hidden gap — the same discipline mandate #1 applies to capture loss.
+>
+> **Erasure inventory (unchanged and still required):** deletion must cover Storage object · Postgres row + FTS index · job payloads · caches · **device local copies (purge command)** · logs. Vendor (STT/LLM) retention and expired-backup windows are **stated residual boundaries**. Crypto-shred never fixed these either.
 - **L5 — Therefore sync is append-only.** Every sync operation is an **append of a new immutable row** (a capture receipt, or a new version). Nothing already synced-and-approved is ever mutated. This is what lets the sync protocol (artifact 2) avoid a general two-way merge engine.
 
   > ### ⚠️ L5 IS FALSE AS STATED — OPEN GAP (Codex #7, blocker 3)
@@ -119,7 +123,7 @@ Every sync operation moves an **append-mutation** — a self-contained immutable
 - an **approval** (a signature over a specific record version — L4),
 - a **tombstone** (windowing/revocation only — see 2.4).
 
-No mutation ever *edits* a prior row. A "change" is a new version-append; a "removal" is a superseding append (approved rows: never destroyed except the lawful crypto-shred, L4). This is why the protocol needs no conflict resolution for edits — **there are no edits.**
+No mutation ever *edits* a prior row. A "change" is a new version-append; a "removal" is a superseding append (approved rows: never destroyed except the lawful hard-delete, L4). This is why the protocol needs no conflict resolution for edits — **there are no edits.**
 
 ### 2.2 Push (device → server)
 
@@ -148,7 +152,7 @@ Because nothing is ever edited or (normally) deleted, tombstones exist for exact
 1. **Windowing** — a row leaves the device's working set (project archived, or older than the last-N-days window). "Stop showing / purge locally," not "this changed."
 2. **Revocation** — access removed (member/collaborator offboarded — REQ-MEMBER-5). Purge the revoked scope locally; **suspend, don't push,** any queued outbound mutations for a revoked scope (never push A's data under B's credentials — Codex H7).
 
-*(The lawful crypto-shred erasure, L4, also produces a tombstone-with-hash-stub — the evidence skeleton survives.)*
+*(The lawful hard-delete erasure, L4, also produces a tombstone-with-hash-stub — the evidence skeleton survives.)* *(revised 2026-07-16, DECISION 4 → Option A: hard-delete, not crypto-shred — client-side media encryption dropped for v1; see `DURABILITY-DESIGN-v1` DECISION 4)*
 
 ### 2.5 The one real "conflict" — and why it's not a sync problem
 
@@ -174,7 +178,20 @@ Gone, versus a general two-way engine: oplog merge · last-writer-wins · vector
 
 *SQLCipher protects the database, not the audio/image files (Codex C3). This artifact decides how the media itself is protected, and how keys live and die — which also unblocks the op-sqlite-vs-expo-sqlite library choice.*
 
-**▶ DECISION 4 — media encryption scheme. ✅ LOCKED 2026-07-16 (hadar): Option B — per-capture-key envelope encryption.**
+**▶ DECISION 4 — media encryption scheme. 🔄 RE-DECIDED 2026-07-16 (hadar): ~~Option B~~ → **Option A — OS file protection only**.**
+
+> **Why the flip (hadar, 2026-07-16).** Asked plainly: *"why do we need to encrypt the media?"* The honest answer was that Option B never served security or the user — it existed **only** to make the L4 lawful-erasure carve-out (crypto-shred) enforceable. That is the tail wagging the dog:
+>
+> 1. **Crypto-shred already didn't cover the data that matters.** `CRITIC-REVIEW-02` H1: it *"doesn't cover indexed plaintext or replicated local copies"* — transcripts / `canonical_en` are FTS-indexed **plaintext in Postgres**. The adopted resolution was already **two data classes: blob crypto-shred + plaintext hard-delete + device purge**. So the searchable personal data — the actual subject of an erasure request — was **always** hard-deleted. Crypto-shred only ever covered the audio blob.
+> 2. **Its one unique benefit was already conceded.** Crypto-shred's only edge over a plain delete is erasing from backups you can't reach — and `CRITIC-REVIEW-04-CODEX` already required us to *"document backup expiry rather than claiming immediate complete erasure"*, plus flagged vendors/logs/quarantine-plaintext as outside it.
+> 3. **The cost was severe and load-bearing.** Option B was the sole reason Q3 was the hardest question in the sync bakeoff (*"there is no production unwrap path to test"* — `CRITIC-REVIEW-09-CODEX`), required a key lifecycle nobody had designed, hard-coupled us to SQLCipher/op-sqlite, and introduced **device-key-loss = permanent loss of unsynced captures** — a new failure mode in a product whose north star is never losing a capture.
+> 4. **Market reality (hadar):** *"we are selling to solo owners with 2-10 employees — let's not overdo it."* No data-residency or right-to-erasure contract clauses. Zero users today.
+>
+> **Threat model after the flip:** media is encrypted at rest by the OS on-device (iOS Data Protection / Android encrypted storage) and by **Supabase Storage at rest** server-side, with RLS + signed URLs gating access. That covers stolen disks, bucket enumeration, and unauthorized reads. What we give up is protection against a **malicious/compromised Supabase**, and enforceable crypto-shred. Both are accepted for v1.
+>
+> **Revisit trigger (write it down so it isn't forgotten):** the first customer contract with a hard right-to-erasure or data-residency clause, or the first EU customer. At that point re-open DECISION 4 — the `RemoteStorage` abstraction is where it would land.
+>
+> **Consequences applied:** L4's carve-out becomes **hard-delete media + retain hash/metadata stub** (below) · **REQ-CAP4 reworded** to OS-file-protection at rest · the SQLCipher/op-sqlite coupling below is **no longer forced by this decision** (op-sqlite may still win on merit — decide in A0.3, not here) · **Q3 collapses**: no DEK, no unwrap path, no plaintext-canary scanning.
 
 - **Option A — OS file protection only.** Rely on iOS Data Protection + Android encrypted storage; media is encrypted at rest by the OS. *Simplest*, but: not app-level encrypted, weaker if a device is compromised while unlocked, and it means **crypto-shred (the L4 lawful-erasure carve-out) is not truly enforceable** — you can't destroy one capture's key to make it unreadable everywhere. Would require rewording REQ-CAP4 to "OS-file-protection at rest."
 - **Option B — per-capture-key envelope encryption (recommended).** Each capture gets its own **data key (DEK)**; media chunks are encrypted with it; the DEK is **wrapped** (a) by a device master key in Keychain/Keystore **and** (b) for the **server ingest identity**. **Ciphertext is uploaded unchanged** (so background upload never needs the plaintext or even the key — it just ships bytes). *Why recommended:* it makes **crypto-shred real** (destroy the DEK → that capture is unreadable everywhere the key never went), which the immutability/erasure model (L4) depends on; and it gives a **nice durability bonus** — because the DEK is also wrapped for the server, a **synced** capture stays recoverable even if the device's key is lost; only **not-yet-synced** captures are exposed to device key-loss. Cost: more work than Option A.

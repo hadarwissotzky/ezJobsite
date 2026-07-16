@@ -1,0 +1,61 @@
+IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Do NOT modify agents/openai.yaml. Stay focused on the repository code and docs only.
+
+You are an adversarial reviewer. Do not be agreeable. Do not compliment.
+
+CONTEXT. A build-vs-buy spike ("the sync bakeoff") was just run to decide whether to adopt PowerSync as the sync transport, or hand-build one. An earlier cross-model pass (docs/CRITIC-REVIEW-08-CODEX.md) found that all seven questions Q1-Q7 COULD FALSE-PASS as written, and tightened each bar. The spike was then run against those tightened bars, and the author wrote up docs/BAKEOFF-RESULT.md claiming:
+  - Q1 (commit-ordering): VALID PASS, 20/20, mechanism "(a) late row delivered"
+  - Q2 (mutable state):   VALID PASS, 7/7 assertions
+  - Q3 (encrypted media): UNRUN - blocked
+  - Go/No-Go: NOT YET DECIDABLE
+
+YOUR JOB. Decide whether that write-up is HONEST EVIDENCE or a FALSE PASS dressed up as one. The bakeoff doc itself (SPIKE-SYNC-BAKEOFF.md:119) says: "Record the evidence, not the verdict... A verdict with no assertion trail is exactly the false-pass Codex #8 exists to prevent, and the conclusion-stage Codex pass will (correctly) reject it." You are that pass. Reject it if it deserves rejecting.
+
+READ (all in the repo):
+  docs/BAKEOFF-RESULT.md          <- the conclusion under review
+  docs/BAKEOFF-PREDECLARATION.md  <- parameters claimed to be frozen BEFORE the run
+  docs/SPIKE-SYNC-BAKEOFF.md      <- the tightened bars each Q had to meet
+  docs/CRITIC-REVIEW-08-CODEX.md  <- why those bars exist
+  spike/harness/q1.py             <- THE CODE THAT PRODUCED THE Q1 NUMBERS
+  spike/harness/q2.py             <- THE CODE THAT PRODUCED THE Q2 NUMBERS
+  spike/harness/common.py         <- device/db plumbing + oracles
+  spike/sql/001_schema.sql        <- schema, RLS, column grants
+  spike/sql/002_publication.sql, spike/sql/003_denorm.sql
+  spike/app-src/App.tsx, spike/app-src/connector.ts, spike/app-src/AppSchema.ts  <- the client under test
+  spike/out/q1.json, spike/out/q2.json   <- raw per-trial evidence
+  powersync/sync-config.yaml, powersync/service.yaml
+
+DO NOT trust the prose. Read the harness and check whether each claimed assertion is actually implemented, actually asserted, and actually capable of failing.
+
+Attack specifically:
+
+1. IS Q1's "VALID PASS" REAL? Walk q1.py against SPIKE-SYNC-BAKEOFF.md:37-52 step by step. For each of the 11 required steps, is it implemented, or only claimed? Specifically:
+   - Is the "completed durable download checkpoint containing B" oracle (ps_buckets.last_op) actually proof of a DURABLE checkpoint, or just a row appearing? Could last_op advance without durability? Is reading it from a status.json written by a 500ms polling loop a sound oracle, or is there a race where the harness observes state that was never durable?
+   - Is "A committed after the device observation" genuinely established, or is it an artifact of harness wall-clock ordering? track_commit_timestamp is OFF - is the causal argument (A is blocked by an advisory lock) actually airtight?
+   - The seq negative control: does seq_a < seq_b actually reproduce the fault that killed the hand-built design, or is it cosmetic? PowerSync does not read seq at all. Is this negative control proving anything?
+   - Trial independence: 20 trials run against a SHARED, ACCUMULATING device DB and one bucket. Are the trials actually independent, or does trial N benefit from trial N-1's state? Could a passing trial mask a failure?
+   - The restart check: is `simctl terminate` + `launch` genuinely equivalent to the required "restart the app without clearing its database", or is it weaker than a kill?
+   - Is the OPPORTUNITY_WINDOW=25s / ARRIVAL_TIMEOUT=90s choice load-bearing? Could a shorter/longer window flip the mechanism classification (a) vs (b)? If the classification is timing-dependent, the reported mechanism is not a property of PowerSync.
+
+2. IS THE MECHANISM EXPLANATION CORRECT? The result claims Q1 passes because "Postgres logical decoding emits changes in COMMIT order, not insert-LSN order, so a late commit necessarily lands at a later stream position - the seq-inversion fault is structurally impossible." Is that claim TRUE of Postgres logical replication and of PowerSync specifically? Name any condition under which it is false (streaming/in-progress decoding of uncommitted transactions, parallel apply, subtransactions, logical decoding message ordering, PowerSync's bucket/op_id assignment, compaction). If it can be false, Q1's "structural immunity" claim is overstated and 20 trials is NOT sufficient.
+
+3. IS Q1's HONESTY ABOUT N=20 ACTUALLY HONEST? The doc says N=20 is a "mechanism determination, not a rate bound" and cites <14% @95%. Is that a legitimate framing, or is it a rhetorical shield that lets a 20-trial run stand in for evidence it cannot provide? Would you accept this reasoning?
+
+4. IS Q2's "VALID PASS" REAL? Read q2.py AND spike/app-src/connector.ts together.
+   - The claim "client write to a SERVER-owned field was refused" rests on a 42501 captured by the connector's FATAL_PG_CODES path. But the connector CATCHES 42501, records it, and calls tx.complete() - i.e. it DISCARDS the op. Does that actually prove the DATABASE refused the write, or could the same evidence appear if the harness/connector simply chose to drop it? Is the assertion falsifiable?
+   - "Pending local edit won" - is LWW-by-upload-order actually being tested, or is the test constructed so the device's write is simply the last one to arrive, making the result trivially true regardless of PowerSync's behaviour?
+   - Are the two "devices" genuinely independent? They run the same build, same EXPO_PUBLIC_DEVICE, same Supabase user. Does that invalidate the "both devices converged" assertion?
+   - Q2 is a SINGLE trial. Codex #8 demanded predeclared convergence rules but the bar says nothing about N. Is one trial enough for a concurrency assertion?
+
+5. WAS THE PREDECLARATION ACTUALLY PREDECLARED? BAKEOFF-PREDECLARATION.md claims it was frozen before the run and that git history is the tamper-evidence. Check: is it committed? If it is untracked/uncommitted, the "frozen" claim has NO evidence behind it. Does that matter? Also: the predeclaration PREDICTED mechanism (b) and the run observed (a). The author records this as "prediction falsified". Is that the right handling, or does a wrong prediction indicate the author did not understand the system well enough for the test design to be trusted?
+
+6. THE Q3 STRUCTURAL CLAIM. The result claims "PowerSync's attachment helper has no resumable upload... the Q3 bar is unmeetable by PowerSync." This is asserted from API/doc review with NO test run. Is the claim correct? Is it possible to implement resumable upload within the given uploadFile(ArrayBuffer, attachment) interface (e.g. the adapter persisting its own TUS session and short-circuiting)? If it IS possible, the "unmeetable" framing is wrong and overstates the finding.
+
+7. IS THE GO/NO-GO CORRECT AND IS ANYTHING BEING SMUGGLED? The result says "NOT YET DECIDABLE" but also says PowerSync "decisively wins the sync-transport argument". Is that pair coherent, or is the second statement doing the work of an adoption decision without owning it? Is there any place the write-up quietly upgrades an untested thing into a supported one? Check Q4/Q5/Q6/Q7's PARTIAL claims for the same.
+
+8. WHAT IS MISSING ENTIRELY? Name faults, conditions, or questions this bakeoff never asked that a build-vs-buy decision on a sync transport REQUIRES. Be specific.
+
+9. SCOPE HONESTY. One bucket, one project, one user, two simulators, ~40 rows, good network, debug build, iOS only. Does the write-up's stated scope limitation adequately bound its own claims, or do the claims travel further than the evidence?
+
+For each finding: severity (CRITICAL / HIGH / MEDIUM), the precise defect, and a concrete fix. Explicitly state, as your bottom line: DOES THE Q1 "VALID PASS" SURVIVE, YES OR NO? DOES Q2's, YES OR NO? And: is BAKEOFF-RESULT.md fit to be the basis of an ADR-2 decision, or must the bakeoff be re-run?
+
+End with the single most likely way this bakeoff misleads the team into the wrong build-vs-buy decision.

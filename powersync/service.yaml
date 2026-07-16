@@ -1,0 +1,54 @@
+# PowerSync Cloud config — SYNC BAKEOFF (throwaway spike, not production)
+# yaml-language-server: $schema=https://unpkg.com/@powersync/cli-schemas@latest/json-schema/service-config.json
+#
+# Edited 2026-07-16 with hadar's explicit authorization. Service-config changes are
+# out-of-scope by default per the PowerSync skill's guardrails; this edit is scoped
+# to the "Development" instance named in powersync/cli.yaml. Original backed up at
+# spike/backup/service.yaml.orig.
+#
+# CHANGES FROM THE PULLED TEMPLATE:
+#   1. Removed the `uri:` line. `powersync pull instance` writes the password back
+#      REDACTED as the literal string "[HIDDEN_PASSWORD]" — deploying that would
+#      have sent "[HIDDEN_PASSWORD]" as the actual password. Using the individual
+#      hostname/port/database/username fields + secret_ref instead.
+#   2. Enabled client_auth.supabase so auth.user_id() resolves to the Supabase
+#      user id (what sync-config.yaml compares owner_id against).
+#   3. Stripped the commented-out schema catalogue for legibility; it is
+#      reproducible from the schema URL above and preserved in the backup.
+
+_type: cloud
+name: Development
+region: us
+
+replication:
+  connections:
+    - type: postgresql
+      # Supabase DIRECT connection host, per the official integration guide
+      # ("use the Direct connection section to copy the connection string").
+      #
+      # ⚠️ Q6 COST FINDING — VERIFY AT DEPLOY. This host is IPv6-ONLY (it has an
+      # AAAA record and no A record). The Supavisor pooler CANNOT be substituted:
+      # Supabase state that logical replication through a pooler "will not work".
+      # So PowerSync Cloud must reach this host over IPv6. If the deploy's
+      # connection validation fails, adopting PowerSync forces the Supabase IPv4
+      # add-on (~$4/mo) AND a Pro plan (~$25/mo) — a recurring cost absent from
+      # the current pricing model. Whatever happens, record it in BAKEOFF-RESULT.
+      hostname: db.wwhfgsijnlpajvdiopfd.supabase.co
+      port: 5432
+      database: postgres
+      username: postgres
+      password:
+        # The instance already holds this secret (the pulled config referenced it),
+        # so no plaintext password is needed here or in git.
+        secret_ref: default_password
+      name: Default
+      tag: default
+      # PowerSync bundles Supabase's CA cert, so verify-full needs no extra config.
+      sslmode: verify-full
+      debug_api: false
+
+client_auth:
+  # This project uses the NEW Supabase API key format (sb_publishable_…). Per the
+  # integration guide, the legacy JWT secret field is left empty and PowerSync
+  # auto-configures the JWKS endpoint.
+  supabase: true
