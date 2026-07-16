@@ -1,4 +1,27 @@
-# Sync Bakeoff — RESULT (revision 2, 2026-07-16)
+# Sync Bakeoff — RESULT (revision 2, 2026-07-16) · **CLOSED — ADOPT POWERSYNC**
+
+> # 🟢 DECISION (hadar, 2026-07-16): **ADOPT PowerSync as the sync transport. Media durability stays ours. The bakeoff is closed.**
+>
+> **`ARCHITECTURE.md` ADR-2 is flipped.** Logged in `IMPLEMENTATION_NOTES §4`.
+>
+> **The decision does not rest on the "VALID PASS" labels below — those are WITHDRAWN.** `CRITIC-REVIEW-10-CODEX.md` rejected them and was **right on every point**. It rests on three things the reviews never disputed:
+>
+> 1. **PowerSync survived both faults that killed our hand-built design twice** — 40/40 trials across two independent harness revisions. Codex called the observed behaviour *"credible and materially better."* **No review round ever suggested PowerSync got the ordering wrong.**
+> 2. **The immunity has a mechanism we can state and attack:** Postgres logical decoding emits in **commit order**, so a late commit lands at a *later* stream position. **The `seq`-cursor model we kept getting wrong is not how the transport works.**
+> 3. **Media doesn't discriminate.** PowerSync has no resumable upload — but **we own media durability under either option**, so it is a constant, not a cost of adopting.
+>
+> **What the objection was really about.** Codex #9/#10 found real defects — a restart assertion that couldn't fail, a circular hash comparison, a broken freeze, an evidence trail quoting a smoke run. All were fixed or withdrawn. But they were defects in **assertion rigor on a throwaway harness**, not in the answer. `SPIKE-SYNC-BAKEOFF.md:120` anticipated exactly this: *"if Q1–Q3 aren't answered in ~4 focused days, that itself is signal — report and decide rather than sinking more."*
+>
+> **Q3 never ran, and the decision proceeds without it** — a deliberate departure from the `:103` gate ("Q1, Q2, Q3 all pass"). Justification: **`DECISION 4` was re-decided (Option B → Option A), dropping client-side media encryption**, which removed Q3's hard half (DEK, unwrap path, canary scan). What remained was *"does the queue move bytes"* (yes — it's a `fetch`) and *"does it resume"* (**no** — an API-level fact needing no test). **Named residual, untested: whole-file `ArrayBuffer` memory for multi-minute media → carry into Spike A.**
+>
+> **What this buys:** Codex #7 **blockers 1 and 3 dissolve** (transport-owned). **Blocker 2 (`MEDIA_COMMITTED` atomicity) remains ours** and is now the top of the Spike A critical path — **one problem instead of three**.
+>
+> **The honest one-liner:** *PowerSync wins the sync-transport argument on observed behaviour with a stated mechanism; it contributes nothing to media; we own media either way. That is enough to decide, and more decimal places on Q1/Q2 could not change it.*
+>
+> Everything below is the evidence as recorded. Read the withdrawal notes in Q1/Q2 — they matter.
+
+---
+
 
 > **Revision 2 supersedes revision 1, which `docs/CRITIC-REVIEW-09-CODEX.md` REJECTED.** #9's verdict on rev 1 was: *"This is not fabricated evidence, but it is a false-pass write-up."* Both claimed passes were withdrawn, the harness was fixed, and Q1/Q2 were **re-run**. Every #9 finding is reconciled in §7.
 >
