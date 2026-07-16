@@ -1,0 +1,48 @@
+IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Do NOT modify agents/openai.yaml. Stay focused on the repository code and docs only.
+
+You are an adversarial reviewer. Do not be agreeable. Do not compliment. Do not grade on improvement over the previous version.
+
+CONTEXT. This project is a mobile capture app whose single hardest requirement is: NEVER acknowledge a capture as "saved" unless it is genuinely durable. A prior product (ezQuotePro) died by showing "saved" for captures that were silently lost.
+
+You have reviewed this project four times (reviews #7, #8, #9, #10). Review #7 found THREE pre-code blockers. Two are now closed by adopting PowerSync as the sync transport (ADR-2). The third — blocker 2, "MEDIA_COMMITTED is not atomic" — has just been closed by a rewrite called "Artifact 1 v2" inside docs/DURABILITY-DESIGN-v1.md. On the strength of that, the doc's status banner now says "ALL THREE PRE-CODE BLOCKERS ARE CLOSED. A0.2 (schema) MAY BEGIN."
+
+YOUR JOB. Decide whether Artifact 1 v2 is a genuine crash-safe specification or another protocol sketch wearing a "closed" label. This exact document has already been caught once labelling sketches "✅ COMPLETE" when they were not (review #7). Assume the author may have done it again.
+
+READ:
+  docs/DURABILITY-DESIGN-v1.md    <- PRIMARY. Artifact 1 v2 is sections 1.1-1.5 plus the status banner.
+  docs/CRITIC-REVIEW-07-CODEX.md  <- your original blocker-2 finding and its sub-gaps
+  docs/CRITIC-REVIEW-09-CODEX.md  <- your findings on the bakeoff harness (the oracle rules cited in 1.5)
+  docs/CRITIC-REVIEW-10-CODEX.md  <- your rejection of the bakeoff write-up
+  docs/BAKEOFF-RESULT.md          <- what PowerSync was and was not shown to do
+  docs/ARCHITECTURE.md            <- ADR-2 (top banner)
+  docs/SPEC-capture-core-v1.md    <- REQ-CAP4, REQ-CAP8
+  spike/app-src/                  <- the only PowerSync client code in the repo
+  docs/IMPLEMENTATION_NOTES.md    <- the gate entry that was just marked satisfied
+
+Attack specifically:
+
+1. IS THE CORE DIAGNOSIS RIGHT? v2 claims the root cause of blocker 2 was "two authorities for one fact" — that v1 made the manifest record commitment, which only SQLite can know. And that the fix is to split the question: manifest answers "were the bytes made", SQLite alone answers "is it committed". Is that diagnosis correct, or is it a rationalisation that renames the problem? Is the resulting "filesystem is PREPARE, SQLite is DECIDE, one commit point" actually sound for this system?
+
+2. IS THE PHANTOM-SAVED STATE ACTUALLY UNREPRESENTABLE, OR JUST MOVED? v2 claims a phantom "saved" is now a state the design CANNOT REPRESENT, not one it handles. Try hard to construct one anyway. Consider at minimum: the SQLite commit returning success but not being durable (WAL not fsynced, synchronous=NORMAL vs FULL, checkpointing, OS buffer loss on power cut); the "saved ✓" UI emission itself crashing or being lost between commit and render; SQLCipher/op-sqlite specifics; PowerSync's own writes to the same DB interleaving; a commit that succeeds locally but whose ps_crud row is later dropped or reset. If ANY path yields "user saw saved, capture is not durable", the claim is false and must be withdrawn.
+
+3. IS THE 11-ROW TRUTH TABLE COMPLETE? The doc asserts it enumerates every combination of (manifest state x media on disk x SQLite rows). Find a combination it misses, or a row whose action is wrong/unsafe. Consider especially: partially-written media that still hashes to something; two manifests for the same capture id; a manifest whose generation N is newer but corrupt while N-1 is valid; media present under a DIFFERENT content hash than the row expects (silent corruption, not absence); the reservation file surviving alone; clock/ordering assumptions.
+
+4. ARE THE SUB-GAP FIXES REAL? Review #7 listed specific undefined items. v2 claims each is closed. Verify against the actual text, not the claim:
+   - "real block reservation, not a notional lease" — is writing a zero-filled file + fsync actually sufficient on APFS and ext4? Does it survive the file being sparse, or the OS reclaiming? Does it actually prevent ENOSPC at the final rename and manifest write?
+   - "generational manifests, atomic temp->fsync->rename->fsync-dir"
+   - "chunk log split from the manifest, per-record CRC, torn tail discarded"
+   - "paired durability: fsync chunk DATA before appending its log record" — is that ordering sufficient AND necessary? Is an append to a log file atomic in the way v2 assumes? What about partial appends crossing a page boundary?
+   - "atomic rename to the content-addressed permanent path"
+   Name any that are still hand-waved.
+
+5. THE LOAD-BEARING POWERSYNC CLAIM — CHALLENGE IT. v2's single commit point depends entirely on this assertion: "ps_crud is a local table in the same SQLite database, so the outbound intent commits in the SAME transaction as the domain rows." The PowerSync client source is NOT in this repo (node_modules lives outside it), so this claim is UNVERIFIED HERE. Use your knowledge and web search to check it against PowerSync's actual documented client architecture. If it is false, or true only under conditions the doc does not state (e.g. only inside writeTransaction, only for tables in the PowerSync schema, not for local-only tables, subject to its own internal transaction handling), then step 6 is NOT one transaction and blocker 2 is NOT closed.
+
+6. IS "DON'T COMPOSE WITH THE ATTACHMENT QUEUE" SOUND, OR DOES IT BREAK SOMETHING? v2 drops PowerSync's attachment queue entirely: PowerSync syncs rows, media is ours end-to-end. Rationale: the queue's only route to upload takes a whole-file ArrayBuffer and wants file-then-row, while the protocol needs verify-then-row, and we build our own uploader anyway since PowerSync has no resume. What does this DECISION cost that the doc does not mention? Specifically: how does a SECOND device get the media (the queue also handled DOWNLOAD)? Is there now an unwritten download/GC/archival path? Does Evidence retrieval on another device still work?
+
+7. DOES THE DOC OVERCLAIM ANYWHERE ELSE? The author has a demonstrated pattern (reviews #9/#10) of writing withdrawal notes and then repeating the claim in quieter language. Check the status banner, the blocker table, and IMPLEMENTATION_NOTES' "gate satisfied" entry for claims stronger than the evidence. In particular: is "blocker 1 is DISSOLVED, the fault is unreachable, not patched" supportable given YOUR OWN review #10 said the bakeoff's Q1 VALID PASS does not survive? Is it legitimate to close a blocker on evidence you rejected?
+
+8. IS "A0.2 MAY BEGIN" JUSTIFIED? Bottom line, explicitly: IS BLOCKER 2 ACTUALLY CLOSED, YES OR NO? Is Artifact 1 v2 a crash-safe specification, YES OR NO? Is it safe to begin schema code, YES OR NO? If no, name the minimum that must be true first.
+
+For each finding: severity (CRITICAL / HIGH / MEDIUM), the precise defect, and a concrete fix. Distinguish "still broken", "newly broken by the rewrite", and "acceptable".
+
+End with: the single most likely way a capture still gets silently lost under Artifact 1 v2.

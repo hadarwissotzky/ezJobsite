@@ -208,7 +208,17 @@
 
 **NET:** the doc set now tells one story about the **decisions already made**; it still has **no crash-safe protocol** for the three blockers. **A `DURABILITY-DESIGN-v2` is required before A0.2 — do not start schema code.** **hadar decision owed (blocking v2): the ADR-2 direction** — PowerSync bakeoff vs. append-only-P1-sync (which now needs the L5 evidence-vs-operational split designed) vs. full owned relational protocol. Codex #7's L5 finding materially weakens the "append-only makes it simple" rationale that closed H1, so this is worth re-deciding, not assuming. | Codex #7 run + reconciliation + doc-drift cleanup by Claude. | **hadar (1 decision: ADR-2 direction)** |
 
-> ## ✅ THIS GATE IS SATISFIED (2026-07-16, later the same day) — A0.2 MAY BEGIN
+> ## ⛔ RETRACTED (2026-07-16) — THIS GATE IS **NOT** SATISFIED. DO NOT BEGIN A0.2.
+>
+> **`CRITIC-REVIEW-11-CODEX.md` rejected the Artifact 1 v2 closure: *"Is blocker 2 closed? NO. Is it safe to begin A0.2 schema code? NO."*** The entry below was written before that review and **claimed a closure it had not earned** — the third time this doc set has labelled a sketch complete. All 12 findings adopted, none disputed. **Two independent phantom-saved paths were constructed against the claim that a phantom is "unrepresentable":** (1) a returned SQLite COMMIT is **not durable** under `synchronous=NORMAL` in WAL mode — atomicity ≠ durability, and no pragma/`F_FULLFSYNC`/checkpoint policy is specified anywhere; (2) **`ps_crud` is a transient queue** — `tx.complete()` removes entries (our connector does exactly that), so "rows without `ps_crud`" is the **normal post-upload state**, not impossible, and PowerSync **reverts local rows** when the queue drains after a backend rejection — which our connector permits by sending Capture and Attachment as separate requests and completing anyway.
+>
+> **What survives:** the PREPARE/DECIDE split is **correct** and does eliminate v1's two half-commit states (Codex: *"Splitting authority is the right architecture"*). **It is the protocol skeleton, not a specification.**
+>
+> **Minimum still owed before A0.2:** a **durability profile** (`synchronous=FULL` for the capture commit + `F_FULLFSYNC` + a runtime assertion the pragma took effect + what happens if PowerSync/op-sqlite change it on another connection) · a **queue-lifecycle model** with a durable mutation id + server receipt that survives `ps_crud` completion, and **one backend transaction/RPC for Capture+Attachment** (never partial-accept) · a **complete, corruption-aware truth table** (hash mismatch, not just absence) · **real filesystem specs** (reservation, generational manifests, chunk-log append atomicity, immutable content-addressed install) · the **download/GC/archival path** deleted along with the attachment queue.
+>
+> **Blocker 1 wording corrected:** *"demonstrated 40/40 / the fault is unreachable"* is **withdrawn** — review #10 rejected Q1's VALID PASS. Retiring the `seq`-cursor fault **as an architectural decision** is reasonable (we no longer write that cursor); the honest record is **"PowerSync adopted despite an uncleared validation gate."** **ADR-2 stands** — it does not depend on Artifact 1.
+>
+> <details><summary>The premature "gate satisfied" entry, retained for provenance</summary>
 >
 > The decision this gate was blocked on (**the ADR-2 direction**) is **made: ADR-2 → PowerSync**. It closed two of the three blockers outright, and the third is closed by **Artifact 1 v2** written into `DURABILITY-DESIGN-v1.md` (§1.1–§1.4). **The "v2" that was owed is that rewrite, not a new file** — so the `DURABILITY-DESIGN-v2` requirement is **met in place**; do not go looking for a file by that name.
 >
@@ -225,6 +235,10 @@
 > **Carried into Spike A, named not hidden:** `REQ-MEMBER-5` revocation undefined (cited 4×, defined 0×) · *"last-N-days"* not expressible server-side in Sync Streams · server-owned writes silently revert with no rejection hook (UX defect to design around) · **whole-file media memory on-device untested**.
 >
 > **No Codex pass has reviewed Artifact 1 v2.** Given `CRITIC-REVIEW-09/10` caught real defects in far simpler work, that review is **worth running before the recovery sweep is coded** — but it does not block A0.2 schema.
+>
+> </details>
+>
+> *That closing line was wrong on both counts: the review **did** block A0.2, and it found **3 CRITICALs** — including two that killed the "phantom is unrepresentable" claim outright. Running it was the right call; shipping schema on the strength of the unreviewed version would not have been.*
 
 ---
 

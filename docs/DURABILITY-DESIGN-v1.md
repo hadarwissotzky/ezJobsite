@@ -2,17 +2,24 @@
 
 > **What this is.** The design pass Codex #6 required before any Spike A code. It answers the 9 artifacts from `SPIKE-A-BUILD-PLAN.md §0.5` at the protocol level, so the build derives from written invariants instead of improvising durability in code. Decisions locked 2026-07-16: **append-only sync (ADR-2)** · **honest save-invariant (CLAUDE #1)** · **immutable media + versioned records + approval-freeze** · **DECISION 4 (~~Option B~~ → **Option A**, re-decided 2026-07-16 — client-side media encryption dropped for v1)** · **DECISION 7 (Supabase Storage)**.
 >
-> ## 🟢 STATUS 2026-07-16 — ALL THREE PRE-CODE BLOCKERS ARE CLOSED. A0.2 (schema) MAY BEGIN.
+> ## ⛔ STATUS 2026-07-16 (corrected) — BLOCKER 2 IS **NOT** CLOSED. **DO NOT BEGIN A0.2.**
 >
-> The three blockers below were gated behind the ADR-2 / PowerSync-bakeoff decision. **That decision is made (ADR-2 → PowerSync), and it closed two of them outright. The third is closed by Artifact 1 v2 in this document.**
+> **`CRITIC-REVIEW-11-CODEX.md` reviewed Artifact 1 v2 and rejected it: *"Is blocker 2 closed? NO. Is Artifact 1 v2 a crash-safe specification? NO. Is it safe to begin A0.2 schema code? NO."* All findings adopted; none disputed.** An earlier version of this banner claimed all three blockers were closed and A0.2 could begin. **That was wrong and is retracted** — it is the third time this document has labelled a sketch complete, which is why the label now costs a review to earn.
 >
-> | Blocker | Status | How |
-> |---|---|---|
-> | **1 — the `seq` pull is not commit-ordered → silent capture loss** *(Codex's pick for the single most likely field failure)* | ✅ **DISSOLVED — transport-owned** | We no longer write a `seq` cursor. PowerSync orders by the **Postgres commit log**, so a late-committing txn lands at a *later* stream position and cannot fall behind the checkpoint. **The fault is not fixed — it is unreachable.** Demonstrated 40/40 under a deliberate stalled-commit inversion (`BAKEOFF-RESULT.md`). |
-> | **2 — `MEDIA_COMMITTED` is not atomic** | ✅ **CLOSED — Artifact 1 v2 (§1.1–§1.4 below)** | Root cause was **two authorities for one fact**: the manifest was made to record commitment, which only SQLite can know. v2 splits the questions — manifest answers *"were bytes made"*, SQLite alone answers *"is it committed"*. **One commit point.** The phantom-saved state is now **unrepresentable**, and the recovery truth table is complete (11 rows, incl. the two v1 could not express). |
-> | **3 — L5 ("sync is append-only") is false for the data model** | ✅ **RESOLVED via option (a)** | Append-only is scoped to the **evidence ledger** (media, capture receipts, record versions, approvals), enforced by **our** rules (authz + no-update policies), not the transport. **Mutable operational state syncs through PowerSync** — demonstrated in bakeoff Q2 (bidirectional convergence, pending offline edits preserved, server-owned fields refused at the DB boundary with `42501`). |
+> **v2's central claim — *"the phantom-saved state is unrepresentable"* — is WITHDRAWN. Two independent phantoms were constructed:**
 >
-> **Artifact 1 is now a crash-safe specification, not a sketch.** The other artifacts retain their **⚠️ DRAFT** labels honestly — §2 (sync protocol) is now **largely superseded by PowerSync** and should be read as such; 3/5/6/8 still need work but **none of them block A0.2**.
+> 1. **A returned SQLite commit is not durable.** v2 asserted *"SQLite's commit is atomic, so there is no instant at which the app has said 'saved' and the capture is not committed."* **That conflates atomicity with durability.** In WAL mode under `synchronous=NORMAL`, COMMIT returns **without fsyncing the WAL**; power loss rolls it back. §1.3 specifies no `journal_mode`, `synchronous`, `fullfsync`, checkpoint policy, or runtime assertion that the pragma took effect — and on iOS ordinary `fsync` is not the real barrier (`F_FULLFSYNC` is). **Phantom: commit returns → "saved ✓" → power loss → rows gone.**
+> 2. **`ps_crud` is a transient queue, not a permanent recovery fact.** `tx.complete()` **removes** entries — our connector does exactly that. So **row 8 is the normal post-upload state, not "unrepresentable"**, and the §1.5 oracle would fire on every successful upload. Worse: PowerSync **reverts local state** once the queue drains if the backend rejected the mutation, and our connector sends Capture and Attachment as **separate Supabase requests** and completes the txn anyway → *Capture accepted + Attachment rejected → the server checkpoint overwrites the local rows.* **Phantom: saved → queue drained → capture gone.**
+>
+> **What survives:** the **PREPARE/DECIDE split is correct** — Codex confirms it eliminates v1's two half-commit states. *"Splitting authority is the right architecture."* But a correct skeleton is not a protocol. **Artifact 1 v2 is the protocol skeleton, not a specification.**
+>
+> | Blocker | Real status |
+> |---|---|
+> | **1 — `seq` pull not commit-ordered** | ⚠️ **Retired as an algorithmic fault, NOT empirically demonstrated.** We no longer write a `seq` cursor, and PowerSync's documented checkpoint model includes only fully-committed transactions — Codex agrees retiring the precise fault is reasonable. **But the "demonstrated 40/40 / the fault is unreachable" wording is WITHDRAWN**: review #10 rejected Q1's VALID PASS. The honest record is **"PowerSync adopted despite an uncleared validation gate"** (ADR-2), which cannot be converted into verified durability by quieter wording. |
+> | **2 — `MEDIA_COMMITTED` not atomic** | ⛔ **OPEN.** Diagnosis right, conclusion premature. Needs: a durability profile (pragmas + `F_FULLFSYNC` + runtime assertion), a queue-lifecycle model that does not treat `ps_crud` as permanent, a complete + safe truth table, and real filesystem operations. |
+> | **3 — L5 false for the data model** | ⚠️ **Direction resolved (option (a)), not proven.** Evidence-ledger append-only enforced by our rules; mutable state via PowerSync. Rests on bakeoff Q2, whose VALID PASS review #10 also rejected. |
+>
+> **ADR-2 is unaffected** — it does not depend on Artifact 1, and it was knowingly taken over an uncleared gate (see `ARCHITECTURE.md`).
 >
 > **Still open and carried into Spike A (named, not hidden):** `REQ-MEMBER-5` revocation is undefined (cited 4×, defined 0×) · *"last-N-days"* windowing is not expressible server-side in Sync Streams · a client write to a server-owned field is applied locally then **silently reverted with no rejection hook** (a UX defect to design around) · **whole-file media memory behaviour on-device is untested**.
 >
@@ -85,9 +92,16 @@ The four durability events v1 conflated — **journal commit, media-file commit,
 
 1. **One commit point.** The **SQLite transaction is the only commit.** Every filesystem step before it is a *prepare*: durable, idempotent, and safe to re-run. Nothing is written to any other system after it.
 2. **Two authorities, two questions, no overlap.** The **manifest** answers *"was media made, and where are its bytes"* — it is the recovery source of truth **independent of SQLite**, so if SQLite is corrupted or its key is lost (H3/H4), manifests + content-addressed media reconstruct the index. **SQLite** answers *"is this capture committed"* — and nothing else may claim to answer it.
-3. **`"saved ✓"` is emitted only after the SQLite commit returns.** SQLite's commit is atomic, so there is no instant at which the app has said "saved" and the capture is not committed.
+3. **`"saved ✓"` is emitted only after the SQLite commit returns.**
+>
+> ### ⛔ THE CLAIM THAT WAS HERE IS FALSE — WITHDRAWN (Codex #11 CRITICAL 2)
+> This point previously read: *"SQLite's commit is atomic, so there is no instant at which the app has said 'saved' and the capture is not committed."*
+>
+> **That conflates atomicity with durability. They are different properties.** Atomicity means you never see half a transaction. **Durability means it survives power loss — and a returned COMMIT does not guarantee it.** In WAL mode under `synchronous=NORMAL`, COMMIT returns *before* the WAL is fsynced; a power cut rolls the transaction back after the UI has already said "saved". On iOS, ordinary `fsync` is not the barrier either — `F_FULLFSYNC` is, and even that is best-effort under sudden power loss.
+>
+> **"Commit returned" ≠ "durable" is now a first-class requirement, not an assumption.** Before this step can be built, §1.3 must specify and *assert at runtime*: `journal_mode` · `synchronous` (**FULL**, not NORMAL, for the capture-commit transaction) · `fullfsync` · checkpoint policy · VFS assumptions · what happens if PowerSync or op-sqlite changes these on another connection. **None of that is written yet.**
 
-**The invariant this buys:** *a phantom "saved" is not a bug we handle — it is a state the design cannot represent.*
+**What this buys — stated honestly:** the PREPARE/DECIDE split **eliminates v1's two half-commit states** (Codex #11 confirms: *"Splitting authority is the right architecture… The two v1 half-commit states really are eliminated"*). It does **not** yet make a phantom "saved" unrepresentable — **that claim is withdrawn**, and two independent phantoms remain open (see the status banner). **This is the protocol skeleton, not a specification.**
 
 ### 1.2 The states (per capture)
 
@@ -130,7 +144,15 @@ The four durability events v1 conflated — **journal commit, media-file commit,
 
 On every launch, a **recovery sweep** reconciles journal + sidecar manifests against SQLite and the media directory. Rule: **never initialize a fresh database over an existing one whose key is missing** (enter a hard recovery state instead — Codex H3). Per capture, keyed off the manifest's last durable state:
 
-**The truth table is now COMPLETE** — it enumerates every combination of *(manifest state × media on disk × SQLite rows)*, including the two v1 had no row for. The sweep is driven by the **manifest**, then cross-checked against SQLite. **`"saved ✓"` was shown only for rows that exist in SQLite**, so any row below with *no SQLite rows* is by construction a state the user was never promised.
+> ### ⛔ "COMPLETE" IS RETRACTED — the table is neither complete nor safe (Codex #11 CRITICAL 4)
+> It enumerates *absence* of media but not **corruption** of it. Missing combinations Codex named, each of which this table would mishandle:
+> - `VERIFIED` + media present at the expected path but **bytes hash differently** + **rows present** ← *silent corruption; row 6 would call this "committed, nothing to do"*
+> - `VERIFIED` + **wrong-hash** media + **no rows** ← row 5 would re-run step 6 and **commit corrupt media**
+> - two manifests for the same capture id · manifest gen N newer but **corrupt** while N-1 is valid · reservation file surviving alone
+>
+> **Row 8 is factually wrong** (see below). **Row 5's action is unsafe as written** — it must re-verify the hash before committing, not assume the install was good. Treat this table as a **draft enumeration**, not the truth table blocker 2 requires.
+
+~~**The truth table is now COMPLETE**~~ — it enumerates *some* combinations of *(manifest state × media on disk × SQLite rows)*, including the two v1 had no row for. The sweep is driven by the **manifest**, then cross-checked against SQLite. **`"saved ✓"` was shown only for rows that exist in SQLite**, so any row below with *no SQLite rows* is by construction a state the user was never promised.
 
 | # | Manifest | Media on disk | SQLite rows | What happened | Recovery action | Was "saved" shown? |
 |---|---|---|---|---|---|---|
@@ -141,7 +163,7 @@ On every launch, a **recovery sweep** reconciles journal + sidecar manifests aga
 | 5 | `VERIFIED` | at `media/<sha>.ext` | **none** | **Died between install and commit** *(v1 had no row for this)* | **Orphan awaiting commit → re-run step 6** (idempotent by capture id). | **no** — this is why it is safe |
 | 6 | `VERIFIED` | at `media/<sha>.ext` | **present** | **Committed. The normal terminal state.** | Nothing. Upload proceeds whenever. | yes — correctly |
 | 7 | `VERIFIED` | **missing** | present | Media deleted/lost *after* commit (external deletion, FS damage) | **Do not fail silently.** Mark the capture `media_lost`, keep the row + hash as evidence, surface honestly. **Named residual boundary.** | yes — and we must admit it |
-| 8 | `VERIFIED` | at path | rows present, **`ps_crud` missing** | **Unrepresentable** — same transaction | Assert loudly. If ever observed → DB corruption; go to row 9. | — |
+| 8 | `VERIFIED` | at path | rows present, **`ps_crud` missing** | ⛔ **THIS ROW IS WRONG — Codex #11 CRITICAL 3.** It claimed "unrepresentable, same transaction". **It is the NORMAL POST-UPLOAD STATE:** `tx.complete()` *removes* processed entries, and our connector does exactly that. `ps_crud` is **transport state, not a permanent recovery fact**. | **Do not assert.** Recovery must be *"pending `ps_crud` **or** a durable server receipt"* — never "`ps_crud` present". A durable mutation id + receipt (surviving queue completion) is **not yet designed**. | yes |
 | 9 | present | present | **DB unreadable / key lost (H3/H4)** | Corruption or restore-without-key | **Hard recovery state — never initialize a fresh DB over the old one.** Rebuild rows from manifests + content-addressed media; re-run step 6 per verified manifest (idempotent). | previously yes → **restored** |
 | 10 | **missing** | at `media/<sha>.ext` | none | Manifest lost, orphan bytes | No provenance → quarantine, do not invent a capture. Report. | no |
 | 11 | **missing/corrupt** | missing | present | Rows reference media with no manifest and no bytes | Same as row 7: `media_lost`, honest. | yes — and we must admit it |
