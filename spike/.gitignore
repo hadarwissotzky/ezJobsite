@@ -1,0 +1,9 @@
+.env
+app/.env
+app/node_modules/
+app/ios/
+app/android/
+app/.expo/
+out/
+__pycache__/
+.venv/

@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://unpkg.com/@powersync/service-sync-rules@latest/schema/sync_rules.json
+#
+# SYNC BAKEOFF — throwaway sync config. Not production.
+# Field ownership is predeclared in docs/BAKEOFF-PREDECLARATION.md §2.
+config:
+  edition: 3
+
+streams:
+  # Single stream, multiple queries -> one bucket per user (avoids the
+  # 1,000-bucket-per-user limit and keeps Q1 checkpoint reasoning simple:
+  # one bucket means one checkpoint to observe).
+  bakeoff:
+    with:
+      # Q7 windowing, half 1: "Active projects".
+      # NOTE for Q7: the "last-N-days" half is NOT expressible here — Sync
+      # Streams have no server-side now()/current_date. Time windowing must be
+      # driven by a client-supplied parameter (which the client can lie about)
+      # or a server-maintained flag column. Recorded as a real Q7 fit finding.
+      active_projects: |
+        SELECT id FROM project
+        WHERE owner_id = auth.user_id() AND status = 'active'
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM project           WHERE id         IN active_projects
+      - SELECT * FROM capture           WHERE project_id IN active_projects
+      - SELECT * FROM capture_op_state  WHERE project_id IN active_projects
+      - SELECT * FROM attachment        WHERE project_id IN active_projects

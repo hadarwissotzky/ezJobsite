@@ -1,0 +1,211 @@
+import '@azure/core-asynciterator-polyfill';
+import 'react-native-get-random-values';
+
+import { OPSqliteOpenFactory } from '@powersync/op-sqlite';
+import { PowerSyncDatabase } from '@powersync/react-native';
+import * as FS from 'expo-file-system/legacy';
+import React from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { AppSchema } from './src/AppSchema';
+import { SupabaseConnector } from './src/connector';
+
+// Which identity this instance runs as. Device 2 is launched with a different
+// value so two simulators can observe convergence (Q2).
+const DEVICE = process.env.EXPO_PUBLIC_DEVICE ?? 'device1';
+const EMAIL = `${DEVICE}@example.com`;
+const PASSWORD = 'bakeoff-spike-pw-2026';
+
+const STATUS_FILE = FS.documentDirectory + 'status.json';
+const COMMAND_FILE = FS.documentDirectory + 'command.json';
+
+// Per-PROCESS identity. Codex #9 CRITICAL: the old restart check waited for
+// status.json to *exist* — but it already existed before termination, so a
+// relaunched app that crashed instantly would have "passed". The harness now
+// requires a NEW boot_id + a newer statusSeq, which only a live new process
+// can produce.
+const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+let STATUS_SEQ = 0;
+let DB_INIT_OK = false;
+
+// op-sqlite native adapter, passed EXPLICITLY. The bare `{ dbFilename }` form
+// does NOT auto-detect op-sqlite — it falls back to @journeyapps/react-native-quick-sqlite
+// and throws at runtime. (The docs' "detects which peer is present" claim did not
+// hold for @powersync/op-sqlite 0.9.15 + @powersync/react-native 1.35.x.)
+//
+// NOT the Expo Go sql-js adapter: that one has no SQLite consistency guarantees
+// (full DB rewrite per write, corruptible on kill), which would invalidate every
+// durability claim Q1 depends on.
+export const db = new PowerSyncDatabase({
+  schema: AppSchema,
+  database: new OPSqliteOpenFactory({ dbFilename: `bakeoff-${DEVICE}.db` }),
+});
+
+const connector = new SupabaseConnector();
+
+export default function App() {
+  const [log, setLog] = React.useState<string[]>([]);
+  const say = React.useCallback(
+    (m: string) => setLog((l) => [...l.slice(-14), `${new Date().toISOString().slice(11, 23)} ${m}`]),
+    []
+  );
+
+  React.useEffect(() => {
+    let stop = false;
+    let lastCmdSeq = -1;
+
+    (async () => {
+      try {
+        await db.init();
+        DB_INIT_OK = true;
+        say(`db init (${DEVICE}) boot=${BOOT_ID}`);
+        await connector.login(EMAIL, PASSWORD);
+        say(`signed in ${EMAIL}`);
+        // connect() is fire-and-forget by design.
+        db.connect(connector);
+        say('connect() issued');
+      } catch (e: any) {
+        say(`FATAL ${e?.message ?? e}`);
+      }
+
+      // Status writer + command poller. 500ms is fast enough for the harness to
+      // catch a checkpoint transition without hammering SQLite.
+      while (!stop) {
+        try {
+          const s = db.currentStatus;
+
+          // Codex #9 HIGH: bucket state and rows were read in SEPARATE queries,
+          // so the harness could publish a cross-checkpoint mixture. Read both
+          // inside ONE read transaction so the snapshot is internally consistent.
+          //
+          // Q1 ORACLE, honestly labelled: ps_buckets.last_op is PowerSync's
+          // persisted PER-BUCKET operation cursor. It is NOT the protocol's
+          // "checkpoint_complete" message. Its advancement plus the row being
+          // present in the materialised `capture` view is evidence a checkpoint
+          // was applied and stored — but the harness must ASSERT the
+          // advancement, not merely record it.
+          const snap = await db.readTransaction(async (tx) => {
+            let buckets: any[] = [];
+            try {
+              buckets = (await tx.getAll(
+                `SELECT name, last_op, target_op FROM ps_buckets ORDER BY name`
+              )) as any[];
+            } catch {
+              /* table absent before first sync */
+            }
+            // `payload` is returned so the harness can recompute SHA-256 itself.
+            // Codex #9 HIGH: comparing the payload_sha256 COLUMN to the server's
+            // payload_sha256 COLUMN is circular — a transport that corrupted
+            // `payload` but preserved the hash column would pass.
+            const captures = (await tx.getAll(
+              `SELECT id, seq, label, trial, payload, payload_sha256 FROM capture ORDER BY seq`
+            )) as any[];
+            const opstate = (await tx.getAll(
+              `SELECT id, capture_id, processing_state, resolution_status FROM capture_op_state ORDER BY id`
+            )) as any[];
+            const projects = (await tx.getAll(
+              `SELECT id, name, status FROM project ORDER BY id`
+            )) as any[];
+            let pendingCrud = -1;
+            try {
+              const p = (await tx.getAll(`SELECT count(*) AS n FROM ps_crud`)) as any[];
+              pendingCrud = p[0]?.n ?? -1;
+            } catch {
+              /* ignore */
+            }
+            return { buckets, captures, opstate, projects, pendingCrud };
+          });
+
+          const status = {
+            device: DEVICE,
+            // Per-process identity: only a live NEW process can change these.
+            bootId: BOOT_ID,
+            statusSeq: ++STATUS_SEQ,
+            dbInitOk: DB_INIT_OK,
+            ts: new Date().toISOString(),
+            connected: s.connected,
+            hasSynced: s.hasSynced,
+            lastSyncedAt: s.lastSyncedAt?.toISOString() ?? null,
+            downloading: s.dataFlowStatus?.downloading ?? null,
+            uploading: s.dataFlowStatus?.uploading ?? null,
+            ...snap,
+            rejectedWrites: connector.rejected,
+          };
+          await FS.writeAsStringAsync(STATUS_FILE, JSON.stringify(status, null, 1));
+
+          // Command channel: the harness drops a JSON file; we execute once per seq.
+          const info = await FS.getInfoAsync(COMMAND_FILE);
+          if (info.exists) {
+            const cmd = JSON.parse(await FS.readAsStringAsync(COMMAND_FILE));
+            if (typeof cmd.seq === 'number' && cmd.seq !== lastCmdSeq) {
+              lastCmdSeq = cmd.seq;
+              say(`cmd#${cmd.seq} ${cmd.action}`);
+              await runCommand(cmd, say);
+            }
+          }
+        } catch (e: any) {
+          say(`loop err ${e?.message ?? e}`);
+        }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    })();
+
+    return () => {
+      stop = true;
+    };
+  }, [say]);
+
+  return (
+    <View style={styles.c}>
+      <Text style={styles.h}>bakeoff · {DEVICE}</Text>
+      <ScrollView>
+        {log.map((l, i) => (
+          <Text key={i} style={styles.l}>
+            {l}
+          </Text>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+async function runCommand(cmd: any, say: (m: string) => void) {
+  switch (cmd.action) {
+    case 'disconnect':
+      // Simulates going offline WITHOUT clearing the database — Q1 forbids any
+      // reset/reinstall/DB-clear of the checkpointed device.
+      await db.disconnect();
+      say('disconnected (db intact)');
+      break;
+    case 'connect':
+      db.connect(connector);
+      say('reconnected');
+      break;
+    case 'edit_resolution':
+      // CLIENT-owned field. Pending offline edit must survive and win.
+      await db.execute(
+        `UPDATE capture_op_state SET resolution_status = ?, updated_at = ? WHERE capture_id = ?`,
+        [cmd.value, new Date().toISOString(), cmd.capture_id]
+      );
+      say(`local resolution_status=${cmd.value}`);
+      break;
+    case 'edit_processing':
+      // SERVER-owned field. This write MUST be refused at the DB boundary.
+      // It applies to the local DB (PowerSync is local-first) and then fails on
+      // upload with 42501 — which is exactly the assertion Q2 wants.
+      await db.execute(
+        `UPDATE capture_op_state SET processing_state = ?, updated_at = ? WHERE capture_id = ?`,
+        [cmd.value, new Date().toISOString(), cmd.capture_id]
+      );
+      say(`local processing_state=${cmd.value} (expect server refusal)`);
+      break;
+    default:
+      say(`unknown action ${cmd.action}`);
+  }
+}
+
+const styles = StyleSheet.create({
+  c: { flex: 1, paddingTop: 60, paddingHorizontal: 12, backgroundColor: '#0b0b0c' },
+  h: { color: '#7ee787', fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  l: { color: '#c9d1d9', fontFamily: 'Menlo', fontSize: 10, marginBottom: 2 },
+});
