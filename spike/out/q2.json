@@ -1,0 +1,553 @@
+{
+  "revision": 2,
+  "supersedes": "revision 1, whose VALID PASS was rejected by docs/CRITIC-REVIEW-09-CODEX.md",
+  "trials_per_ordering": 5,
+  "conflict_trials": [
+    {
+      "ordering": "server_edit_while_offline",
+      "capture_id": "q2-2276bf3b",
+      "checks": {
+        "local_edit_queued_while_offline": true,
+        "upload_queue_drained": true,
+        "pg_matches_predeclared_rule": true,
+        "pending_local_edit_not_clobbered": true,
+        "all_devices_converged": true
+      },
+      "evidence": {
+        "pending_crud_while_offline": 1,
+        "pg_after_server_edit": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "pg_final": {
+          "processing_state": "captured",
+          "resolution_status": "resolved"
+        },
+        "devices_final": {
+          "744CBD9A": {
+            "id": "q2-2276bf3b",
+            "capture_id": "q2-2276bf3b",
+            "processing_state": "captured",
+            "resolution_status": "resolved"
+          },
+          "1D56935A": {
+            "id": "q2-2276bf3b",
+            "capture_id": "q2-2276bf3b",
+            "processing_state": "captured",
+            "resolution_status": "resolved"
+          }
+        },
+        "expected_by_predeclared_rule": "resolved"
+      },
+      "trial": 1
+    },
+    {
+      "ordering": "server_edit_while_offline",
+      "capture_id": "q2-d23fc838",
+      "checks": {
+        "local_edit_queued_while_offline": true,
+        "upload_queue_drained": true,
+        "pg_matches_predeclared_rule": true,
+        "pending_local_edit_not_clobbered": true,
+        "all_devices_converged": true
+      },
+      "evidence": {
+        "pending_crud_while_offline": 1,
+        "pg_after_server_edit": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "pg_final": {
+          "processing_state": "captured",
+          "resolution_status": "resolved"
+        },
+        "devices_final": {
+          "744CBD9A": {
+            "id": "q2-d23fc838",
+            "capture_id": "q2-d23fc838",
+            "processing_state": "captured",
+            "resolution_status": "resolved"
+          },
+          "1D56935A": {
+            "id": "q2-d23fc838",
+            "capture_id": "q2-d23fc838",
+            "processing_state": "captured",
+            "resolution_status": "resolved"
+          }
+        },
+        "expected_by_predeclared_rule": "resolved"
+      },
+      "trial": 2
+    },
+    {
+      "ordering": "server_edit_while_offline",
+      "capture_id": "q2-3d9d6244",
+      "checks": {
+        "local_edit_queued_while_offline": true,
+        "upload_queue_drained": true,
+        "pg_matches_predeclared_rule": true,
+        "pending_local_edit_not_clobbered": true,
+        "all_devices_converged": true
+      },
+      "evidence": {
+        "pending_crud_while_offline": 1,
+        "pg_after_server_edit": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "pg_final": {
+          "processing_state": "captured",
+          "resolution_status": "resolved"
+        },
+        "devices_final": {
+          "744CBD9A": {
+            "id": "q2-3d9d6244",
+            "capture_id": "q2-3d9d6244",
+            "processing_state": "captured",
+            "resolution_status": "resolved"
+          },
+          "1D56935A": {
+            "id": "q2-3d9d6244",
+            "capture_id": "q2-3d9d6244",
+            "processing_state": "captured",
+            "resolution_status": "resolved"
+          }
+        },
+        "expected_by_predeclared_rule": "resolved"
+      },
+      "trial": 3
+    },
+    {
+      "ordering": "server_edit_while_offline",
+      "capture_id": "q2-7f54ee2c",
+      "checks": {
+        "local_edit_queued_while_offline": true,
+        "upload_queue_drained": true,
+        "pg_matches_predeclared_rule": true,
+        "pending_local_edit_not_clobbered": true,
+        "all_devices_converged": true
+      },
+      "evidence": {
+        "pending_crud_while_offline": 1,
+        "pg_after_server_edit": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "pg_final": {
+          "processing_state": "captured",
+          "resolution_status": "resolved"
+        },
+        "devices_final": {
+          "744CBD9A": {
+            "id": "q2-7f54ee2c",
+            "capture_id": "q2-7f54ee2c",
+            "processing_state": "captured",
+            "resolution_status": "resolved"
+          },
+          "1D56935A": {
+            "id": "q2-7f54ee2c",
+            "capture_id": "q2-7f54ee2c",
+            "processing_state": "captured",
+            "resolution_status": "resolved"
+          }
+        },
+        "expected_by_predeclared_rule": "resolved"
+      },
+      "trial": 4
+    },
+    {
+      "ordering": "server_edit_while_offline",
+      "capture_id": "q2-c614561c",
+      "checks": {
+        "local_edit_queued_while_offline": true,
+        "upload_queue_drained": true,
+        "pg_matches_predeclared_rule": true,
+        "pending_local_edit_not_clobbered": true,
+        "all_devices_converged": true
+      },
+      "evidence": {
+        "pending_crud_while_offline": 1,
+        "pg_after_server_edit": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "pg_final": {
+          "processing_state": "captured",
+          "resolution_status": "resolved"
+        },
+        "devices_final": {
+          "744CBD9A": {
+            "id": "q2-c614561c",
+            "capture_id": "q2-c614561c",
+            "processing_state": "captured",
+            "resolution_status": "resolved"
+          },
+          "1D56935A": {
+            "id": "q2-c614561c",
+            "capture_id": "q2-c614561c",
+            "processing_state": "captured",
+            "resolution_status": "resolved"
+          }
+        },
+        "expected_by_predeclared_rule": "resolved"
+      },
+      "trial": 5
+    },
+    {
+      "ordering": "server_edit_after_reconnect",
+      "capture_id": "q2-fbc4afa1",
+      "checks": {
+        "local_edit_queued_while_offline": true,
+        "upload_queue_drained": true,
+        "pg_matches_predeclared_rule": true,
+        "all_devices_converged": true
+      },
+      "evidence": {
+        "pending_crud_while_offline": 1,
+        "pg_after_server_edit": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "pg_final": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "devices_final": {
+          "744CBD9A": {
+            "id": "q2-fbc4afa1",
+            "capture_id": "q2-fbc4afa1",
+            "processing_state": "captured",
+            "resolution_status": "overridden"
+          },
+          "1D56935A": {
+            "id": "q2-fbc4afa1",
+            "capture_id": "q2-fbc4afa1",
+            "processing_state": "captured",
+            "resolution_status": "overridden"
+          }
+        },
+        "expected_by_predeclared_rule": "overridden"
+      },
+      "trial": 1
+    },
+    {
+      "ordering": "server_edit_after_reconnect",
+      "capture_id": "q2-f19f600c",
+      "checks": {
+        "local_edit_queued_while_offline": true,
+        "upload_queue_drained": true,
+        "pg_matches_predeclared_rule": true,
+        "all_devices_converged": true
+      },
+      "evidence": {
+        "pending_crud_while_offline": 1,
+        "pg_after_server_edit": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "pg_final": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "devices_final": {
+          "744CBD9A": {
+            "id": "q2-f19f600c",
+            "capture_id": "q2-f19f600c",
+            "processing_state": "captured",
+            "resolution_status": "overridden"
+          },
+          "1D56935A": {
+            "id": "q2-f19f600c",
+            "capture_id": "q2-f19f600c",
+            "processing_state": "captured",
+            "resolution_status": "overridden"
+          }
+        },
+        "expected_by_predeclared_rule": "overridden"
+      },
+      "trial": 2
+    },
+    {
+      "ordering": "server_edit_after_reconnect",
+      "capture_id": "q2-2fc15255",
+      "checks": {
+        "local_edit_queued_while_offline": true,
+        "upload_queue_drained": true,
+        "pg_matches_predeclared_rule": true,
+        "all_devices_converged": true
+      },
+      "evidence": {
+        "pending_crud_while_offline": 1,
+        "pg_after_server_edit": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "pg_final": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "devices_final": {
+          "744CBD9A": {
+            "id": "q2-2fc15255",
+            "capture_id": "q2-2fc15255",
+            "processing_state": "captured",
+            "resolution_status": "overridden"
+          },
+          "1D56935A": {
+            "id": "q2-2fc15255",
+            "capture_id": "q2-2fc15255",
+            "processing_state": "captured",
+            "resolution_status": "overridden"
+          }
+        },
+        "expected_by_predeclared_rule": "overridden"
+      },
+      "trial": 3
+    },
+    {
+      "ordering": "server_edit_after_reconnect",
+      "capture_id": "q2-4bfebfcb",
+      "checks": {
+        "local_edit_queued_while_offline": true,
+        "upload_queue_drained": true,
+        "pg_matches_predeclared_rule": true,
+        "all_devices_converged": true
+      },
+      "evidence": {
+        "pending_crud_while_offline": 1,
+        "pg_after_server_edit": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "pg_final": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "devices_final": {
+          "744CBD9A": {
+            "id": "q2-4bfebfcb",
+            "capture_id": "q2-4bfebfcb",
+            "processing_state": "captured",
+            "resolution_status": "overridden"
+          },
+          "1D56935A": {
+            "id": "q2-4bfebfcb",
+            "capture_id": "q2-4bfebfcb",
+            "processing_state": "captured",
+            "resolution_status": "overridden"
+          }
+        },
+        "expected_by_predeclared_rule": "overridden"
+      },
+      "trial": 4
+    },
+    {
+      "ordering": "server_edit_after_reconnect",
+      "capture_id": "q2-91126901",
+      "checks": {
+        "local_edit_queued_while_offline": true,
+        "upload_queue_drained": true,
+        "pg_matches_predeclared_rule": true,
+        "all_devices_converged": true
+      },
+      "evidence": {
+        "pending_crud_while_offline": 1,
+        "pg_after_server_edit": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "pg_final": {
+          "processing_state": "captured",
+          "resolution_status": "overridden"
+        },
+        "devices_final": {
+          "744CBD9A": {
+            "id": "q2-91126901",
+            "capture_id": "q2-91126901",
+            "processing_state": "captured",
+            "resolution_status": "overridden"
+          },
+          "1D56935A": {
+            "id": "q2-91126901",
+            "capture_id": "q2-91126901",
+            "processing_state": "captured",
+            "resolution_status": "overridden"
+          }
+        },
+        "expected_by_predeclared_rule": "overridden"
+      },
+      "trial": 5
+    }
+  ],
+  "server_owned_trials": [
+    {
+      "capture_id": "q2-2276bf3b",
+      "checks": {
+        "server_owned_write_refused_for_this_row": true,
+        "server_owned_write_did_not_reach_pg": true,
+        "device_converged_back_to_server_value": true
+      },
+      "evidence": {
+        "rejections_baseline_count": 2,
+        "transient_local_value_observed": true,
+        "transient_note": "best-effort only; a miss means the revert outran the 500ms poll, not that the write never applied locally",
+        "new_matching_rejection": {
+          "table": "capture_op_state",
+          "op": "PATCH",
+          "rowId": "q2-2276bf3b",
+          "fields": [
+            "processing_state",
+            "updated_at"
+          ],
+          "code": "42501",
+          "message": "permission denied for table capture_op_state",
+          "at": "2026-07-16T21:05:14.173Z"
+        },
+        "processing_state_pg_before": "captured",
+        "processing_state_pg_after": "captured",
+        "devices_final_processing_state": {
+          "744CBD9A": "captured",
+          "1D56935A": "captured"
+        }
+      },
+      "trial": 1
+    },
+    {
+      "capture_id": "q2-d23fc838",
+      "checks": {
+        "server_owned_write_refused_for_this_row": true,
+        "server_owned_write_did_not_reach_pg": true,
+        "device_converged_back_to_server_value": true
+      },
+      "evidence": {
+        "rejections_baseline_count": 3,
+        "transient_local_value_observed": false,
+        "transient_note": "best-effort only; a miss means the revert outran the 500ms poll, not that the write never applied locally",
+        "new_matching_rejection": {
+          "table": "capture_op_state",
+          "op": "PATCH",
+          "rowId": "q2-d23fc838",
+          "fields": [
+            "processing_state",
+            "updated_at"
+          ],
+          "code": "42501",
+          "message": "permission denied for table capture_op_state",
+          "at": "2026-07-16T21:05:24.039Z"
+        },
+        "processing_state_pg_before": "captured",
+        "processing_state_pg_after": "captured",
+        "devices_final_processing_state": {
+          "744CBD9A": "captured",
+          "1D56935A": "captured"
+        }
+      },
+      "trial": 2
+    },
+    {
+      "capture_id": "q2-3d9d6244",
+      "checks": {
+        "server_owned_write_refused_for_this_row": true,
+        "server_owned_write_did_not_reach_pg": true,
+        "device_converged_back_to_server_value": true
+      },
+      "evidence": {
+        "rejections_baseline_count": 4,
+        "transient_local_value_observed": false,
+        "transient_note": "best-effort only; a miss means the revert outran the 500ms poll, not that the write never applied locally",
+        "new_matching_rejection": {
+          "table": "capture_op_state",
+          "op": "PATCH",
+          "rowId": "q2-3d9d6244",
+          "fields": [
+            "processing_state",
+            "updated_at"
+          ],
+          "code": "42501",
+          "message": "permission denied for table capture_op_state",
+          "at": "2026-07-16T21:06:05.273Z"
+        },
+        "processing_state_pg_before": "captured",
+        "processing_state_pg_after": "captured",
+        "devices_final_processing_state": {
+          "744CBD9A": "captured",
+          "1D56935A": "captured"
+        }
+      },
+      "trial": 3
+    },
+    {
+      "capture_id": "q2-7f54ee2c",
+      "checks": {
+        "server_owned_write_refused_for_this_row": true,
+        "server_owned_write_did_not_reach_pg": true,
+        "device_converged_back_to_server_value": true
+      },
+      "evidence": {
+        "rejections_baseline_count": 5,
+        "transient_local_value_observed": false,
+        "transient_note": "best-effort only; a miss means the revert outran the 500ms poll, not that the write never applied locally",
+        "new_matching_rejection": {
+          "table": "capture_op_state",
+          "op": "PATCH",
+          "rowId": "q2-7f54ee2c",
+          "fields": [
+            "processing_state",
+            "updated_at"
+          ],
+          "code": "42501",
+          "message": "permission denied for table capture_op_state",
+          "at": "2026-07-16T21:06:18.707Z"
+        },
+        "processing_state_pg_before": "captured",
+        "processing_state_pg_after": "captured",
+        "devices_final_processing_state": {
+          "744CBD9A": "captured",
+          "1D56935A": "captured"
+        }
+      },
+      "trial": 4
+    },
+    {
+      "capture_id": "q2-c614561c",
+      "checks": {
+        "server_owned_write_refused_for_this_row": true,
+        "server_owned_write_did_not_reach_pg": true,
+        "device_converged_back_to_server_value": true
+      },
+      "evidence": {
+        "rejections_baseline_count": 6,
+        "transient_local_value_observed": true,
+        "transient_note": "best-effort only; a miss means the revert outran the 500ms poll, not that the write never applied locally",
+        "new_matching_rejection": {
+          "table": "capture_op_state",
+          "op": "PATCH",
+          "rowId": "q2-c614561c",
+          "fields": [
+            "processing_state",
+            "updated_at"
+          ],
+          "code": "42501",
+          "message": "permission denied for table capture_op_state",
+          "at": "2026-07-16T21:06:32.089Z"
+        },
+        "processing_state_pg_before": "captured",
+        "processing_state_pg_after": "captured",
+        "devices_final_processing_state": {
+          "744CBD9A": "captured",
+          "1D56935A": "captured"
+        }
+      },
+      "trial": 5
+    }
+  ],
+  "checks_total": 60,
+  "checks_passed": 60,
+  "verdict": "VALID PASS",
+  "honesty_notes": [
+    "The 42501 proves the DATABASE refused the write in this run \u2014 the error came back from PostgREST. But the discard POLICY is OURS: PowerSync leaves asynchronous validation and discard policy to the application. A pass here is NOT 'PowerSync supplies safe rejection handling'.",
+    "LWW on resolution_status is a spike-local choice with a real cost: two crew members editing simultaneously means one edit is silently discarded. Semantic conflict resolution stays ours either way.",
+    "In ordering 'server_edit_while_offline', PG ending on the client value is expected because it is the last write to ARRIVE. What that ordering actually proves is that the offline CRUD entry SURVIVED and uploaded.",
+    "Both devices are separate stores but the SAME Supabase user \u2014 this is the 'one contractor, two devices' case, not two independent actors."
+  ]
+}

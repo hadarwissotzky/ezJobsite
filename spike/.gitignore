@@ -4,6 +4,11 @@ app/node_modules/
 app/ios/
 app/android/
 app/.expo/
-out/
 __pycache__/
 .venv/
+# Evidence artifacts ARE tracked — BAKEOFF-RESULT.md cites them, and an
+# uncheckable citation is the exact defect Codex #9 caught (the smoke-run trail).
+out/*
+!out/q1.json
+!out/q2.json
+!out/.gitignore

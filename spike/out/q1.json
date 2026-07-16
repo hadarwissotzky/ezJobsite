@@ -1,0 +1,2619 @@
+{
+  "revision": 2,
+  "supersedes": "revision 1, whose VALID PASS was rejected by docs/CRITIC-REVIEW-09-CODEX.md",
+  "predeclared_trials": 20,
+  "passed": 20,
+  "failed": 0,
+  "void": 0,
+  "mechanisms_observed": [
+    "late row delivered"
+  ],
+  "verdict": "VALID PASS",
+  "honesty_notes": [
+    "N=20 is a MECHANISM determination, NOT a failure-rate bound (20/20 bounds the rate only at <14% @95%). See docs/BAKEOFF-PREDECLARATION.md \u00a71.2.",
+    "ps_buckets.last_op is a per-bucket op cursor, NOT the protocol's checkpoint_complete message. Advancement + row materialisation is the oracle.",
+    "Scope: one-row ordinary transactions, one project, good network, iOS simulator, debug build. Streaming of large in-progress transactions, two-phase commit, parallel apply, bucket compaction and service restarts are NOT exercised \u2014 so 'structural immunity' is NOT established."
+  ],
+  "results": [
+    {
+      "trial": 1,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38072,
+        "A": 38073,
+        "B": 38074,
+        "verify": 38075
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 155,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 155,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t1-A-5a632efa",
+      "seq_a": 44,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t1-B-3f952687",
+      "seq_b": 45,
+      "b_committed_at": "2026-07-16T21:00:39.418254+00:00",
+      "third_conn_visible": [
+        "t1-B-3f952687"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.54,
+      "device_saw_b_at": "2026-07-16T21:00:39.980091+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 156,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 156,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzsm91-3fmeuj7y",
+        "new_boot": "mrnzu0w7-e67wgqmo",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:00:43.640038+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 157,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 157,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.0
+    },
+    {
+      "trial": 2,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38074,
+        "A": 38075,
+        "B": 38072,
+        "verify": 38073
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 161,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 161,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t2-A-2ad6f532",
+      "seq_a": 46,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t2-B-34992227",
+      "seq_b": 47,
+      "b_committed_at": "2026-07-16T21:00:47.072452+00:00",
+      "third_conn_visible": [
+        "t2-B-34992227"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.53,
+      "device_saw_b_at": "2026-07-16T21:00:47.622762+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 162,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 162,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzu0w7-e67wgqmo",
+        "new_boot": "mrnzu6pt-vzu4pn6s",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:00:51.059602+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 163,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 163,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.3
+    },
+    {
+      "trial": 3,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38072,
+        "A": 38075,
+        "B": 38074,
+        "verify": 38073
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 167,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 167,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t3-A-141c2d76",
+      "seq_a": 48,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t3-B-204f8059",
+      "seq_b": 49,
+      "b_committed_at": "2026-07-16T21:00:54.316211+00:00",
+      "third_conn_visible": [
+        "t3-B-204f8059"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.52,
+      "device_saw_b_at": "2026-07-16T21:00:54.862178+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 168,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 168,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzu6pt-vzu4pn6s",
+        "new_boot": "mrnzucb6-ww9zztl7",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:00:58.325670+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 169,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 169,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.4
+    },
+    {
+      "trial": 4,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38073,
+        "A": 38075,
+        "B": 38074,
+        "verify": 38072
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 173,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 173,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t4-A-c58f4c8a",
+      "seq_a": 50,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t4-B-469cd11d",
+      "seq_b": 51,
+      "b_committed_at": "2026-07-16T21:01:01.639845+00:00",
+      "third_conn_visible": [
+        "t4-B-469cd11d"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.52,
+      "device_saw_b_at": "2026-07-16T21:01:02.173538+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 174,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 174,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzucb6-ww9zztl7",
+        "new_boot": "mrnzuhyf-nhzxe2de",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:01:05.643556+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 175,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 175,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.3
+    },
+    {
+      "trial": 5,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38072,
+        "A": 38074,
+        "B": 38073,
+        "verify": 38075
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 179,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 179,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t5-A-71634b77",
+      "seq_a": 52,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t5-B-71ba4325",
+      "seq_b": 53,
+      "b_committed_at": "2026-07-16T21:01:09.617442+00:00",
+      "third_conn_visible": [
+        "t5-B-71ba4325"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.98,
+      "device_saw_b_at": "2026-07-16T21:01:10.617593+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 180,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 180,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzuhyf-nhzxe2de",
+        "new_boot": "mrnzuoh0-h15epor1",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:01:14.076780+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 181,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 181,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 8.4
+    },
+    {
+      "trial": 6,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38074,
+        "A": 38073,
+        "B": 38075,
+        "verify": 38072
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 185,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 185,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t6-A-c6fa2e6e",
+      "seq_a": 54,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t6-B-7f515557",
+      "seq_b": 55,
+      "b_committed_at": "2026-07-16T21:01:17.610058+00:00",
+      "third_conn_visible": [
+        "t6-B-7f515557"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.16,
+      "device_saw_b_at": "2026-07-16T21:01:17.788351+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 186,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 186,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzuoh0-h15epor1",
+        "new_boot": "mrnzuu6q-xsb1edjl",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:01:21.552017+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 187,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 187,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.4
+    },
+    {
+      "trial": 7,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38072,
+        "A": 38075,
+        "B": 38073,
+        "verify": 38074
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 191,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 191,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t7-A-72ac8188",
+      "seq_a": 56,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t7-B-ffb13953",
+      "seq_b": 57,
+      "b_committed_at": "2026-07-16T21:01:24.822002+00:00",
+      "third_conn_visible": [
+        "t7-B-ffb13953"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.52,
+      "device_saw_b_at": "2026-07-16T21:01:25.365504+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 192,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 192,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzuu6q-xsb1edjl",
+        "new_boot": "mrnzuzvf-ezdgpiqg",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:01:28.866763+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 193,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 193,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.3
+    },
+    {
+      "trial": 8,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38074,
+        "A": 38073,
+        "B": 38075,
+        "verify": 38072
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 197,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 197,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t8-A-e93d57ba",
+      "seq_a": 58,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t8-B-1349554b",
+      "seq_b": 59,
+      "b_committed_at": "2026-07-16T21:01:32.188290+00:00",
+      "third_conn_visible": [
+        "t8-B-1349554b"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.54,
+      "device_saw_b_at": "2026-07-16T21:01:32.741491+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 198,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 198,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzuzvf-ezdgpiqg",
+        "new_boot": "mrnzv5jk-1ow2bkov",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:01:36.222749+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 199,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 199,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.3
+    },
+    {
+      "trial": 9,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38073,
+        "A": 38075,
+        "B": 38072,
+        "verify": 38074
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 203,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 203,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t9-A-5f73342c",
+      "seq_a": 60,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t9-B-51154560",
+      "seq_b": 61,
+      "b_committed_at": "2026-07-16T21:01:39.410534+00:00",
+      "third_conn_visible": [
+        "t9-B-51154560"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.52,
+      "device_saw_b_at": "2026-07-16T21:01:39.949007+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 204,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 204,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzv5jk-1ow2bkov",
+        "new_boot": "mrnzvb3m-fdrw8hia",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:01:43.406524+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 205,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 205,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.3
+    },
+    {
+      "trial": 10,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38074,
+        "A": 38072,
+        "B": 38073,
+        "verify": 38075
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 209,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 209,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t10-A-18a1d903",
+      "seq_a": 62,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t10-B-b2ce06d3",
+      "seq_b": 63,
+      "b_committed_at": "2026-07-16T21:01:47.067740+00:00",
+      "third_conn_visible": [
+        "t10-B-b2ce06d3"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.56,
+      "device_saw_b_at": "2026-07-16T21:01:47.646374+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 210,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 210,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzvb3m-fdrw8hia",
+        "new_boot": "mrnzvh1u-m4e83ela",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:01:51.266365+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 211,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 211,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 8.0
+    },
+    {
+      "trial": 11,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38072,
+        "A": 38073,
+        "B": 38074,
+        "verify": 38075
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 215,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 215,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t11-A-ecbc90ea",
+      "seq_a": 64,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t11-B-f95edac6",
+      "seq_b": 65,
+      "b_committed_at": "2026-07-16T21:01:54.623404+00:00",
+      "third_conn_visible": [
+        "t11-B-f95edac6"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.96,
+      "device_saw_b_at": "2026-07-16T21:01:55.604434+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 216,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 216,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzvh1u-m4e83ela",
+        "new_boot": "mrnzvn6n-qhmqnc0w",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:01:59.125330+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 217,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 217,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.8
+    },
+    {
+      "trial": 12,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38073,
+        "A": 38075,
+        "B": 38074,
+        "verify": 38072
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 221,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 221,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t12-A-c61d903d",
+      "seq_a": 66,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t12-B-b7bc3ff8",
+      "seq_b": 67,
+      "b_committed_at": "2026-07-16T21:02:02.465164+00:00",
+      "third_conn_visible": [
+        "t12-B-b7bc3ff8"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.53,
+      "device_saw_b_at": "2026-07-16T21:02:03.018438+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 222,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 222,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzvn6n-qhmqnc0w",
+        "new_boot": "mrnzvswo-3l2lunkf",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:02:06.478028+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 223,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 223,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.3
+    },
+    {
+      "trial": 13,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38075,
+        "A": 38072,
+        "B": 38074,
+        "verify": 38073
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 227,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 227,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t13-A-c4dafcb9",
+      "seq_a": 68,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t13-B-7721324e",
+      "seq_b": 69,
+      "b_committed_at": "2026-07-16T21:02:09.751873+00:00",
+      "third_conn_visible": [
+        "t13-B-7721324e"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.5,
+      "device_saw_b_at": "2026-07-16T21:02:10.274246+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 228,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 228,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzvswo-3l2lunkf",
+        "new_boot": "mrnzvyig-npgtzuzb",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:02:13.802190+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 229,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 229,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.3
+    },
+    {
+      "trial": 14,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38073,
+        "A": 38072,
+        "B": 38074,
+        "verify": 38075
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 233,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 233,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t14-A-ba7ecd66",
+      "seq_a": 70,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t14-B-9bc4d856",
+      "seq_b": 71,
+      "b_committed_at": "2026-07-16T21:02:17.172951+00:00",
+      "third_conn_visible": [
+        "t14-B-9bc4d856"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.96,
+      "device_saw_b_at": "2026-07-16T21:02:18.145962+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 234,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 234,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzvyig-npgtzuzb",
+        "new_boot": "mrnzw4qq-65oxom5j",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:02:21.844786+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 235,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 235,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.9
+    },
+    {
+      "trial": 15,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38072,
+        "A": 38073,
+        "B": 38075,
+        "verify": 38074
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 239,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 239,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t15-A-cd5edb07",
+      "seq_a": 72,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t15-B-47fd942c",
+      "seq_b": 73,
+      "b_committed_at": "2026-07-16T21:02:25.084734+00:00",
+      "third_conn_visible": [
+        "t15-B-47fd942c"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.53,
+      "device_saw_b_at": "2026-07-16T21:02:25.633351+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 240,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 240,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzw4qq-65oxom5j",
+        "new_boot": "mrnzwadb-sga3tu30",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:02:29.114976+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 241,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 241,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.3
+    },
+    {
+      "trial": 16,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38074,
+        "A": 38073,
+        "B": 38075,
+        "verify": 38072
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 245,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 245,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t16-A-29d45186",
+      "seq_a": 74,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t16-B-aed947e6",
+      "seq_b": 75,
+      "b_committed_at": "2026-07-16T21:02:32.405195+00:00",
+      "third_conn_visible": [
+        "t16-B-aed947e6"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.51,
+      "device_saw_b_at": "2026-07-16T21:02:32.931832+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 246,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 246,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzwadb-sga3tu30",
+        "new_boot": "mrnzwg2m-23mxwbmy",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:02:36.598219+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 247,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 247,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.5
+    },
+    {
+      "trial": 17,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38072,
+        "A": 38073,
+        "B": 38074,
+        "verify": 38075
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 251,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 251,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t17-A-433b7a29",
+      "seq_a": 76,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t17-B-c3a1e920",
+      "seq_b": 77,
+      "b_committed_at": "2026-07-16T21:02:39.986401+00:00",
+      "third_conn_visible": [
+        "t17-B-c3a1e920"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.13,
+      "device_saw_b_at": "2026-07-16T21:02:40.143317+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 252,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 252,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzwg2m-23mxwbmy",
+        "new_boot": "mrnzwlk9-vnhg27e1",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:02:43.694795+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 253,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 253,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.2
+    },
+    {
+      "trial": 18,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38075,
+        "A": 38074,
+        "B": 38073,
+        "verify": 38072
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 257,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 257,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t18-A-b644536f",
+      "seq_a": 78,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t18-B-a5b85eaf",
+      "seq_b": 79,
+      "b_committed_at": "2026-07-16T21:02:47.004983+00:00",
+      "third_conn_visible": [
+        "t18-B-a5b85eaf"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.52,
+      "device_saw_b_at": "2026-07-16T21:02:47.547833+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 258,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 258,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzwlk9-vnhg27e1",
+        "new_boot": "mrnzwra0-oyx0ov7a",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:02:51.050274+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 259,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 259,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.4
+    },
+    {
+      "trial": 19,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38072,
+        "A": 38073,
+        "B": 38075,
+        "verify": 38074
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 263,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 263,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t19-A-619f5872",
+      "seq_a": 80,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t19-B-386e4891",
+      "seq_b": 81,
+      "b_committed_at": "2026-07-16T21:02:54.457797+00:00",
+      "third_conn_visible": [
+        "t19-B-386e4891"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.91,
+      "device_saw_b_at": "2026-07-16T21:02:55.383836+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 264,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 264,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzwra0-oyx0ov7a",
+        "new_boot": "mrnzwxcd-j7w23lro",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:02:58.992096+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 265,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 265,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 8.0
+    },
+    {
+      "trial": 20,
+      "outcome": "PASS",
+      "mechanism": "late row delivered",
+      "void_reason": null,
+      "pids": {
+        "control": 38075,
+        "A": 38073,
+        "B": 38074,
+        "verify": 38072
+      },
+      "checkpoint_before": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 269,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 269,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "precondition": {
+        "hasSynced": true,
+        "local_captures": 0
+      },
+      "id_a": "t20-A-471fedbb",
+      "seq_a": 82,
+      "a_wait_event": [
+        "active",
+        "Lock",
+        "advisory"
+      ],
+      "id_b": "t20-B-0627d1e9",
+      "seq_b": 83,
+      "b_committed_at": "2026-07-16T21:03:02.176907+00:00",
+      "third_conn_visible": [
+        "t20-B-0627d1e9"
+      ],
+      "opportunity_window_s": 25.0,
+      "b_arrival_latency_s": 0.54,
+      "device_saw_b_at": "2026-07-16T21:03:02.746742+00:00",
+      "checkpoint_containing_b": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 270,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 270,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "checkpoint_advanced_for_b": true,
+      "b_checks_at_checkpoint": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "restart": {
+        "old_boot": "mrnzwxcd-j7w23lro",
+        "new_boot": "mrnzx31r-sz7iu3dp",
+        "new_process_proven": true,
+        "db_init_ok_in_new_process": true
+      },
+      "persisted_after_restart": true,
+      "checkpoint_survived_restart": true,
+      "a_committed_at": "2026-07-16T21:03:06.278746+00:00",
+      "a_committed_after_observation": true,
+      "a_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "b_checks": {
+        "present_exactly_once": true,
+        "payload_exact_match": true,
+        "recomputed_sha_matches": true,
+        "stored_hash_matches_own_payload": true
+      },
+      "checkpoint_after": {
+        "buckets": [
+          {
+            "name": "1#bakeoff|0[\"proj-bakeoff-1\"]",
+            "last_op": 271,
+            "target_op": 0
+          }
+        ],
+        "last_op_total": 271,
+        "names": [
+          "1#bakeoff|0[\"proj-bakeoff-1\"]"
+        ]
+      },
+      "fresh_client_control": {
+        "note": "eligibility control ONLY \u2014 cannot substitute for the checkpointed device",
+        "a": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        },
+        "b": {
+          "present_exactly_once": true,
+          "payload_exact_match": true,
+          "recomputed_sha_matches": true,
+          "stored_hash_matches_own_payload": true
+        }
+      },
+      "checks": {
+        "a_present_exactly_once": true,
+        "a_payload_exact_match": true,
+        "a_recomputed_sha_matches": true,
+        "a_stored_hash_matches_own_payload": true,
+        "b_present_exactly_once": true,
+        "b_payload_exact_match": true,
+        "b_recomputed_sha_matches": true,
+        "b_stored_hash_matches_own_payload": true,
+        "a_seq_matches": true,
+        "both_rows_in_postgres": true,
+        "powersync_idle": true,
+        "checkpoint_advanced_for_a": true
+      },
+      "duration_s": 7.2
+    }
+  ]
+}
