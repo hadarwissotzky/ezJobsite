@@ -208,6 +208,31 @@
 
 **NET:** the doc set now tells one story about the **decisions already made**; it still has **no crash-safe protocol** for the three blockers. **A `DURABILITY-DESIGN-v2` is required before A0.2 — do not start schema code.** **hadar decision owed (blocking v2): the ADR-2 direction** — PowerSync bakeoff vs. append-only-P1-sync (which now needs the L5 evidence-vs-operational split designed) vs. full owned relational protocol. Codex #7's L5 finding materially weakens the "append-only makes it simple" rationale that closed H1, so this is worth re-deciding, not assuming. | Codex #7 run + reconciliation + doc-drift cleanup by Claude. | **hadar (1 decision: ADR-2 direction)** |
 
+> ## 🔧 ARTIFACT 1 v3 (2026-07-16, after the retraction below) — all 12 Codex #11 findings addressed in the doc; **gate still NOT satisfied, and deliberately so**
+>
+> **v3 does NOT re-close blocker 2.** No "closed" label is being claimed this time — that is the whole point. What changed:
+>
+> | #11 finding | v3 |
+> |---|---|
+> | **C2** returned COMMIT not durable | ☑ **§1.0 durability profile**: `synchronous=FULL` · `F_FULLFSYNC` on Apple · explicit checkpoint policy · **pragmas read back and asserted at runtime** (a pragma that silently failed to apply is indistinguishable from data loss) · refuse to arm the recorder if the assertion fails. **⚠️ Cross-connection hazard left OPEN and named** — `synchronous` is per-connection and PowerSync/op-sqlite open their own; we do not yet control what they set. |
+> | **C3** `ps_crud` transient, not permanent | ☑ **§1.3c queue lifecycle**: `ps_crud` = pending-transport state only · recovery predicate = *pending `ps_crud` **or** durable server receipt **or** durable dead-letter* · **Capture+Attachment through ONE Postgres RPC, never two requests** · **never discard an evidence mutation to unblock the queue** · the managed-vs-raw-vs-local-only condition on the atomicity property is stated. |
+> | **C4** truth table incomplete/unsafe | ☑ **rows 5b/6b added** for hash-mismatch (v2 enumerated *absence* of media, never *corruption* — row 6 would have served corrupt evidence forever; row 5 would have committed it). Row 5 now **re-verifies before committing**. Row 8 marked **factually wrong**. |
+> | **H9** identity lost with the DB | ☑ **§1.0b**: `capture_id`/`attachment_id`/`mutation_id` + canonical request digest + full canonical payload minted at **PREPARE** and stored in the terminal manifest, so a rebuild re-runs DECIDE with **the same** identity. Does **not** make the manifest a commitment authority. |
+> | **H5** reservation reserved the wrong file | ☑ **Preallocate `tmp/<id>.part` itself** (`F_PREALLOCATE` / `posix_fallocate`), verify allocation not logical length, small non-purgeable metadata reserve incl. **WAL growth**, released only **after durable DECIDE**. |
+> | **H6** manifest partially specified | ☑ **§1.3b**: canonical dir · `O_EXCL` no-replace · **single-writer fencing** (forks **quarantine**, never resolved by clock/filename) · "valid" defined (embedded id/generation/predecessor hash) · **retain ≥2 generations**. |
+> | **H7** chunk protocol underspecified | ☑ framing magic+version+length · **CRC32 for torn-tail detection AND SHA-256 per exact chunk for integrity** (they are different jobs) · exact-write loop · reread · strict seq/offset continuity · **independent expected sample/frame count** (a truncated file hashes self-consistently). |
+> | **H8** rename ≠ immutable install | ☑ **freeze the writer first** · rehash through the final descriptor · **no-replace install** · verify an existing destination byte-for-byte · assert one filesystem · barrier both dirs. |
+> | **H10** dropped queue deleted the download design | ☑ **"buys us nothing" retracted.** `RemoteAsset` (synced identity, **no local paths**) / `LocalAsset` (local-only state) split specified. **⚠️ The download/GC/retention path is NAMED AS NOT DESIGNED** — and evidence retrieval on a second device is the product. |
+> | **H11** gate language exceeds evidence | ☑ "demonstrated 40/40 / unreachable / dissolved" withdrawn; recorded as **"PowerSync adopted despite an uncleared validation gate."** |
+> | **H12** repo gives mutually exclusive instructions | ☑ **`MEDIA_COMMITTED` removed from every manifest requirement**: `SPEC` REQ-CAP5 + REQ-CAP8 + the M0 accept-criterion, `ARCHITECTURE` flow A. **This was the dangerous one — an implementer following the SPEC would have rebuilt v1's co-committer.** |
+> | **H1** skeleton ≠ specification | ☑ Adopted as the framing: Artifact 1 is **the protocol skeleton**. |
+>
+> **Still owed before A0.2 (real, not cosmetic):** the **cross-connection pragma hazard** · the **`RemoteAsset`/`LocalAsset` model + download/GC path** · **Artifact 3** (manifest authentication) · the **backend RPC** that makes Capture+Attachment one server transaction · **`spike/app-src/connector.ts` is live-buggy** (separate requests + discard-to-unblock) and must not be copied into production.
+>
+> **No Codex pass has reviewed v3.** Given #11 found 3 CRITICALs in v2 — which *also* looked finished — **v3 should be reviewed before A0.2, and I am not labelling it closed until it is.**
+>
+> ---
+>
 > ## ⛔ RETRACTED (2026-07-16) — THIS GATE IS **NOT** SATISFIED. DO NOT BEGIN A0.2.
 >
 > **`CRITIC-REVIEW-11-CODEX.md` rejected the Artifact 1 v2 closure: *"Is blocker 2 closed? NO. Is it safe to begin A0.2 schema code? NO."*** The entry below was written before that review and **claimed a closure it had not earned** — the third time this doc set has labelled a sketch complete. All 12 findings adopted, none disputed. **Two independent phantom-saved paths were constructed against the claim that a phantom is "unrepresentable":** (1) a returned SQLite COMMIT is **not durable** under `synchronous=NORMAL` in WAL mode — atomicity ≠ durability, and no pragma/`F_FULLFSYNC`/checkpoint policy is specified anywhere; (2) **`ps_crud` is a transient queue** — `tx.complete()` removes entries (our connector does exactly that), so "rows without `ps_crud`" is the **normal post-upload state**, not impossible, and PowerSync **reverts local rows** when the queue drains after a backend rejection — which our connector permits by sending Capture and Attachment as separate requests and completing anyway.

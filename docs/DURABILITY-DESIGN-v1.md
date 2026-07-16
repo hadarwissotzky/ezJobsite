@@ -89,6 +89,32 @@ These come from hadar's append-only decision and make the durability problem tra
 >
 > **PowerSync (ADR-2) makes step 6 genuinely one transaction, for free.** `ps_crud` is a local table **in the same SQLite database**, so the outbound intent commits in the *same* transaction as the domain rows. There is no separate queue to write, and therefore **no window where a capture is "saved" but has no sync intent** — v1 had to hand-build that property; we now get it from the transport.
 
+### 1.0 The durability profile — v3 (⛔ WITHOUT THIS, NOTHING BELOW IS DURABLE)
+
+*New in v3. Codex #11 CRITICAL 2: v2 assumed a returned COMMIT is durable. It is not. This section is the precondition for every claim in Artifact 1; if any assertion here fails at runtime, **capture must refuse to start** (honest invariant, mandate #1).*
+
+| Setting | Required value | Why |
+|---|---|---|
+| `journal_mode` | `WAL` | Concurrency; PowerSync expects it. |
+| `synchronous` | **`FULL`** | Under `NORMAL`, COMMIT returns **before the WAL is fsynced** — power loss rolls back a transaction the UI already called "saved". `FULL` syncs the WAL at each commit. **This is the setting that makes DECIDE mean anything.** |
+| iOS barrier | **`F_FULLFSYNC`** | On Apple platforms ordinary `fsync()` returns before the drive has flushed its cache. `F_FULLFSYNC` is the real barrier — and Apple documents even it as best-effort under sudden power loss (**a named residual boundary**). |
+| Android/Linux barrier | `fsync()` + parent-dir `fsync()` | Directory entry durability is separate from file content durability. |
+| `wal_autocheckpoint` | explicit, not default | Checkpoint policy must be stated, not inherited. |
+
+**Runtime assertion, not configuration.** On every open, read the pragmas back (`PRAGMA journal_mode; PRAGMA synchronous;`) and assert the values actually took effect. **A pragma that silently failed to apply is indistinguishable from data loss at 3am.** If the assertion fails → hard error, refuse to arm the recorder.
+
+**⚠️ Cross-connection hazard (open).** `synchronous` is **per-connection**. PowerSync and op-sqlite open their own connections and may set their own values. **We do not currently control what they set, and a `NORMAL` connection committing our rows would silently defeat this.** Must be resolved before A0.2: pin it via op-sqlite open options, verify on every PowerSync-owned connection we can reach, and add a startup assertion. **Not yet designed — this is a real open item, not a checkbox.**
+
+**Cost, stated honestly:** `synchronous=FULL` + `F_FULLFSYNC` is measurably slower per commit. That is the price of "saved" meaning saved. **Never trade it for capture latency.** If it proves too slow, the answer is fewer commits, not weaker ones.
+
+### 1.0b Identity is minted at PREPARE, not at COMMIT — v3
+
+*New in v3. Codex #11 HIGH 9: Artifact 3 minted the mutation id at SQLite commit, but nothing is written to the filesystem after that commit — so **a lost DB loses the identity**, and row 9's "rebuild from manifests" would mint a *different* mutation id, duplicating a server mutation or wrongly suppressing a changed-payload replay.*
+
+**Therefore:** `capture_id`, `attachment_id`, `mutation_id` (UUIDv7) **and a canonical request digest** are generated during PREPARE and written into the **terminal manifest**, alongside the **complete canonical Capture/Attachment payload** needed to reconstruct the rows byte-exactly.
+
+**This does NOT make the manifest a commitment authority.** It still cannot say "committed". It preserves **recovery identity** so that a rebuild re-runs DECIDE with *the same* identity — making the retry genuinely idempotent end-to-end, not just locally.
+
 ### 1.1 Why a state machine + a sidecar manifest (not a boolean) — v2
 
 The four durability events v1 conflated — **journal commit, media-file commit, DB-row commit, outbound-intent commit** — happen on **two storage systems that cannot share a transaction**: the **filesystem** (media) and **SQLite** (rows). No single `COMMIT` makes both atomic. **So we stop trying.** Instead:
@@ -126,22 +152,77 @@ The four durability events v1 conflated — **journal commit, media-file commit,
 
 **One commit point (step 6). Steps 1–5 are PREPARE: durable, idempotent, re-runnable. Step 7 is derived.**
 
-1. **RESERVE — actually reserve blocks, not a notional lease.** Create `reserve/<id>.blk`, **write it out to the expected maximum size** (`ftruncate` alone is not enough on APFS/ext4 — it can produce a sparse file that fails later), `fsync` it, then `fsync` the parent dir. Include **headroom for the manifest, the chunk log, and the final rename**. If reservation, permissions, or mic access fail → **refuse loudly and record nothing**. *(Closes v1's "disk-space lease reserves no blocks → ENOSPC can still strike the manifest or the final rename.")*
-2. **STARTED — manifest generation 0, before the recorder is armed** (REQ-CAP8). Written **atomically**: `manifest.tmp` → write → `fsync(file)` → `rename()` → `fsync(dir)`.
-3. **RECORDING — paired durability, data before log.** Media streams to `tmp/<id>.part`. For each chunk: **`fsync` the chunk DATA first, then append its `(seq, offset, len, crc32)` record to `chunks.log` and `fsync` the log.** *This order is load-bearing:* the log can never reference bytes that are not durable. The reverse order permits a log that claims an absent chunk. Each log record carries its own length + CRC, so a **torn tail record is detected and discarded on read**. *(Closes v1's "no paired durability order between chunk data and chunk-log entries.")*
-4. **FINALIZING.** Write the container footer → `fsync(file)` → `fsync(dir)`.
-5. **VERIFIED — verify, then install atomically.** Re-open and check: decodable · duration credible · full-file hash matches the chunk log. **Then `rename()` the temp file to its content-addressed permanent path `media/<sha256>.<ext>`** (rename within a filesystem is atomic) → **`fsync(dir)`**. Write manifest **generation N** (same atomic temp→fsync→rename→fsync-dir dance) marking `verified` + the final content hash. **This is the manifest's terminal state.** Delete the reservation file. *(Closes v1's "the finalized temp file is never atomically renamed to its content-addressed permanent path.")*
-6. **COMMIT — the single commit point.** One SQLite `writeTransaction`: insert `Capture` + `Attachment` (referencing `media/<sha256>.<ext>`). PowerSync writes the matching `ps_crud` rows **in the same transaction**. **Nothing is written outside SQLite here — the manifest is not touched.**
-7. **Emit `"saved ✓"` — only after the transaction returns.**
+**Precondition: §1.0's durability profile is asserted, or capture refuses to start.**
+
+1. **RESERVE — preallocate the ACTUAL media file, not a decoy.** *(v2 was wrong: Codex #11 HIGH 5. Zero-filling `reserve/<id>.blk` reserves blocks that belong to **that** file, while recording writes into `tmp/<id>.part` — so it needs **~2× max media size**, and deleting the decoy to free space **reintroduces the exact race it was meant to prevent**. v2 also deleted it *before* the SQLite commit, letting another writer take the space before the WAL sync.)*
+   - **Preallocate `tmp/<id>.part` itself**: Apple **`F_PREALLOCATE`** (allocate-all semantics), Linux/Android **`posix_fallocate`/`fallocate`**. **Verify allocation, not logical length** — `ftruncate` yields a sparse file that fails later.
+   - Keep a **small, separate, non-purgeable reserve for metadata** (manifest + chunk log + **SQLite WAL growth**), in a location the OS will not purge. `reserve/` was unspecified in v2 and could be OS-purgeable.
+   - **Release the metadata reserve only after durable DECIDE.** Post-commit cleanup is derived and idempotent.
+   - If either allocation cannot be **guaranteed** (or permissions/mic fail) → **refuse loudly and record nothing.**
+2. **STARTED — manifest generation 0, before the recorder is armed** (REQ-CAP8). Contains the **PREPARE-minted identity** (§1.0b). Installed atomically: unique temp → write → barrier → **no-replace install** → dir barrier. See §1.3b.
+3. **RECORDING — paired durability, data before log.** For each chunk: **exact-write loop** (handle short writes) → **barrier the chunk DATA** → **reread the written bytes** → append a **framed** record to `chunks.log` → barrier the log. **Data-before-log is load-bearing**: the log can never reference bytes that are not durable.
+   Each record carries: **framing magic + version + record length + strict monotonic `seq` + `offset` + `len` + a framed-record CRC32 (torn-tail detection) + a SHA-256 digest of the exact chunk bytes (integrity)**. *(v2 said "hash" in the states table but only stored `crc32` in step 3, and never said what the CRC covered — Codex #11 HIGH 7. CRC32 is a tear detector, not an integrity primitive; both are needed and they are not the same job.)* A **partial append is safe only because every prefix is unambiguous** under this framing; the scanner discards the first invalid tail record.
+   The recorder's **expected sample/frame count** is recorded independently — *a truncated file can hash self-consistently and pass every internal check.*
+4. **FINALIZING.** Footer → barrier(file) → barrier(dir).
+5. **VERIFIED — freeze, verify, then install with NO-REPLACE.** *(v2's plain `rename()` was not an immutable install: Codex #11 HIGH 8. `rename()` **replaces** an existing destination, contradicting write-once.)*
+   - **Close/freeze the writer first** — a recorder still holding the descriptor can modify bytes after verification.
+   - **Recompute the hash through the final descriptor**, over the reconstructed durable byte sequence. Check: decodable · duration credible · **actual sample/frame count == the recorder's expected count** · hash matches the chunk-log digests.
+   - **Install with no-replace semantics** (`link()`/`renameatx_np(RENAME_EXCL)`) to `media/<sha256>.<ext>`. **Require source and destination on the same filesystem — assert it.** If the destination already exists (legitimate: content-addressed), **verify it byte-for-byte** rather than replacing or trusting it.
+   - Barrier the destination dir; barrier the source dir; durably remove the source entry.
+   - Write manifest **generation N** = **terminal `VERIFIED`**, carrying the final hash **and the identity + canonical payload** from §1.0b.
+6. **DECIDE — the single commit point.** One SQLite `writeTransaction`: insert `Capture` + `Attachment`. **Both MUST be PowerSync-*managed* tables** (not local-only, not raw) — that is what makes PowerSync's generated triggers append the matching `ps_crud` rows **inside the same transaction**. **Nothing is written outside SQLite here; the manifest is not touched.**
+7. **Emit `"saved ✓"` — only after the transaction returns *and* §1.0's durability profile held.**
+
+### 1.3b Manifest specification — v3
+
+*v2's temp→fsync→rename→fsync-dir was the right skeleton and nothing more (Codex #11 HIGH 6).*
+
+- **Canonical per-capture directory**; **collision-safe unique temp filenames**.
+- **No-replace installation** (`O_EXCL`) — never silently overwrite a generation.
+- **Single-writer lease / fencing.** Without it two writers can both create generation N. *"Highest valid generation wins" cannot resolve a fork* — **forks quarantine, they do not get selected by clock or filename.**
+- **"Valid" is defined**: canonical encoding + checksum/authentication + **embedded `capture_id`, `generation`, and predecessor-generation hash**, binding filename to content. A generation that doesn't bind is not valid.
+- **Retain at least two verified generations.** v2 deleted generation N-1 once N was durable — removing the only fallback if N later corrupts.
+- Clock ordering is **not** required; **monotonic generation order suffices once single-writer fencing exists.**
+- Barriers per §1.0 (`F_FULLFSYNC` on Apple — ordinary `fsync` does not meet the claimed power-loss boundary).
+- **Manifest authentication still delegates to Artifact 3, which is unfinished.** Named, not hidden.
 
 **Manifest = generational, not appended-in-place.** `manifest.<gen>.json`; each generation is immutable and atomically installed; highest valid generation wins; older generations are deleted only once the newer one is durable. The **constantly-growing** part (the chunk log) is a **separate append-only file** with per-record CRCs. *(Closes v1's "the manifest is described as both content-addressed and continuously appended — incompatible unless explicitly versioned," and "atomic temp-write → fsync → rename → dir-fsync for manifest generations" is now specified.)*
 
 **Idempotency of step 6.** Keyed by capture id; `INSERT … ON CONFLICT DO NOTHING`. Re-running after a crash never duplicates. Object keys are content-addressed (artifact 3), so re-upload is also idempotent.
 
+### 1.3c The queue lifecycle — v3 (⛔ closes Codex #11 CRITICAL 3)
+
+*v2 treated `ps_crud` as a permanent recovery fact. **It is transport state.** `tx.complete()` removes processed entries — our own connector does exactly that — so "rows present, `ps_crud` absent" is **the normal state after every successful upload**, not corruption.*
+
+**Rules:**
+1. **`ps_crud` is pending-transport state only.** Never assert its presence. Never treat its absence as corruption.
+2. **Durable identity outlives the queue.** The `mutation_id` + canonical request digest (§1.0b) live in the **Capture row and the manifest**, not in `ps_crud`.
+3. **Recovery predicate is:** *pending `ps_crud` **OR** a durable server receipt **OR** a durable dead-letter record* — **never** "`ps_crud` is present".
+4. **Capture + Attachment go to the backend in ONE transaction (a single Postgres RPC), never two requests.** *This is the live bug in `spike/app-src/connector.ts`:* it sends them as **separate Supabase calls**, continues past permanent errors, and calls `tx.complete()` anyway. **PowerSync's local transaction grouping does NOT make separate server calls atomic.** So *Capture accepted + Attachment rejected + queue completed* → the next downloaded checkpoint **overwrites the local rows** → **a capture the user was told was saved is gone.**
+5. **Never discard an evidence mutation to unblock the queue.** A permanent rejection must land in a **durable dead-letter state** that is surfaced, not swallowed. The connector's current `FATAL_PG_CODES` → `continue` → `tx.complete()` path is exactly the "discard to keep moving" behaviour that produces silent loss. **Unblocking the queue is not worth more than the capture.**
+6. **Complete the PowerSync CRUD transaction only after the whole domain transaction is durable server-side.**
+
+> **The `ps_crud`-in-one-transaction property is real but CONDITIONAL** (Codex #11 verified it against PowerSync's docs): it holds for **PowerSync-managed** tables, whose generated triggers update `ps_data__<table>` and append `ps_crud` in the current transaction. **Raw tables need application-created triggers; local-only tables queue nothing at all.** So step 6's atomicity depends on Capture and Attachment being declared **managed** — which `spike/app-src/AppSchema.ts` does, but which must be **asserted**, not assumed, once the production schema exists.
+
 > #### Why we do NOT use PowerSync's attachment queue (resolves Q4 by not composing)
 > The queue's only route to `QUEUED_UPLOAD` is `saveFile({data: ArrayBuffer})`, which **writes the local file itself and takes the whole buffer in memory** — it wants *file-then-row*, while this protocol requires *verify-then-row*, and the whole-file buffer is a real memory risk for multi-minute media. Since PowerSync provides **no resumable upload** and we are therefore building our own uploader regardless (ADR-2), the queue buys us nothing we can use.
 >
-> **Decision: PowerSync syncs ROWS (its proven strength — Q1/Q2). Media is ours end-to-end: our file, our verify, our atomic install, our uploader, our resume.** `Attachment` is an ordinary synced row, not a PowerSync `AttachmentTable`. This also drops the **alpha** attachments dependency and the `ArrayBuffer` memory risk in one move.
+> **Decision stands: PowerSync syncs ROWS. Media is ours end-to-end.** `Attachment` is an ordinary synced row, not a PowerSync `AttachmentTable`. This drops the **alpha** dependency and the `ArrayBuffer` memory risk.
+>
+> ### ⛔ BUT "it buys us nothing" WAS FALSE — and the replacement is NOT designed (Codex #11 HIGH 10)
+> The queue also supplied: **detection of remote attachment references · cross-device download scheduling · local file state · retry · repair of missing local files · archive/delete transitions · cleanup coordination.** Dropping it deletes all of that. **Building our own uploader is justified; it does not eliminate the need to rebuild the rest.**
+>
+> **Artifact 1 currently has NO specification for:** Device 2 discovering and downloading media · resumable/ranged **download** · hash verification before a file is marked locally available · atomic install on Device 2 · per-device local paths · remote-object vs local-cache state · retention pins, archival, GC · window exit/re-entry · **evidence retrieval when media is not resident locally**.
+>
+> **Also a live modelling bug:** an ordinary **synced** `Attachment` row **must not carry a device-local `media/<sha>` path** — that path is meaningless on Device 2. The spike schema does exactly this.
+>
+> **Required split (not yet written):**
+> - **`RemoteAsset` — synced, immutable identity:** object key · content hash · size · media type. **No local paths.**
+> - **`LocalAsset` — local-only, per-device:** local URI · download state · verified state · retry/session state.
+> - **Our own upload AND download queues**, both temp → verify → atomic no-replace install.
+> - **Reference-aware GC** with grace periods and evidence-retention rules.
+>
+> **Until that exists, evidence retrieval on a second device is not designed** — and evidence retrieval is the product.
 
 ### 1.4 Crash behavior + recovery (what relaunch does per last state)
 
@@ -163,8 +244,10 @@ On every launch, a **recovery sweep** reconciles journal + sidecar manifests aga
 | 2 | `STARTED` | absent / partial | none | Died between arming and first chunk | Discard; reclaim reservation. | no |
 | 3 | `RECORDING` | partial | none | **Mid-record kill — the ezQuotePro case** | Truncate to the last chunk the log durably records (per-record CRC; torn tail discarded). Offer **keep partial / discard**. | no |
 | 4 | `RECORDING` | complete, no footer | none | Died during `FINALIZING` | Re-run finalize from the chunk log → verify → install. | no |
-| 5 | `VERIFIED` | at `media/<sha>.ext` | **none** | **Died between install and commit** *(v1 had no row for this)* | **Orphan awaiting commit → re-run step 6** (idempotent by capture id). | **no** — this is why it is safe |
-| 6 | `VERIFIED` | at `media/<sha>.ext` | **present** | **Committed. The normal terminal state.** | Nothing. Upload proceeds whenever. | yes — correctly |
+| 5 | `VERIFIED` | at `media/<sha>.ext`, **hash MATCHES** | **none** | **Died between install and commit** *(v1 had no row for this)* | **Orphan awaiting commit → re-run DECIDE with the PREPARE-minted identity** (§1.0b), so the retry is idempotent server-side too. **Re-verify the hash first — never commit on the assumption the install was good.** | **no** — this is why it is safe |
+| **5b** | `VERIFIED` | at path, **hash MISMATCH** | **none** | **Silent corruption before commit** *(v3 — v2 would have committed corrupt media here)* | **Do NOT commit.** Quarantine the bytes, mark the capture `media_corrupt`, surface it. Re-deriving from the chunk log is permitted **only** if the log's per-chunk digests still verify. | no |
+| 6 | `VERIFIED` | at path, **hash MATCHES** | **present** | **Committed. The normal terminal state.** | Nothing. Upload proceeds whenever. | yes — correctly |
+| **6b** | `VERIFIED` | at path, **hash MISMATCH** | **present** | **Silent corruption AFTER commit** *(v3 — v2's row 6 would have called this "committed, nothing to do" and served corrupt evidence forever)* | **Do NOT serve it as evidence.** Mark `media_corrupt`, keep the row + expected hash, surface honestly. If a verified remote copy exists, re-download and re-install. **Otherwise: named residual loss.** | yes — and we must admit it |
 | 7 | `VERIFIED` | **missing** | present | Media deleted/lost *after* commit (external deletion, FS damage) | **Do not fail silently.** Mark the capture `media_lost`, keep the row + hash as evidence, surface honestly. **Named residual boundary.** | yes — and we must admit it |
 | 8 | `VERIFIED` | at path | rows present, **`ps_crud` missing** | ⛔ **THIS ROW IS WRONG — Codex #11 CRITICAL 3.** It claimed "unrepresentable, same transaction". **It is the NORMAL POST-UPLOAD STATE:** `tx.complete()` *removes* processed entries, and our connector does exactly that. `ps_crud` is **transport state, not a permanent recovery fact**. | **Do not assert.** Recovery must be *"pending `ps_crud` **or** a durable server receipt"* — never "`ps_crud` present". A durable mutation id + receipt (surviving queue completion) is **not yet designed**. | yes |
 | 9 | present | present | **DB unreadable / key lost (H3/H4)** | Corruption or restore-without-key | **Hard recovery state — never initialize a fresh DB over the old one.** Rebuild rows from manifests + content-addressed media; re-run step 6 per verified manifest (idempotent). | previously yes → **restored** |
