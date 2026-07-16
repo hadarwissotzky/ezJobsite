@@ -1,0 +1,59 @@
+IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Do NOT modify agents/openai.yaml. Stay focused on the repository code and docs only.
+
+You are an adversarial reviewer. Do not be agreeable. Do not compliment. Do not grade on effort or improvement.
+
+CONTEXT. You (Codex, review #9) REJECTED revision 1 of a build-vs-buy spike write-up, calling it "not fabricated evidence, but a false-pass write-up," and ruled: Q1 VALID PASS survives NO, Q2 VALID PASS survives NO, fit for ADR-2 NO. Your required action was: "freeze a corrected harness in Git, rerun Q1 and Q2, then complete Q3 and the decision-critical parts of Q5-Q7."
+
+The author claims to have done exactly that. Revision 2 now claims:
+  - Q1 VALID PASS, 20/20, mechanism "(a) late row delivered"
+  - Q2 VALID PASS, 60/60 checks across BOTH upload orderings, 5 trials each
+  - Q3 still UNRUN, Go/No-Go still NOT DECIDABLE
+  - All 20 of your #9 findings ADOPTED, none disputed
+
+YOUR JOB. Decide whether revision 2 is a genuine correction or a more sophisticated false pass. An author who knows the rejection criteria can write to them. Check whether the FIXES ARE REAL IN CODE, not whether the prose says they are.
+
+CRITICAL INSTRUCTION: the harness is now COMMITTED. You can and should verify claims against git:
+  git log --oneline
+  git log --format='%ci %h %s' -- docs/BAKEOFF-PREDECLARATION.md
+  git show aedc79d --stat
+  git diff aedc79d..HEAD -- spike/harness/
+The author claims the predeclaration was "committed at 2026-07-16 14:00:19, BEFORE run 2 executed" and that "no parameter was changed between runs." VERIFY BOTH against git. If a parameter changed, or if the freeze postdates the run, say so.
+
+READ:
+  docs/BAKEOFF-RESULT.md          <- revision 2, the conclusion under review (note its §7 reconciliation table)
+  docs/BAKEOFF-PREDECLARATION.md  <- now committed; check the correction block AND that params are unchanged
+  docs/CRITIC-REVIEW-09-CODEX.md  <- your own prior findings; check each was actually fixed
+  docs/SPIKE-SYNC-BAKEOFF.md      <- the tightened bars
+  spike/harness/q1.py             <- REVISION 2 of the code that produced the Q1 numbers
+  spike/harness/q2.py             <- REVISION 2 of the Q2 code
+  spike/harness/common.py         <- restart_app / checkpoint / is_ready oracles
+  spike/app-src/App.tsx           <- bootId, statusSeq, dbInitOk, single read transaction, payload
+  spike/app-src/connector.ts      <- rejection records with rowId/fields/timestamp
+  spike/out/q1.json               <- raw evidence, revision 2 (now tracked)
+  spike/out/q2.json               <- raw evidence, revision 2 (now tracked)
+  spike/sql/001_schema.sql, powersync/sync-config.yaml
+
+Attack specifically:
+
+1. ARE THE #9 FIXES REAL, OR RELABELLED? Go through the §7 reconciliation table in BAKEOFF-RESULT.md line by line. For each row marked with a checkbox, find the actual code or doc change. The repo's convention is "checkbox-only-when-the-edit-exists". Name every row where the checkbox is claimed but the edit is absent, cosmetic, or weaker than the finding required. Specifically verify:
+   - The bootId restart proof: can it actually fail now? What if the app relaunches, generates a new bootId, sets dbInitOk, but its SQLite is corrupt or its sync is broken? Does the harness re-query state FROM the new process, or does it just check the boot changed?
+   - The payload assertion: is the harness genuinely recomputing SHA-256 over device-held content, or is it still comparing something server-supplied to something server-supplied by a longer route?
+   - The checkpoint advancement assertion: is `last_op_total` a sound quantity? It SUMS last_op across buckets. Can that sum advance for a reason unrelated to B (e.g. an unrelated bucket, a MOVE/CLEAR op, a second project's bucket)? If so the assertion is weaker than it looks.
+   - The step-1 empty-scope precondition: does purging server rows and waiting for an empty local set actually establish independence, or does bucket/op history still carry across trials in a way that matters?
+   - The Q2 rejection matching: is baselining by list PREFIX (rejections[len(baseline):]) sound? What if the list is reordered, deduped, or the app restarts mid-run and resets it?
+
+2. IS THE Q1 20/20 NOW SUPPORTABLE? Or does some new gap make it unsound? Consider: all trials still run against one app process lineage per trial-group, one bucket namespace, and a purge/re-add cycle that itself generates ops. Does the purge-per-trial introduce a NEW artifact (e.g. B arriving fast because the bucket is nearly empty) that flatters the result? The author reports B latency 0.13-0.98s against a 25s window and calls the classification "not marginal" -- is that reasoning sound, or does the tiny dataset explain the low latency and therefore tell us nothing about a realistic bucket?
+
+3. IS THE Q2 60/60 NOW SUPPORTABLE? In ordering B ("server_edit_after_reconnect") the author expects the server value to win because it is strictly later. Is that a real test of anything, or a tautology? Does running both orderings actually address your #9 "single favorable upload ordering" finding, or does it merely add a second tautology? What conflict schedule would ACTUALLY be informative and is still missing?
+
+4. DID THE WITHDRAWALS GO FAR ENOUGH -- OR TOO FAR? The author withdrew "structurally impossible", "unmeetable by PowerSync", "decisively wins", "two blockers dissolved". Check the whole of revision 2 for surviving or NEW overclaims. In particular: "the two blockers that killed our hand-built design twice ... held up under the tightened bars" -- is that materially different from the withdrawn claim, or the same claim in quieter clothes? Is "Q1 and Q2 met their tightened bars on this configuration" itself supportable given what you find in the code?
+
+5. NEW DEFECTS INTRODUCED BY THE FIX. Rewrites introduce bugs. Read q1.py/q2.py revision 2 as fresh code. Find defects that did not exist in revision 1. Consider: the purge helper disables an immutability trigger (ALTER TABLE ... DISABLE TRIGGER) -- is that safe/atomic, could it leave the trigger disabled on failure, and does it undermine the append-only property the spike claims to enforce? The q2 transient-value observation was downgraded to best-effort after a race -- is that downgrade honest, or did it remove an assertion that mattered? Does `checkpoint_advanced_for_a` silently pass as True for mechanism (b)?
+
+6. THE HARNESS RACE DISCLOSURE. The author discloses a race found during the re-run and calls it "our defect, not a PowerSync finding". Is that characterization correct, or is the fast revert actually a PowerSync behaviour worth reporting (a user's write vanishing in under 500ms)?
+
+7. IS REVISION 2 FIT TO SUPPORT AN ADR-2 DECISION? Bottom line, explicitly: DOES Q1's "VALID PASS" NOW SURVIVE, YES OR NO? DOES Q2's, YES OR NO? Is BAKEOFF-RESULT.md revision 2 fit to be the basis of an ADR-2 decision once Q3 is run, or is a third run required?
+
+For each finding: severity (CRITICAL / HIGH / MEDIUM), the precise defect, and a concrete fix. Distinguish clearly between "still broken", "newly broken", and "acceptable".
+
+End with: the single most likely way REVISION 2 still misleads the team.
