@@ -7,7 +7,7 @@ import React from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
-import { SupabaseConnector } from './src/connector';
+import { REJECT_DDL, SupabaseConnector } from './src/connector';
 import { readCapture,
   applyDurabilityProfile,
   assertDurabilityProfile,
@@ -22,7 +22,7 @@ import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          type Note } from './src/annotate';
-import { createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
+import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
          INBOX_ID, listProjects, resolveProject, touchProject,
          type Project } from './src/projects';
 import { canRecordAudio, consentBasisText, defaultConsentFor, ensureConsentSchema,
@@ -137,6 +137,7 @@ export default function App() {
   const [vnotes, setVnotes] = React.useState<Note[]>([]);
   const [noteDraft, setNoteDraft] = React.useState('');
   const [nCounts, setNCounts] = React.useState<Record<string, number>>({});
+  const [rejected, setRejected] = React.useState<any[]>([]);
   // Resolved from the session at startup. Nothing that syncs may be written with a
   // placeholder: the server's types are the contract, and a string that cannot be
   // a UUID is not a user.
@@ -183,6 +184,7 @@ export default function App() {
       setSaved(await listCommittedCaptures(db, projectId));
       setInbox(await inboxCount(db));
       setNCounts(await noteCounts(db));
+      setRejected(await listRejected(db));
       const s = (await outboxStatus(db))[0];
       // Captures and decisions ride independent queues, so "not backed up yet"
       // must count both. One green tick that ignores half the queue is a lie.
@@ -210,6 +212,7 @@ export default function App() {
       await ensureAppOwnedSchema(db);
       await ensureDecisionSchema(db);
       await ensureChangeOrderSchema(db);
+      for (const s of REJECT_DDL) await db.execute(s);
       await ensureProjectSchema(db, OWNER);
       await ensureResolutionSchema(db);
       await ensureAnnotationSchema(db);
@@ -835,6 +838,26 @@ export default function App() {
         <Text style={s.jobBarS}>tap to change</Text>
       </Pressable>
 
+      {/* A row the server refused for good. It is on this phone and will NEVER
+          reach the cloud -- the one fact mandate #1 says must never be silent.
+          Red, not amber: this is not "syncing later", it is "never". */}
+      {rejected.length > 0 && (
+        <View style={s.rejBanner}>
+          <Text style={s.rejT}>
+            {rejected.length} item{rejected.length > 1 ? 's' : ''} the server refused
+          </Text>
+          {rejected.slice(0, 2).map((r) => (
+            <Text key={r.row_id} style={s.rejS}>
+              {r.tbl} · {r.code ?? '?'} · {String(r.message ?? '').slice(0, 60)}
+            </Text>
+          ))}
+          <Text style={s.rejS}>
+            These are saved on this phone but will not reach the cloud. Send this
+            screen to support — nothing is lost until this phone is.
+          </Text>
+        </View>
+      )}
+
       {inbox > 0 && (
         <Pressable style={s.inboxBanner} onPress={async () => {
           setInboxRows(await listCommittedCaptures(db, INBOX_ID));
@@ -1330,6 +1353,10 @@ const s = StyleSheet.create({
   capNote: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#21262d' },
   capNoteBody: { color: '#e6edf3', fontSize: 14 },
   capNoteMeta: { color: '#6e7681', fontSize: 11, marginTop: 2 },
+  rejBanner: { backgroundColor: '#3d1418', borderColor: '#b62324', borderWidth: 1,
+    borderRadius: 10, padding: 12, marginBottom: 12 },
+  rejT: { color: '#ff7b72', fontWeight: '700', fontSize: 14, marginBottom: 4 },
+  rejS: { color: '#c98a86', fontSize: 11, marginTop: 2 },
   inboxBanner: { backgroundColor: '#1c2b1c', borderColor: '#2ea043', borderWidth: 1,
     borderRadius: 10, padding: 12, marginBottom: 12 },
   inboxBannerT: { color: '#7ee787', fontWeight: '700', fontSize: 14 },

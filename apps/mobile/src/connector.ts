@@ -67,6 +67,25 @@ function stripServerOwned(table: string, data: Record<string, any> | undefined) 
   return out;
 }
 
+/**
+ * Rows PowerSync will never deliver, kept where a human can find them.
+ *
+ * Local-only and deliberately NOT synced: the whole point is that syncing is what
+ * failed. Keyed by table:id so a retried-and-refused row does not pile up.
+ */
+export const REJECT_DDL = [
+  `CREATE TABLE IF NOT EXISTS sync_rejected (
+      row_key  TEXT NOT NULL PRIMARY KEY,
+      tbl      TEXT NOT NULL,
+      op       TEXT NOT NULL,
+      row_id   TEXT NOT NULL,
+      code     TEXT,
+      message  TEXT,
+      fields   TEXT,
+      at_ms    INTEGER NOT NULL
+   ) STRICT`,
+];
+
 export class SupabaseConnector implements PowerSyncBackendConnector {
   readonly client: SupabaseClient;
   /**
@@ -160,6 +179,25 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
               message: result.error.message,
               at: new Date().toISOString(),
             });
+            // DURABLE, AND VISIBLE. `this.rejected` is an in-memory array: it dies
+            // with the process and no user ever sees it. That is how EVERY job
+            // created on this device was discarded on 42501 while the app said
+            // "saved ✓" -- silent, permanent loss with a clean queue and no error.
+            //
+            // A discard is the app deciding a row will NEVER reach the cloud. That
+            // is exactly the fact mandate #1 says must never be silent. The owned
+            // outboxes park-and-surface; ps_crud had no equivalent, so this is it.
+            // Best-effort: a failure to record the failure must not also stall the
+            // queue.
+            try {
+              await database.execute(
+                `INSERT OR REPLACE INTO sync_rejected
+                   (row_key, tbl, op, row_id, code, message, fields, at_ms)
+                 VALUES (?,?,?,?,?,?,?,?)`,
+                [`${op.table}:${op.id}`, op.table, String(op.op), String(op.id), code,
+                 result.error.message, JSON.stringify(Object.keys(data ?? {})), Date.now()]
+              );
+            } catch { /* never let bookkeeping take the queue down */ }
             continue;
           }
           throw result.error; // transient -> retry

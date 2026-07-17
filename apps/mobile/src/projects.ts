@@ -60,6 +60,17 @@ import { sha256 } from 'js-sha256';
  */
 export const INBOX_ID = 'inbox';
 
+/** Rows the server refused for good. Surfaced, never silent. */
+export type Rejected = { tbl: string; row_id: string; code: string | null;
+                         message: string | null; at_ms: number };
+
+export async function listRejected(db: AbstractPowerSyncDatabase): Promise<Rejected[]> {
+  try {
+    return await db.getAll<Rejected>(
+      `SELECT tbl, row_id, code, message, at_ms FROM sync_rejected ORDER BY at_ms DESC`);
+  } catch { return []; }   // table not created yet on a fresh install
+}
+
 export async function ensureProjectSchema(_db: AbstractPowerSyncDatabase, _ownerId: string) {
   // Nothing to create: AppSchema owns the project table. Kept as a named no-op so
   // the call site reads the same as every other schema and nobody re-adds a
