@@ -129,6 +129,10 @@ export const APP_OWNED_DDL = [
         CHECK (length(media_sha256) = 64 AND media_sha256 NOT GLOB '*[^0-9a-f]*'),
       media_bytes     INTEGER NOT NULL CHECK (media_bytes > 0),
       media_mime_type TEXT NOT NULL CHECK (length(media_mime_type) > 0),
+      -- REQ-CAP2: voice | video | photo | text. Part of the commitment record
+      -- because a DB-loss rebuild must know WHAT was captured, not just that
+      -- bytes existed.
+      modality        TEXT NOT NULL CHECK (modality IN ('voice','video','photo','text')),
       captured_at_ms  INTEGER NOT NULL CHECK (captured_at_ms > 0),
       committed_at_ms INTEGER NOT NULL CHECK (committed_at_ms >= captured_at_ms),
       request_sha256  TEXT NOT NULL
@@ -162,8 +166,43 @@ export const APP_OWNED_DDL = [
      ON capture_outbox (next_attempt_at_ms, queued_at_ms)`,
 ];
 
+/**
+ * Create the app-owned tables, and MIGRATE them forward.
+ *
+ * `CREATE TABLE IF NOT EXISTS` silently does nothing when the table already
+ * exists with an older shape — so adding a column to the DDL above does NOT add
+ * it to an existing database. That produced a real bug: "no such column:
+ * modality", surfaced only because init now reports failures instead of hanging
+ * on "Starting…". A schema that only works on a fresh install is not a schema.
+ *
+ * capture_commit is append-only by trigger, so migration is ADD COLUMN only —
+ * never rewrite, never drop. That constraint is the point, not an obstacle:
+ * the commitment record must never be destroyed to change its shape.
+ */
 export async function ensureAppOwnedSchema(db: AbstractPowerSyncDatabase): Promise<void> {
   for (const stmt of APP_OWNED_DDL) await db.execute(stmt);
+  await migrateAppOwnedSchema(db);
+}
+
+/**
+ * Additive migrations. Idempotent; safe on every launch.
+ *
+ * DESIGN CONSEQUENCE worth naming: `capture_commit` is append-only by trigger,
+ * so UPDATE is blocked and historical rows CANNOT be backfilled. Therefore a
+ * field added later MUST be nullable for old rows, and the read path must cope
+ * with NULL. This is not a wart -- it is append-only working as designed. The
+ * alternative (drop and recreate to change shape) would destroy committed
+ * evidence, which is the one thing this table exists to prevent.
+ */
+async function migrateAppOwnedSchema(db: AbstractPowerSyncDatabase): Promise<void> {
+  const rows = await db.getAll<{ name: string }>(`PRAGMA table_info(capture_commit)`);
+  const cols = new Set(rows.map((r) => r.name));
+
+  if (rows.length > 0 && !cols.has('modality')) {
+    // Nullable by necessity: SQLite cannot add NOT NULL without a default, and
+    // we cannot UPDATE the old rows to fill one. New inserts always supply it.
+    await db.execute(`ALTER TABLE capture_commit ADD COLUMN modality TEXT`);
+  }
 }
 
 // ---------------------------------------------------------------- helpers
@@ -210,8 +249,8 @@ export async function performCapture(
   opts: {
     ownerId: string;
     projectId: string;
-    payloadBytes: Uint8Array;   // the "media"
-    mimeType: string;
+    /** Bytes + modality + mime. performCapture does not care what produced them. */
+    input: import('./modality').CaptureInput;
   }
 ): Promise<CaptureResult> {
   // Step 0 — durability gate. Spec: if readback fails, DO NOT ARM.
@@ -230,13 +269,14 @@ export async function performCapture(
   const mutationId = `mut-${Math.random().toString(36).slice(2, 14)}`;
   const capturedAtMs = Date.now();
 
-  const mediaRelpath = `capture-media/${captureId}/${attachmentId}.bin`;
+  const ext = opts.input.modality === 'text' ? 'txt' : opts.input.modality === 'voice' ? 'm4a' : 'bin';
+  const mediaRelpath = `capture-media/${captureId}/${attachmentId}.${ext}`;
   const finalDir = MEDIA_DIR + captureId + '/';
-  const finalUri = finalDir + attachmentId + '.bin';
+  const finalUri = finalDir + attachmentId + '.' + ext;
   const tmpUri = `${TMP_DIR}${captureId}-${Math.random().toString(36).slice(2, 8)}.part`;
 
   // Steps 2-3 — record to a unique temp path; footer; freeze the writer.
-  const b64 = Buffer.from(opts.payloadBytes).toString('base64');
+  const b64 = Buffer.from(opts.input.bytes).toString('base64');
   await FS.writeAsStringAsync(tmpUri, b64, { encoding: FS.EncodingType.Base64 });
 
   // Step 4 — the finalized-file barrier. (See deviation note above.)
@@ -267,7 +307,8 @@ export async function performCapture(
   const payloadJson = JSON.stringify({
     v: 1, capture_id: captureId, attachment_id: attachmentId, mutation_id: mutationId,
     project_id: opts.projectId, owner_id: opts.ownerId,
-    media_sha256: mediaSha256, media_bytes: mediaBytes, media_mime_type: opts.mimeType,
+    media_sha256: mediaSha256, media_bytes: mediaBytes, media_mime_type: opts.input.mimeType,
+    modality: opts.input.modality,
     captured_at_ms: capturedAtMs,
   });
   const requestSha256 = await sha256Hex(new Uint8Array(Buffer.from(payloadJson, 'utf8')));
@@ -277,11 +318,11 @@ export async function performCapture(
     await db.writeTransaction(async (tx) => {
       await tx.execute(
         `INSERT INTO capture_commit (capture_id, attachment_id, mutation_id, project_id, owner_id,
-           media_relpath, media_sha256, media_bytes, media_mime_type,
+           media_relpath, media_sha256, media_bytes, media_mime_type, modality,
            captured_at_ms, committed_at_ms, request_sha256)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [captureId, attachmentId, mutationId, opts.projectId, opts.ownerId,
-         mediaRelpath, mediaSha256, mediaBytes, opts.mimeType,
+         mediaRelpath, mediaSha256, mediaBytes, opts.input.mimeType, opts.input.modality,
          capturedAtMs, Date.now(), requestSha256]
       );
 
@@ -306,8 +347,17 @@ export async function performCapture(
 
 /** Spec §5. Resolves EXCLUSIVELY through capture_commit. */
 export async function listCommittedCaptures(db: AbstractPowerSyncDatabase) {
-  return db.getAll<{ capture_id: string; media_relpath: string; media_sha256: string; media_bytes: number }>(
-    `SELECT capture_id, media_relpath, media_sha256, media_bytes FROM capture_commit ORDER BY committed_at_ms`
+  return db.getAll<{ capture_id: string; media_relpath: string; media_sha256: string; media_bytes: number; modality: string; media_mime_type: string }>(
+    `SELECT capture_id, media_relpath, media_sha256, media_bytes, media_mime_type,
+            -- pre-migration rows have no modality and CANNOT be backfilled
+            -- (append-only). Derive for display; never invent it in the record.
+            COALESCE(modality,
+              CASE WHEN media_mime_type LIKE 'text/%'  THEN 'text'
+                   WHEN media_mime_type LIKE 'audio/%' THEN 'voice'
+                   WHEN media_mime_type LIKE 'image/%' THEN 'photo'
+                   WHEN media_mime_type LIKE 'video/%' THEN 'video'
+                   ELSE 'unknown' END) AS modality
+     FROM capture_commit ORDER BY committed_at_ms`
   );
 }
 

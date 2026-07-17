@@ -4,7 +4,7 @@ import 'react-native-get-random-values';
 import { OPSqliteOpenFactory } from '@powersync/op-sqlite';
 import { PowerSyncDatabase } from '@powersync/react-native';
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
 import { SupabaseConnector } from './src/connector';
@@ -17,6 +17,7 @@ import {
   recoverySweep,
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
+import { textCapture, voiceCapture } from './src/modality';
 
 export const db = new PowerSyncDatabase({
   schema: AppSchema,
@@ -44,7 +45,9 @@ export default function App() {
   const [ui, setUi] = React.useState<UiState>({ k: 'idle' });
   const [ready, setReady] = React.useState(false);
   const [gate, setGate] = React.useState<string | null>(null);
+  const [initError, setInitError] = React.useState<string | null>(null);
   const [saved, setSaved] = React.useState<any[]>([]);
+  const [note, setNote] = React.useState('');
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   const refresh = React.useCallback(async () => {
@@ -53,6 +56,7 @@ export default function App() {
 
   React.useEffect(() => {
     (async () => {
+     try {
       await db.init();
       await applyDurabilityProfile(db);
       await ensureAppOwnedSchema(db);
@@ -79,6 +83,14 @@ export default function App() {
       }
       await refresh();
       setReady(true);
+     } catch (e: any) {
+       // A failure here means we cannot promise a save. Say so, loudly, with the
+       // reason -- never sit on "Starting..." forever. Silent init failure is the
+       // same sin as a silent save failure.
+       console.log('INIT FAILED:', e?.message ?? String(e), e?.stack);
+       setInitError(e?.message ?? String(e));
+       setReady(true);
+     }
     })();
   }, [refresh]);
 
@@ -101,11 +113,28 @@ export default function App() {
       const bytes = await readRecordingBytes(uri);
       const r = await performCapture(db, {
         ownerId: 'owner-local', projectId: 'proj-bakeoff-1',
-        payloadBytes: bytes, mimeType: 'audio/m4a',
+        input: voiceCapture(bytes),
       });
       if (r.ok) setUi({ k: 'saved', id: r.captureId });
       else setUi({ k: 'refused', why: r.reason });
       await refresh();
+    }
+  };
+
+  // REQ-CAP2 text capture. Same commit path, different producer.
+  const onSaveNote = async () => {
+    if (gate || !note.trim()) return;
+    setUi({ k: 'saving' });
+    try {
+      const r = await performCapture(db, {
+        ownerId: 'owner-local', projectId: 'proj-bakeoff-1',
+        input: textCapture(note),
+      });
+      if (r.ok) { setUi({ k: 'saved', id: r.captureId }); setNote(''); }
+      else setUi({ k: 'refused', why: r.reason });
+      await refresh();
+    } catch (e: any) {
+      setUi({ k: 'refused', why: e?.message ?? String(e) });
     }
   };
 
@@ -119,21 +148,21 @@ export default function App() {
     <View style={s.c}>
       <Text style={s.h}>EZjobsite</Text>
 
-      {gate && (
+      {(gate || initError) && (
         <View style={s.gate}>
-          <Text style={s.gateT}>Can’t record safely on this device</Text>
+          <Text style={s.gateT}>{initError ? 'EZjobsite couldn’t start safely' : 'Can’t record safely on this device'}</Text>
           <Text style={s.gateS}>
             The database can’t guarantee a save would survive. Rather than tell you
             something is saved and lose it, recording is off.
           </Text>
-          <Text style={s.mono}>{gate}</Text>
+          <Text style={s.mono}>{gate ?? initError}</Text>
         </View>
       )}
 
       <Pressable
         onPress={onPress}
-        disabled={!ready || !!gate || ui.k === 'saving' || ui.k === 'arming'}
-        style={[s.btn, ui.k === 'recording' && s.btnRec, (!!gate || !ready) && s.btnOff]}
+        disabled={!ready || !!gate || !!initError || ui.k === 'saving' || ui.k === 'arming'}
+        style={[s.btn, ui.k === 'recording' && s.btnRec, (!!gate || !!initError || !ready) && s.btnOff]}
       >
         <Text style={s.btnT}>{label}</Text>
       </Pressable>
@@ -146,12 +175,32 @@ export default function App() {
           : ready ? 'Ready' : 'Starting…'}
       </Text>
 
+      <Text style={s.sub}>Or type it</Text>
+      <View style={s.noteRow}>
+        <TextInput
+          style={s.input}
+          value={note}
+          onChangeText={setNote}
+          placeholder="What was decided?"
+          placeholderTextColor="#6e7681"
+          multiline
+          editable={!gate && ui.k !== 'saving'}
+        />
+        <Pressable
+          onPress={onSaveNote}
+          disabled={!!gate || !note.trim() || ui.k === 'saving'}
+          style={[s.save, (!note.trim() || !!gate) && s.btnOff]}
+        >
+          <Text style={s.saveT}>SAVE</Text>
+        </Pressable>
+      </View>
+
       <Text style={s.sub}>Saved on this phone ({saved.length})</Text>
       <ScrollView style={{ flex: 1 }}>
         {saved.slice().reverse().map((c) => (
           <View key={c.capture_id} style={s.row}>
             <Text style={s.rowT}>{c.capture_id}</Text>
-            <Text style={s.rowS}>{(c.media_bytes / 1024).toFixed(1)} KB · {c.media_sha256.slice(0, 12)}…</Text>
+            <Text style={s.rowS}>{c.modality} · {(c.media_bytes / 1024).toFixed(1)} KB · {c.media_sha256.slice(0, 12)}…</Text>
           </View>
         ))}
       </ScrollView>
@@ -171,6 +220,11 @@ const s = StyleSheet.create({
   row: { borderTopWidth: 1, borderTopColor: '#21262d', paddingVertical: 10 },
   rowT: { color: '#c9d1d9', fontSize: 13, fontFamily: 'Menlo' },
   rowS: { color: '#6e7681', fontSize: 11, fontFamily: 'Menlo', marginTop: 2 },
+  noteRow: { flexDirection: 'row', gap: 8, marginBottom: 22 },
+  input: { flex: 1, backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+           borderRadius: 10, color: '#c9d1d9', padding: 12, minHeight: 54, fontSize: 15 },
+  save: { backgroundColor: '#1f6feb', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center' },
+  saveT: { color: '#fff', fontWeight: '800', letterSpacing: 1 },
   gate: { backgroundColor: '#3d1d1d', borderColor: '#da3633', borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 18 },
   gateT: { color: '#ff7b72', fontWeight: '700', marginBottom: 6 },
   gateS: { color: '#c9d1d9', fontSize: 13, lineHeight: 18 },
