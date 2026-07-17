@@ -178,3 +178,11 @@ select state, blocked_reason, count(*) as n,
   from public.processing_job
  group by state, blocked_reason;
 grant select on public.processing_backlog to authenticated;
+
+-- Transcripts live in 150_transcripts.sql, NOT here.
+--
+-- This file originally added source_transcript/source_language as COLUMNS ON
+-- `capture`. The worker tried to UPDATE them and the append-only trigger refused:
+--   "capture is append-only (immutable evidence): UPDATE blocked"
+-- It was right. A derivative that arrives later belongs BESIDE the record, in its
+-- own append-only table -- the same shape as capture_note and capture_resolution.
