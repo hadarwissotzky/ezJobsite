@@ -44,3 +44,31 @@ Do not change the safety model here — raise it with the architect.
   delivery path (sends Capture and Attachment as separate requests, discards
   permanent failures). It must be replaced by one Postgres RPC before it drains
   anything.
+
+## STATUS 2026-07-16 — builds, does not run
+
+`Build Succeeded`, app installs, **JS bundle fails at startup**:
+`[runtime not ready]: Error: Cannot find native module 'ExpoAsset'`
+
+Two facts that go together and point at the cause:
+1. The native module `ExpoAsset` is missing from the binary even after
+   `expo prebuild --clean` + a full rebuild.
+2. The bundle id builds as **`org.name.EZjobsite`** while `app.json` says
+   `com.hilo.ezjobsite`.
+
+**A wrong bundle id AND missing autolinked modules, after a clean prebuild, means
+the build is not reading the config being edited.** That is a build-configuration
+problem, not a product problem — the capture code has never been reached.
+
+Do NOT debug this by guessing (three attempts already failed that way). Check, in
+order:
+- Is there an `app.config.js`/`app.config.ts` shadowing `app.json`? Expo prefers
+  the JS config and silently ignores `app.json` when one exists.
+- Is `expo-asset` actually in `package.json` dependencies, or only transitive?
+- Does `~/ezjobsite-build/package.json` still carry the bakeoff app's field set?
+  This package.json was **copied from the throwaway app**, and that shortcut is
+  the most likely culprit — it was never a clean `create-expo-app`.
+
+**Likely correct fix: scaffold clean** (`npx create-expo-app`) into a space-free
+path and move `src/` + `App.tsx` in, rather than inheriting the spike's
+package.json/app.json. The product code is good; its packaging is inherited junk.
