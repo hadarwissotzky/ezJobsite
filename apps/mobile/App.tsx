@@ -21,6 +21,7 @@ import { textCapture, voiceCapture } from './src/modality';
 import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, ensureDecisionSchema, listDecisions, recordDecision,
          type DecisionRow } from './src/decisions';
+import { sendForConfirmation } from './src/confirmations';
 
 export const db = new PowerSyncDatabase({
   schema: AppSchema,
@@ -75,6 +76,7 @@ export default function App() {
     captureId: string; subject: string; value: string; directedBy: string; scope: 'project'|'party';
   }>(null);
   const [history, setHistory] = React.useState<any[] | null>(null);
+  const [sentLink, setSentLink] = React.useState<{url:string; shown:string} | null>(null);
   const [saved, setSaved] = React.useState<any[]>([]);
   const [note, setNote] = React.useState('');
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -302,9 +304,41 @@ export default function App() {
                 {d.scope_level}-scope · {d.directed_by ?? 'unattributed'}
                 {d.version_count > 1 ? ` · changed ${d.version_count - 1}× (tap for history)` : ''}
               </Text>
+              <Pressable style={s.ask} onPress={async () => {
+                const r = await sendForConfirmation(connector.client, {
+                  kind: 'confirm', decisionId: d.id, projectId: PROJECT_ID,
+                  projectName: 'Bakeoff Project', subject: d.subject, value: d.current_value,
+                  directedBy: d.directed_by ?? 'Owner', counterparty: d.directed_by ?? 'Owner',
+                  channel: 'link', whenMs: d.last_changed_ms,
+                  linkBase: 'https://ezjobsite.app',
+                });
+                if (r.ok) setSentLink({ url: r.url, shown: r.shownContent });
+                else setUi({ k: 'refused', why: r.reason });
+              }}>
+                <Text style={s.askT}>Ask {d.directed_by ?? 'them'} to confirm →</Text>
+              </Pressable>
             </Pressable>
           ))}
         </>
+      )}
+
+      {sentLink && (
+        <View style={s.card}>
+          <Text style={s.cardH}>Confirm request created</Text>
+          <Text style={s.frozen}>{sentLink.shown}</Text>
+          <Text style={s.cardNote}>
+            These exact words are frozen — if the decision changes later, this still
+            shows what they were asked. It is the binding record.
+          </Text>
+          <Text style={s.link}>{sentLink.url}</Text>
+          <Text style={s.cardNote}>
+            No login needed. NOT YET DELIVERED — email/SMS is unbuilt (REQ-VAL8);
+            the link works, nothing sends it.
+          </Text>
+          <Pressable style={s.later} onPress={() => setSentLink(null)}>
+            <Text style={s.laterT}>Close</Text>
+          </Pressable>
+        </View>
       )}
 
       {history && (
@@ -376,6 +410,11 @@ const s = StyleSheet.create({
   dmeta: { color: '#6e7681', fontSize: 11, marginTop: 3 },
   hNow: { color: '#7ee787', fontSize: 14, marginBottom: 4 },
   hOld: { color: '#6e7681', fontSize: 13, marginBottom: 4, textDecorationLine: 'line-through' },
+  ask: { marginTop: 8 },
+  askT: { color: '#58a6ff', fontSize: 13, fontWeight: '600' },
+  frozen: { color: '#e6edf3', fontSize: 14, lineHeight: 20, backgroundColor: '#0b0b0c',
+            borderColor: '#30363d', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 8 },
+  link: { color: '#58a6ff', fontFamily: 'Menlo', fontSize: 11, marginVertical: 6 },
   parked: { color: '#ff7b72', fontSize: 12, marginBottom: 8, lineHeight: 16 },
   noteRow: { flexDirection: 'row', gap: 8, marginBottom: 22 },
   input: { flex: 1, backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
