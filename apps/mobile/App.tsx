@@ -4,11 +4,11 @@ import 'react-native-get-random-values';
 import { OPSqliteOpenFactory } from '@powersync/op-sqlite';
 import { PowerSyncDatabase } from '@powersync/react-native';
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
 import { SupabaseConnector } from './src/connector';
-import {
+import { readCapture,
   applyDurabilityProfile,
   assertDurabilityProfile,
   ensureAppOwnedSchema,
@@ -20,6 +20,7 @@ import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } fr
 import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
+import { addNote, ensureAnnotationSchema, noteCounts, notesFor, type Note } from './src/annotate';
 import { createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
          INBOX_ID, listProjects, resolveProject, touchProject,
          type Project } from './src/projects';
@@ -123,6 +124,11 @@ export default function App() {
   const [inbox, setInbox] = React.useState(0);
   const [inboxOpen, setInboxOpen] = React.useState(false);
   const [inboxRows, setInboxRows] = React.useState<any[]>([]);
+  // REQ-EVID1 + REQ-CAP3.
+  const [viewing, setViewing] = React.useState<any>(null);
+  const [vnotes, setVnotes] = React.useState<Note[]>([]);
+  const [noteDraft, setNoteDraft] = React.useState('');
+  const [nCounts, setNCounts] = React.useState<Record<string, number>>({});
   const [newJob, setNewJob] = React.useState<null | { name: string; address: string }>(null);
 
   /**
@@ -164,6 +170,7 @@ export default function App() {
       // REQ-EVID2: this job's captures, not every capture on the phone.
       setSaved(await listCommittedCaptures(db, projectId));
       setInbox(await inboxCount(db));
+      setNCounts(await noteCounts(db));
       const s = (await outboxStatus(db))[0];
       // Captures and decisions ride independent queues, so "not backed up yet"
       // must count both. One green tick that ignores half the queue is a lie.
@@ -193,6 +200,7 @@ export default function App() {
       await ensureChangeOrderSchema(db);
       await ensureProjectSchema(db, OWNER);
       await ensureResolutionSchema(db);
+      await ensureAnnotationSchema(db);
       await ensureConsentSchema(db);
       await initFeedback();
 
@@ -424,6 +432,96 @@ export default function App() {
    * spending a tap to confirm where a photo goes would be ceremony, and ceremony
    * is what stops people clearing a queue at all.
    */
+  /**
+   * REQ-EVID1: the capture, standing on its own. What was recorded, when, where,
+   * and whether the bytes are still the bytes -- with no handler applied and
+   * nothing interpreted. This is the screen an inspector or a peer would be shown.
+   * REQ-CAP3 lives here too: a note about any capture, of any modality.
+   */
+  if (viewing) {
+    const v = viewing;
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: '#0d1117' }} contentContainerStyle={s.c}>
+        <Text style={s.h}>EZjobsite</Text>
+        <View style={s.card}>
+          <Text style={s.cardH}>{v.modality} capture</Text>
+
+          {!v.ok ? (
+            // The row says it exists and the file does not. Loud, never swallowed:
+            // this is the loss mandate #1 forbids, and the user must know BEFORE
+            // they rely on it in a dispute.
+            <Text style={s.warn}>{v.reason}</Text>
+          ) : (
+            <>
+              {v.modality === 'photo' && (
+                <Image source={{ uri: v.uri }} style={s.viewImg} resizeMode="contain" />
+              )}
+              {v.text !== undefined && <Text style={s.frozen}>{v.text}</Text>}
+              {v.modality === 'voice' && (
+                <Text style={s.cardNote}>
+                  Audio · {(v.bytes / 1024).toFixed(1)} KB. Playback isn’t built yet —
+                  the file is on this phone and intact.
+                </Text>
+              )}
+              {v.modality === 'video' && (
+                <Text style={s.cardNote}>
+                  Video · {(v.bytes / 1024 / 1024).toFixed(1)} MB. Playback isn’t built yet.
+                </Text>
+              )}
+
+              {/* The stamp, plainly. This is what makes it evidence rather than a file. */}
+              <Text style={s.sub}>Recorded</Text>
+              <Text style={s.evid}>{new Date(v.capturedAtMs).toLocaleString()}</Text>
+              <Text style={s.sub}>Where</Text>
+              <Text style={s.evid}>{describeStamp({ lat: v.lat, lng: v.lng, stamp_status: v.stampStatus })}</Text>
+              <Text style={s.sub}>Content hash (SHA-256)</Text>
+              <Text style={s.hash}>{v.sha256}</Text>
+              <Text style={v.intact ? s.ok : s.warn}>
+                {v.intact
+                  ? '✓ The file on this phone still matches this hash — recomputed just now from the bytes on disk, not compared to a stored copy of itself.'
+                  : '⚠ THE FILE NO LONGER MATCHES ITS HASH. Do not rely on this capture.'}
+              </Text>
+            </>
+          )}
+
+          {/* REQ-CAP3: a note on any capture, any modality. */}
+          <Text style={s.sub}>Notes ({vnotes.length})</Text>
+          {vnotes.map((n) => (
+            <View key={n.id} style={s.capNote}>
+              <Text style={s.capNoteBody}>{n.body}</Text>
+              <Text style={s.capNoteMeta}>
+                {n.author ?? 'you'} · {new Date(n.created_at_ms).toLocaleString()}
+              </Text>
+            </View>
+          ))}
+          <TextInput style={s.moneyInput} value={noteDraft} multiline
+            placeholder="Add a note about this" placeholderTextColor="#6e7681"
+            onChangeText={setNoteDraft} />
+          <Pressable style={[s.confirmWide, !noteDraft.trim() && s.btnOff]}
+            disabled={!noteDraft.trim()}
+            onPress={async () => {
+              const r = await addNote(db, { captureId: v.captureId, body: noteDraft, author: 'Owner' });
+              if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return; }
+              setNoteDraft('');
+              setVnotes(await notesFor(db, v.captureId));
+              setNCounts(await noteCounts(db));
+            }}>
+            <Text style={s.confirmT}>ADD NOTE</Text>
+          </Pressable>
+          <Text style={s.cardNote}>
+            Notes are added, never replaced — an earlier note is never overwritten by
+            a later one. The note is what someone said ABOUT this; it isn’t part of
+            what was recorded.
+          </Text>
+
+          <Pressable style={s.later} onPress={() => setViewing(null)}>
+            <Text style={s.laterT}>Close</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    );
+  }
+
   if (inboxOpen) {
     return (
       <View style={s.c}>
@@ -1143,16 +1241,23 @@ export default function App() {
       )}
       <ScrollView style={{ flex: 1 }}>
         {saved.slice().reverse().map((c) => (
-          <View key={c.capture_id} style={s.row}>
+          <Pressable key={c.capture_id} style={s.row} onPress={async () => {
+              const v = await readCapture(db, c.capture_id);
+              setViewing({ ...v, captureId: c.capture_id });
+              setVnotes(await notesFor(db, c.capture_id));
+            }}>
             <Text style={s.rowT}>{c.capture_id}</Text>
-            <Text style={s.rowS}>{c.modality} · {(c.media_bytes / 1024).toFixed(1)} KB · {c.media_sha256.slice(0, 12)}…</Text>
+            <Text style={s.rowS}>
+              {c.modality} · {(c.media_bytes / 1024).toFixed(1)} KB · {c.media_sha256.slice(0, 12)}…
+              {nCounts[c.capture_id] ? ` · ${nCounts[c.capture_id]} note${nCounts[c.capture_id] > 1 ? 's' : ''}` : ''}
+            </Text>
             {/* MANDATE #9 made visible. A missing fix says WHY -- never 0,0 (a spot
                 in the Atlantic) and never a guess. Captures taken before the stamp
                 existed show "no location" honestly: capture_commit is append-only,
                 so those rows cannot be backfilled, and that is a true fact about
                 them rather than a bug in this line. */}
             <Text style={s.stamp}>{describeStamp(c)}</Text>
-          </View>
+          </Pressable>
         ))}
       </ScrollView>
     </View>
@@ -1202,6 +1307,13 @@ const s = StyleSheet.create({
   money: { backgroundColor: '#1c1400', borderColor: '#9e6a03', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
   moneyScope: { color: '#c9d1d9', fontSize: 14, marginBottom: 10 },
   bigMoney: { color: '#f0b72f', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
+  viewImg: { width: '100%', height: 260, borderRadius: 8, backgroundColor: '#010409',
+    marginBottom: 10 },
+  evid: { color: '#e6edf3', fontSize: 15, marginBottom: 10 },
+  hash: { color: '#8b949e', fontSize: 11, fontFamily: 'Menlo', marginBottom: 8 },
+  capNote: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#21262d' },
+  capNoteBody: { color: '#e6edf3', fontSize: 14 },
+  capNoteMeta: { color: '#6e7681', fontSize: 11, marginTop: 2 },
   inboxBanner: { backgroundColor: '#1c2b1c', borderColor: '#2ea043', borderWidth: 1,
     borderRadius: 10, padding: 12, marginBottom: 12 },
   inboxBannerT: { color: '#7ee787', fontWeight: '700', fontSize: 14 },

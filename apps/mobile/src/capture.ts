@@ -494,3 +494,53 @@ export async function recoverySweep(db: AbstractPowerSyncDatabase): Promise<{
   }
   return { tmpDeleted, orphansDeleted, integrityErrors };
 }
+
+
+/**
+ * Read one capture back for viewing — REQ-EVID1: "raw capture + stamp is retained
+ * and VIEWABLE without any handler applied ... standing on its own for
+ * inspectors/peers."
+ *
+ * THE HASH IS RECOMPUTED FROM THE BYTES ON DISK, not compared to a stored copy of
+ * itself. A stored-hash-to-stored-hash compare proves only that we can read our own
+ * database; recomputing proves the FILE has not rotted or been swapped. Codex #9
+ * named the former as a false-pass, and it is exactly the check an inspector's
+ * question ("how do you know this is the original photo?") turns on.
+ */
+export async function readCapture(db: AbstractPowerSyncDatabase, captureId: string): Promise<
+  | { ok: true; uri: string; mime: string; modality: string; bytes: number;
+      sha256: string; intact: boolean; text?: string;
+      capturedAtMs: number; lat: number | null; lng: number | null; stampStatus: string | null }
+  | { ok: false; reason: string }
+> {
+  const r = (await db.getAll<{
+    media_relpath: string; media_sha256: string; media_bytes: number; media_mime_type: string;
+    modality: string | null; captured_at_ms: number; gps_lat: number | null;
+    gps_lng: number | null; stamp_status: string | null;
+  }>(
+    `SELECT media_relpath, media_sha256, media_bytes, media_mime_type, modality,
+            captured_at_ms, gps_lat, gps_lng, stamp_status
+       FROM capture_commit WHERE capture_id = ?`, [captureId]))[0];
+  if (!r) return { ok: false, reason: 'no such capture' };
+
+  const uri = FS.documentDirectory + r.media_relpath;
+  try {
+    const b64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 });
+    const bytes = Buffer.from(b64, 'base64');
+    // Recomputed. See the note above.
+    const actual = sha256(bytes);
+    return {
+      ok: true, uri, mime: r.media_mime_type,
+      modality: r.modality ?? 'unknown', bytes: r.media_bytes,
+      sha256: r.media_sha256, intact: actual === r.media_sha256,
+      text: r.media_mime_type.startsWith('text/') ? bytes.toString('utf8') : undefined,
+      capturedAtMs: r.captured_at_ms, lat: r.gps_lat, lng: r.gps_lng,
+      stampStatus: r.stamp_status,
+    };
+  } catch (e: any) {
+    // The row says it exists and the file does not. That is a REAL failure and it
+    // must be shown, not swallowed: it is the loss mandate #1 forbids, and the one
+    // moment the user needs to know is before they rely on it in a dispute.
+    return { ok: false, reason: `media unreadable: ${e?.message ?? String(e)}` };
+  }
+}
