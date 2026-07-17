@@ -134,6 +134,59 @@ export function centsFromInput(s: string): number | null {
   return Math.round(v * 100);
 }
 
+/**
+ * A line item — §7.2. Mandate #6 MULTIPLIED: every line is a qty and a unit
+ * price, each its own chance to be wrong, and then a total claiming to be their
+ * sum. So the arithmetic lives in ONE function used by the composer, the create
+ * path and the read-back, and it rounds EXACTLY as the server's check does. Two
+ * implementations of the same sum is how a device and a server come to disagree
+ * about what someone signed.
+ */
+export type LineItem = {
+  description: string;
+  qty: number;
+  unit_cents: number;
+  total_cents: number;
+};
+
+/** qty x unit, in integer cents. The one place this multiplication happens. */
+export function lineTotal(qty: number, unitCents: number): number {
+  return Math.round(qty * unitCents);
+}
+
+export function makeLine(description: string, qty: number, unitCents: number): LineItem {
+  return { description: description.trim(), qty, unit_cents: unitCents,
+           total_cents: lineTotal(qty, unitCents) };
+}
+
+export function linesSum(items: LineItem[]): number {
+  return items.reduce((n, i) => n + i.total_cents, 0);
+}
+
+/**
+ * The same rules the DB enforces, checked here so the user is told what is wrong
+ * BEFORE a round trip, in words rather than as constraint violation 23514.
+ * The DB remains the authority -- this is a courtesy, not the guarantee.
+ */
+export function validateLines(items: LineItem[], amountCents: number): string | null {
+  if (!items.length) return null;                 // itemising is optional
+  for (const [n, i] of items.entries()) {
+    if (!i.description.trim()) return `Line ${n + 1} needs a description`;
+    if (!(i.qty > 0)) return `Line ${n + 1}: quantity must be more than zero`;
+    if (!Number.isInteger(i.unit_cents) || i.unit_cents < 0) return `Line ${n + 1}: bad price`;
+    if (i.total_cents !== lineTotal(i.qty, i.unit_cents)) {
+      return `Line ${n + 1} does not add up`;
+    }
+  }
+  const sum = linesSum(items);
+  if (sum !== amountCents) {
+    // The most useful error in the file: it says the two numbers AND the gap,
+    // because "invalid" would leave someone hunting for a penny.
+    return `Lines add up to ${money(sum)} but the change order says ${money(amountCents)}`;
+  }
+  return null;
+}
+
 export type CreateCOResult = { ok: true; id: string } | { ok: false; reason: string };
 
 /**
@@ -150,7 +203,7 @@ export async function createChangeOrder(
     id: string; decisionId: string; projectId: string; ownerId: string;
     scope: string; amountCents: number; nteCents?: number | null;
     whoDirected: string; refEstimate?: string | null; isMini?: boolean;
-    lineItems?: Array<{ description: string; qty: number; unit_cents: number; total_cents: number }>;
+    lineItems?: LineItem[];
     numbersConfirmedAt: Date;
   }
 ): Promise<CreateCOResult> {
@@ -158,6 +211,11 @@ export async function createChangeOrder(
   const confirmedMs = o.numbersConfirmedAt.getTime();
   const mutationId = `cm-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const lineItems = o.lineItems ?? [];
+  // Refuse here too. The DB would refuse anyway, but a CO that fails on upload is
+  // a CO the contractor believed was saved -- and mandate #1 says never say
+  // "saved" for something that is not.
+  const bad = validateLines(lineItems, o.amountCents);
+  if (bad) return { ok: false, reason: bad };
 
   const payload = {
     mutation_id: mutationId, id: o.id, decision_id: o.decisionId,

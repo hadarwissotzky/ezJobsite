@@ -24,7 +24,8 @@ import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisio
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
 import { sendForConfirmation } from './src/confirmations';
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
-         ensureChangeOrderSchema, hydrateChangeOrders, ledger, money, parseMoney } from './src/changeorder';
+         ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine,
+         money, parseMoney, validateLines, type LineItem } from './src/changeorder';
 import { issueOtp, newOtpCode, renderApproval, signApproval, verifyOtp } from './src/signing';
 
 export const db = new PowerSyncDatabase({
@@ -89,6 +90,10 @@ export default function App() {
   }>(null);
   const [coRows, setCoRows] = React.useState<any[]>([]);
   const [dsync, setDsync] = React.useState<any>(null);
+  // §7.2 line items. Kept OUT of `priced` so cancelling the composer cannot
+  // disturb a figure the contractor has already read back and agreed with.
+  const [lines, setLines] = React.useState<LineItem[]>([]);
+  const [draftLine, setDraftLine] = React.useState({ desc: '', qty: '1', unit: '' });
   // §7.1 signing. `shown` is frozen the moment the sheet opens.
   const [sign, setSign] = React.useState<null | {
     coId: string; shown: string; phone: string; code: string; sent: string | null;
@@ -570,8 +575,70 @@ export default function App() {
               <Text style={s.warn}>No price heard. Type it.</Text>
             )}
 
+            {/* §7.2 line items. OPTIONAL: "add 3 outlets for $450" is a complete,
+                honest change order, and forcing a breakdown out of someone on a
+                ladder would spend mandate #3's touch budget to satisfy a
+                bookkeeper who is not there. Whoever wants the detail can add it. */}
+            {lines.map((li, n) => (
+              <View key={n} style={s.lineRow}>
+                <Text style={s.lineDesc}>{li.description}</Text>
+                <Text style={s.lineMath}>
+                  {li.qty} × {money(li.unit_cents)} = {money(li.total_cents)}
+                </Text>
+                <Pressable onPress={() => {
+                  // Removing a line RECOMPUTES the total. The alternative -- leaving
+                  // the old figure -- is a change order whose lines contradict its
+                  // own total, which is the single worst artefact to hand a lawyer.
+                  const next = lines.filter((_, i) => i !== n);
+                  setLines(next);
+                  setPriced({ ...priced, amountText: next.length
+                    ? (linesSum(next) / 100).toFixed(2) : priced.amountText });
+                }}>
+                  <Text style={s.lineX}>✕</Text>
+                </Pressable>
+              </View>
+            ))}
+
+            <View style={s.lineAdd}>
+              <TextInput style={[s.lineIn, { flex: 2 }]} value={draftLine.desc}
+                placeholder="what" placeholderTextColor="#6e7681"
+                onChangeText={(v) => setDraftLine({ ...draftLine, desc: v })} />
+              <TextInput style={s.lineIn} value={draftLine.qty} keyboardType="decimal-pad"
+                placeholder="qty" placeholderTextColor="#6e7681"
+                onChangeText={(v) => setDraftLine({ ...draftLine, qty: v })} />
+              <TextInput style={s.lineIn} value={draftLine.unit} keyboardType="decimal-pad"
+                placeholder="each" placeholderTextColor="#6e7681"
+                onChangeText={(v) => setDraftLine({ ...draftLine, unit: v })} />
+              <Pressable style={s.linePlus} onPress={() => {
+                const qty = parseFloat(draftLine.qty);
+                const unit = centsFromInput(draftLine.unit);
+                if (!draftLine.desc.trim() || !(qty > 0) || unit === null) return;
+                const next = [...lines, makeLine(draftLine.desc, qty, unit)];
+                setLines(next);
+                // The total is DERIVED from the lines, never typed alongside them.
+                // Two independently-editable numbers that must agree is a bug with
+                // a UI: one of them is always wrong and nobody knows which.
+                setPriced({ ...priced, amountText: (linesSum(next) / 100).toFixed(2) });
+                setDraftLine({ desc: '', qty: '1', unit: '' });
+              }}>
+                <Text style={s.linePlusT}>+</Text>
+              </Pressable>
+            </View>
+            {draftLine.desc.trim() && parseFloat(draftLine.qty) > 0 && centsFromInput(draftLine.unit) !== null && (
+              <Text style={s.lineMath}>
+                = {money(lineTotal(parseFloat(draftLine.qty), centsFromInput(draftLine.unit)!))}
+              </Text>
+            )}
+
             {/* Read-back: BIG, and tap-to-correct. mandate #6. */}
             <Text style={s.bigMoney}>{money(cents)}</Text>
+            {lines.length > 0 && (
+              <Text style={linesSum(lines) === cents ? s.ok : s.warn}>
+                {linesSum(lines) === cents
+                  ? `${lines.length} line${lines.length > 1 ? 's' : ''} add up to this`
+                  : `Lines add up to ${money(linesSum(lines))} — they must match, or remove them`}
+              </Text>
+            )}
             <TextInput
               style={s.moneyInput}
               value={priced.amountText}
@@ -592,8 +659,8 @@ export default function App() {
 
             <View style={s.cardBtns}>
               <Pressable
-                style={[s.confirm, cents === null && s.btnOff]}
-                disabled={cents === null}
+                style={[s.confirm, (cents === null || !!validateLines(lines, cents ?? 0)) && s.btnOff]}
+                disabled={cents === null || !!validateLines(lines, cents ?? 0)}
                 onPress={async () => {
                   const { data } = await connector.client.auth.getUser();
                   if (!data?.user) { setUi({k:'refused',why:'not signed in'}); return; }
@@ -601,19 +668,19 @@ export default function App() {
                     id: `co-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`,
                     decisionId: priced.decisionId, projectId: PROJECT_ID, ownerId: data.user.id,
                     scope: priced.scope, amountCents: cents!, nteCents: nte,
-                    whoDirected: priced.whoDirected,
+                    whoDirected: priced.whoDirected, lineItems: lines,
                     // The read-back happened HERE. This timestamp is the proof,
                     // and the DB refuses the row without it.
                     numbersConfirmedAt: new Date(),
                   });
-                  if (r.ok) { setPriced(null); await refresh(); }
+                  if (r.ok) { setPriced(null); setLines([]); await refresh(); }
                   else setUi({ k: 'refused', why: r.reason });
                 }}>
                 <Text style={s.confirmT}>
                   {cents === null ? 'ENTER A PRICE' : `YES — ${money(cents)}`}
                 </Text>
               </Pressable>
-              <Pressable style={s.later} onPress={() => setPriced(null)}>
+              <Pressable style={s.later} onPress={() => { setPriced(null); setLines([]); }}>
                 <Text style={s.laterT}>Cancel</Text>
               </Pressable>
             </View>
@@ -763,6 +830,17 @@ const s = StyleSheet.create({
   money: { backgroundColor: '#1c1400', borderColor: '#9e6a03', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
   moneyScope: { color: '#c9d1d9', fontSize: 14, marginBottom: 10 },
   bigMoney: { color: '#f0b72f', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
+  lineRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6,
+    borderBottomWidth: 1, borderBottomColor: '#21262d' },
+  lineDesc: { color: '#e6edf3', fontSize: 14, flex: 1 },
+  lineMath: { color: '#8b949e', fontSize: 12 },
+  lineX: { color: '#6e7681', fontSize: 16, paddingHorizontal: 6 },
+  lineAdd: { flexDirection: 'row', gap: 6, marginTop: 10, marginBottom: 4 },
+  lineIn: { flex: 1, backgroundColor: '#0b0b0c', borderColor: '#30363d', borderWidth: 1,
+    borderRadius: 8, color: '#e6edf3', paddingHorizontal: 8, paddingVertical: 10, fontSize: 13 },
+  linePlus: { backgroundColor: '#21262d', borderRadius: 8, paddingHorizontal: 14,
+    justifyContent: 'center' },
+  linePlusT: { color: '#e6edf3', fontSize: 20, fontWeight: '800' },
   moneyInput: { backgroundColor: '#0b0b0c', borderColor: '#30363d', borderWidth: 1, borderRadius: 8,
                 color: '#e6edf3', padding: 12, fontSize: 18, marginBottom: 10, textAlign: 'center' },
   ok: { color: '#7ee787', fontSize: 14, marginBottom: 8 },
