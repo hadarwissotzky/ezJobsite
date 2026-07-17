@@ -24,7 +24,7 @@ import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
 import { captureStatus, levelColor, screenStatus } from './src/status';
 import { FIRST_RUN_TAPS, isFirstRun, markFirstRunDone, nextStep, savedLang, saveLang } from './src/firstrun';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
-         type Note } from './src/annotate';
+         playCapture, stopPlayback, type Note } from './src/annotate';
 import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
          INBOX_ID, listProjects, resolveProject, touchProject,
          type Project } from './src/projects';
@@ -139,6 +139,8 @@ export default function App() {
   const [viewing, setViewing] = React.useState<any>(null);
   const [vnotes, setVnotes] = React.useState<Note[]>([]);
   const [noteDraft, setNoteDraft] = React.useState('');
+  const [playing, setPlaying] = React.useState(false);
+  const [playErr, setPlayErr] = React.useState<string | null>(null);
   const [nCounts, setNCounts] = React.useState<Record<string, number>>({});
   const [rejected, setRejected] = React.useState<any[]>([]);
   const [showDetail, setShowDetail] = React.useState(false);
@@ -504,10 +506,27 @@ export default function App() {
                 <Image source={{ uri: v.uri }} style={s.viewImg} resizeMode="contain" />
               )}
               {v.text !== undefined && <Text style={s.frozen}>{v.text}</Text>}
-              {v.modality === 'voice' && (
-                <Text style={s.cardNote}>
-                  {T({ k: 'ev.noPlayback', p: { kb: (v.bytes / 1024).toFixed(1) } })}
-                </Text>
+              {/* REQ-EVID1 for the PRIMARY modality. A viewer that shows a byte
+                  count for a voice note cannot show the evidence — an inspector
+                  asking "what did he say?" got a hash. Plays from disk, so it
+                  works in the basement where the question gets asked. */}
+              {(v.modality === 'voice' || v.modality === 'video') && (
+                <>
+                  <Pressable style={s.confirmWide} onPress={async () => {
+                    if (playing) { stopPlayback(); setPlaying(false); return; }
+                    const r = await playCapture(v.uri);
+                    if (!r.ok) { setPlayErr(r.reason); return; }
+                    setPlayErr(null); setPlaying(true);
+                  }}>
+                    <Text style={s.confirmT}>{T(playing ? 'ev.stop' : 'ev.play')}</Text>
+                  </Pressable>
+                  <Text style={s.cardNote}>
+                    {T({ k: 'ev.audioMeta', p: { kb: (v.bytes / 1024).toFixed(1) } })}
+                  </Text>
+                  {playErr && (
+                    <Text style={s.warn}>{T({ k: 'ev.playFailed', p: { why: playErr } })}</Text>
+                  )}
+                </>
               )}
               {v.modality === 'video' && (
                 <Text style={s.cardNote}>
@@ -558,7 +577,7 @@ export default function App() {
             what was recorded.
           </Text>
 
-          <Pressable style={s.later} onPress={() => setViewing(null)}>
+          <Pressable style={s.later} onPress={() => { stopPlayback(); setPlaying(false); setViewing(null); }}>
             <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
         </View>

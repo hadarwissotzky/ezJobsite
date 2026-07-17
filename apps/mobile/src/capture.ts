@@ -269,6 +269,32 @@ export type CaptureResult =
  * barrier gap is REAL and is recorded in the result doc — it means K0-K2 test
  * ordering, not physical durability.
  */
+/**
+ * MIME -> file extension. One map, used for the local file; the uploader has its
+ * own for the Storage key and they must agree.
+ *
+ * Defaults are per-modality and honest: an unknown image is a jpg because that is
+ * what a camera produces, an unknown audio is m4a because that is what the
+ * recorder produces. 'bin' survives only for something we genuinely cannot name --
+ * and a .bin is a file nobody can open, so it should be rare and visible.
+ */
+export function extFor(mime: string, modality: string): string {
+  const m = (mime || '').toLowerCase();
+  if (m.startsWith('text/')) return 'txt';
+  if (m === 'image/png') return 'png';
+  if (m === 'image/heic') return 'heic';
+  if (m.startsWith('image/')) return 'jpg';
+  if (m === 'audio/wav' || m === 'audio/x-wav') return 'wav';
+  if (m === 'audio/mpeg') return 'mp3';
+  if (m.startsWith('audio/')) return 'm4a';
+  if (m === 'video/mp4') return 'mp4';
+  if (m.startsWith('video/')) return 'mov';
+  // Fall back on the modality rather than 'bin': a file nobody can open is worse
+  // than a reasonable guess, and the bytes are what the hash protects anyway.
+  return modality === 'photo' ? 'jpg' : modality === 'video' ? 'mov'
+    : modality === 'voice' ? 'm4a' : 'bin';
+}
+
 export async function performCapture(
   db: AbstractPowerSyncDatabase,
   opts: {
@@ -304,7 +330,15 @@ export async function performCapture(
   // minute, and the evidence should say when it was SHOT.
   const capturedAtMs = opts.stamp?.capturedAtMs ?? Date.now();
 
-  const ext = opts.input.modality === 'text' ? 'txt' : opts.input.modality === 'voice' ? 'm4a' : 'bin';
+  // The extension comes from the MIME the producer declared, not from the
+  // modality. It used to be `text->txt, voice->m4a, everything else->bin`, which
+  // meant EVERY PHOTO AND EVERY VIDEO was written to disk as ".bin" and any audio
+  // that was not m4a was mislabelled. The bytes were right and the hash checked
+  // out -- the file simply could not be opened by anything that trusts an
+  // extension, which is the viewer, the player, and every tool a person would
+  // reach for after exporting it. Found by playing a capture back and watching the
+  // player report `playing: true` while the position never moved.
+  const ext = extFor(opts.input.mimeType, opts.input.modality);
   const mediaRelpath = `capture-media/${captureId}/${attachmentId}.${ext}`;
   const finalDir = MEDIA_DIR + captureId + '/';
   const finalUri = finalDir + attachmentId + '.' + ext;

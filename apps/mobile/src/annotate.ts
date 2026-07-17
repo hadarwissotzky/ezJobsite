@@ -155,3 +155,53 @@ export async function drainNoteOutbox(
   }
   return r;
 }
+
+/**
+ * Play a capture back — the half of REQ-EVID1 I left undone.
+ *
+ * "raw capture + stamp is retained and VIEWABLE without any handler applied"
+ *
+ * For a voice capture, "viewable" means AUDIBLE. I shipped the viewer showing a
+ * byte count and the words "playback isn't built yet", which for the product's
+ * PRIMARY modality means the evidence screen could not show the evidence. An
+ * inspector asking "what did he say?" got a hash.
+ *
+ * PLAYS FROM DISK, NOT FROM THE CLOUD. The file is already local (mandate #1 —
+ * capture is local-first), so this works in a basement with no signal, which is
+ * exactly where someone would be standing when they need to check what was said.
+ */
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+
+let player: AudioPlayer | null = null;
+
+export type Playback = { ok: true; durationSec: number } | { ok: false; reason: string };
+
+export async function playCapture(uri: string): Promise<Playback> {
+  try {
+    // Play through the silent switch: this is the user asking "what did he say?",
+    // not a notification. Same reasoning as the save confirmation.
+    await setAudioModeAsync({ playsInSilentMode: true });
+    stopPlayback();
+    player = createAudioPlayer({ uri });
+    player.play();
+    // duration is 0 until the asset loads; the caller polls if it needs it.
+    return { ok: true, durationSec: player.duration ?? 0 };
+  } catch (e: any) {
+    // A capture that will not play is a REAL failure and must be visible: it means
+    // the evidence cannot be examined, which is the whole point of keeping it.
+    return { ok: false, reason: e?.message ?? String(e) };
+  }
+}
+
+export function stopPlayback() {
+  try { player?.remove(); } catch { /* already gone */ }
+  player = null;
+}
+
+export function playbackState(): { playing: boolean; positionSec: number; durationSec: number } {
+  return {
+    playing: !!player?.playing,
+    positionSec: player?.currentTime ?? 0,
+    durationSec: player?.duration ?? 0,
+  };
+}

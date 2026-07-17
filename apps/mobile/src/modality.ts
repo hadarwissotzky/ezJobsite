@@ -43,9 +43,20 @@ export function textCapture(text: string): CaptureInput {
   };
 }
 
-/** Voice capture: bytes come from the recorder. See recorder.ts. */
-export function voiceCapture(bytes: Uint8Array): CaptureInput {
-  return { modality: 'voice', bytes, mimeType: 'audio/m4a' };
+/**
+ * Voice capture: bytes come from the recorder.
+ *
+ * The MIME is a parameter, not an assumption. It was hardcoded to audio/m4a --
+ * true for the current recorder preset and false the moment anything else
+ * produces audio. A capture whose stored MIME does not match its bytes CANNOT BE
+ * PLAYED BACK: the file lands with the wrong extension in Storage and the player
+ * cannot decode it. Found by feeding a real WAV through this path and watching the
+ * player report `playing: true` while the position never moved. Silent, and it
+ * would have been silent in production too -- the capture saves, the hash checks
+ * out, and the evidence simply will not play when someone finally asks to hear it.
+ */
+export function voiceCapture(bytes: Uint8Array, mimeType = 'audio/m4a'): CaptureInput {
+  return { modality: 'voice', bytes, mimeType };
 }
 
 /** Photo capture: bytes from the camera or the library. */

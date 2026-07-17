@@ -128,6 +128,8 @@ export async function drainOutbox(
       // that trusts a file extension, which is most things.
       const mime: string = payload.media_mime_type ?? '';
       const ext = mime.startsWith('text/') ? 'txt'
+        : mime === 'audio/wav' ? 'wav'
+        : mime === 'audio/mpeg' ? 'mp3'
         : mime.startsWith('audio/') ? 'm4a'
         : mime === 'image/png' ? 'png'
         : mime === 'image/heic' ? 'heic'

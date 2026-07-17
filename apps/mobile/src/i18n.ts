@@ -143,7 +143,10 @@ const EN: Record<string, string> = {
   'ev.addNote': 'Add a note about this',
   'ev.addNoteBtn': 'ADD NOTE',
   'ev.notesAppend': 'Notes are added, never replaced — an earlier note is never overwritten by a later one. The note is what someone said ABOUT this; it isn’t part of what was recorded.',
-  'ev.noPlayback': 'Audio · {kb} KB. Playback isn’t built yet — the file is on this phone and intact.',
+  'ev.play': '▶ PLAY',
+  'ev.stop': '■ STOP',
+  'ev.audioMeta': 'Audio · {kb} KB · plays from this phone, no signal needed',
+  'ev.playFailed': 'This won’t play: {why}. The evidence can’t be examined — that matters.',
 
   // --- decisions / confirmations ---
   'dec.history': 'History — nothing is ever overwritten',
@@ -294,7 +297,10 @@ const ES: Record<string, string> = {
   'ev.addNote': 'Agrega una nota sobre esto',
   'ev.addNoteBtn': 'AGREGAR NOTA',
   'ev.notesAppend': 'Las notas se agregan, nunca se reemplazan — una nota anterior nunca se sobrescribe. La nota es lo que alguien dijo SOBRE esto; no es parte de lo que se grabó.',
-  'ev.noPlayback': 'Audio · {kb} KB. Todavía no se puede reproducir — el archivo está en este teléfono y está íntegro.',
+  'ev.play': '▶ REPRODUCIR',
+  'ev.stop': '■ PARAR',
+  'ev.audioMeta': 'Audio · {kb} KB · se reproduce desde este teléfono, sin señal',
+  'ev.playFailed': 'Esto no se reproduce: {why}. La evidencia no se puede examinar — eso importa.',
 
   'dec.history': 'Historial — nada se sobrescribe nunca',
   'dec.notADecision': 'No es una decisión',
