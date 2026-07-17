@@ -21,6 +21,7 @@ import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } fr
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
 import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
+import { FIRST_RUN_TAPS, isFirstRun, markFirstRunDone, nextStep, savedLang, saveLang } from './src/firstrun';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          type Note } from './src/annotate';
 import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
@@ -140,6 +141,11 @@ export default function App() {
   const [nCounts, setNCounts] = React.useState<Record<string, number>>({});
   const [rejected, setRejected] = React.useState<any[]>([]);
   const [lang, setLangState] = React.useState<Lang>(getLang());
+  // REQ-SET2. Derived from what EXISTS, never a stored step counter -- a counter
+  // and reality drift apart the moment someone kills the app mid-setup.
+  const [firstRun, setFirstRun] = React.useState<boolean | null>(null);
+  const [langPicked, setLangPicked] = React.useState(false);
+  const [frJob, setFrJob] = React.useState('');
   // Resolved from the session at startup. Nothing that syncs may be written with a
   // placeholder: the server's types are the contract, and a string that cannot be
   // a UUID is not a user.
@@ -219,6 +225,9 @@ export default function App() {
       await ensureResolutionSchema(db);
       await ensureAnnotationSchema(db);
       await ensureConsentSchema(db);
+      const sl = await savedLang(db);
+      if (sl) { setLang(sl); setLangState(sl); }
+      setFirstRun(await isFirstRun(db));
       await initFeedback();
 
       // THE GATE. If the write connection cannot promise durability we do not
@@ -583,6 +592,82 @@ export default function App() {
         </View>
       </View>
     );
+  }
+
+  // REQ-SET2. Shown before anything else, and only once.
+  if (firstRun && ready && !gate) {
+    const step = nextStep({
+      langChosen: !!langPicked,
+      hasJob: projects.some((p) => p.id !== INBOX_ID),
+      hasConsent: consent.consent !== null,
+    });
+
+    if (step === 'done') {
+      // No celebration screen. They came here to record something.
+      void markFirstRunDone(db).then(() => setFirstRun(false));
+      return <View style={s.c}><Text style={s.h}>EZjobsite</Text></View>;
+    }
+
+    // 1. LANGUAGE, FIRST AND WITHOUT WORDS.
+    //    Asking someone to read English to choose Spanish is the joke every app
+    //    makes. Both options are shown in their OWN language, side by side, so
+    //    this screen needs no reading at all -- you recognise your language or you
+    //    do not.
+    if (step === 'lang') {
+      return (
+        <View style={s.c}>
+          <Text style={s.h}>EZjobsite</Text>
+          <View style={{ flex: 1, justifyContent: 'center' }}>
+            <Pressable style={s.langBig} onPress={async () => {
+              setLang('en'); setLangState('en'); await saveLang(db, 'en'); setLangPicked(true);
+            }}>
+              <Text style={s.langBigT}>English</Text>
+            </Pressable>
+            <Pressable style={s.langBig} onPress={async () => {
+              setLang('es'); setLangState('es'); await saveLang(db, 'es'); setLangPicked(true);
+            }}>
+              <Text style={s.langBigT}>Español</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    // 2. THE JOB. Consent belongs to a project, so there must be one first.
+    //    A name is enough -- the address can come later, and demanding one from a
+    //    man standing in the room is how you get "asdf".
+    if (step === 'job') {
+      return (
+        <View style={s.c}>
+          <Text style={s.h}>EZjobsite</Text>
+          <View style={s.card}>
+            <Text style={s.cardH}>{T('fr.jobTitle')}</Text>
+            <Text style={s.cardNote}>{T('fr.jobWhy')}</Text>
+            <TextInput style={s.moneyInput} value={frJob} autoFocus
+              placeholder={T('job.name')} placeholderTextColor="#6e7681"
+              onChangeText={setFrJob} />
+            <Pressable style={[s.confirmWide, !frJob.trim() && s.btnOff]}
+              disabled={!frJob.trim()}
+              onPress={async () => {
+                const st = await stampNow();
+                const r = await createProject(db, { ownerId: OWNER, name: frJob,
+                  lat: st.lat, lng: st.lng });
+                if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return; }
+                setProjectId(r.id);
+                setProjects(await listProjects(db));
+              }}>
+              <Text style={s.confirmT}>{T('job.create')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    // 3. CONSENT. One tap, strict default. Reuses the same screen the app uses
+    //    later -- one implementation, so the legal wording can never drift.
+    if (step === 'consent' && !setup) {
+      setSetup({ jurisdiction: '' });
+    }
   }
 
   if (newJob) {
@@ -1355,6 +1440,11 @@ const s = StyleSheet.create({
     paddingVertical: 10, borderWidth: 1, borderColor: '#30363d' },
   inboxJobT: { color: '#e6edf3', fontSize: 13, fontWeight: '600' },
   langT: { color: '#6e7681', fontSize: 13, fontWeight: '400' },
+  // Thumb-sized. This is the first thing a new user ever touches, and they may be
+  // wearing gloves when they do it.
+  langBig: { backgroundColor: '#21262d', borderColor: '#30363d', borderWidth: 1,
+    borderRadius: 14, paddingVertical: 28, alignItems: 'center', marginBottom: 16 },
+  langBigT: { color: '#e6edf3', fontSize: 26, fontWeight: '700' },
   jobBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
     borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },

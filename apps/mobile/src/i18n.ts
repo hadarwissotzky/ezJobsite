@@ -159,6 +159,11 @@ const EN: Record<string, string> = {
   'job.noneYet': 'No jobs yet. Create one — it takes a name.',
   'inbox.appendOnly': 'Filing doesn’t rewrite the capture — the original stays exactly as it was recorded, and your choice is kept beside it.',
 
+  'fr.jobTitle': 'What job are you on?',
+  'fr.jobWhy': 'Everything you capture files itself to a job. You can add more later.',
+  'fr.consentWhy': 'One question, once. Then the record button never asks you anything again.',
+  'fr.ready': 'Ready — tap the green button',
+
   'common.close': 'Close',
   'common.cancel': 'Cancel',
   'common.back': 'Back',
@@ -290,6 +295,11 @@ const ES: Record<string, string> = {
   'inbox.noJobs': 'Todavía no hay trabajos para archivar. Crea uno primero.',
   'job.noneYet': 'Todavía no hay trabajos. Crea uno — solo necesita un nombre.',
   'inbox.appendOnly': 'Archivar no reescribe la captura — el original queda exactamente como se grabó, y tu decisión se guarda junto a él.',
+
+  'fr.jobTitle': '¿En cuál trabajo estás?',
+  'fr.jobWhy': 'Todo lo que captures se archiva solo en un trabajo. Puedes agregar más después.',
+  'fr.consentWhy': 'Una pregunta, una vez. Después el botón de grabar ya no te pregunta nada.',
+  'fr.ready': 'Listo — toca el botón verde',
 
   'common.close': 'Cerrar',
   'common.cancel': 'Cancelar',
