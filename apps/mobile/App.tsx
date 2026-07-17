@@ -23,6 +23,7 @@ import { decisionHistory, ensureDecisionSchema, listDecisions, recordDecision,
          type DecisionRow } from './src/decisions';
 import { sendForConfirmation } from './src/confirmations';
 import { centsFromInput, createChangeOrder, ledger, money, parseMoney } from './src/changeorder';
+import { issueOtp, newOtpCode, renderApproval, signApproval, verifyOtp } from './src/signing';
 
 export const db = new PowerSyncDatabase({
   schema: AppSchema,
@@ -85,6 +86,11 @@ export default function App() {
     amountText: string; confidence: 'high'|'low'|'none'; nteText: string;
   }>(null);
   const [coRows, setCoRows] = React.useState<any[]>([]);
+  // §7.1 signing. `shown` is frozen the moment the sheet opens.
+  const [sign, setSign] = React.useState<null | {
+    coId: string; shown: string; phone: string; code: string; sent: string | null;
+    legalName: string; verifiedAt: string | null; err: string | null;
+  }>(null);
   const [saved, setSaved] = React.useState<any[]>([]);
   const [note, setNote] = React.useState('');
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -213,6 +219,110 @@ export default function App() {
     ui.k === 'recording' ? 'STOP' :
     ui.k === 'saving' ? 'SAVING…' :
     ui.k === 'arming' ? '…' : 'RECORD';
+
+  // A signature gets the whole screen. Nothing else is reachable while it is up --
+  // one deliberate act, no way to wander off halfway through signing.
+  if (sign) {
+    return (
+      <View style={s.c}>
+        <Text style={s.h}>EZjobsite</Text>
+        <View style={s.card}>
+          <Text style={s.cardH}>Signature required</Text>
+          <Text style={s.frozen}>{sign.shown}</Text>
+
+          {!sign.verifiedAt ? (
+            <>
+              <Text style={s.sub}>Owner's mobile — you enter it, not them</Text>
+              <TextInput style={s.moneyInput} value={sign.phone} keyboardType="phone-pad"
+                placeholder="+15551234567" placeholderTextColor="#6e7681"
+                onChangeText={(v) => setSign({ ...sign, phone: v })} />
+              {!sign.sent ? (
+                <Pressable style={[s.confirmWide, sign.phone.length < 8 && s.btnOff]}
+                  disabled={sign.phone.length < 8}
+                  onPress={async () => {
+                    const code = newOtpCode();
+                    const r = await issueOtp(connector.client, sign.coId, sign.phone, code);
+                    // NOT DELIVERED: no SMS provider (REQ-VAL8). Shown on screen
+                    // so the flow is testable, and labelled as such rather than
+                    // pretending a text went out.
+                    setSign({ ...sign, sent: code, err: r.ok ? null : r.reason });
+                  }}>
+                  <Text style={s.confirmT}>SEND CODE</Text>
+                </Pressable>
+              ) : (
+                <>
+                  <Text style={s.warn}>
+                    No SMS provider yet — code would be texted to {sign.phone}.
+                    For now: {sign.sent}
+                  </Text>
+                  <TextInput style={s.moneyInput} value={sign.code} keyboardType="number-pad"
+                    placeholder="6-digit code" placeholderTextColor="#6e7681"
+                    onChangeText={(v) => setSign({ ...sign, code: v })} />
+                  <Pressable style={[s.confirmWide, sign.code.length !== 6 && s.btnOff]}
+                    disabled={sign.code.length !== 6}
+                    onPress={async () => {
+                      const r = await verifyOtp(connector.client, sign.coId, sign.code);
+                      if (r.ok && r.status === 'verified') {
+                        setSign({ ...sign, verifiedAt: new Date().toISOString(), err: null });
+                      } else {
+                        setSign({ ...sign, err: r.ok
+                          ? `${r.status}${r.attemptsLeft != null ? ` — ${r.attemptsLeft} tries left` : ''}`
+                          : r.reason });
+                      }
+                    }}>
+                    <Text style={s.confirmT}>VERIFY</Text>
+                  </Pressable>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <Text style={s.ok}>✓ Phone verified</Text>
+              <Text style={s.sub}>Type your full legal name to sign</Text>
+              <TextInput style={s.moneyInput} value={sign.legalName}
+                placeholder="Full legal name" placeholderTextColor="#6e7681"
+                onChangeText={(v) => setSign({ ...sign, legalName: v })} />
+              <View style={s.cardBtns}>
+                <Pressable style={[s.confirm, sign.legalName.trim().length < 2 && s.btnOff]}
+                  disabled={sign.legalName.trim().length < 2}
+                  onPress={async () => {
+                    const r = await signApproval(connector.client, {
+                      changeOrderId: sign.coId, projectId: PROJECT_ID, shownContent: sign.shown,
+                      signerLabel: 'Owner', legalName: sign.legalName, phoneE164: sign.phone,
+                      otpVerifiedAt: sign.verifiedAt!, action: 'approved', userAgent: 'EZjobsite iOS',
+                    });
+                    if (r.ok) { setSign(null); await refresh(); }
+                    else setSign({ ...sign, err: r.reason });
+                  }}>
+                  <Text style={s.confirmT}>SIGN & APPROVE</Text>
+                </Pressable>
+                <Pressable style={s.later} onPress={async () => {
+                  await signApproval(connector.client, {
+                    changeOrderId: sign.coId, projectId: PROJECT_ID, shownContent: sign.shown,
+                    signerLabel: 'Owner', legalName: sign.legalName || 'declined',
+                    phoneE164: sign.phone, otpVerifiedAt: sign.verifiedAt!,
+                    action: 'declined', userAgent: 'EZjobsite iOS',
+                  });
+                  setSign(null); await refresh();
+                }}>
+                  <Text style={s.laterT}>Decline</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+
+          {sign.err && <Text style={s.warn}>{sign.err}</Text>}
+          <Pressable style={s.later} onPress={() => setSign(null)}>
+            <Text style={s.laterT}>Close</Text>
+          </Pressable>
+          <Text style={s.cardNote}>
+            The words above are frozen — they are what gets signed, not whatever
+            the change order says later.
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={s.c}>
@@ -428,10 +538,26 @@ export default function App() {
                 {c.signed_by ? ` · signed ${c.signed_by}` : ''}
                 {c.approved_running ? ` · approved to date ${c.approved_running}` : ''}
               </Text>
+              {!c.signed_by && (
+                <Pressable style={s.ask} onPress={() => setSign({
+                  coId: c.id,
+                  // FROZEN HERE. Rendered once. If the CO changed after this
+                  // point the signature would evidence the wrong thing.
+                  shown: renderApproval({
+                    scope: c.scope, amount: c.amount, nte: c.nte,
+                    whoDirected: 'Owner', projectName: 'Bakeoff Project',
+                  }),
+                  phone: '', code: '', sent: null, legalName: '',
+                  verifiedAt: null, err: null,
+                })}>
+                  <Text style={s.askT}>Get it signed →</Text>
+                </Pressable>
+              )}
             </View>
           ))}
         </>
       )}
+
 
       {sentLink && (
         <View style={s.card}>
@@ -511,6 +637,9 @@ const s = StyleSheet.create({
   chipDim: { color: '#6e7681', borderColor: '#30363d', backgroundColor: 'transparent' },
   cardBtns: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   confirm: { flex: 1, backgroundColor: '#238636', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  // Standalone (not inside s.cardBtns): must NOT use flex:1 -- see above.
+  confirmWide: { alignSelf: 'stretch', backgroundColor: '#238636', borderRadius: 10,
+    paddingVertical: 16, alignItems: 'center', marginBottom: 10 },
   confirmT: { color: '#fff', fontWeight: '800', letterSpacing: 1 },
   later: { paddingHorizontal: 12, paddingVertical: 14 },
   laterT: { color: '#8b949e', fontSize: 13 },
@@ -526,6 +655,7 @@ const s = StyleSheet.create({
   bigMoney: { color: '#f0b72f', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
   moneyInput: { backgroundColor: '#0b0b0c', borderColor: '#30363d', borderWidth: 1, borderRadius: 8,
                 color: '#e6edf3', padding: 12, fontSize: 18, marginBottom: 10, textAlign: 'center' },
+  ok: { color: '#7ee787', fontSize: 14, marginBottom: 8 },
   warn: { color: '#f0b72f', fontSize: 12, marginBottom: 6 },
   ask: { marginTop: 8 },
   askT: { color: '#58a6ff', fontSize: 13, fontWeight: '600' },
