@@ -612,6 +612,11 @@ export default function App() {
   }
 
   // REQ-SET2. Shown before anything else, and only once.
+  // Nothing until we know. A null firstRun rendered the MAIN screen for a frame
+  // and then swapped it for the language picker -- a flash of the wrong app, shown
+  // to the one user who has never seen the right one.
+  if (firstRun === null && ready) return <View style={s.c}><Text style={s.h}>EZjobsite</Text></View>;
+
   if (firstRun && ready && !gate) {
     const step = nextStep({
       langChosen: !!langPicked,
@@ -1357,8 +1362,10 @@ export default function App() {
       <Text style={s.sub}>
         {T({ k: 'st.onThisPhone', p: { n: saved.length } })}
         {delivery.pending > 0 ? T({ k: 'st.waiting', p: { n: delivery.pending } }) : ''}
-        {delivery.parked > 0 ? T({ k: 'st.failedCount', p: { n: delivery.parked } }) : ''}
-      </Text>      <ScrollView style={{ flex: 1 }}>
+
+      </Text>
+
+      <ScrollView style={{ flex: 1 }}>
         {saved.slice().reverse().map((c) => (
           <Pressable key={c.capture_id} style={s.row} onPress={async () => {
               const v = await readCapture(db, c.capture_id);
@@ -1449,14 +1456,6 @@ const s = StyleSheet.create({
   capNote: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#21262d' },
   capNoteBody: { color: '#e6edf3', fontSize: 14 },
   capNoteMeta: { color: '#6e7681', fontSize: 11, marginTop: 2 },
-  rejBanner: { backgroundColor: '#3d1418', borderColor: '#b62324', borderWidth: 1,
-    borderRadius: 10, padding: 12, marginBottom: 12 },
-  rejT: { color: '#ff7b72', fontWeight: '700', fontSize: 14, marginBottom: 4 },
-  rejS: { color: '#c98a86', fontSize: 11, marginTop: 2 },
-  inboxBanner: { backgroundColor: '#1c2b1c', borderColor: '#2ea043', borderWidth: 1,
-    borderRadius: 10, padding: 12, marginBottom: 12 },
-  inboxBannerT: { color: '#7ee787', fontWeight: '700', fontSize: 14 },
-  inboxBannerS: { color: '#5c9c5c', fontSize: 12, marginTop: 2 },
   inboxItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#21262d' },
   inboxWhat: { color: '#8b949e', fontSize: 12, marginBottom: 6 },
   inboxJobs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -1481,9 +1480,6 @@ const s = StyleSheet.create({
   jobName: { color: '#e6edf3', fontSize: 16 },
   jobNameOn: { color: '#7ee787', fontSize: 16, fontWeight: '700' },
   jobMeta: { color: '#6e7681', fontSize: 12, marginTop: 2 },
-  filed: { backgroundColor: '#132a3a', borderColor: '#1f5b82', borderWidth: 1,
-    borderRadius: 8, padding: 10, marginBottom: 12 },
-  filedT: { color: '#79c0ff', fontSize: 13 },
   consentBanner: { backgroundColor: '#2d2410', borderColor: '#7d6320', borderWidth: 1,
     borderRadius: 10, padding: 12, marginBottom: 14 },
   consentT: { color: '#f0b72f', fontWeight: '700', fontSize: 14, marginBottom: 3 },
@@ -1510,7 +1506,6 @@ const s = StyleSheet.create({
   frozen: { color: '#e6edf3', fontSize: 14, lineHeight: 20, backgroundColor: '#0b0b0c',
             borderColor: '#30363d', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 8 },
   link: { color: '#58a6ff', fontFamily: 'Menlo', fontSize: 11, marginVertical: 6 },
-  parked: { color: '#ff7b72', fontSize: 12, marginBottom: 8, lineHeight: 16 },
   noteRow: { flexDirection: 'row', gap: 8, marginBottom: 22 },
   input: { flex: 1, backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
            borderRadius: 10, color: '#c9d1d9', padding: 12, minHeight: 54, fontSize: 15 },
