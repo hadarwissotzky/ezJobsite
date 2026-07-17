@@ -20,6 +20,7 @@ import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } fr
 import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
+import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          type Note } from './src/annotate';
 import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
@@ -87,7 +88,7 @@ type UiState =
   | { k: 'recording' }
   | { k: 'saving' }
   | { k: 'saved'; id: string }
-  | { k: 'refused'; why: string };
+  | { k: 'refused'; why: Msg | string };
 
 export default function App() {
   const [ui, setUi] = React.useState<UiState>({ k: 'idle' });
@@ -128,7 +129,7 @@ export default function App() {
   const [projectId, setProjectId] = React.useState<string>(INBOX_ID);
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [picker, setPicker] = React.useState(false);
-  const [filed, setFiled] = React.useState<string | null>(null);
+  const [filed, setFiled] = React.useState<Msg | string | null>(null);
   const [inbox, setInbox] = React.useState(0);
   const [inboxOpen, setInboxOpen] = React.useState(false);
   const [inboxRows, setInboxRows] = React.useState<any[]>([]);
@@ -138,6 +139,7 @@ export default function App() {
   const [noteDraft, setNoteDraft] = React.useState('');
   const [nCounts, setNCounts] = React.useState<Record<string, number>>({});
   const [rejected, setRejected] = React.useState<any[]>([]);
+  const [lang, setLangState] = React.useState<Lang>(getLang());
   // Resolved from the session at startup. Nothing that syncs may be written with a
   // placeholder: the server's types are the contract, and a string that cannot be
   // a UUID is not a user.
@@ -427,10 +429,10 @@ export default function App() {
   };
 
   const label =
-    gate ? 'UNAVAILABLE' :
-    ui.k === 'recording' ? 'STOP' :
-    ui.k === 'saving' ? 'SAVING…' :
-    ui.k === 'arming' ? '…' : 'RECORD';
+    gate ? T('rec.unavailable') :
+    ui.k === 'recording' ? T('rec.stop') :
+    ui.k === 'saving' ? T('rec.saving') :
+    ui.k === 'arming' ? '…' : T('rec.record');
 
   // A signature gets the whole screen. Nothing else is reachable while it is up --
   // one deliberate act, no way to wander off halfway through signing.
@@ -534,7 +536,7 @@ export default function App() {
           </Text>
 
           <Pressable style={s.later} onPress={() => setViewing(null)}>
-            <Text style={s.laterT}>Close</Text>
+            <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -575,7 +577,7 @@ export default function App() {
             <Text style={s.warn}>No jobs to file into yet. Create one first.</Text>
           )}
           <Pressable style={s.later} onPress={() => setInboxOpen(false)}>
-            <Text style={s.laterT}>Close</Text>
+            <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
           <Text style={s.cardNote}>
             Filing doesn’t rewrite the capture — the original stays exactly as it was
@@ -591,12 +593,12 @@ export default function App() {
       <View style={s.c}>
         <Text style={s.h}>EZjobsite</Text>
         <View style={s.card}>
-          <Text style={s.cardH}>New job</Text>
+          <Text style={s.cardH}>{T('job.newTitle')}</Text>
           <TextInput style={s.moneyInput} value={newJob.name} autoFocus
-            placeholder="What do you call it?" placeholderTextColor="#6e7681"
+            placeholder={T('job.name')} placeholderTextColor="#6e7681"
             onChangeText={(v) => setNewJob({ ...newJob, name: v })} />
           <TextInput style={s.moneyInput} value={newJob.address}
-            placeholder="Address (optional)" placeholderTextColor="#6e7681"
+            placeholder={T('job.address')} placeholderTextColor="#6e7681"
             onChangeText={(v) => setNewJob({ ...newJob, address: v })} />
           <Text style={s.cardNote}>
             We’ll pin this job to where you are now, so captures here file
@@ -618,10 +620,10 @@ export default function App() {
               setNewJob(null); setPicker(false);
               await refresh();
             }}>
-            <Text style={s.confirmT}>CREATE JOB</Text>
+            <Text style={s.confirmT}>{T('job.create')}</Text>
           </Pressable>
           <Pressable style={s.later} onPress={() => setNewJob(null)}>
-            <Text style={s.laterT}>Cancel</Text>
+            <Text style={s.laterT}>{T('common.cancel')}</Text>
           </Pressable>
         </View>
       </View>
@@ -634,7 +636,7 @@ export default function App() {
       <View style={s.c}>
         <Text style={s.h}>EZjobsite</Text>
         <View style={s.card}>
-          <Text style={s.cardH}>Which job?</Text>
+          <Text style={s.cardH}>{T('job.which')}</Text>
           {projects.map((p) => (
             <Pressable key={p.id} style={s.jobRow} onPress={async () => {
               setProjectId(p.id); await touchProject(db, p.id);
@@ -651,10 +653,10 @@ export default function App() {
             <Text style={s.cardNote}>No jobs yet. Create one — it takes a name.</Text>
           )}
           <Pressable style={s.confirmWide} onPress={() => setNewJob({ name: '', address: '' })}>
-            <Text style={s.confirmT}>+ NEW JOB</Text>
+            <Text style={s.confirmT}>{T('job.new')}</Text>
           </Pressable>
           <Pressable style={s.later} onPress={() => setPicker(false)}>
-            <Text style={s.laterT}>Close</Text>
+            <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
         </View>
       </View>
@@ -675,7 +677,7 @@ export default function App() {
       <View style={s.c}>
         <Text style={s.h}>EZjobsite</Text>
         <View style={s.card}>
-          <Text style={s.cardH}>Recording on this job</Text>
+          <Text style={s.cardH}>{T('consent.title')}</Text>
           <Text style={s.cardNote}>
             Decided once, here. The record button will never stop to ask you.
           </Text>
@@ -693,14 +695,14 @@ export default function App() {
 
           <Pressable style={[s.confirmWide, suggested !== 'all_party' && s.btnOff]}
             onPress={() => choose('all_party')}>
-            <Text style={s.confirmT}>EVERYONE HAS AGREED</Text>
+            <Text style={s.confirmT}>{T('consent.everyone')}</Text>
           </Pressable>
           <Pressable style={[s.confirmWide, suggested !== 'one_party' && s.btnOff]}
             onPress={() => choose('one_party')}>
-            <Text style={s.confirmT}>I'M PART OF THE CONVERSATION</Text>
+            <Text style={s.confirmT}>{T('consent.imPart')}</Text>
           </Pressable>
           <Pressable style={s.later} onPress={() => choose('no_recording')}>
-            <Text style={s.laterT}>No recording on this job</Text>
+            <Text style={s.laterT}>{T('consent.none')}</Text>
           </Pressable>
 
           <Text style={s.cardNote}>
@@ -709,7 +711,7 @@ export default function App() {
             rules differ by state and by who is in the room.
           </Text>
           <Pressable style={s.later} onPress={() => setSetup(null)}>
-            <Text style={s.laterT}>Back</Text>
+            <Text style={s.laterT}>{T('common.back')}</Text>
           </Pressable>
         </View>
       </View>
@@ -813,7 +815,7 @@ export default function App() {
 
           {sign.err && <Text style={s.warn}>{sign.err}</Text>}
           <Pressable style={s.later} onPress={() => setSign(null)}>
-            <Text style={s.laterT}>Close</Text>
+            <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
           <Text style={s.cardNote}>
             The words above are frozen — they are what gets signed, not whatever
@@ -826,16 +828,18 @@ export default function App() {
 
   return (
     <View style={s.c}>
-      <Text style={s.h}>EZjobsite</Text>
+      <Pressable onPress={() => { const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n); }}>
+        <Text style={s.h}>EZjobsite <Text style={s.langT}>{lang === 'en' ? 'ES' : 'EN'}</Text></Text>
+      </Pressable>
 
       {/* Which job you're on, and one tap to change it. A capture tool that does
           not tell you where things are going is asking for trust it has not
           earned. */}
       <Pressable style={s.jobBar} onPress={() => setPicker(true)}>
         <Text style={s.jobBarT}>
-          {projects.find((p) => p.id === projectId)?.name ?? 'No job — tap to pick'}
+          {projects.find((p) => p.id === projectId)?.name ?? T('job.pick')}
         </Text>
-        <Text style={s.jobBarS}>tap to change</Text>
+        <Text style={s.jobBarS}>{T('job.change')}</Text>
       </Pressable>
 
       {/* A row the server refused for good. It is on this phone and will NEVER
@@ -844,17 +848,14 @@ export default function App() {
       {rejected.length > 0 && (
         <View style={s.rejBanner}>
           <Text style={s.rejT}>
-            {rejected.length} item{rejected.length > 1 ? 's' : ''} the server refused
+            {T({ k: 'err.refusedTitle', p: { n: rejected.length } })}
           </Text>
           {rejected.slice(0, 2).map((r) => (
             <Text key={r.row_id} style={s.rejS}>
               {r.tbl} · {r.code ?? '?'} · {String(r.message ?? '').slice(0, 60)}
             </Text>
           ))}
-          <Text style={s.rejS}>
-            These are saved on this phone but will not reach the cloud. Send this
-            screen to support — nothing is lost until this phone is.
-          </Text>
+          <Text style={s.rejS}>{T('err.refusedBody')}</Text>
         </View>
       )}
 
@@ -872,16 +873,14 @@ export default function App() {
 
       {filed && (
         <Pressable style={s.filed} onPress={() => setFiled(null)}>
-          <Text style={s.filedT}>{filed}</Text>
+          <Text style={s.filedT}>{T(filed)}</Text>
         </Pressable>
       )}
 
       {!gate && !initError && consent.consent === null && (
         <Pressable style={s.consentBanner} onPress={() => setSetup({ jurisdiction: '' })}>
-          <Text style={s.consentT}>Recording isn’t set up for this job</Text>
-          <Text style={s.consentS}>
-            One tap to set it. Photos and typed notes work now — only voice and video wait.
-          </Text>
+          <Text style={s.consentT}>{T('consent.notSetTitle')}</Text>
+          <Text style={s.consentS}>{T('consent.notSetBody')}</Text>
         </Pressable>
       )}
 
@@ -905,11 +904,11 @@ export default function App() {
       </Pressable>
 
       <Text style={s.state}>
-        {ui.k === 'saved' ? 'Saved on this phone ✓ — not backed up yet'
-          : ui.k === 'refused' ? `Not saved: ${ui.why}`
+        {ui.k === 'saved' ? T('st.savedNotBacked')
+          : ui.k === 'refused' ? T({ k: 'cap.notSaved', p: { why: T(ui.why) } })
           : ui.k === 'recording' ? 'Recording…'
           : ui.k === 'saving' ? 'Finishing…'
-          : ready ? 'Ready' : 'Starting…'}
+          : ready ? T('rec.ready') : T('st.starting')}
       </Text>
 
       {/* REQ-CAP2: all four modalities, all working with no signal. Big targets,
@@ -917,25 +916,25 @@ export default function App() {
       <View style={s.mediaRow}>
         <Pressable style={[s.media, gate && s.btnOff]} disabled={!!gate}
           onPress={() => onMedia(snapPhoto, 'Camera')}>
-          <Text style={s.mediaIcon}>📷</Text><Text style={s.mediaT}>PHOTO</Text>
+          <Text style={s.mediaIcon}>📷</Text><Text style={s.mediaT}>{T('cap.photo')}</Text>
         </Pressable>
         <Pressable style={[s.media, gate && s.btnOff]} disabled={!!gate}
           onPress={() => onMedia(recordVideo, 'Camera')}>
-          <Text style={s.mediaIcon}>🎥</Text><Text style={s.mediaT}>VIDEO</Text>
+          <Text style={s.mediaIcon}>🎥</Text><Text style={s.mediaT}>{T('cap.video')}</Text>
         </Pressable>
         <Pressable style={[s.media, gate && s.btnOff]} disabled={!!gate}
           onPress={() => onMedia(pickFromLibrary, 'Photos')}>
-          <Text style={s.mediaIcon}>🖼</Text><Text style={s.mediaT}>PICK</Text>
+          <Text style={s.mediaIcon}>🖼</Text><Text style={s.mediaT}>{T('cap.pick')}</Text>
         </Pressable>
       </View>
 
-      <Text style={s.sub}>Or type it</Text>
+      <Text style={s.sub}>{T('cap.orType')}</Text>
       <View style={s.noteRow}>
         <TextInput
           style={s.input}
           value={note}
           onChangeText={setNote}
-          placeholder="What was decided?"
+          placeholder={T('cap.whatDecided')}
           placeholderTextColor="#6e7681"
           multiline
           editable={!gate && ui.k !== 'saving'}
@@ -945,7 +944,7 @@ export default function App() {
           disabled={!!gate || !note.trim() || ui.k === 'saving'}
           style={[s.save, (!note.trim() || !!gate) && s.btnOff]}
         >
-          <Text style={s.saveT}>SAVE</Text>
+          <Text style={s.saveT}>{T('cap.save')}</Text>
         </Pressable>
       </View>
 
@@ -1045,7 +1044,7 @@ export default function App() {
         const nte = centsFromInput(priced.nteText);
         return (
           <View style={s.money}>
-            <Text style={s.cardH}>Check the number</Text>
+            <Text style={s.cardH}>{T('co.check')}</Text>
             <Text style={s.moneyScope}>{priced.scope}</Text>
 
             {priced.confidence === 'low' && (
@@ -1159,11 +1158,11 @@ export default function App() {
                   else setUi({ k: 'refused', why: r.reason });
                 }}>
                 <Text style={s.confirmT}>
-                  {cents === null ? 'ENTER A PRICE' : `YES — ${money(cents)}`}
+                  {cents === null ? T('co.enterPrice') : T({ k: 'co.yes', p: { amount: money(cents) } })}
                 </Text>
               </Pressable>
               <Pressable style={s.later} onPress={() => { setPriced(null); setLines([]); }}>
-                <Text style={s.laterT}>Cancel</Text>
+                <Text style={s.laterT}>{T('common.cancel')}</Text>
               </Pressable>
             </View>
             <Text style={s.cardNote}>
@@ -1247,7 +1246,7 @@ export default function App() {
           </Pressable>
 
           <Pressable style={s.later} onPress={() => setSentLink(null)}>
-            <Text style={s.laterT}>Close</Text>
+            <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
         </View>
       )}
@@ -1262,21 +1261,18 @@ export default function App() {
             </Text>
           ))}
           <Pressable style={s.later} onPress={() => setHistory(null)}>
-            <Text style={s.laterT}>Close</Text>
+            <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
         </View>
       )}
 
       <Text style={s.sub}>
-        Saved on this phone ({saved.length})
-        {delivery.pending > 0 ? ` · ${delivery.pending} waiting to back up` : ''}
-        {delivery.parked > 0 ? ` · ${delivery.parked} FAILED to back up` : ''}
+        {T({ k: 'st.onThisPhone', p: { n: saved.length } })}
+        {delivery.pending > 0 ? T({ k: 'st.waiting', p: { n: delivery.pending } }) : ''}
+        {delivery.parked > 0 ? T({ k: 'st.failedCount', p: { n: delivery.parked } }) : ''}
       </Text>
       {delivery.parked > 0 && (
-        <Text style={s.parked}>
-          {delivery.parked} capture{delivery.parked > 1 ? 's are' : ' is'} saved here but could not
-          be backed up. Still on this phone — not lost. Needs attention.
-        </Text>
+        <Text style={s.parked}>{T({ k: 'st.failedBody', p: { n: delivery.parked } })}</Text>
       )}
       <ScrollView style={{ flex: 1 }}>
         {saved.slice().reverse().map((c) => (
@@ -1367,6 +1363,7 @@ const s = StyleSheet.create({
   inboxJob: { backgroundColor: '#21262d', borderRadius: 8, paddingHorizontal: 12,
     paddingVertical: 10, borderWidth: 1, borderColor: '#30363d' },
   inboxJobT: { color: '#e6edf3', fontSize: 13, fontWeight: '600' },
+  langT: { color: '#6e7681', fontSize: 13, fontWeight: '400' },
   jobBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
     borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },

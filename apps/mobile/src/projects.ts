@@ -30,6 +30,7 @@
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { sha256 } from 'js-sha256';
+import { msg, type Msg } from './i18n';
 
 /**
  * NO app-owned project table and NO project outbox.
@@ -109,9 +110,9 @@ export async function createProject(
   db: AbstractPowerSyncDatabase,
   o: { ownerId: string; name: string; address?: string | null;
        lat?: number | null; lng?: number | null; clientRef?: string | null }
-): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
+): Promise<{ ok: true; id: string } | { ok: false; reason: Msg | string }> {
   const name = o.name.trim();
-  if (!name) return { ok: false, reason: 'A job needs a name' };
+  if (!name) return { ok: false, reason: msg('job.needsName') };
 
   // REFUSE AT THE DOOR. A project row with a non-UUID owner cannot be upserted
   // (22P02), and because that code is not in the connector's fatal set it does not
@@ -120,7 +121,7 @@ export async function createProject(
   // app keeps saying "saved". Refusing loudly here costs one error message;
   // allowing it cost every job I created tonight.
   if (!UUID_RE.test(o.ownerId)) {
-    return { ok: false, reason: 'Not signed in yet — a job can’t be created until the app has a user' };
+    return { ok: false, reason: msg('job.needsUser') };
   }
 
   const now = Date.now();
@@ -158,8 +159,8 @@ export type Resolution = {
   projectId: string;
   method: 'gps_auto' | 'last_used' | 'only_project' | 'unresolved';
   confidence: 'high' | 'low' | 'none';
-  /** Why, in words. REQ-PROC6: a state the user can act on, not a code. */
-  why: string;
+  /** REQ-PROC6 + REQ-X2: a message the render layer turns into the user's language. */
+  why: Msg;
   candidates?: Array<{ id: string; name: string; distanceM: number }>;
 };
 
@@ -184,7 +185,7 @@ export async function resolveProject(
 
   if (!all.length) {
     return { projectId: INBOX_ID, method: 'unresolved', confidence: 'none',
-             why: 'No jobs yet — saved to your Inbox' };
+             why: msg('res.noJobsYet') };
   }
 
   if (fix) {
@@ -196,13 +197,13 @@ export async function resolveProject(
 
     if (inside.length === 1) {
       return { projectId: inside[0].p.id, method: 'gps_auto', confidence: 'high',
-               why: `You're at ${inside[0].p.name}` };
+               why: msg('res.atJob', { name: inside[0].p.name }) };
     }
     if (inside.length > 1) {
       // Ambiguity is REPORTED, never resolved by picking the nearest.
       return {
         projectId: INBOX_ID, method: 'unresolved', confidence: 'none',
-        why: `You're near ${inside.length} jobs — tap to say which`,
+        why: msg('res.nearN', { n: inside.length }),
         candidates: inside.map(({ p, d }) => ({ id: p.id, name: p.name, distanceM: Math.round(d) })),
       };
     }
@@ -216,8 +217,8 @@ export async function resolveProject(
     return {
       projectId: INBOX_ID, method: 'unresolved', confidence: 'none',
       why: nearest
-        ? `Not at any job — nearest is ${nearest.p.name}, ${Math.round(nearest.d / 100) / 10} km away`
-        : 'No job has a location yet — saved to your Inbox',
+        ? msg('res.notAtAny', { name: nearest.p.name, km: Math.round(nearest.d / 100) / 10 })
+        : msg('res.noPinned'),
       candidates: nearest ? [{ id: nearest.p.id, name: nearest.p.name, distanceM: Math.round(nearest.d) }] : [],
     };
   }
@@ -225,15 +226,15 @@ export async function resolveProject(
   // No fix from here down.
   if (all.length === 1) {
     return { projectId: all[0].id, method: 'only_project', confidence: 'high',
-             why: `Saved to ${all[0].name} — your only job` };
+             why: msg('res.onlyJob', { name: all[0].name }) };
   }
   const recent = all.find((p) => p.last_used_ms && Date.now() - p.last_used_ms < 12 * 3600_000);
   if (recent) {
     return { projectId: recent.id, method: 'last_used', confidence: 'low',
-             why: `No location — saved to ${recent.name} (the job you were just on)` };
+             why: msg('res.lastUsed', { name: recent.name }) };
   }
   return { projectId: INBOX_ID, method: 'unresolved', confidence: 'none',
-           why: 'No location — saved to your Inbox, tap to file it' };
+           why: msg('res.noLocationInbox') };
 }
 
 /** REQ-P2: the queue. Never lost, resolvable in one action. */

@@ -35,6 +35,7 @@
  * is lawful -- that is stated in the UI rather than implied by our silence.
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import { msg, type Msg } from './i18n';
 
 /** What was decided about recording people on this job. */
 export type RecordingConsent =
@@ -118,7 +119,10 @@ export async function getRecordingConsent(
   };
 }
 
-export type ArmCheck = { allowed: true } | { allowed: false; why: string };
+// `why` is a MESSAGE, not a sentence. This module used to return English prose,
+// which welded the language into the logic: no dictionary can localize a string
+// that was already baked in here. REQ-X2.
+export type ArmCheck = { allowed: true } | { allowed: false; why: Msg };
 
 /**
  * May this job record audio/video RIGHT NOW?
@@ -134,10 +138,10 @@ export async function canRecordAudio(
   const { consent } = await getRecordingConsent(db, projectId);
   if (consent === 'all_party' || consent === 'one_party') return { allowed: true };
   if (consent === 'no_recording') {
-    return { allowed: false, why: 'This job is set to no recording. Type it or take a photo instead.' };
+    return { allowed: false, why: msg('consent.no_recording') };
   }
   // null. Never "probably fine": a wrong guess here is a potential crime, not a bug.
-  return { allowed: false, why: 'Recording isn’t set up for this job yet. Set it in job setup — it takes one tap.' };
+  return { allowed: false, why: msg('consent.needed') };
 }
 
 // ============ REQ-CON2: cellular upload ============
@@ -171,7 +175,7 @@ export async function setCellularConsent(db: AbstractPowerSyncDatabase, on: bool
 
 export type UploadGate =
   | { upload: true }
-  | { upload: false; reason: string; blockedBy: 'no_connection' | 'needs_cell_consent' };
+  | { upload: false; reason: Msg; blockedBy: 'no_connection' | 'needs_cell_consent' };
 
 /**
  * REQ-PROC6: "when it's stuck it tells the user why in plain language".
@@ -182,12 +186,10 @@ export function uploadGate(
   net: { isConnected: boolean; isCellular: boolean }, cellConsent: boolean
 ): UploadGate {
   if (!net.isConnected) {
-    return { upload: false, blockedBy: 'no_connection',
-             reason: 'Saved ✓ — will upload when you have a connection' };
+    return { upload: false, blockedBy: 'no_connection', reason: msg('up.waitingConn') };
   }
   if (net.isCellular && !cellConsent) {
-    return { upload: false, blockedBy: 'needs_cell_consent',
-             reason: 'Saved ✓ — waiting for Wi-Fi (turn on cellular upload to send now)' };
+    return { upload: false, blockedBy: 'needs_cell_consent', reason: msg('up.waitingWifi') };
   }
   return { upload: true };
 }
