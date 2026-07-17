@@ -16,7 +16,16 @@ import { Buffer } from 'buffer';
 
 export async function requestMic(): Promise<boolean> {
   const p = await AudioModule.requestRecordingPermissionsAsync();
-  return !!p.granted;
+  if (!p.granted) return false;
+  // REQUIRED on iOS before prepareToRecordAsync(), or it throws
+  // "Calling the 'prepareToRecordAsync' function has failed". The audio session
+  // must be put into a recording-capable mode first; permission alone is not
+  // enough.
+  await AudioModule.setAudioModeAsync({
+    allowsRecording: true,
+    playsInSilentMode: true,
+  });
+  return true;
 }
 
 /** Read the recorder's output into memory. Fine for short jobsite captures. */

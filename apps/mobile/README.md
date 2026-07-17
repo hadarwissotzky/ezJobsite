@@ -72,3 +72,48 @@ order:
 **Likely correct fix: scaffold clean** (`npx create-expo-app`) into a space-free
 path and move `src/` + `App.tsx` in, rather than inheriting the spike's
 package.json/app.json. The product code is good; its packaging is inherited junk.
+
+## STATUS 2026-07-16 (updated) — IT RUNS
+
+The app builds, installs as `com.hilo.ezjobsite`, and **runs**: RECORD button,
+"Ready", "Saved on this phone (0)". No red screen.
+
+**Root cause of the earlier failure (found, not guessed):** `expo prebuild` was
+**crashing** in `withIosIcons → generateUniversalIconAsync` because `app.json`
+referenced `./assets/icon.png` and **`assets/` had never been copied**. A crashed
+prebuild leaves a half-written `ios/` with the DEFAULT bundle id and **no config
+plugins applied** — so nothing was autolinked, hence `Cannot find native module
+'ExpoAsset'`. One cause, both symptoms. `expo-asset` was also missing from
+dependencies. Both fixed; prebuild now exits 0 and emits `com.hilo.ezjobsite`.
+
+**Verified working in the product app:**
+- The durability gate PASSES — no gate banner, so the write connection has
+  `synchronous=FULL`, `fullfsync`, `foreign_keys` (the assertion runs inside
+  `writeTransaction`, which is the only connection whose profile means anything).
+- App-owned schema created, recovery sweep runs on launch, saved list reads
+  exclusively from `capture_commit`.
+- Offline is handled as normal, not an error.
+
+## THE ONE THING NOT PROVEN: real microphone capture
+
+`prepareToRecordAsync` fails on the iOS Simulator:
+`Calling the 'prepareToRecordAsync' function has failed`
+
+Adding `setAudioModeAsync({allowsRecording:true, playsInSilentMode:true})` — which
+IS required on iOS and is now in `recorder.ts` — did not fix it. Two attempts, no
+convergence, so stopping rather than guessing a third time.
+
+**Most likely: the Simulator has no usable audio input.** That is a simulator
+limitation, not a product bug — but it is UNPROVEN. Do not assume it.
+
+Next diagnostic, in order:
+- Check Simulator > Settings > Microphone, and macOS mic permission for Simulator.app.
+- Try `RecordingPresets.LOW_QUALITY` — the HIGH_QUALITY preset may request a
+  format the simulator cannot supply.
+- If it is the simulator, this needs the physical iPhone — which needs **Xcode
+  26.x** (installed Xcode 16.4 ships the iOS 18.5 SDK; the device runs iOS 26.3.1).
+  That has blocked physical-device work all day and is the same blocker as Q3.
+
+`performCapture()` itself is NOT implicated: it was exercised 8/8 across every
+kill boundary in the spike with synthetic bytes. What is unproven is the
+recorder feeding it, not the saving.
