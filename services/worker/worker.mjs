@@ -158,11 +158,102 @@ const STEPS = {
     // call, and that adapter is not written — say so rather than guess 'english'.
     throw { block: 'needs_api_key', why: 'no language on the capture and no text-detector adapter' };
   },
+  /**
+   * MANDATE #4: "transcription is a commodity; THE STRUCTURING LAYER IS THE
+   * PRODUCT." This is that layer, and it is built around one number:
+   *
+   *   "LLM structuring hallucinates ~31% OF THE TIME in the closest studied
+   *    domain — a dollar figure cannot ride on an unconfirmed transcript."
+   *
+   * At ~31%, a pipeline that WRITES decisions invents one the contractor never
+   * made, roughly one time in three. So this writes a PROPOSAL to
+   * capture_structured and nothing else. It cannot create a decision. It cannot
+   * create a change order — change_order.numbers_confirmed_at is NOT NULL, so the
+   * DB refuses a price no human read back. This step feeds that read-back; it does
+   * not go around it.
+   *
+   * THE PROMPT IS THE SAFETY, and every rule in it is a mandate:
+   *  - "quote only what was said" — an invented subject is a hallucination with
+   *    good grammar.
+   *  - amount null unless a currency figure was ACTUALLY SPOKEN. A wrong number is
+   *    worse than no number: no number makes a man type it; a wrong one gets
+   *    confirmed by a tired man who trusts the app (mandate #6).
+   *  - confidence is the model's own, kept honestly. 'low' never prefills.
+   */
   structure: async (job) => {
-    if (!process.env.OPENAI_API_KEY) {
-      throw { block: 'needs_api_key', why: 'no LLM key in the environment' };
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) throw { block: 'needs_api_key', why: 'no LLM key in the environment' };
+
+    const transcript = sql(`select coalesce(text,'') from public.capture_transcript_current
+                             where capture_id = '${job.capture_id}'`);
+    if (!transcript) {
+      // Nothing to structure. A photo has no words; a text capture is its own text.
+      // Blocking is right: the step cannot run, and pretending it did would mark
+      // the capture processed with an empty proposal.
+      throw { block: 'needs_connection', why: 'no transcript to structure' };
     }
-    throw { block: 'needs_api_key', why: 'structurer not implemented — key present but no adapter' };
+
+    const body = {
+      model: 'gpt-4o-mini',
+      // Deterministic: the same audio must not produce a different proposal on a
+      // retry. A resumed job that disagrees with itself is unarguable in a dispute.
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content:
+          'You extract a jobsite decision from a transcript. You are feeding a HUMAN CONFIRMATION step, not a database. Rules, in order of importance:\n' +
+          '1. NEVER invent. Quote or closely paraphrase only what was said. If a field was not said, use null.\n' +
+          '2. DO NOT extract prices, amounts or numbers. Another part of the system owns those. Never mention a figure.\n' +
+          '3. subject = the thing being decided (2-4 words, e.g. "trim colour", "outlets in unit 3B"). value = what was decided about it.\n' +
+          '4. scope: "party" if it assigns work to a trade/company, else "project".\n' +
+          '5. who_directed: only if a person or role was named.\n' +
+          '6. confidence: "high" only if the transcript is unambiguous. Otherwise "low". If it is not a decision at all, "none".\n' +
+          'Return JSON: {subject, value, scope, who_directed, confidence}.' },
+        { role: 'user', content: transcript },
+      ],
+    };
+    const out = execFileSync('curl', ['-s', 'https://api.openai.com/v1/chat/completions',
+      '-H', `Authorization: Bearer ${key}`, '-H', 'Content-Type: application/json',
+      '-d', JSON.stringify(body)]).toString();
+    const res = JSON.parse(out || '{}');
+    if (res.error) throw { block: 'needs_api_key', why: res.error.message };
+
+    let g;
+    try { g = JSON.parse(res.choices?.[0]?.message?.content ?? '{}'); }
+    catch { throw { block: 'needs_connection', why: 'model returned non-JSON' }; }
+
+    const q = (v) => (v === null || v === undefined || v === '') ? 'null' : `'${String(v).replace(/'/g, "''")}'`;
+
+    // THE MODEL NEVER SETS THE AMOUNT. Always null here.
+    //
+    // This is not caution, it is a MEASURED RESULT. Given "Add three outlets in
+    // unit 3B, four fifty", gpt-4o-mini returned amount_cents: 45000 with
+    // confidence "high" — it invented $450 from an ambiguous spoken number, in
+    // direct defiance of a prompt that said "ONLY if a currency figure was
+    // actually spoken". That is the ~31% hallucination mandate #2 cites, live.
+    //
+    // The app's parseMoney() REFUSES that exact input ({cents: null, confidence:
+    // 'none'}) because it only accepts an explicit currency marker. THE REGEX IS
+    // SAFER THAN THE MODEL on the highest-risk field in the product.
+    //
+    // So the split is: THE MODEL STRUCTURES THE WORDS; A DETERMINISTIC PARSER OWNS
+    // THE NUMBER. Mandate #6 says numbers get read-back + tap-to-correct ALWAYS —
+    // they get the auditable, testable, conservative path, never the probabilistic
+    // one. The app runs parseMoney() on `from_transcript` at read-back time, so
+    // there is ONE money parser in the product and it cannot drift from itself.
+    const cents = null;
+    const conf = ['high', 'low', 'none'].includes(g.confidence) ? g.confidence : 'low';
+
+    sql(`insert into public.capture_structured
+           (id, capture_id, owner_id, proposed_subject, proposed_value, proposed_scope,
+            proposed_who_directed, proposed_amount_cents, confidence, engine, engine_model,
+            from_transcript)
+         select 'st-' || substr(md5(random()::text),1,10), '${job.capture_id}', c.owner_id,
+                ${q(g.subject)}, ${q(g.value)},
+                ${['project','party'].includes(g.scope) ? `'${g.scope}'` : 'null'},
+                ${q(g.who_directed)}, ${cents === null ? 'null' : cents}, '${conf}',
+                'openai', 'gpt-4o-mini', ${q(transcript)}
+           from public.capture c where c.id = '${job.capture_id}'`);
   },
 };
 
