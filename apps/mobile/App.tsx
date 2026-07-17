@@ -18,6 +18,7 @@ import {
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { textCapture, voiceCapture } from './src/modality';
+import { drainOutbox, outboxStatus } from './src/uploader';
 
 export const db = new PowerSyncDatabase({
   schema: AppSchema,
@@ -46,15 +47,21 @@ export default function App() {
   const [ready, setReady] = React.useState(false);
   const [gate, setGate] = React.useState<string | null>(null);
   const [initError, setInitError] = React.useState<string | null>(null);
+  const [delivery, setDelivery] = React.useState<{pending:number;parked:number}>({pending:0,parked:0});
   const [saved, setSaved] = React.useState<any[]>([]);
   const [note, setNote] = React.useState('');
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   const refresh = React.useCallback(async () => {
-    try { setSaved(await listCommittedCaptures(db)); } catch { /* pre-init */ }
+    try {
+      setSaved(await listCommittedCaptures(db));
+      const s = (await outboxStatus(db))[0];
+      setDelivery({ pending: s?.pending ?? 0, parked: s?.parked ?? 0 });
+    } catch { /* pre-init */ }
   }, []);
 
   React.useEffect(() => {
+    const cleanups: Array<() => void> = [];
     (async () => {
      try {
       await db.init();
@@ -83,6 +90,22 @@ export default function App() {
       }
       await refresh();
       setReady(true);
+
+      // Drain the outbox. Runs on a timer, not on a network event, because
+      // "online" is a lie you find out about by trying. Offline is the normal
+      // case: drainOutbox simply fails transiently and backs off.
+      const drain = async () => {
+        try {
+          const { data } = await connector.client.auth.getUser();
+          if (!data?.user) return;             // not signed in -> nothing to do
+          const r = await drainOutbox(db, connector.client, data.user.id);
+          if (r.attempted) console.log('drain:', JSON.stringify(r));
+          if (r.uploaded || r.alreadyApplied || r.parked) await refresh();
+        } catch (e: any) { /* offline is normal; backoff already recorded */ }
+      };
+      drain();
+      const iv = setInterval(drain, 15_000);
+      cleanups.push(() => clearInterval(iv));
      } catch (e: any) {
        // A failure here means we cannot promise a save. Say so, loudly, with the
        // reason -- never sit on "Starting..." forever. Silent init failure is the
@@ -92,6 +115,7 @@ export default function App() {
        setReady(true);
      }
     })();
+    return () => cleanups.forEach((c) => c());
   }, [refresh]);
 
   const onPress = async () => {
@@ -195,7 +219,17 @@ export default function App() {
         </Pressable>
       </View>
 
-      <Text style={s.sub}>Saved on this phone ({saved.length})</Text>
+      <Text style={s.sub}>
+        Saved on this phone ({saved.length})
+        {delivery.pending > 0 ? ` · ${delivery.pending} waiting to back up` : ''}
+        {delivery.parked > 0 ? ` · ${delivery.parked} FAILED to back up` : ''}
+      </Text>
+      {delivery.parked > 0 && (
+        <Text style={s.parked}>
+          {delivery.parked} capture{delivery.parked > 1 ? 's are' : ' is'} saved here but could not
+          be backed up. Still on this phone — not lost. Needs attention.
+        </Text>
+      )}
       <ScrollView style={{ flex: 1 }}>
         {saved.slice().reverse().map((c) => (
           <View key={c.capture_id} style={s.row}>
@@ -220,6 +254,7 @@ const s = StyleSheet.create({
   row: { borderTopWidth: 1, borderTopColor: '#21262d', paddingVertical: 10 },
   rowT: { color: '#c9d1d9', fontSize: 13, fontFamily: 'Menlo' },
   rowS: { color: '#6e7681', fontSize: 11, fontFamily: 'Menlo', marginTop: 2 },
+  parked: { color: '#ff7b72', fontSize: 12, marginBottom: 8, lineHeight: 16 },
   noteRow: { flexDirection: 'row', gap: 8, marginBottom: 22 },
   input: { flex: 1, backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
            borderRadius: 10, color: '#c9d1d9', padding: 12, minHeight: 54, fontSize: 15 },

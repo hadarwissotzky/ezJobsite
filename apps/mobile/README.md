@@ -117,3 +117,34 @@ Next diagnostic, in order:
 `performCapture()` itself is NOT implicated: it was exercised 8/8 across every
 kill boundary in the spike with synthetic bytes. What is unproven is the
 recorder feeding it, not the saving.
+
+
+## STATUS — capture reaches the cloud (verified server-side)
+
+Full round trip works: **3 captures, 3 attachments, 3 ledger rows**, media in
+Storage under content-addressed owner-scoped keys.
+
+```
+capture   : cap-mrodypni-4wn6iwt7
+  object  : <owner>/cap-.../e7b0703…e59c.txt   (60 bytes, in Storage)
+  state   : uploaded
+  mutation: mut-6lf8okfi9bu
+drain: {"attempted":1,"uploaded":1,"parked":0,"retryable":0}
+```
+
+**The three properties that make retry safe, each tested against the real RPC:**
+| Property | Result |
+|---|---|
+| Replay same `mutation_id` + same digest | `{"status":"already_applied"}` — **no duplicate** (3 rows before and after) |
+| Replay same `mutation_id` + **different** digest | `ERROR: mutation_id … replayed with a different payload digest` |
+| Different user submits for another owner | `ERROR: owner mismatch` |
+
+Direct `INSERT` on capture/attachment is **revoked** for `authenticated` — the
+RPC is the only door, so a client cannot recreate the partial-accept bug.
+
+### Microphone: BLOCKED BY HARDWARE, not code
+`system_profiler` shows one audio device — *Mac mini Speakers*, **output only,
+zero inputs**. The simulator has no input to forward, so `prepareToRecordAsync`
+fails natively (`ERR_AUDIO_RECORDING`). **No code change fixes this.** Needs a USB
+mic on the Mac mini, or the physical iPhone (Xcode 26). Text capture (REQ-CAP2)
+proves the path meanwhile.
