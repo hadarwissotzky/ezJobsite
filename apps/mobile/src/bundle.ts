@@ -192,3 +192,29 @@ export async function shareBundle(htmlPath: string): Promise<{ ok: boolean; reas
   });
   return { ok: true };
 }
+
+/**
+ * Send a no-login confirmation link — REQ-VAL8.
+ *
+ * NO EMAIL PROVIDER, on purpose. The user is a solo operator who already texts
+ * this client. Their phone holds every channel the client actually reads, and a
+ * link that arrives from a number the client recognises gets opened; one we send
+ * from a no-reply address lands in spam. Sending it ourselves would also make us
+ * a delivery liability -- bounces, blocklists, a provider bill -- to do worse than
+ * the phone already does.
+ *
+ * The message carries the frozen text as well as the link, so the recipient can
+ * see what is being asked before deciding whether to tap a URL from a builder.
+ */
+export async function shareLink(url: string, shownContent: string): Promise<{ ok: boolean; reason?: string }> {
+  if (!url || url.startsWith('/')) {
+    return { ok: false, reason: 'No confirmation page is configured (EXPO_PUBLIC_CONFIRM_BASE)' };
+  }
+  try {
+    const { Share } = await import('react-native');
+    const r = await Share.share({ message: `${shownContent}\n\n${url}` });
+    return { ok: r.action !== Share.dismissedAction };
+  } catch (e: any) {
+    return { ok: false, reason: e?.message ?? String(e) };
+  }
+}

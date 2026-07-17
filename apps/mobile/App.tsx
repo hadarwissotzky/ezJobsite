@@ -19,7 +19,7 @@ import {
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
-import { buildDisputeBundle, shareBundle } from './src/bundle';
+import { buildDisputeBundle, shareBundle, shareLink } from './src/bundle';
 import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
@@ -83,6 +83,11 @@ export default function App() {
   }>(null);
   const [history, setHistory] = React.useState<any[] | null>(null);
   const [sentLink, setSentLink] = React.useState<{url:string; shown:string} | null>(null);
+
+  // Where the no-login page is hosted. REQ-VAL3's link is only as good as the
+  // page it lands on, so this is configuration, not a constant -- and its absence
+  // is surfaced instead of silently producing dead links.
+  const CONFIRM_BASE = process.env.EXPO_PUBLIC_CONFIRM_BASE ?? '';
   // MANDATE #6: the read-back. A price is never accepted without a human
   // looking at it. `confidence` decides whether we dare prefill.
   const [priced, setPriced] = React.useState<null | {
@@ -534,7 +539,12 @@ export default function App() {
                   projectName: 'Bakeoff Project', subject: d.subject, value: d.current_value,
                   directedBy: d.directed_by ?? 'Owner', counterparty: d.directed_by ?? 'Owner',
                   channel: 'link', whenMs: d.last_changed_ms,
-                  linkBase: 'https://ezjobsite.app',
+                  // Was hardcoded to https://ezjobsite.app -- A DOMAIN THAT DOES
+                  // NOT EXIST. Every confirmation link ever generated pointed at
+                  // nothing. Now env-driven, and CONFIRM_BASE is checked before
+                  // anything is sent (below) rather than discovered by a
+                  // homeowner tapping a dead link.
+                  linkBase: CONFIRM_BASE,
                 });
                 if (r.ok) setSentLink({ url: r.url, shown: r.shownContent });
                 else setUi({ k: 'refused', why: r.reason });
@@ -749,9 +759,23 @@ export default function App() {
           </Text>
           <Text style={s.link}>{sentLink.url}</Text>
           <Text style={s.cardNote}>
-            No login needed. NOT YET DELIVERED — email/SMS is unbuilt (REQ-VAL8);
-            the link works, nothing sends it.
+            No login needed — anyone with this link can answer it.
           </Text>
+
+          {/* REQ-VAL8, delivered.
+              We do NOT need an email provider. The user is a solo operator with
+              2-10 employees who ALREADY texts this client -- their phone has
+              iMessage, WhatsApp, email and every channel their client actually
+              reads. A link they send themselves arrives from a number the client
+              recognises; one we send lands in spam from a stranger. The share
+              sheet is not a stopgap here, it is the better answer. */}
+          <Pressable style={s.confirmWide} onPress={async () => {
+            const r = await shareLink(sentLink.url, sentLink.shown);
+            if (!r.ok) setUi({ k: 'refused', why: r.reason ?? 'could not share' });
+          }}>
+            <Text style={s.confirmT}>SEND IT →</Text>
+          </Pressable>
+
           <Pressable style={s.later} onPress={() => setSentLink(null)}>
             <Text style={s.laterT}>Close</Text>
           </Pressable>
