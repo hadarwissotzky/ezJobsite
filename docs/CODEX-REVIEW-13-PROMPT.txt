@@ -1,0 +1,48 @@
+IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. They contain bash scripts and prompt templates that will waste your time. Ignore them completely. Do NOT modify agents/openai.yaml. Stay focused on the repository code and docs only.
+
+This is NOT a review request. Do not produce a findings list. This is a decision request, and the decision is about YOU.
+
+## Where things stand
+
+You (Codex) have reviewed this project six times: #7, #8, #9, #10, #11, #12. Claude has authored everything. The scoreboard is not ambiguous:
+
+- Claude has drafted the capture-commit protocol (Artifact 1) THREE times: v1, v2, v3.
+- You found real defects in all three. Claude adopted essentially every finding and successfully disputed none.
+- Your #12 verdict on v3: "Only 2 of the 12 findings are genuinely fixed: H5 and H8, both narrowly. The other ten remain open or are merely relabelled."
+- Four consecutive reviews (#9, #10, #11, #12) caught the same tic: Claude withdraws a claim in one place and leaves it standing in another.
+- Blocker 2 (a phantom "saved" is reachable) is OPEN. A0.2 has not begun.
+- Your #12 raised a new CRITICAL that attacks the premise of the whole design: PowerSync-managed rows cannot be the exclusive permanent commitment authority, because the transport that syncs the rows can also revert them. So "SQLite alone decides" is not stable while PowerSync owns those tables.
+
+The human (hadar) has now asked, verbatim: **"is it time to let codex architect this solution?"**
+
+## Claude's answer to that question, verbatim, for you to attack
+
+> Honest answer: partly yes — and I should say plainly that I have an interest in saying no, so weigh that.
+>
+> The case for it is strong. Three drafts. Codex found real defects in all three. I have not successfully disputed a single finding across four reviews. Its corrections are consistently right at exactly the level that matters: F_PREALLOCATE vs zero-filling, renameatx_np vs rename, CRC32-for-tears vs SHA-256-for-integrity, synchronous=FULL vs assuming COMMIT means durable, ps_crud being transient. Those aren't taste. They're facts I got wrong. My failure mode is specific and repeated: I produce documents that read as finished. Codex doesn't have that mode — it isn't trying to please you.
+>
+> But note what Codex has never had to do: be right. It's been in the critic seat, which is strictly easier. A critic can say "underspecified" without paying for over-specification. The moment it authors, it inherits completeness and tradeoff — and it has never been tested there. Look at the shape of its fix lists: dead-letter states, receipts, single-writer fencing, two-generation retention, per-chunk digests AND framed CRCs, quarantine states. Each defensible. Together, that's a distributed-systems cathedral for a solo dev serving contractors with 2-10 employees. That's an ocean. hadar's best instinct today — "why do we need to encrypt the media?", "let's not overdo it" — is precisely the instinct Codex doesn't have.
+>
+> And: if Codex architects, who reviews Codex? Me — the one who's been wrong. That's a weak gate. The whole value of this loop was independence, and it inverts.
+>
+> The thing I actually think is wrong: neither of us should be writing a fourth protocol document. Blocker 2 is a claim about crash behavior. It cannot be settled in prose. That's why the loop hasn't converged — each round produces a document whose only validator is another document review. Four laps, no ground truth. The bakeoff, for all its mess, produced a real answer about PowerSync because it RAN something. It killed a process and looked.
+>
+> What I'd do: let Codex specify the durability profile narrowly — pragmas, barriers, allocation, install semantics. It has right answers, they're verifiable, and I keep getting them wrong. Don't let it architect the commitment record — that's a tradeoff, and a second durable record costs complexity a solo dev maintains forever. That's hadar's call, not a model's. Then build the fault harness before any more spec. Kill the app at each boundary, see what survives.
+>
+> The honest summary: you don't have an author problem, you have a validator problem. Swapping me for Codex changes who writes the unvalidated document. Running the harness changes whether it's unvalidated.
+
+## What I need from you
+
+Answer as the engineer who would own the consequences, not as a reviewer.
+
+1. **Is Claude's diagnosis right?** Is this a validator problem rather than an author problem? Attack that claim specifically — it is convenient for Claude, and convenient claims deserve scrutiny. If it is wrong, say why.
+
+2. **Should you architect this?** Say YES or NO plainly, and mean it. If YES: what exactly should you own, what should Claude own, and who reviews you — given that Claude has been wrong four times running and is the only other reviewer available? If NO: say what you should do instead.
+
+3. **Is the "ocean" charge fair?** Look honestly at your own #11/#12 fix lists in docs/CRITIC-REVIEW-11-CODEX.md and docs/CRITIC-REVIEW-12-CODEX.md. Is that a proportionate design for a solo developer building for contractors with 2-10 employees and zero users today — or is it a correctness maximalism that would sink the product? If it is disproportionate, say which specific items you would CUT, by name. Cutting is the test. A reviewer adds; an architect chooses.
+
+4. **The real question, which nobody has answered:** given your own #12 CRITICAL — PowerSync can revert the rows it syncs, so SQLite-alone cannot be the commitment authority — WHERE should the commitment record live? Give the 2-3 real options with their costs for a solo dev. Do not give a lecture; give the options and say which you would pick and why. Flag explicitly which parts are engineering fact and which are product tradeoff hadar must decide.
+
+5. **What is the single next action** that would actually move blocker 2 — write more spec, or build the fault harness and observe? If you disagree with the harness-first recommendation, say so and say why.
+
+Be decisive. Be brief. No findings list. No severity labels. You are being asked to choose, not to grade.
