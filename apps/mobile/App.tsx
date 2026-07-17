@@ -22,6 +22,7 @@ import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, ensureDecisionSchema, listDecisions, recordDecision,
          type DecisionRow } from './src/decisions';
 import { sendForConfirmation } from './src/confirmations';
+import { centsFromInput, createChangeOrder, ledger, money, parseMoney } from './src/changeorder';
 
 export const db = new PowerSyncDatabase({
   schema: AppSchema,
@@ -77,6 +78,13 @@ export default function App() {
   }>(null);
   const [history, setHistory] = React.useState<any[] | null>(null);
   const [sentLink, setSentLink] = React.useState<{url:string; shown:string} | null>(null);
+  // MANDATE #6: the read-back. A price is never accepted without a human
+  // looking at it. `confidence` decides whether we dare prefill.
+  const [priced, setPriced] = React.useState<null | {
+    decisionId: string; scope: string; whoDirected: string;
+    amountText: string; confidence: 'high'|'low'|'none'; nteText: string;
+  }>(null);
+  const [coRows, setCoRows] = React.useState<any[]>([]);
   const [saved, setSaved] = React.useState<any[]>([]);
   const [note, setNote] = React.useState('');
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -87,6 +95,7 @@ export default function App() {
       const s = (await outboxStatus(db))[0];
       setDelivery({ pending: s?.pending ?? 0, parked: s?.parked ?? 0 });
       setDecisions(await listDecisions(db, PROJECT_ID));
+      try { setCoRows(await ledger(connector.client, PROJECT_ID)); } catch { /* offline */ }
     } catch { /* pre-init */ }
   }, []);
 
@@ -317,7 +326,109 @@ export default function App() {
               }}>
                 <Text style={s.askT}>Ask {d.directed_by ?? 'them'} to confirm →</Text>
               </Pressable>
+              <Pressable style={s.ask} onPress={() => {
+                const pm = parseMoney(d.current_value);
+                setPriced({
+                  decisionId: d.id, scope: d.current_value,
+                  whoDirected: d.directed_by ?? 'Owner',
+                  // A low-confidence guess is NOT prefilled. Make them type it
+                  // rather than nudge them into agreeing with a wrong number.
+                  amountText: pm.confidence === 'high' && pm.cents !== null
+                    ? (pm.cents / 100).toFixed(2) : '',
+                  confidence: pm.confidence, nteText: '',
+                });
+              }}>
+                <Text style={s.askT}>Price it (change order) →</Text>
+              </Pressable>
             </Pressable>
+          ))}
+        </>
+      )}
+
+      {priced && (() => {
+        const cents = centsFromInput(priced.amountText);
+        const nte = centsFromInput(priced.nteText);
+        return (
+          <View style={s.money}>
+            <Text style={s.cardH}>Check the number</Text>
+            <Text style={s.moneyScope}>{priced.scope}</Text>
+
+            {priced.confidence === 'low' && (
+              <Text style={s.warn}>
+                Heard a number but not sure it's the price. Type it.
+              </Text>
+            )}
+            {priced.confidence === 'none' && (
+              <Text style={s.warn}>No price heard. Type it.</Text>
+            )}
+
+            {/* Read-back: BIG, and tap-to-correct. mandate #6. */}
+            <Text style={s.bigMoney}>{money(cents)}</Text>
+            <TextInput
+              style={s.moneyInput}
+              value={priced.amountText}
+              onChangeText={(v) => setPriced({ ...priced, amountText: v })}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              placeholderTextColor="#6e7681"
+            />
+            <Text style={s.sub}>Not to exceed (optional)</Text>
+            <TextInput
+              style={s.moneyInput}
+              value={priced.nteText}
+              onChangeText={(v) => setPriced({ ...priced, nteText: v })}
+              keyboardType="decimal-pad"
+              placeholder="optional cap for T&M"
+              placeholderTextColor="#6e7681"
+            />
+
+            <View style={s.cardBtns}>
+              <Pressable
+                style={[s.confirm, cents === null && s.btnOff]}
+                disabled={cents === null}
+                onPress={async () => {
+                  const { data } = await connector.client.auth.getUser();
+                  if (!data?.user) { setUi({k:'refused',why:'not signed in'}); return; }
+                  const r = await createChangeOrder(connector.client, {
+                    id: `co-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`,
+                    decisionId: priced.decisionId, projectId: PROJECT_ID, ownerId: data.user.id,
+                    scope: priced.scope, amountCents: cents!, nteCents: nte,
+                    whoDirected: priced.whoDirected,
+                    // The read-back happened HERE. This timestamp is the proof,
+                    // and the DB refuses the row without it.
+                    numbersConfirmedAt: new Date(),
+                  });
+                  if (r.ok) { setPriced(null); await refresh(); }
+                  else setUi({ k: 'refused', why: r.reason });
+                }}>
+                <Text style={s.confirmT}>
+                  {cents === null ? 'ENTER A PRICE' : `YES — ${money(cents)}`}
+                </Text>
+              </Pressable>
+              <Pressable style={s.later} onPress={() => setPriced(null)}>
+                <Text style={s.laterT}>Cancel</Text>
+              </Pressable>
+            </View>
+            <Text style={s.cardNote}>
+              Nothing is sent until you agree with this figure.
+            </Text>
+          </View>
+        );
+      })()}
+
+      {coRows.length > 0 && (
+        <>
+          <Text style={s.sub}>Change orders ({coRows.length})</Text>
+          {coRows.map((c) => (
+            <View key={c.id} style={s.drow}>
+              <Text style={s.dval}>{c.amount} {c.is_mini ? '· mini' : ''}</Text>
+              <Text style={s.dsub}>{c.scope}</Text>
+              <Text style={s.dmeta}>
+                {c.status}{c.nte ? ` · NTE ${c.nte}` : ''}
+                {c.signed_by ? ` · signed ${c.signed_by}` : ''}
+                {c.approved_running ? ` · approved to date ${c.approved_running}` : ''}
+              </Text>
+            </View>
           ))}
         </>
       )}
@@ -410,6 +521,12 @@ const s = StyleSheet.create({
   dmeta: { color: '#6e7681', fontSize: 11, marginTop: 3 },
   hNow: { color: '#7ee787', fontSize: 14, marginBottom: 4 },
   hOld: { color: '#6e7681', fontSize: 13, marginBottom: 4, textDecorationLine: 'line-through' },
+  money: { backgroundColor: '#1c1400', borderColor: '#9e6a03', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
+  moneyScope: { color: '#c9d1d9', fontSize: 14, marginBottom: 10 },
+  bigMoney: { color: '#f0b72f', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
+  moneyInput: { backgroundColor: '#0b0b0c', borderColor: '#30363d', borderWidth: 1, borderRadius: 8,
+                color: '#e6edf3', padding: 12, fontSize: 18, marginBottom: 10, textAlign: 'center' },
+  warn: { color: '#f0b72f', fontSize: 12, marginBottom: 6 },
   ask: { marginTop: 8 },
   askT: { color: '#58a6ff', fontSize: 13, fontWeight: '600' },
   frozen: { color: '#e6edf3', fontSize: 14, lineHeight: 20, backgroundColor: '#0b0b0c',
