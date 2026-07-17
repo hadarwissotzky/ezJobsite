@@ -74,13 +74,28 @@ def read_status(udid: str) -> dict | None:
         return None  # caught mid-write; caller retries
 
 
-_cmd_seq = {"n": 0}
+# Monotonic across harness runs. The app now persists a command watermark and
+# only executes `seq > watermark`, so a per-run counter starting at 0 would make
+# the app SILENTLY SKIP every command after the first run. Seeding from the clock
+# keeps it strictly increasing without the harness having to read app state.
+_cmd_seq = {"n": int(time.time() * 1000)}
 
 
 def send_command(udid: str, action: str, **kw) -> None:
     _cmd_seq["n"] += 1
     p = app_container(udid) / "Documents" / "command.json"
     p.write_text(json.dumps({"seq": _cmd_seq["n"], "action": action, **kw}))
+
+
+def clear_command(udid: str) -> None:
+    """Belt-and-braces: remove the pending command before a kill.
+
+    The durable watermark in the app is the real fix; this just means a
+    relaunched app does not even see a stale command to consider.
+    """
+    p = app_container(udid) / "Documents" / "command.json"
+    if p.exists():
+        p.unlink()
 
 
 def restart_app(udid: str, timeout: float = 90.0) -> dict:

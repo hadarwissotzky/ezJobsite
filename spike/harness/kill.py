@@ -129,6 +129,10 @@ def run_trial(udid: str, boundary: str, trial: int) -> dict:
         return r
 
     # --- kill, prove a new process --------------------------------------
+    # Remove the pending command before terminating. The app's durable watermark
+    # already prevents replay; this removes the stale command entirely so a
+    # relaunch cannot even consider re-running `do_capture` mid-trial.
+    C.clear_command(udid)
     subprocess.run(["xcrun", "simctl", "terminate", udid, C.BUNDLE_ID],
                    capture_output=True, text=True)
     time.sleep(1.0)

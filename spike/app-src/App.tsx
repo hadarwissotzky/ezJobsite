@@ -30,6 +30,15 @@ const PASSWORD = 'bakeoff-spike-pw-2026';
 
 const STATUS_FILE = FS.documentDirectory + 'status.json';
 const COMMAND_FILE = FS.documentDirectory + 'command.json';
+// DURABLE command watermark. Without this, `lastCmdSeq` is process-local and
+// resets to -1 on relaunch, so the app RE-EXECUTES the stale command sitting in
+// command.json. Observed: 4 capture_commit rows from one requested capture.
+// Every K-boundary trial is arm -> capture -> kill -> relaunch -> assert, so the
+// relaunch would silently perform a SECOND capture before the assertions ran and
+// both (0,0) and (1,1) would become unreliable. Same class as Codex #9's restart
+// check that could not fail: a harness artifact manufacturing the state it claims
+// to observe.
+const CMD_WATERMARK_FILE = FS.documentDirectory + 'cmd-watermark.json';
 
 // Per-PROCESS identity. Codex #9 CRITICAL: the old restart check waited for
 // status.json to *exist* — but it already existed before termination, so a
@@ -98,6 +107,15 @@ export default function App() {
       } catch (e: any) {
         say(`FATAL ${e?.message ?? e}`);
       }
+
+      // Load the durable command watermark (see CMD_WATERMARK_FILE).
+      try {
+        const wm = await FS.getInfoAsync(CMD_WATERMARK_FILE);
+        if (wm.exists) {
+          lastCmdSeq = JSON.parse(await FS.readAsStringAsync(CMD_WATERMARK_FILE)).seq ?? -1;
+          say(`cmd watermark restored: ${lastCmdSeq}`);
+        }
+      } catch { /* first boot */ }
 
       // Status writer + command poller. 500ms is fast enough for the harness to
       // catch a checkpoint transition without hammering SQLite.
@@ -198,10 +216,22 @@ export default function App() {
           const info = await FS.getInfoAsync(COMMAND_FILE);
           if (info.exists) {
             const cmd = JSON.parse(await FS.readAsStringAsync(COMMAND_FILE));
-            if (typeof cmd.seq === 'number' && cmd.seq !== lastCmdSeq) {
+            if (typeof cmd.seq === 'number' && cmd.seq > lastCmdSeq) {
               lastCmdSeq = cmd.seq;
+              // Persist BEFORE running. A command that dies mid-execution must
+              // not replay on relaunch -- replaying `do_capture` is exactly the
+              // defect this fixes.
+              await FS.writeAsStringAsync(CMD_WATERMARK_FILE, JSON.stringify({ seq: cmd.seq }));
               say(`cmd#${cmd.seq} ${cmd.action}`);
-              await runCommand(cmd, say);
+              // FIRE-AND-FORGET, deliberately. `await` here parked the STATUS
+              // WRITER as well as the capture: a failpoint would pause the
+              // capture thread and thereby prevent the app from ever publishing
+              // that it had paused. The harness could never observe
+              // {trialNonce, captureId, boundary}, so every trial voided --
+              // the observer and the observed shared a loop.
+              // Codex's spec says "pause the capture thread"; this keeps the
+              // status loop alive so a parked capture is still visible.
+              void runCommand(cmd, say).catch((e: any) => say(`cmd err ${e?.message ?? e}`));
             }
           }
         } catch (e: any) {
