@@ -374,8 +374,9 @@ Not "needs an LLM" as a lump. Each named:
 
 | Requirement | Real blocker |
 |---|---|
-| CAP7 (pre-roll), REP-7 (pause=section break) | **A microphone.** This Mac has none (`system_profiler`: one audio device, output only). |
-| PROC1 / PROC3 / PROC5, REP-6 (AI walkthrough note), REQ-P1's content signal | **An LLM/STT key.** |
+| CAP7 (pre-roll), REP-7 (pause=section break) | **A microphone.** This Mac mini has none, and **no camera either** — confirmed by the user 2026-07-17 (`system_profiler`: one audio device, output only). Test photo/video/audio by generating a file and feeding it through the real path; never a live device, and never a synthetic DB row passed off as proof of the capture path. |
+| ~~PROC1 / PROC3 / PROC5, REP-6, REQ-P1's content signal~~ | ~~**An LLM/STT key.**~~ **NO LONGER TRUE — corrected 2026-07-17.** The user authorised the OpenAI key on 2026-07-16; PROC1/PROC3 and PROC5's *detection* half are **live and proven** against real Supabase via `services/worker/worker.mjs`. This row stayed wrong for three commits after the fact and was owed in three consecutive commit messages. **A stale blocker is worse than no note**: it is how a future session inherits a false belief and declines to build something that already works. What actually remains: **PROC5's P1.5 half** (translate / display-cache / English-pivot search) and **REP-6**. |
+| REQ-P4's content signal | **Nothing. Built 2026-07-17, deliberately WITHOUT the model** (`170_content_resolution.sql`). Listed here because the row above once claimed it needed a key. It does not: project identity is a string match against rows we already hold, and the model — asked that question — will confidently match a job that was never mentioned. See §5.5. |
 | REP-3 (daily digest) | A scheduler + notification channel. Not a share button. |
 | TL4 (video → audio + keyframes) | Native media extraction + a journaled encrypted temp asset. A subsystem. |
 | REQ-VAL8 hosting | **A static host for one file**, then `EXPO_PUBLIC_CONFIRM_BASE`. Supabase Storage **refuses to serve renderable HTML** (verified: row says `text/html`, CDN serves `text/plain`, `.json` serves correctly — a deliberate anti-phishing measure). |
@@ -394,4 +395,39 @@ tag was the gap, not the behaviour. Worth checking the others before building.
 - The kill is **simulated** (an abandoned drain), NOT a SIGKILL. A harness cannot
   report on the process that killed it. `spike/harness/kill.py` does it from outside.
 - Media integrity sampled at **25 of 100**, not exhaustive.
+- **The model invented a price. Measured, 2026-07-16.** Given *"Add three outlets in
+  unit 3B, four fifty"*, `gpt-4o-mini` at `temperature: 0` returned
+  `amount_cents: 45000` with `confidence: "high"` — inventing **$450** in direct
+  defiance of a system prompt that said to use null unless a currency figure was
+  actually spoken. The app's `parseMoney()` **refuses that same input**
+  (`{cents: null, confidence: 'none'}`) because it only accepts an explicit currency
+  marker. **The regex is safer than the model on the highest-risk field in the
+  product.** This is mandate #2's ~31% hallucination figure reproduced locally, on
+  mandate #6's field, on the first realistic input tried.
+  - **The rule it earned: the model for comprehension, a deterministic rule for
+    identity and for numbers.** Use the model for what only it can do — turning
+    rambling speech into a subject and a value. Never for a number, and never for
+    *which job this is*.
+  - Enforced in **two places on purpose**: the prompt bars amounts, and
+    `worker.mjs` hard-codes `const cents = null`. A prompt is a request; the code is
+    the guarantee. This measurement is why the prompt alone is not trusted.
+  - **REQ-P4 was then built as SQL, not an LLM call, on the strength of this** — with
+    an authorised key sitting right there. `content_resolve()` is exact, auditable,
+    testable, free, and **cannot hallucinate a jobsite**. A capture filed to the
+    wrong job is the failure **nobody goes looking for**, which is strictly worse
+    than an unresolved one sitting in a queue a human checks.
+- **REQ-P4: 12 behavioural cases pass**, including the two that would have shipped a
+  mis-file: *two matches → none* (the first cut returned the matches and *then*
+  appended an "ambiguous" row, so a caller reading the first row got a confident
+  wrong answer), and *matched_text quotes the field that actually matched* (it first
+  quoted the project **name** while `matched_on` said **address** — evidence
+  contradicting its own label, which is worse than no evidence because it looks
+  checked).
+- **Two queue bugs found by inspection, then PROVEN before being called bugs.**
+  Every photo blocked with `needs_connection: no transcript to structure` — a reason
+  that was not true, on a capture with nothing wrong with it. And a job with no
+  remaining steps was **never marked done by anyone**, because only a step calls
+  `complete_step`: it sat in `running` until the lease lapsed, was reclaimed, and
+  died at `attempts >= 5`. The second is the dangerous one — **silent**, and it hit
+  every photo *and* every resumed job whose work was already complete.
 

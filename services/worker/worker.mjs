@@ -255,6 +255,52 @@ const STEPS = {
                 'openai', 'gpt-4o-mini', ${q(transcript)}
            from public.capture c where c.id = '${job.capture_id}'`);
   },
+  /**
+   * REQ-P4 — content-assisted project detection.
+   *
+   *   "a recording that names/implies a known project resolves to it; one that fits
+   *    no project is flagged 'new project?' rather than mis-filed or lost."
+   *
+   * NO MODEL CALL, AND THAT IS THE POINT. The step right above this one exists
+   * because only a model can turn rambling speech into a subject and a value. This
+   * one asks "did he say a job we have on the books?", which is a string match
+   * against rows we already hold — and the model, asked that, will confidently
+   * match a job that was never mentioned. The whole rule is in 170's header: THE
+   * MODEL FOR COMPREHENSION, A DETERMINISTIC RULE FOR IDENTITY.
+   *
+   * IT WRITES A ROW EVEN WHEN IT MATCHES NOTHING. "The words named no job we know"
+   * is a FINDING — it is exactly the evidence REQ-P5's "new project?" prompt rests
+   * on — and it is not the same as "this step never ran". An absent row cannot
+   * tell those apart, and the second one is a bug.
+   *
+   * It never files anything. It writes a candidate + what was matched, quoted, so
+   * a human can check it in a second. GPS resolution (REQ-P1) still decides;
+   * ambiguity still goes to the Inbox (REQ-P2); a project is still never
+   * auto-created (REQ-P5).
+   */
+  resolve_project: async (job) => {
+    const transcript = sql(`select coalesce(text,'') from public.capture_transcript_current
+                             where capture_id = '${job.capture_id}'`);
+    // No words is not a failure: a photo names no job. There is nothing for a
+    // CONTENT signal to say, so it says nothing and the step is done. Blocking
+    // here would wedge every photo in the pipeline forever.
+    if (!transcript) return;
+
+    const t = transcript.replace(/'/g, "''");
+    // One statement: resolve and record atomically. The left join is what makes
+    // the no-match case a row rather than an absence — content_resolve returns
+    // ZERO rows when the words name nothing, and `from f` alone would insert
+    // nothing at all.
+    sql(`insert into public.capture_content_signal
+           (id, capture_id, owner_id, candidate_project_id, matched_on, matched_text,
+            confidence, from_transcript)
+         select 'cs-' || substr(md5(random()::text),1,10), c.id, c.owner_id,
+                f.project_id, coalesce(f.matched_on, 'no_match'), f.matched_text,
+                coalesce(f.confidence, 'none'), '${t}'
+           from public.capture c
+           left join lateral public.content_resolve(c.owner_id, '${t}') f on true
+          where c.id = '${job.capture_id}'`);
+  },
 };
 
 /** Stubs exist ONLY to prove the loop. They do no work and claim none. */
@@ -288,6 +334,13 @@ async function runOnce() {
       return { job: job.id, blocked: reason, why };
     }
   }
+  // NOTHING LEFT TO DO -> say so. complete_step is the only thing that marks a
+  // job done, and it is only called BY a step, so a job with no remaining steps
+  // was never finished by anyone: it sat in 'running' until the lease lapsed, got
+  // reclaimed, and died at attempts >= 5. Silent, and it hit every photo (which
+  // declares no steps) and every resumed job whose work was already complete.
+  // finish_job re-checks the same predicate itself, so this cannot skip work.
+  if (remaining.length === 0) sql(`select public.finish_job('${job.id}')`);
   return { job: job.id, done: remaining };
 }
 

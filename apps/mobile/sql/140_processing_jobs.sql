@@ -72,11 +72,15 @@ begin
   insert into public.processing_job (id, capture_id, owner_id, project_id, steps)
   values ('job-' || new.id, new.id, new.owner_id, new.project_id,
           case
-            -- A photo has nothing to transcribe. Listing steps a capture does not
-            -- need means a job that can never finish.
-            when new.modality = 'photo' then '["structure"]'::jsonb
-            when new.modality = 'text'  then '["detect_language","structure"]'::jsonb
-            else '["transcribe","detect_language","structure"]'::jsonb
+            -- A photo has NO WORDS. It was given '["structure"]', which needs a
+            -- transcript, so every photo blocked forever with a reason that was
+            -- not even true. A photo capture IS complete when it is stored and
+            -- stamped: it is evidence, and there is nothing to extract from it
+            -- without a vision model nobody has plugged in. Declaring no steps is
+            -- the honest description of that.
+            when new.modality = 'photo' then '[]'::jsonb
+            when new.modality = 'text'  then '["detect_language","resolve_project","structure"]'::jsonb
+            else '["transcribe","detect_language","resolve_project","structure"]'::jsonb
           end)
   on conflict (id) do nothing;
   return new;
@@ -158,6 +162,52 @@ begin
   return j;
 end $$;
 
+/**
+ * Finish a job that has NOTHING LEFT TO DO.
+ *
+ * TWO REAL BUGS, one shape. complete_step is the only thing that can mark a job
+ * done, and it is only ever called BY a step. So a job with no remaining steps is
+ * never marked done by anyone:
+ *
+ *  * A PHOTO. It was enqueued with '["structure"]', but structure needs a
+ *    transcript and a photo has no words -- so every photo blocked with
+ *    "needs_connection: no transcript to structure". PROVEN, not theorised: the
+ *    worker printed exactly that. The reason was also a LIE (nothing was wrong
+ *    with the connection), and REQ-PROC6 promises the stuck state "tells the user
+ *    why in plain language". Photos now declare NO steps, honestly.
+ *  * A RESUMED JOB whose steps all completed before it died. remaining = [], no
+ *    step runs, nothing calls complete_step, and the job sits in 'running' until
+ *    the lease lapses -- then it is reclaimed, and again, until attempts hits 5
+ *    and claim_job stops considering it FOREVER. That one is worse than the photo
+ *    because it is SILENT: the capture is fully processed and its state says
+ *    'running' until it quietly dies.
+ *
+ * IT CANNOT BE USED TO SKIP WORK. The guard is the same predicate complete_step
+ * uses -- done only when every declared step is already in completed_steps. Given
+ * a job with work left, this does nothing at all. A "mark it done" that trusts
+ * its caller is how work gets claimed that never happened.
+ */
+create or replace function public.finish_job(p_job text)
+returns public.processing_job language plpgsql security definer set search_path = public as $$
+declare j public.processing_job;
+begin
+  update public.processing_job
+     set state = 'done', updated_at = now(), leased_until = null
+   where id = p_job
+     and (select bool_and(s in (select jsonb_array_elements_text(completed_steps)))
+            from jsonb_array_elements_text(steps) s)
+         -- bool_and over ZERO rows is NULL, not true: a job that declares no steps
+         -- (a photo) has nothing outstanding by definition. Without this coalesce
+         -- the photo fix does not fix the photo.
+         is not false
+   returning * into j;
+  if j.id is null then return null; end if;   -- work outstanding: refuse, silently.
+
+  update public.capture_op_state set processing_state = 'processed', updated_at = now()
+   where capture_id = j.capture_id;
+  return j;
+end $$;
+
 /** Park it with a REASON a person can act on (REQ-PROC6). */
 create or replace function public.block_job(p_job text, p_reason text, p_error text default null)
 returns void language plpgsql security definer set search_path = public as $$
@@ -168,8 +218,8 @@ begin
    where id = p_job;
 end $$;
 
-revoke all on function public.claim_job, public.complete_step, public.block_job
-  from public, anon, authenticated;
+revoke all on function public.claim_job, public.complete_step, public.block_job,
+  public.finish_job from public, anon, authenticated;
 
 -- What is waiting, and why. The office's Monday query, and REQ-PROC6's source.
 create or replace view public.processing_backlog as
