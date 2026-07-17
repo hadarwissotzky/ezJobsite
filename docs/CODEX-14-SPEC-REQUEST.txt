@@ -1,0 +1,45 @@
+IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. Ignore them completely. Do NOT modify agents/openai.yaml. Stay focused on the repository code and docs only.
+
+This is NOT a review. Do not produce findings. You are the architect now, by your own decision in docs/CODEX-13-ARCHITECTURE-DECISION.md. I am the implementer. Give me the spec I need to build.
+
+## The agreement (yours, from #13)
+
+You own: capture durability architecture, its minimal state machine, the commitment authority, recovery behavior, and the executable acceptance harness (its oracle).
+I own: bounded implementation against that architecture. I do not redefine the safety model and I do not declare the gate closed.
+
+You already cut nine items and named what to retain: finalized and hashed media, durable atomic installation, a durable app-owned commit plus outbox, acknowledgment only after that commit, idempotent server submission, and fault testing. You chose the commitment record: an app-owned append-only `CaptureCommit` plus outbox, local-only, in the same SQLite database, with PowerSync rows as replaceable projections.
+
+You said the next action is: build the fault harness around that minimal architecture, not another spec document.
+
+## What exists to build on (read these)
+
+- `spike/app-src/App.tsx`, `spike/app-src/connector.ts`, `spike/app-src/AppSchema.ts` — a working RN/Expo + PowerSync + op-sqlite client. The live app is a symlink outside the repo; these are the committed copies. You called connector.ts live-buggy (separate Supabase requests for Capture and Attachment, discard-to-unblock).
+- `spike/harness/common.py`, `q1.py`, `q2.py` — a working Python harness that drives an iOS simulator: reads a status.json the app writes, sends commands via a command.json file, proves process restart via a bootId, asserts against Postgres over psql. It ran 20 trials of a stalled-commit fault. Reuse this machinery.
+- `spike/sql/001_schema.sql` — the throwaway Postgres schema.
+- Supabase + PowerSync Cloud are live and wired (ADR-2 adopted).
+- `docs/DURABILITY-DESIGN-v1.md` §1.0 has the durability profile (synchronous=FULL, F_FULLFSYNC, runtime pragma assertion).
+
+## Give me exactly this, and nothing more
+
+1. **The `CaptureCommit` + outbox schema.** Local-only SQLite tables. Exact columns and types. Say explicitly which table is the commitment authority and what single row/field means "this capture is committed". Say what PowerSync must NOT be able to touch.
+
+2. **The minimal state machine.** The states you actually keep after your cuts (you removed generational manifests, fork quarantine, per-chunk digest grammar, etc). For each state: what is durably written, and what the UI shows. Name the ONE transition after which "saved" may be shown.
+
+3. **The commit sequence.** Ordered steps, with the exact barrier at each (fsync vs F_FULLFSYNC vs SQLite transaction). Mark the single commit point.
+
+4. **The recovery rules.** After your cuts this should be small. For each state the app can wake up in: what recovery does. Keep it to the cases that can actually happen given what you kept.
+
+5. **THE HARNESS ORACLE — the part I must not invent.** For each kill boundary, the exact assertion. Specifically:
+   - The kill boundaries you want (name them).
+   - For each: what must be true afterward, stated so it can FAIL. Not "capture is recoverable" but the concrete check.
+   - The acceptance predicate for "every acknowledged capture remains locally discoverable and exportable" — what query/operation proves it.
+   - How to simulate PowerSync reversion (you flagged this; I need your definition of the fault, not my guess).
+   - How to simulate upload rejection.
+   - What makes a trial VOID vs FAIL.
+   - The predeclared trial count, and say plainly what it does and does not bound. (Review #9 rejected an earlier harness for treating a mechanism check as a rate bound.)
+
+6. **What this harness explicitly does NOT prove.** You already said process-kill does not prove sudden-power-loss durability. Name every other limit so I do not overclaim it, because I demonstrably will otherwise.
+
+Constraints: solo dev, throwaway spike infrastructure, iOS simulator + the existing Python harness, no physical device available. If any item above cannot be tested on a simulator, say so and say what it needs instead — do not silently include it.
+
+Be concrete and minimal. Column names, state names, exact assertions. No prose about why. I am going to implement this literally.
