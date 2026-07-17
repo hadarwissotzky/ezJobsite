@@ -20,6 +20,9 @@ import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } fr
 import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
+import { createProject, ensureProjectSchema, ensureResolutionSchema, inboxCount,
+         INBOX_ID, listProjects, resolveProject, touchProject,
+         type Project } from './src/projects';
 import { canRecordAudio, consentBasisText, defaultConsentFor, ensureConsentSchema,
          getCellularConsent, getRecordingConsent, setCellularConsent, setRecordingConsent,
          type RecordingConsent } from './src/consent';
@@ -41,7 +44,10 @@ export const db = new PowerSyncDatabase({
 });
 
 const connector = new SupabaseConnector();
-const PROJECT_ID = 'proj-bakeoff-1';
+// The job the app is currently showing. Was a hardcoded constant -- every capture
+// in this app's history was filed to that string. It is now STATE, seeded from the
+// last job used, so the app opens where the contractor left off.
+const LAST_PROJECT_KEY = 'last_project_id';
 const OWNER = 'owner-local';
 
 /**
@@ -108,6 +114,14 @@ export default function App() {
   const [cellOn, setCellOn] = React.useState(false);
   const [setup, setSetup] = React.useState<null | { jurisdiction: string }>(null);
 
+  // REQ-SET1/EVID2. Null until the first job exists -- a new user has no jobs, and
+  // pretending otherwise is what the hardcoded constant was doing.
+  const [projectId, setProjectId] = React.useState<string>(INBOX_ID);
+  const [projects, setProjects] = React.useState<Project[]>([]);
+  const [picker, setPicker] = React.useState(false);
+  const [filed, setFiled] = React.useState<string | null>(null);
+  const [newJob, setNewJob] = React.useState<null | { name: string; address: string }>(null);
+
   /**
    * REQ-CAP5 + mandate #1: "saved" is confirmed AUDIBLY and visually; failure is
    * loud, never silent.
@@ -150,11 +164,16 @@ export default function App() {
       // must count both. One green tick that ignores half the queue is a lie.
       const ds = await decisionSyncStatus(db);
       setDsync(ds);
-      setConsent(await getRecordingConsent(db, PROJECT_ID));
+      const ps = await listProjects(db);
+      setProjects(ps);
+      // Open where he left off. A contractor who closes the app on the Elm St job
+      // and reopens it in the same truck should not have to find it again.
+      setProjectId((cur) => (cur === INBOX_ID && ps.length ? ps[0].id : cur));
+      setConsent(await getRecordingConsent(db, projectId));
       setCellOn(await getCellularConsent(db));
       setDelivery({ pending: (s?.pending ?? 0) + ds.pending, parked: (s?.parked ?? 0) + ds.parked });
-      setDecisions(await listDecisions(db, PROJECT_ID));
-      setCoRows(await ledger(db, PROJECT_ID));
+      setDecisions(await listDecisions(db, projectId));
+      setCoRows(await ledger(db, projectId));
     } catch { /* pre-init */ }
   }, []);
 
@@ -167,6 +186,8 @@ export default function App() {
       await ensureAppOwnedSchema(db);
       await ensureDecisionSchema(db);
       await ensureChangeOrderSchema(db);
+      await ensureProjectSchema(db, OWNER);
+      await ensureResolutionSchema(db);
       await ensureConsentSchema(db);
       await initFeedback();
 
@@ -218,7 +239,7 @@ export default function App() {
           if (cr.attempted) console.log('drain change orders:', JSON.stringify(cr));
           // Pull anything this device does not have: a reinstall, a second phone,
           // or a CO authored before the device became the author.
-          const hy = await hydrateChangeOrders(db, connector.client, PROJECT_ID, data.user.id);
+          const hy = await hydrateChangeOrders(db, connector.client, projectId, data.user.id);
           if (hy.pulled || hy.statusUpdated) { console.log('hydrate:', JSON.stringify(hy)); await refresh(); }
           if (r.uploaded || r.alreadyApplied || r.parked ||
               dr.uploaded || dr.alreadyApplied || dr.parked ||
@@ -250,7 +271,7 @@ export default function App() {
       // is the one thing this path may never do. Checked BEFORE the mic opens: we
       // must never record first and ask later, because by then the recording
       // exists.
-      const may = await canRecordAudio(db, PROJECT_ID);
+      const may = await canRecordAudio(db, projectId);
       if (!may.allowed) { setUi({ k: 'refused', why: may.why }); return; }
       if (!(await requestMic())) { setUi({ k: 'refused', why: 'microphone permission denied' }); return; }
       await recorder.prepareToRecordAsync();
@@ -284,6 +305,23 @@ export default function App() {
    * happens in that time instead of after it. Mandate #3's touch budget is a hard
    * constraint, and "wait 3 seconds for a satellite" would have spent it.
    */
+  /**
+   * MANDATE #8: the capture goes where the GPS says, not where the screen says.
+   *
+   * The visible job is what the contractor is LOOKING at; the fix is where he is
+   * STANDING. Those differ constantly -- he opened the app on yesterday's job in
+   * the truck and is now in a different kitchen. Filing by the screen would
+   * silently mis-file, and a wrong filing is the failure nobody goes looking for.
+   * Resolution decides; the screen never does.
+   */
+  const resolveFor = async (stamp: { lat: number | null; lng: number | null }) => {
+    const fix = stamp.lat != null && stamp.lng != null
+      ? { lat: stamp.lat, lng: stamp.lng } : null;
+    const r = await resolveProject(db, fix);
+    if (r.projectId !== INBOX_ID) await touchProject(db, r.projectId);
+    return r;
+  };
+
   const onMedia = async (produce: () => Promise<any>, label: string) => {
     if (gate) return;
     // MANDATE #9's permission, asked HERE and not on cold start: the user has just
@@ -303,9 +341,16 @@ export default function App() {
     }
     setUi({ k: 'saving' });
     try {
+      const stamp = await fix;
+      const res = await resolveFor(stamp);
       const r = await performCapture(db, {
-        ownerId: OWNER, projectId: PROJECT_ID, input: picked.input, stamp: await fix,
+        ownerId: OWNER, projectId: res.projectId, input: picked.input, stamp,
       });
+      if (r.ok && res.confidence !== 'high') {
+        // REQ-PROC6/P2: say where it went and why, in words. Silence here is how a
+        // capture ends up somewhere nobody looks.
+        setFiled(res.why);
+      }
       if (r.ok) setUi({ k: 'saved', id: r.captureId });
       else setUi({ k: 'refused', why: r.reason });
     } catch (e: any) {
@@ -319,10 +364,12 @@ export default function App() {
     if (gate || !note.trim()) return;
     setUi({ k: 'saving' });
     try {
+      const stamp = await stampNow();
+      const res = await resolveFor(stamp);
       const r = await performCapture(db, {
-        ownerId: OWNER, projectId: PROJECT_ID, input: textCapture(note),
-        stamp: await stampNow(),
+        ownerId: OWNER, projectId: res.projectId, input: textCapture(note), stamp,
       });
+      if (r.ok && res.confidence !== 'high') setFiled(res.why);
       if (r.ok) {
         setUi({ k: 'saved', id: r.captureId });
         // Capture is SAVED already. The card is about what it MEANS, and it can
@@ -350,14 +397,92 @@ export default function App() {
   // banner, never from the record button. The strict default is pre-selected so the
   // common case is one tap, which is what "≤ a few actions" has to mean for someone
   // who does not think in software.
+  // REQ-SET1: create a job, in the field, in ≤ a few actions. Address optional --
+  // a name is enough to start, and demanding a full address from a man standing in
+  // the room is how you get "asdf".
+  if (newJob) {
+    return (
+      <View style={s.c}>
+        <Text style={s.h}>EZjobsite</Text>
+        <View style={s.card}>
+          <Text style={s.cardH}>New job</Text>
+          <TextInput style={s.moneyInput} value={newJob.name} autoFocus
+            placeholder="What do you call it?" placeholderTextColor="#6e7681"
+            onChangeText={(v) => setNewJob({ ...newJob, name: v })} />
+          <TextInput style={s.moneyInput} value={newJob.address}
+            placeholder="Address (optional)" placeholderTextColor="#6e7681"
+            onChangeText={(v) => setNewJob({ ...newJob, address: v })} />
+          <Text style={s.cardNote}>
+            We’ll pin this job to where you are now, so captures here file
+            themselves. You can add the address later.
+          </Text>
+          <Pressable style={[s.confirmWide, !newJob.name.trim() && s.btnOff]}
+            disabled={!newJob.name.trim()}
+            onPress={async () => {
+              // Pin it to HERE. That is what makes resolution work later, and it
+              // costs the user nothing: he is standing on the job as he creates it.
+              const st = await stampNow();
+              const r = await createProject(db, {
+                ownerId: OWNER, name: newJob.name, address: newJob.address || null,
+                lat: st.lat, lng: st.lng,
+              });
+              if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return; }
+              setProjectId(r.id);
+              setProjects(await listProjects(db));
+              setNewJob(null); setPicker(false);
+              await refresh();
+            }}>
+            <Text style={s.confirmT}>CREATE JOB</Text>
+          </Pressable>
+          <Pressable style={s.later} onPress={() => setNewJob(null)}>
+            <Text style={s.laterT}>Cancel</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // REQ-EVID2: "found in ≤2 actions". Tap the job name, tap the job.
+  if (picker) {
+    return (
+      <View style={s.c}>
+        <Text style={s.h}>EZjobsite</Text>
+        <View style={s.card}>
+          <Text style={s.cardH}>Which job?</Text>
+          {projects.map((p) => (
+            <Pressable key={p.id} style={s.jobRow} onPress={async () => {
+              setProjectId(p.id); await touchProject(db, p.id);
+              setProjects(await listProjects(db)); setPicker(false); await refresh();
+            }}>
+              <Text style={p.id === projectId ? s.jobNameOn : s.jobName}>{p.name}</Text>
+              <Text style={s.jobMeta}>
+                {p.address ?? 'no address'}
+                {p.lat != null ? ' · pinned' : ' · not pinned — captures here won’t file themselves'}
+              </Text>
+            </Pressable>
+          ))}
+          {!projects.length && (
+            <Text style={s.cardNote}>No jobs yet. Create one — it takes a name.</Text>
+          )}
+          <Pressable style={s.confirmWide} onPress={() => setNewJob({ name: '', address: '' })}>
+            <Text style={s.confirmT}>+ NEW JOB</Text>
+          </Pressable>
+          <Pressable style={s.later} onPress={() => setPicker(false)}>
+            <Text style={s.laterT}>Close</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   if (setup) {
     const suggested = defaultConsentFor(setup.jurisdiction || null);
     const choose = async (c: Exclude<RecordingConsent, null>) => {
       await setRecordingConsent(db, {
-        projectId: PROJECT_ID, consent: c,
+        projectId: projectId, consent: c,
         jurisdiction: setup.jurisdiction || null, decidedBy: 'Owner',
       });
-      setConsent(await getRecordingConsent(db, PROJECT_ID));
+      setConsent(await getRecordingConsent(db, projectId));
       setSetup(null);
     };
     return (
@@ -470,7 +595,7 @@ export default function App() {
                   disabled={sign.legalName.trim().length < 2}
                   onPress={async () => {
                     const r = await signApproval(connector.client, {
-                      changeOrderId: sign.coId, projectId: PROJECT_ID, shownContent: sign.shown,
+                      changeOrderId: sign.coId, projectId: projectId, shownContent: sign.shown,
                       signerLabel: 'Owner', legalName: sign.legalName, phoneE164: sign.phone,
                       otpVerifiedAt: sign.verifiedAt!, action: 'approved', userAgent: 'EZjobsite iOS',
                     });
@@ -486,7 +611,7 @@ export default function App() {
                 </Pressable>
                 <Pressable style={s.later} onPress={async () => {
                   await signApproval(connector.client, {
-                    changeOrderId: sign.coId, projectId: PROJECT_ID, shownContent: sign.shown,
+                    changeOrderId: sign.coId, projectId: projectId, shownContent: sign.shown,
                     signerLabel: 'Owner', legalName: sign.legalName || 'declined',
                     phoneE164: sign.phone, otpVerifiedAt: sign.verifiedAt!,
                     action: 'declined', userAgent: 'EZjobsite iOS',
@@ -516,6 +641,22 @@ export default function App() {
   return (
     <View style={s.c}>
       <Text style={s.h}>EZjobsite</Text>
+
+      {/* Which job you're on, and one tap to change it. A capture tool that does
+          not tell you where things are going is asking for trust it has not
+          earned. */}
+      <Pressable style={s.jobBar} onPress={() => setPicker(true)}>
+        <Text style={s.jobBarT}>
+          {projects.find((p) => p.id === projectId)?.name ?? 'No job — tap to pick'}
+        </Text>
+        <Text style={s.jobBarS}>tap to change</Text>
+      </Pressable>
+
+      {filed && (
+        <Pressable style={s.filed} onPress={() => setFiled(null)}>
+          <Text style={s.filedT}>{filed}</Text>
+        </Pressable>
+      )}
 
       {!gate && !initError && consent.consent === null && (
         <Pressable style={s.consentBanner} onPress={() => setSetup({ jurisdiction: '' })}>
@@ -607,7 +748,7 @@ export default function App() {
           <View style={s.cardBtns}>
             <Pressable style={s.confirm} onPress={async () => {
               const res = await recordDecision(db, {
-                projectId: PROJECT_ID, ownerId: OWNER, subject: card.subject, value: card.value,
+                projectId: projectId, ownerId: OWNER, subject: card.subject, value: card.value,
                 captureId: card.captureId, directedBy: card.directedBy, scopeLevel: card.scope,
               });
               setCard(null);
@@ -646,7 +787,7 @@ export default function App() {
               </Text>
               <Pressable style={s.ask} onPress={async () => {
                 const r = await sendForConfirmation(connector.client, {
-                  kind: 'confirm', decisionId: d.id, projectId: PROJECT_ID,
+                  kind: 'confirm', decisionId: d.id, projectId: projectId,
                   projectName: 'Bakeoff Project', subject: d.subject, value: d.current_value,
                   directedBy: d.directed_by ?? 'Owner', counterparty: d.directed_by ?? 'Owner',
                   channel: 'link', whenMs: d.last_changed_ms,
@@ -789,7 +930,7 @@ export default function App() {
                   if (!data?.user) { setUi({k:'refused',why:'not signed in'}); return; }
                   const r = await createChangeOrder(db, {
                     id: `co-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`,
-                    decisionId: priced.decisionId, projectId: PROJECT_ID, ownerId: data.user.id,
+                    decisionId: priced.decisionId, projectId: projectId, ownerId: data.user.id,
                     scope: priced.scope, amountCents: cents!, nteCents: nte,
                     whoDirected: priced.whoDirected, lineItems: lines,
                     // The read-back happened HERE. This timestamp is the proof,
@@ -819,7 +960,7 @@ export default function App() {
           <Text style={s.sub}>Change orders ({coRows.length})</Text>
         <Pressable style={s.bundleBtn} onPress={async () => {
           setBundling('Assembling…');
-          const r = await buildDisputeBundle(connector.client, PROJECT_ID);
+          const r = await buildDisputeBundle(connector.client, projectId);
           if (!r.ok) { setBundling(`Could not assemble: ${r.reason}`); return; }
           const s2 = await shareBundle(r.htmlPath);
           setBundling(s2.ok
@@ -980,6 +1121,18 @@ const s = StyleSheet.create({
   money: { backgroundColor: '#1c1400', borderColor: '#9e6a03', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
   moneyScope: { color: '#c9d1d9', fontSize: 14, marginBottom: 10 },
   bigMoney: { color: '#f0b72f', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
+  jobBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
+  jobBarT: { color: '#e6edf3', fontWeight: '700', fontSize: 15, flex: 1 },
+  jobBarS: { color: '#6e7681', fontSize: 11 },
+  jobRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#21262d' },
+  jobName: { color: '#e6edf3', fontSize: 16 },
+  jobNameOn: { color: '#7ee787', fontSize: 16, fontWeight: '700' },
+  jobMeta: { color: '#6e7681', fontSize: 12, marginTop: 2 },
+  filed: { backgroundColor: '#132a3a', borderColor: '#1f5b82', borderWidth: 1,
+    borderRadius: 8, padding: 10, marginBottom: 12 },
+  filedT: { color: '#79c0ff', fontSize: 13 },
   consentBanner: { backgroundColor: '#2d2410', borderColor: '#7d6320', borderWidth: 1,
     borderRadius: 10, padding: 12, marginBottom: 14 },
   consentT: { color: '#f0b72f', fontWeight: '700', fontSize: 14, marginBottom: 3 },
