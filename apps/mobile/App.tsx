@@ -20,7 +20,7 @@ import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } fr
 import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
-import { createProject, ensureProjectSchema, ensureResolutionSchema, inboxCount,
+import { createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
          INBOX_ID, listProjects, resolveProject, touchProject,
          type Project } from './src/projects';
 import { canRecordAudio, consentBasisText, defaultConsentFor, ensureConsentSchema,
@@ -120,6 +120,9 @@ export default function App() {
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [picker, setPicker] = React.useState(false);
   const [filed, setFiled] = React.useState<string | null>(null);
+  const [inbox, setInbox] = React.useState(0);
+  const [inboxOpen, setInboxOpen] = React.useState(false);
+  const [inboxRows, setInboxRows] = React.useState<any[]>([]);
   const [newJob, setNewJob] = React.useState<null | { name: string; address: string }>(null);
 
   /**
@@ -158,7 +161,9 @@ export default function App() {
 
   const refresh = React.useCallback(async () => {
     try {
-      setSaved(await listCommittedCaptures(db));
+      // REQ-EVID2: this job's captures, not every capture on the phone.
+      setSaved(await listCommittedCaptures(db, projectId));
+      setInbox(await inboxCount(db));
       const s = (await outboxStatus(db))[0];
       // Captures and decisions ride independent queues, so "not backed up yet"
       // must count both. One green tick that ignores half the queue is a lie.
@@ -409,6 +414,61 @@ export default function App() {
   // REQ-SET1: create a job, in the field, in ≤ a few actions. Address optional --
   // a name is enough to start, and demanding a full address from a man standing in
   // the room is how you get "asdf".
+  /**
+   * REQ-P2: the secondary workflow. "Never lost, never silently mis-filed;
+   * resolves in ≤1 action."
+   *
+   * One tap per capture: pick the job, it is filed. No confirm step -- filing is
+   * reversible (the override can be changed) and it is the LOW-stakes end of this
+   * product. Mandate #2's confirm-don't-automate is about price and commitment;
+   * spending a tap to confirm where a photo goes would be ceremony, and ceremony
+   * is what stops people clearing a queue at all.
+   */
+  if (inboxOpen) {
+    return (
+      <View style={s.c}>
+        <Text style={s.h}>EZjobsite</Text>
+        <View style={s.card}>
+          <Text style={s.cardH}>Needs a job ({inboxRows.length})</Text>
+          <Text style={s.cardNote}>
+            These saved fine — we just couldn’t tell which job. Tap a job to file it.
+          </Text>
+          {inboxRows.map((c2) => (
+            <View key={c2.capture_id} style={s.inboxItem}>
+              <Text style={s.inboxWhat}>
+                {c2.modality} · {(c2.media_bytes / 1024).toFixed(1)} KB · {describeStamp(c2)}
+              </Text>
+              <View style={s.inboxJobs}>
+                {projects.filter((p2) => p2.id !== INBOX_ID).map((p2) => (
+                  <Pressable key={p2.id} style={s.inboxJob} onPress={async () => {
+                    await fileCapture(db, { captureId: c2.capture_id, projectId: p2.id, by: 'Owner' });
+                    const left = inboxRows.filter((x) => x.capture_id !== c2.capture_id);
+                    setInboxRows(left);
+                    setInbox(await inboxCount(db));
+                    if (!left.length) setInboxOpen(false);
+                    await refresh();
+                  }}>
+                    <Text style={s.inboxJobT}>{p2.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ))}
+          {!projects.filter((p2) => p2.id !== INBOX_ID).length && (
+            <Text style={s.warn}>No jobs to file into yet. Create one first.</Text>
+          )}
+          <Pressable style={s.later} onPress={() => setInboxOpen(false)}>
+            <Text style={s.laterT}>Close</Text>
+          </Pressable>
+          <Text style={s.cardNote}>
+            Filing doesn’t rewrite the capture — the original stays exactly as it was
+            recorded, and your choice is kept beside it.
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   if (newJob) {
     return (
       <View style={s.c}>
@@ -660,6 +720,18 @@ export default function App() {
         </Text>
         <Text style={s.jobBarS}>tap to change</Text>
       </Pressable>
+
+      {inbox > 0 && (
+        <Pressable style={s.inboxBanner} onPress={async () => {
+          setInboxRows(await listCommittedCaptures(db, INBOX_ID));
+          setInboxOpen(true);
+        }}>
+          <Text style={s.inboxBannerT}>
+            {inbox} capture{inbox > 1 ? 's' : ''} need{inbox > 1 ? '' : 's'} a job →
+          </Text>
+          <Text style={s.inboxBannerS}>Saved and safe — just not filed yet</Text>
+        </Pressable>
+      )}
 
       {filed && (
         <Pressable style={s.filed} onPress={() => setFiled(null)}>
@@ -1130,6 +1202,16 @@ const s = StyleSheet.create({
   money: { backgroundColor: '#1c1400', borderColor: '#9e6a03', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
   moneyScope: { color: '#c9d1d9', fontSize: 14, marginBottom: 10 },
   bigMoney: { color: '#f0b72f', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
+  inboxBanner: { backgroundColor: '#1c2b1c', borderColor: '#2ea043', borderWidth: 1,
+    borderRadius: 10, padding: 12, marginBottom: 12 },
+  inboxBannerT: { color: '#7ee787', fontWeight: '700', fontSize: 14 },
+  inboxBannerS: { color: '#5c9c5c', fontSize: 12, marginTop: 2 },
+  inboxItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#21262d' },
+  inboxWhat: { color: '#8b949e', fontSize: 12, marginBottom: 6 },
+  inboxJobs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  inboxJob: { backgroundColor: '#21262d', borderRadius: 8, paddingHorizontal: 12,
+    paddingVertical: 10, borderWidth: 1, borderColor: '#30363d' },
+  inboxJobT: { color: '#e6edf3', fontSize: 13, fontWeight: '600' },
   jobBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
     borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },

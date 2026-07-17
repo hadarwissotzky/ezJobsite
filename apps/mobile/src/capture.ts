@@ -392,21 +392,38 @@ export async function performCapture(
 // ---------------------------------------------------------------- read path
 
 /** Spec §5. Resolves EXCLUSIVELY through capture_commit. */
-export async function listCommittedCaptures(db: AbstractPowerSyncDatabase) {
+/**
+ * REQ-EVID2: "a capture is findable BY JOB and recency".
+ *
+ * This listed EVERY capture on the device regardless of job -- fine when there was
+ * one hardcoded project, wrong the moment projects became real: a contractor on the
+ * Elm St job would see the Oak Ave photos and have no way to tell which was which.
+ *
+ * Reads through capture_resolution: if a human filed an unresolved capture, that
+ * override decides where it shows. The original project_id stays untouched --
+ * capture_commit is append-only, and the device's belief at capture time is a fact
+ * we keep, not a mistake we erase.
+ */
+export async function listCommittedCaptures(db: AbstractPowerSyncDatabase, projectId?: string) {
   return db.getAll<{ capture_id: string; media_relpath: string; media_sha256: string;
                      media_bytes: number; modality: string; media_mime_type: string;
                      gps_lat: number | null; gps_lng: number | null; stamp_status: string | null }>(
-    `SELECT capture_id, media_relpath, media_sha256, media_bytes, media_mime_type,
-            gps_lat, gps_lng, stamp_status,
+    `SELECT c.capture_id, c.media_relpath, c.media_sha256, c.media_bytes, c.media_mime_type,
+            c.gps_lat, c.gps_lng, c.stamp_status,
             -- pre-migration rows have no modality and CANNOT be backfilled
             -- (append-only). Derive for display; never invent it in the record.
-            COALESCE(modality,
-              CASE WHEN media_mime_type LIKE 'text/%'  THEN 'text'
-                   WHEN media_mime_type LIKE 'audio/%' THEN 'voice'
-                   WHEN media_mime_type LIKE 'image/%' THEN 'photo'
-                   WHEN media_mime_type LIKE 'video/%' THEN 'video'
+            COALESCE(c.modality,
+              CASE WHEN c.media_mime_type LIKE 'text/%'  THEN 'text'
+                   WHEN c.media_mime_type LIKE 'audio/%' THEN 'voice'
+                   WHEN c.media_mime_type LIKE 'image/%' THEN 'photo'
+                   WHEN c.media_mime_type LIKE 'video/%' THEN 'video'
                    ELSE 'unknown' END) AS modality
-     FROM capture_commit ORDER BY committed_at_ms`
+     FROM capture_commit c
+     WHERE ? IS NULL OR COALESCE(
+             (SELECT r.project_id FROM capture_resolution r WHERE r.capture_id = c.capture_id),
+             c.project_id) = ?
+     ORDER BY committed_at_ms DESC`,
+    [projectId ?? null, projectId ?? null]
   );
 }
 

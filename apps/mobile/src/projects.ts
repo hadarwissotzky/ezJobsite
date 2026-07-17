@@ -214,8 +214,19 @@ export async function resolveProject(
 
 /** REQ-P2: the queue. Never lost, resolvable in one action. */
 export async function inboxCount(db: AbstractPowerSyncDatabase): Promise<number> {
+  // MUST read through the override, exactly as listCommittedCaptures does.
+  //
+  // This counted capture_commit.project_id directly. Because capture_commit is
+  // APPEND-ONLY, filing a capture never changes that column -- so a capture the
+  // user had just filed still counted as unresolved, and THE BANNER COULD NEVER
+  // REACH ZERO. A queue you can empty but that always says it is full is worse
+  // than no queue: it trains the user to ignore it. Caught by the proof reporting
+  // inbox_before: 2 -> inbox_after: 2 after a successful file.
   const r = (await db.getAll<{ n: number }>(
-    `SELECT count(*) AS n FROM capture_commit WHERE project_id = ?`, [INBOX_ID]))[0];
+    `SELECT count(*) AS n FROM capture_commit c
+      WHERE COALESCE(
+              (SELECT r.project_id FROM capture_resolution r WHERE r.capture_id = c.capture_id),
+              c.project_id) = ?`, [INBOX_ID]))[0];
   return r?.n ?? 0;
 }
 
