@@ -22,7 +22,8 @@ import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
 import { sendForConfirmation } from './src/confirmations';
-import { centsFromInput, createChangeOrder, ledger, money, parseMoney } from './src/changeorder';
+import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
+         ensureChangeOrderSchema, hydrateChangeOrders, ledger, money, parseMoney } from './src/changeorder';
 import { issueOtp, newOtpCode, renderApproval, signApproval, verifyOtp } from './src/signing';
 
 export const db = new PowerSyncDatabase({
@@ -107,7 +108,7 @@ export default function App() {
       setDsync(ds);
       setDelivery({ pending: (s?.pending ?? 0) + ds.pending, parked: (s?.parked ?? 0) + ds.parked });
       setDecisions(await listDecisions(db, PROJECT_ID));
-      try { setCoRows(await ledger(connector.client, PROJECT_ID)); } catch { /* offline */ }
+      setCoRows(await ledger(db, PROJECT_ID));
     } catch { /* pre-init */ }
   }, []);
 
@@ -119,6 +120,7 @@ export default function App() {
       await applyDurabilityProfile(db);
       await ensureAppOwnedSchema(db);
       await ensureDecisionSchema(db);
+      await ensureChangeOrderSchema(db);
 
       // THE GATE. If the write connection cannot promise durability we do not
       // arm the recorder at all. Refusing loudly beats saying "saved" and lying.
@@ -135,7 +137,14 @@ export default function App() {
 
       try {
         await connector.login('device1@example.com', 'bakeoff-spike-pw-2026');
-        db.connect(connector);
+        // connect() is fire-and-forget by design, so its rejection lands nowhere
+        // and surfaces as an unhandled "TypeError: Network request failed". Being
+        // offline is the NORMAL case for this product, not an error -- a red
+        // banner on a jobsite with no signal is the tool blaming the user for the
+        // conditions it was built for. PowerSync retries internally; we note it
+        // and carry on.
+        db.connect(connector).catch((e) =>
+          console.log('sync will connect when there is signal', e?.message ?? e));
       } catch (e) {
         // Offline is normal and is NOT an error. Capture must work regardless.
         console.log('not signed in / offline — capture still works', e);
@@ -157,8 +166,15 @@ export default function App() {
           // and a stuck photo must never hold back the record of what was decided.
           const dr = await drainDecisionOutbox(db, connector.client, data.user.id);
           if (dr.attempted) console.log('drain decisions:', JSON.stringify(dr));
+          const cr = await drainChangeOrderOutbox(db, connector.client, data.user.id);
+          if (cr.attempted) console.log('drain change orders:', JSON.stringify(cr));
+          // Pull anything this device does not have: a reinstall, a second phone,
+          // or a CO authored before the device became the author.
+          const hy = await hydrateChangeOrders(db, connector.client, PROJECT_ID, data.user.id);
+          if (hy.pulled || hy.statusUpdated) { console.log('hydrate:', JSON.stringify(hy)); await refresh(); }
           if (r.uploaded || r.alreadyApplied || r.parked ||
-              dr.uploaded || dr.alreadyApplied || dr.parked) await refresh();
+              dr.uploaded || dr.alreadyApplied || dr.parked ||
+              cr.uploaded || cr.alreadyApplied || cr.parked) await refresh();
         } catch (e: any) { /* offline is normal; backoff already recorded */ }
       };
       drain();
@@ -303,8 +319,13 @@ export default function App() {
                       signerLabel: 'Owner', legalName: sign.legalName, phoneE164: sign.phone,
                       otpVerifiedAt: sign.verifiedAt!, action: 'approved', userAgent: 'EZjobsite iOS',
                     });
-                    if (r.ok) { setSign(null); await refresh(); }
-                    else setSign({ ...sign, err: r.reason });
+                    if (r.ok) {
+                      // The signature is authored on the server (it needs the OTP
+                      // check), so the local row must be told the outcome or the
+                      // ledger would keep calling a signed CO a draft.
+                      await applyLocalApproval(db, sign.coId, 'approved', sign.legalName);
+                      setSign(null); await refresh();
+                    } else setSign({ ...sign, err: r.reason });
                   }}>
                   <Text style={s.confirmT}>SIGN & APPROVE</Text>
                 </Pressable>
@@ -315,6 +336,7 @@ export default function App() {
                     phoneE164: sign.phone, otpVerifiedAt: sign.verifiedAt!,
                     action: 'declined', userAgent: 'EZjobsite iOS',
                   });
+                  await applyLocalApproval(db, sign.coId, 'declined', sign.legalName);
                   setSign(null); await refresh();
                 }}>
                   <Text style={s.laterT}>Decline</Text>
@@ -517,7 +539,7 @@ export default function App() {
                 onPress={async () => {
                   const { data } = await connector.client.auth.getUser();
                   if (!data?.user) { setUi({k:'refused',why:'not signed in'}); return; }
-                  const r = await createChangeOrder(connector.client, {
+                  const r = await createChangeOrder(db, {
                     id: `co-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`,
                     decisionId: priced.decisionId, projectId: PROJECT_ID, ownerId: data.user.id,
                     scope: priced.scope, amountCents: cents!, nteCents: nte,

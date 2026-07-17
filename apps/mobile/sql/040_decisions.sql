@@ -107,7 +107,13 @@ create or replace function public.ingest_decision_v1(
 ) returns jsonb language plpgsql security definer set search_path = public as $$
 declare prior text;
 begin
-  if p_owner_id <> auth.uid() then
+  -- NULL-SAFE ON PURPOSE. `p_owner_id <> auth.uid()` is a TRAP: when auth.uid()
+  -- is NULL the comparison yields NULL, the IF never fires, and the ownership
+  -- check SILENTLY PASSES. Proven, not theorised -- a call with a bogus owner and
+  -- no JWT sailed straight past this line into the validation below. `is distinct
+  -- from` is null-safe, and auth.uid() is checked explicitly so a missing JWT is
+  -- refused loudly instead of being treated as "no objection".
+  if auth.uid() is null or p_owner_id is distinct from auth.uid() then
     raise exception 'owner mismatch' using errcode = '42501';
   end if;
 

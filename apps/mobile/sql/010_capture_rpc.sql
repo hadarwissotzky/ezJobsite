@@ -53,7 +53,13 @@ declare
 begin
   -- Callers may only write their own data. security definer bypasses RLS, so
   -- the ownership check must be explicit and must not be removable by accident.
-  if p_owner_id is null or p_owner_id <> auth.uid() then
+  --
+  -- NULL-SAFE ON PURPOSE. This guarded p_owner_id being null but NOT auth.uid()
+  -- being null, which is the same trap: `p_owner_id <> NULL` yields NULL, the IF
+  -- never fires, and the ownership check SILENTLY PASSES for a caller with no JWT.
+  -- Found in the change-order RPC and fixed in all three rather than only where
+  -- it was noticed.
+  if auth.uid() is null or p_owner_id is distinct from auth.uid() then
     raise exception 'owner mismatch' using errcode = '42501';
   end if;
 
