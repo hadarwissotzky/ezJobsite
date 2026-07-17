@@ -2,6 +2,31 @@
 
 > 🟢 **ADR-2 RESOLVED 2026-07-16 (hadar) — SYNC TRANSPORT = POWERSYNC. This supersedes the 2026-07-15 banner below.**
 >
+> ---
+>
+> **🔶 ADR-2 AMENDED 2026-07-17 (Claude, during the build) — POWERSYNC IS THE TRANSPORT FOR MUTABLE ROWS, NOT FOR EVIDENCE. ⏳ NEEDS SIGN-OFF.**
+>
+> As written above, "SYNC TRANSPORT = POWERSYNC" **overstates what the build does**, in the opposite direction to CLAUDE.md's stale "NOT PowerSync". Neither described reality. The build is a **split**, and it was arrived at by hitting the boundary twice rather than by design:
+>
+> | Data | Transport | Why |
+> |---|---|---|
+> | **Evidence** — captures, decisions, notes, scope boundaries, change orders | **Owned outbox** (11 modules) | Append-only, carrying SQLite triggers that refuse UPDATE/DELETE — which a PowerSync-managed **view** over `ps_data` cannot carry. And PowerSync **can revert its own rows** when the server rejects, so it cannot be the commitment authority for something mandate #1 says must never be lost. `capture_commit` is the authority; an outbox row is transport, and deleting one never destroys a capture. |
+> | **Mutable relational rows** — projects (name, address, geofence, recording consent) | **PowerSync** | A jobsite address is not evidence. It is a mutable row that must converge across devices — exactly what PowerSync is for. |
+>
+> **The rule, in one line: append-only evidence → owned outbox; mutable row → PowerSync.**
+>
+> **It earned itself twice:**
+> 1. I first built an owned outbox for projects too, by pattern-matching the capture path. It failed loudly — `CREATE TABLE IF NOT EXISTS project` **silently did nothing**, because PowerSync already defines `project`. The lesson was not "rename the table": I had built **a second sync engine beside the one we adopted.**
+> 2. PowerSync's upload was **silently dead for an entire session** (`IMPLEMENTATION_NOTES.md` §5.1: schema drift → PGRST204 → a wedged queue; then a grant/upsert conflict → silent discards). Captures, decisions and change orders were **completely unaffected** — because they ride owned queues. That is not luck. It is the reason for the split, demonstrated rather than argued.
+>
+> **What this does NOT retract:** the bakeoff's finding that PowerSync gets commit-ordering right, which was the fault that killed the hand-built design twice. That finding stands and is why PowerSync carries the relational rows at all.
+>
+> **The trade-off, stated so it can be rejected:** two transports is more surface than one, and whoever adds a table must know which rule applies before they add it. That is a real cost. The alternative — PowerSync for everything — would put the commitment authority for evidence inside a library that can revert rows, which mandate #1 forbids. The alternative in the other direction — owned queues for everything — is the second sync engine I already tried and which already failed.
+>
+> `[Claude, 2026-07-17, during the build. Not a human decision yet — CLAUDE.md §3 requires sign-off for a decision that materially shapes the build, and this one does.]`
+>
+> ---
+>
 > The sync bakeoff (`SPIKE-SYNC-BAKEOFF.md` → `BAKEOFF-RESULT.md`) ran. **Decision: adopt PowerSync as the sync transport; media durability stays ours.** Wherever the 2026-07-15 banner or this document's body says "read the owned-queue equivalent," that instruction is **withdrawn** — the PowerSync passages are live again, with the caveats below.
 >
 > **What the evidence actually showed** (stated precisely; the labels were contested):
