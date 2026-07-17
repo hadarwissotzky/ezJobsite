@@ -8,6 +8,12 @@ build/
 # env / secrets — never commit
 .env
 .env.*
+# ...except the example, which carries NO VALUES and is the only way anyone else
+# can start this repo. `.env.*` silently swallowed it — which is exactly why no
+# .env.example existed: every attempt to add one was refused without a word.
+# The negation is deliberate and narrow: .env, .env.local, .env.production stay
+# ignored; only this one literal name is allowed back.
+!.env.example
 *.pem
 *.keystore
 google-services.json
