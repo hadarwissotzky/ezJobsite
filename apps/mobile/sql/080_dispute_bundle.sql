@@ -23,27 +23,12 @@
 --    gets a contractor humiliated by the first person who asks what it actually
 --    proves.
 
-create or replace function public.bundle_limitations()
-returns jsonb language sql immutable as $$
-  select jsonb_build_array(
-    'Locations and timestamps come from the capturing device''s operating system. '
-    || 'They are evidence of what that device recorded at the time, corroborated by '
-    || 'content hashes and an append-only history. They are NOT proof against a '
-    || 'modified device or a deliberately falsified GPS signal.',
-
-    'Approval links require no login: the token in the link is the credential. '
-    || 'An approval records an identity SIGNAL (a code sent to the phone number the '
-    || 'contractor entered, plus a typed legal name and timestamp) -- not proof of '
-    || 'who was holding the phone.',
-
-    'Captures recorded before a device had location permission, or with no GPS fix '
-    || 'available, carry no location. Those records say so explicitly and cannot be '
-    || 'backfilled, because the history is append-only.',
-
-    'This bundle is assembled from records; it is not a legal opinion, and nothing '
-    || 'in it has been reviewed by a lawyer.'
-  )
-$$;
+-- bundle_limitations() lives in 090_corroboration.sql, NOT here.
+--
+-- It was defined in BOTH. 090 rewrote it to add the device-attested/server-observed
+-- boundary; re-running 080 silently reverted it to the older, weaker list, and
+-- nothing failed -- `create or replace` is a replace, not a merge. The bundle went
+-- back to overclaiming and only a count caught it. One function, one file.
 
 /**
  * Everything known about one project's decisions and money, in one document.
@@ -129,6 +114,39 @@ begin
             from public.approval a where a.change_order_id = co.id), '[]'::jsonb)
       ) order by co.created_at)
       from public.change_order co where co.project_id = p_project_id), '[]'::jsonb),
+
+    -- REQ-VAL7 in the bundle. "Nobody said who owned this" is the sentence a
+    -- dispute turns on, and the bundle could not say it.
+    --
+    -- The ANSWER is read through the DECISION CHAIN, never from a copy: the
+    -- boundary row carries a decision_id and nothing else. A second copy could
+    -- disagree with the chain, and then the bundle would be arguing with itself in
+    -- the only moment it is read.
+    'responsibility', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'subject', b.subject,
+        'trades', b.trades,
+        'assigned_to', (select v.value from public.decision_version v
+                         where v.decision_id = b.decision_id
+                         order by v.created_at_ms desc limit 1),
+        -- The inconvenient part, kept: who owned it BEFORE, and who changed it.
+        -- "It was the electrician's, then it was mechanical's" IS the argument.
+        'history', (select jsonb_agg(jsonb_build_object(
+                        'assigned_to', v2.value, 'by', v2.directed_by,
+                        'at', to_timestamp(v2.created_at_ms / 1000.0))
+                        order by v2.created_at_ms desc)
+                      from public.decision_version v2 where v2.decision_id = b.decision_id),
+        'nobody_owns_this', b.decision_id is null,
+        'named_at', to_timestamp(b.created_at_ms / 1000.0))
+        -- Unowned first: the gap is the expensive one.
+        order by (b.decision_id is null) desc, b.created_at_ms)
+      from public.scope_boundary b where b.project_id = p_project_id), '[]'::jsonb),
+
+    'parties', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'name', pp.name, 'trade', pp.trade, 'scope_of_work', pp.scope_of_work,
+        'status', pp.status) order by pp.trade, pp.name)
+      from public.project_party pp where pp.project_id = p_project_id), '[]'::jsonb),
 
     -- What was asked of the other party, and what they said back.
     'confirmations', coalesce((

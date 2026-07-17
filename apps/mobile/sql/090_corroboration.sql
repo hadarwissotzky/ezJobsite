@@ -92,6 +92,11 @@ returns jsonb language sql immutable as $$
     || 'available, carry no location. Those records say so explicitly and cannot be '
     || 'backfilled, because the history is append-only.',
 
+    'Where this shows that nobody was assigned a piece of work, that means NOBODY '
+    || 'RECORDED AN ASSIGNMENT IN THIS APP -- not that no agreement existed. Work is '
+    || 'assigned in conversations, contracts and drawings this app never saw. An '
+    || 'unowned item here is a question to ask, not a finding.',
+
     'This bundle is assembled from records; it is not a legal opinion, and nothing '
     || 'in it has been reviewed by a lawyer.'
   )
