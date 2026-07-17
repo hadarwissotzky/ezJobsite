@@ -17,7 +17,8 @@ import {
   recoverySweep,
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
-import { textCapture, voiceCapture } from './src/modality';
+import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
+import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
@@ -211,12 +212,51 @@ export default function App() {
       const bytes = await readRecordingBytes(uri);
       const r = await performCapture(db, {
         ownerId: 'owner-local', projectId: 'proj-bakeoff-1',
-        input: voiceCapture(bytes),
+        input: voiceCapture(bytes), stamp: await stampNow(),
       });
       if (r.ok) setUi({ k: 'saved', id: r.captureId });
       else setUi({ k: 'refused', why: r.reason });
       await refresh();
     }
+  };
+
+  /**
+   * REQ-CAP2 photo/video. Same commit path, same durability gate, new producer --
+   * capture.ts did not change to accommodate them.
+   *
+   * The GPS fix STARTS WITH THE CAMERA and is awaited after the shutter. The user
+   * spends a second or two framing the shot; the fix costs nothing because it
+   * happens in that time instead of after it. Mandate #3's touch budget is a hard
+   * constraint, and "wait 3 seconds for a satellite" would have spent it.
+   */
+  const onMedia = async (produce: () => Promise<any>, label: string) => {
+    if (gate) return;
+    // MANDATE #9's permission, asked HERE and not on cold start: the user has just
+    // tapped PHOTO, so "why do you want my location" answers itself. A sheet on
+    // launch, before the app has done anything, is how you get denied by someone
+    // for whom software is not second nature -- and a denial is sticky.
+    // Not gated on the answer: a refused location must never block a capture.
+    await ensureLocationPermission();
+    const fix = stampNow();          // starts NOW, awaited below. Not blocking.
+    const picked = await produce();
+    if (!picked.ok) {
+      if (picked.reason === 'cancelled') { void fix; return; }   // no capture, no noise
+      setUi({ k: 'refused', why: picked.reason === 'denied'
+        ? `${label} needs permission — enable it in Settings`
+        : picked.detail ?? 'could not read that file' });
+      return;
+    }
+    setUi({ k: 'saving' });
+    try {
+      const r = await performCapture(db, {
+        ownerId: OWNER, projectId: PROJECT_ID, input: picked.input, stamp: await fix,
+      });
+      if (r.ok) setUi({ k: 'saved', id: r.captureId });
+      else setUi({ k: 'refused', why: r.reason });
+    } catch (e: any) {
+      setUi({ k: 'refused', why: e?.message ?? String(e) });
+    }
+    await refresh();
   };
 
   // REQ-CAP2 text capture. Same commit path, different producer.
@@ -226,6 +266,7 @@ export default function App() {
     try {
       const r = await performCapture(db, {
         ownerId: OWNER, projectId: PROJECT_ID, input: textCapture(note),
+        stamp: await stampNow(),
       });
       if (r.ok) {
         setUi({ k: 'saved', id: r.captureId });
@@ -388,6 +429,23 @@ export default function App() {
           : ui.k === 'saving' ? 'Finishing…'
           : ready ? 'Ready' : 'Starting…'}
       </Text>
+
+      {/* REQ-CAP2: all four modalities, all working with no signal. Big targets,
+          one touch each -- mandate #3 assumes gloves, a ladder and a loud room. */}
+      <View style={s.mediaRow}>
+        <Pressable style={[s.media, gate && s.btnOff]} disabled={!!gate}
+          onPress={() => onMedia(snapPhoto, 'Camera')}>
+          <Text style={s.mediaIcon}>📷</Text><Text style={s.mediaT}>PHOTO</Text>
+        </Pressable>
+        <Pressable style={[s.media, gate && s.btnOff]} disabled={!!gate}
+          onPress={() => onMedia(recordVideo, 'Camera')}>
+          <Text style={s.mediaIcon}>🎥</Text><Text style={s.mediaT}>VIDEO</Text>
+        </Pressable>
+        <Pressable style={[s.media, gate && s.btnOff]} disabled={!!gate}
+          onPress={() => onMedia(pickFromLibrary, 'Photos')}>
+          <Text style={s.mediaIcon}>🖼</Text><Text style={s.mediaT}>PICK</Text>
+        </Pressable>
+      </View>
 
       <Text style={s.sub}>Or type it</Text>
       <View style={s.noteRow}>
@@ -649,6 +707,12 @@ export default function App() {
           <View key={c.capture_id} style={s.row}>
             <Text style={s.rowT}>{c.capture_id}</Text>
             <Text style={s.rowS}>{c.modality} · {(c.media_bytes / 1024).toFixed(1)} KB · {c.media_sha256.slice(0, 12)}…</Text>
+            {/* MANDATE #9 made visible. A missing fix says WHY -- never 0,0 (a spot
+                in the Atlantic) and never a guess. Captures taken before the stamp
+                existed show "no location" honestly: capture_commit is append-only,
+                so those rows cannot be backfilled, and that is a true fact about
+                them rather than a bug in this line. */}
+            <Text style={s.stamp}>{describeStamp(c)}</Text>
           </View>
         ))}
       </ScrollView>
@@ -662,6 +726,12 @@ const s = StyleSheet.create({
   btn: { backgroundColor: '#238636', paddingVertical: 28, borderRadius: 18, alignItems: 'center' },
   btnRec: { backgroundColor: '#da3633' },
   btnOff: { backgroundColor: '#30363d' },
+  mediaRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
+  media: { flex: 1, backgroundColor: '#21262d', borderRadius: 12, paddingVertical: 16,
+    alignItems: 'center', borderWidth: 1, borderColor: '#30363d' },
+  mediaIcon: { fontSize: 26, marginBottom: 4 },
+  mediaT: { color: '#e6edf3', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
+  stamp: { color: '#6e7681', fontSize: 10 },
   btnT: { color: '#fff', fontSize: 24, fontWeight: '800', letterSpacing: 1 },
   state: { color: '#c9d1d9', fontSize: 15, marginTop: 14, marginBottom: 22, textAlign: 'center' },
   sub: { color: '#8b949e', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },

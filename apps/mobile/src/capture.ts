@@ -134,6 +134,15 @@ export const APP_OWNED_DDL = [
       -- bytes existed.
       modality        TEXT NOT NULL CHECK (modality IN ('voice','video','photo','text')),
       captured_at_ms  INTEGER NOT NULL CHECK (captured_at_ms > 0),
+      -- MANDATE #9: where and when. NULLABLE ON PURPOSE -- a fix is not always
+      -- available (basement, denied, no signal from a satellite) and mandate #1
+      -- says a capture is never blocked. stamp_status records WHY it is missing
+      -- so null is an honest answer rather than an unexplained hole.
+      gps_lat         REAL,
+      gps_lng         REAL,
+      gps_accuracy_m  REAL,
+      gps_fix_age_ms  INTEGER,
+      stamp_status    TEXT,
       committed_at_ms INTEGER NOT NULL CHECK (committed_at_ms >= captured_at_ms),
       request_sha256  TEXT NOT NULL
         CHECK (length(request_sha256) = 64 AND request_sha256 NOT GLOB '*[^0-9a-f]*'),
@@ -203,6 +212,22 @@ async function migrateAppOwnedSchema(db: AbstractPowerSyncDatabase): Promise<voi
     // we cannot UPDATE the old rows to fill one. New inserts always supply it.
     await db.execute(`ALTER TABLE capture_commit ADD COLUMN modality TEXT`);
   }
+
+  // MANDATE #9: "every media capture is stamped with GPS + time as tamper-evident
+  // evidence". Nullable for the same reason modality is, and for a second one that
+  // matters more: capture_commit is APPEND-ONLY, so the old rows CANNOT be
+  // backfilled -- not "we chose not to", the trigger refuses the UPDATE. A capture
+  // taken before the stamp existed has no location and never will. That is a true
+  // fact about those rows and the read path must show it as such, not as 0,0 (a
+  // spot in the Atlantic) or as a guess.
+  for (const [col, type] of [
+    ['gps_lat', 'REAL'], ['gps_lng', 'REAL'], ['gps_accuracy_m', 'REAL'],
+    ['gps_fix_age_ms', 'INTEGER'], ['stamp_status', 'TEXT'],
+  ] as const) {
+    if (rows.length > 0 && !cols.has(col)) {
+      await db.execute(`ALTER TABLE capture_commit ADD COLUMN ${col} ${type}`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- helpers
@@ -251,6 +276,13 @@ export async function performCapture(
     projectId: string;
     /** Bytes + modality + mime. performCapture does not care what produced them. */
     input: import('./modality').CaptureInput;
+    /**
+     * MANDATE #9 stamp. Optional because a capture is NEVER blocked on a fix
+     * (mandate #1): if the producer could not get one, the capture still happens
+     * and `stamp_status` says why. Producers should start the fix when the camera
+     * OPENS, so it is ready by the shutter and costs the user nothing.
+     */
+    stamp?: import('./stamp').Stamp;
   }
 ): Promise<CaptureResult> {
   // Step 0 — durability gate. Spec: if readback fails, DO NOT ARM.
@@ -267,7 +299,10 @@ export async function performCapture(
   const captureId = `cap-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const attachmentId = `att-${Math.random().toString(36).slice(2, 12)}`;
   const mutationId = `mut-${Math.random().toString(36).slice(2, 14)}`;
-  const capturedAtMs = Date.now();
+  // The stamp's clock wins when there is one: it is the moment the producer began,
+  // not the moment the bytes finished arriving. For a 60s video those differ by a
+  // minute, and the evidence should say when it was SHOT.
+  const capturedAtMs = opts.stamp?.capturedAtMs ?? Date.now();
 
   const ext = opts.input.modality === 'text' ? 'txt' : opts.input.modality === 'voice' ? 'm4a' : 'bin';
   const mediaRelpath = `capture-media/${captureId}/${attachmentId}.${ext}`;
@@ -319,11 +354,15 @@ export async function performCapture(
       await tx.execute(
         `INSERT INTO capture_commit (capture_id, attachment_id, mutation_id, project_id, owner_id,
            media_relpath, media_sha256, media_bytes, media_mime_type, modality,
-           captured_at_ms, committed_at_ms, request_sha256)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           captured_at_ms, committed_at_ms, request_sha256,
+           gps_lat, gps_lng, gps_accuracy_m, gps_fix_age_ms, stamp_status)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [captureId, attachmentId, mutationId, opts.projectId, opts.ownerId,
          mediaRelpath, mediaSha256, mediaBytes, opts.input.mimeType, opts.input.modality,
-         capturedAtMs, Date.now(), requestSha256]
+         capturedAtMs, Date.now(), requestSha256,
+         opts.stamp?.lat ?? null, opts.stamp?.lng ?? null,
+         opts.stamp?.accuracyM ?? null, opts.stamp?.fixAgeMs ?? null,
+         opts.stamp?.status ?? 'unavailable']
       );
 
       await tx.execute(
@@ -347,8 +386,11 @@ export async function performCapture(
 
 /** Spec §5. Resolves EXCLUSIVELY through capture_commit. */
 export async function listCommittedCaptures(db: AbstractPowerSyncDatabase) {
-  return db.getAll<{ capture_id: string; media_relpath: string; media_sha256: string; media_bytes: number; modality: string; media_mime_type: string }>(
+  return db.getAll<{ capture_id: string; media_relpath: string; media_sha256: string;
+                     media_bytes: number; modality: string; media_mime_type: string;
+                     gps_lat: number | null; gps_lng: number | null; stamp_status: string | null }>(
     `SELECT capture_id, media_relpath, media_sha256, media_bytes, media_mime_type,
+            gps_lat, gps_lng, stamp_status,
             -- pre-migration rows have no modality and CANNOT be backfilled
             -- (append-only). Derive for display; never invent it in the record.
             COALESCE(modality,

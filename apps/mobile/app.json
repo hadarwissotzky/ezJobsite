@@ -8,7 +8,13 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.hilo.ezjobsite"
+      "bundleIdentifier": "com.hilo.ezjobsite",
+      "infoPlist": {
+        "NSCameraUsageDescription": "EZjobsite uses the camera so you can snap a photo of a jobsite decision instead of writing it up.",
+        "NSPhotoLibraryUsageDescription": "EZjobsite attaches photos you pick to the decision they belong to.",
+        "NSMicrophoneUsageDescription": "EZjobsite records what you say on site so you do not have to type it.",
+        "NSLocationWhenInUseUsageDescription": "EZjobsite stamps each photo with where it was taken, so it is evidence of what happened on this job."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -30,7 +36,9 @@
         {
           "microphonePermission": "EZjobsite records jobsite decisions so nothing gets lost."
         }
-      ]
+      ],
+      "expo-image-picker",
+      "expo-location"
     ]
   }
 }
