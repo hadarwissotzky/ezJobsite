@@ -286,12 +286,21 @@ export default function App() {
       if (!uri) { setUi({ k: 'refused', why: 'recorder produced no file' }); return; }
 
       const bytes = await readRecordingBytes(uri);
+      // These were STRING LITERALS ('owner-local', 'proj-bakeoff-1'), so the
+      // rename of the PROJECT_ID constant walked straight past them: the voice
+      // path -- the product's primary modality -- filed every recording to a dead
+      // project and never resolved by GPS at all. Found by checking my own claim
+      // that the constant was gone instead of trusting it.
+      const stamp = await stampNow();
+      const res = await resolveFor(stamp);
       const r = await performCapture(db, {
-        ownerId: 'owner-local', projectId: 'proj-bakeoff-1',
-        input: voiceCapture(bytes), stamp: await stampNow(),
+        ownerId: OWNER, projectId: res.projectId,
+        input: voiceCapture(bytes), stamp,
       });
-      if (r.ok) setUi({ k: 'saved', id: r.captureId });
-      else setUi({ k: 'refused', why: r.reason });
+      if (r.ok) {
+        setUi({ k: 'saved', id: r.captureId });
+        if (res.confidence !== 'high') setFiled(res.why);
+      } else setUi({ k: 'refused', why: r.reason });
       await refresh();
     }
   };
