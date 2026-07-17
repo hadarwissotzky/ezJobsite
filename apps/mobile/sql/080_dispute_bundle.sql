@@ -152,7 +152,12 @@ begin
       select jsonb_agg(jsonb_build_object(
         'id', c.id,
         'modality', c.modality,
-        'captured_at', c.client_created_at,
+        -- REQ-TL5: BOTH times, never just the device's claim. The pair is what
+        -- makes a timestamp evidence instead of an assertion.
+        'device_claimed_at', c.client_created_at,
+        'server_observed_at', c.inserted_at,
+        'corroboration', (select cc.corroboration from public.capture_corroboration cc where cc.id = c.id),
+        'what_this_means', (select cc.what_this_means from public.capture_corroboration cc where cc.id = c.id),
         'object_key', c.payload,
         'media_sha256', c.payload_sha256,
         'location', case when c.gps_lat is not null
