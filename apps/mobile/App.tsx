@@ -480,8 +480,7 @@ export default function App() {
               {v.text !== undefined && <Text style={s.frozen}>{v.text}</Text>}
               {v.modality === 'voice' && (
                 <Text style={s.cardNote}>
-                  Audio · {(v.bytes / 1024).toFixed(1)} KB. Playback isn’t built yet —
-                  the file is on this phone and intact.
+                  {T({ k: 'ev.noPlayback', p: { kb: (v.bytes / 1024).toFixed(1) } })}
                 </Text>
               )}
               {v.modality === 'video' && (
@@ -491,16 +490,14 @@ export default function App() {
               )}
 
               {/* The stamp, plainly. This is what makes it evidence rather than a file. */}
-              <Text style={s.sub}>Recorded</Text>
+              <Text style={s.sub}>{T('ev.recorded')}</Text>
               <Text style={s.evid}>{new Date(v.capturedAtMs).toLocaleString()}</Text>
-              <Text style={s.sub}>Where</Text>
+              <Text style={s.sub}>{T('ev.where')}</Text>
               <Text style={s.evid}>{describeStamp({ lat: v.lat, lng: v.lng, stamp_status: v.stampStatus })}</Text>
-              <Text style={s.sub}>Content hash (SHA-256)</Text>
+              <Text style={s.sub}>{T('ev.hash')}</Text>
               <Text style={s.hash}>{v.sha256}</Text>
               <Text style={v.intact ? s.ok : s.warn}>
-                {v.intact
-                  ? '✓ The file on this phone still matches this hash — recomputed just now from the bytes on disk, not compared to a stored copy of itself.'
-                  : '⚠ THE FILE NO LONGER MATCHES ITS HASH. Do not rely on this capture.'}
+                {v.intact ? T('ev.intact') : T('ev.tampered')}
               </Text>
             </>
           )}
@@ -516,7 +513,7 @@ export default function App() {
             </View>
           ))}
           <TextInput style={s.moneyInput} value={noteDraft} multiline
-            placeholder="Add a note about this" placeholderTextColor="#6e7681"
+            placeholder={T('ev.addNote')} placeholderTextColor="#6e7681"
             onChangeText={setNoteDraft} />
           <Pressable style={[s.confirmWide, !noteDraft.trim() && s.btnOff]}
             disabled={!noteDraft.trim()}
@@ -527,7 +524,7 @@ export default function App() {
               setVnotes(await notesFor(db, v.captureId));
               setNCounts(await noteCounts(db));
             }}>
-            <Text style={s.confirmT}>ADD NOTE</Text>
+            <Text style={s.confirmT}>{T('ev.addNoteBtn')}</Text>
           </Pressable>
           <Text style={s.cardNote}>
             Notes are added, never replaced — an earlier note is never overwritten by
@@ -548,7 +545,7 @@ export default function App() {
       <View style={s.c}>
         <Text style={s.h}>EZjobsite</Text>
         <View style={s.card}>
-          <Text style={s.cardH}>Needs a job ({inboxRows.length})</Text>
+          <Text style={s.cardH}>{T({ k: 'inbox.title', p: { n: inboxRows.length } })}</Text>
           <Text style={s.cardNote}>
             These saved fine — we just couldn’t tell which job. Tap a job to file it.
           </Text>
@@ -574,7 +571,7 @@ export default function App() {
             </View>
           ))}
           {!projects.filter((p2) => p2.id !== INBOX_ID).length && (
-            <Text style={s.warn}>No jobs to file into yet. Create one first.</Text>
+            <Text style={s.warn}>{T('inbox.noJobs')}</Text>
           )}
           <Pressable style={s.later} onPress={() => setInboxOpen(false)}>
             <Text style={s.laterT}>{T('common.close')}</Text>
@@ -650,7 +647,7 @@ export default function App() {
             </Pressable>
           ))}
           {!projects.length && (
-            <Text style={s.cardNote}>No jobs yet. Create one — it takes a name.</Text>
+            <Text style={s.cardNote}>{T('job.noneYet')}</Text>
           )}
           <Pressable style={s.confirmWide} onPress={() => setNewJob({ name: '', address: '' })}>
             <Text style={s.confirmT}>{T('job.new')}</Text>
@@ -723,12 +720,12 @@ export default function App() {
       <View style={s.c}>
         <Text style={s.h}>EZjobsite</Text>
         <View style={s.card}>
-          <Text style={s.cardH}>Signature required</Text>
+          <Text style={s.cardH}>{T('sig.required')}</Text>
           <Text style={s.frozen}>{sign.shown}</Text>
 
           {!sign.verifiedAt ? (
             <>
-              <Text style={s.sub}>Owner's mobile — you enter it, not them</Text>
+              <Text style={s.sub}>{T('sig.ownersMobile')}</Text>
               <TextInput style={s.moneyInput} value={sign.phone} keyboardType="phone-pad"
                 placeholder="+15551234567" placeholderTextColor="#6e7681"
                 onChangeText={(v) => setSign({ ...sign, phone: v })} />
@@ -743,7 +740,7 @@ export default function App() {
                     // pretending a text went out.
                     setSign({ ...sign, sent: code, err: r.ok ? null : r.reason });
                   }}>
-                  <Text style={s.confirmT}>SEND CODE</Text>
+                  <Text style={s.confirmT}>{T('sig.sendCode')}</Text>
                 </Pressable>
               ) : (
                 <>
@@ -752,7 +749,7 @@ export default function App() {
                     For now: {sign.sent}
                   </Text>
                   <TextInput style={s.moneyInput} value={sign.code} keyboardType="number-pad"
-                    placeholder="6-digit code" placeholderTextColor="#6e7681"
+                    placeholder={T('sig.enterCode')} placeholderTextColor="#6e7681"
                     onChangeText={(v) => setSign({ ...sign, code: v })} />
                   <Pressable style={[s.confirmWide, sign.code.length !== 6 && s.btnOff]}
                     disabled={sign.code.length !== 6}
@@ -766,17 +763,17 @@ export default function App() {
                           : r.reason });
                       }
                     }}>
-                    <Text style={s.confirmT}>VERIFY</Text>
+                    <Text style={s.confirmT}>{T('sig.verify')}</Text>
                   </Pressable>
                 </>
               )}
             </>
           ) : (
             <>
-              <Text style={s.ok}>✓ Phone verified</Text>
-              <Text style={s.sub}>Type your full legal name to sign</Text>
+              <Text style={s.ok}>{T('sig.verified')}</Text>
+              <Text style={s.sub}>{T('sig.typeName')}</Text>
               <TextInput style={s.moneyInput} value={sign.legalName}
-                placeholder="Full legal name" placeholderTextColor="#6e7681"
+                placeholder={T('sig.legalName')} placeholderTextColor="#6e7681"
                 onChangeText={(v) => setSign({ ...sign, legalName: v })} />
               <View style={s.cardBtns}>
                 <Pressable style={[s.confirm, sign.legalName.trim().length < 2 && s.btnOff]}
@@ -795,7 +792,7 @@ export default function App() {
                       setSign(null); await refresh();
                     } else setSign({ ...sign, err: r.reason });
                   }}>
-                  <Text style={s.confirmT}>SIGN & APPROVE</Text>
+                  <Text style={s.confirmT}>{T('sig.sign')}</Text>
                 </Pressable>
                 <Pressable style={s.later} onPress={async () => {
                   await signApproval(connector.client, {
@@ -807,7 +804,7 @@ export default function App() {
                   await applyLocalApproval(db, sign.coId, 'declined', sign.legalName);
                   setSign(null); await refresh();
                 }}>
-                  <Text style={s.laterT}>Decline</Text>
+                  <Text style={s.laterT}>{T('sig.decline')}</Text>
                 </Pressable>
               </View>
             </>
@@ -865,9 +862,9 @@ export default function App() {
           setInboxOpen(true);
         }}>
           <Text style={s.inboxBannerT}>
-            {inbox} capture{inbox > 1 ? 's' : ''} need{inbox > 1 ? '' : 's'} a job →
+            {T({ k: 'inbox.needJob', p: { n: inbox } })}
           </Text>
-          <Text style={s.inboxBannerS}>Saved and safe — just not filed yet</Text>
+          <Text style={s.inboxBannerS}>{T('inbox.safe')}</Text>
         </Pressable>
       )}
 
@@ -973,13 +970,13 @@ export default function App() {
               if (res.superseded) console.log('superseded:', res.superseded, '->', card.value);
               await refresh();
             }}>
-              <Text style={s.confirmT}>CONFIRM</Text>
+              <Text style={s.confirmT}>{T('dec.confirm')}</Text>
             </Pressable>
             <Pressable style={s.later} onPress={() => setCard(null)}>
-              <Text style={s.laterT}>Not a decision</Text>
+              <Text style={s.laterT}>{T('dec.notADecision')}</Text>
             </Pressable>
           </View>
-          <Text style={s.cardNote}>Already saved either way — this just says what it means.</Text>
+          <Text style={s.cardNote}>{T('dec.alreadySaved')}</Text>
         </View>
       )}
 
@@ -1048,12 +1045,10 @@ export default function App() {
             <Text style={s.moneyScope}>{priced.scope}</Text>
 
             {priced.confidence === 'low' && (
-              <Text style={s.warn}>
-                Heard a number but not sure it's the price. Type it.
-              </Text>
+              <Text style={s.warn}>{T('co.unsure')}</Text>
             )}
             {priced.confidence === 'none' && (
-              <Text style={s.warn}>No price heard. Type it.</Text>
+              <Text style={s.warn}>{T('co.noPriceHeard')}</Text>
             )}
 
             {/* §7.2 line items. OPTIONAL: "add 3 outlets for $450" is a complete,
@@ -1165,9 +1160,7 @@ export default function App() {
                 <Text style={s.laterT}>{T('common.cancel')}</Text>
               </Pressable>
             </View>
-            <Text style={s.cardNote}>
-              Nothing is sent until you agree with this figure.
-            </Text>
+            <Text style={s.cardNote}>{T('co.nothingSent')}</Text>
           </View>
         );
       })()}
@@ -1220,16 +1213,14 @@ export default function App() {
 
       {sentLink && (
         <View style={s.card}>
-          <Text style={s.cardH}>Confirm request created</Text>
+          <Text style={s.cardH}>{T('conf.created')}</Text>
           <Text style={s.frozen}>{sentLink.shown}</Text>
           <Text style={s.cardNote}>
             These exact words are frozen — if the decision changes later, this still
             shows what they were asked. It is the binding record.
           </Text>
           <Text style={s.link}>{sentLink.url}</Text>
-          <Text style={s.cardNote}>
-            No login needed — anyone with this link can answer it.
-          </Text>
+          <Text style={s.cardNote}>{T('conf.noLogin')}</Text>
 
           {/* REQ-VAL8, delivered.
               We do NOT need an email provider. The user is a solo operator with
@@ -1242,7 +1233,7 @@ export default function App() {
             const r = await shareLink(sentLink.url, sentLink.shown);
             if (!r.ok) setUi({ k: 'refused', why: r.reason ?? 'could not share' });
           }}>
-            <Text style={s.confirmT}>SEND IT →</Text>
+            <Text style={s.confirmT}>{T('conf.send')}</Text>
           </Pressable>
 
           <Pressable style={s.later} onPress={() => setSentLink(null)}>
@@ -1253,7 +1244,7 @@ export default function App() {
 
       {history && (
         <View style={s.card}>
-          <Text style={s.cardH}>History — nothing is ever overwritten</Text>
+          <Text style={s.cardH}>{T('dec.history')}</Text>
           {history.map((h, i) => (
             <Text key={i} style={i === 0 ? s.hNow : s.hOld}>
               {i === 0 ? '● now:  ' : '○ was: '}{h.value}
