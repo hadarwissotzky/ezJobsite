@@ -19,6 +19,7 @@ import {
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
+import { buildDisputeBundle, shareBundle } from './src/bundle';
 import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
@@ -90,6 +91,7 @@ export default function App() {
   }>(null);
   const [coRows, setCoRows] = React.useState<any[]>([]);
   const [dsync, setDsync] = React.useState<any>(null);
+  const [bundling, setBundling] = React.useState<string | null>(null);
   // §7.2 line items. Kept OUT of `priced` so cancelling the composer cannot
   // disturb a figure the contractor has already read back and agreed with.
   const [lines, setLines] = React.useState<LineItem[]>([]);
@@ -694,6 +696,19 @@ export default function App() {
       {coRows.length > 0 && (
         <>
           <Text style={s.sub}>Change orders ({coRows.length})</Text>
+        <Pressable style={s.bundleBtn} onPress={async () => {
+          setBundling('Assembling…');
+          const r = await buildDisputeBundle(connector.client, PROJECT_ID);
+          if (!r.ok) { setBundling(`Could not assemble: ${r.reason}`); return; }
+          const s2 = await shareBundle(r.htmlPath);
+          setBundling(s2.ok
+            ? `Bundle ready — ${(r.json.change_orders ?? []).length} change order(s), ` +
+              `${(r.json.decisions ?? []).length} decision(s), ${(r.json.captures ?? []).length} capture(s)`
+            : s2.reason ?? 'saved');
+        }}>
+          <Text style={s.bundleT}>Export evidence bundle →</Text>
+        </Pressable>
+        {bundling && <Text style={s.dmeta}>{bundling}</Text>}
           {coRows.map((c) => (
             <View key={c.id} style={s.drow}>
               <Text style={s.dval}>{c.amount} {c.is_mini ? '· mini' : ''}</Text>
@@ -830,6 +845,8 @@ const s = StyleSheet.create({
   money: { backgroundColor: '#1c1400', borderColor: '#9e6a03', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
   moneyScope: { color: '#c9d1d9', fontSize: 14, marginBottom: 10 },
   bigMoney: { color: '#f0b72f', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
+  bundleBtn: { paddingVertical: 8 },
+  bundleT: { color: '#58a6ff', fontSize: 14, fontWeight: '600' },
   lineRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6,
     borderBottomWidth: 1, borderBottomColor: '#21262d' },
   lineDesc: { color: '#e6edf3', fontSize: 14, flex: 1 },
