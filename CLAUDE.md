@@ -44,6 +44,41 @@ These come from adversarially-verified research (see the claude.ai Project docs)
 - **Keep the notes current.** When you hit an edge case, a known, or an assumption, record it in `IMPLEMENTATION_NOTES.md` with how you handled it. That file is the project's memory of *why*.
 - **Trace everything.** Every requirement must trace to a research finding or a logged human decision. If you can't trace it, flag it as an assumption — don't invent requirements.
 
+### 3.1 Commit message rule — MANDATORY, every commit, no exceptions `[hadar, 2026-07-16]`
+
+**A commit message that only says *what* changed is incomplete and must be rewritten before committing.** The subject line says *what*. **The description must always answer four things, under these exact headings:**
+
+```
+<subject: what changed, imperative, ≤72 chars>
+
+WHY:
+  The intent. What problem or need prompted this, and what breaks or stays
+  broken without it. Not a restatement of the diff — the reason the diff
+  exists. If it came from a review/decision/finding, name it (e.g. "Codex #11
+  CRITICAL 2", "hadar 2026-07-16").
+
+GOALS:
+  What this change is trying to achieve, as outcomes. What is now true that
+  wasn't. If it deliberately does NOT achieve something adjacent, say so.
+
+COMPLETION:
+  <N>% — and what the remaining % is. "100%" is a claim, not a default:
+  it means nothing is owed. If anything is unfinished, unverified, deferred,
+  or known-broken, it is not 100% and the gap gets named here.
+
+BLAST RADIUS:
+  Every other area this touches or could touch. Files/modules changed beyond
+  the obvious one · docs whose claims this invalidates · decisions it
+  supersedes · anything downstream that must now be re-checked. "None" is
+  allowed only when it is actually true.
+```
+
+**Why this rule exists** (hadar, 2026-07-16, after four consecutive cross-model reviews found the same failure): *this project's recurring defect is not bad code — it is claims that outrun their evidence, and edits that land in one place while a contradiction survives in another.* `WHY` forces the intent to be traceable instead of reconstructed later. `COMPLETION` makes over-claiming a visible, dated, attributable act rather than a vibe. **`BLAST RADIUS` is the direct countermeasure to the withdraw-then-restate pattern** — the whole reason `MEDIA_COMMITTED` survived in `SPEC` REQ-CAP5/CAP8 after being removed from `DURABILITY-DESIGN` is that nobody was required to write down what else the change touched.
+
+**Applies to every commit** — code, docs, config, spikes, throwaway work. **Applies to Codex and any other assistant, not just Claude.** A one-line commit is only acceptable when all four sections are genuinely trivial, and they must still be present.
+
+**Do not inflate `COMPLETION`.** A commit that says `COMPLETION: 60% — the recovery sweep is unwritten` is worth more than one that says 100% and is wrong. The ledger rule applies here too: **☑ only when the edit exists.**
+
 ---
 
 ## 4. The verification layer (the user's instruction #2)
