@@ -20,6 +20,9 @@ import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } fr
 import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
+import { canRecordAudio, consentBasisText, defaultConsentFor, ensureConsentSchema,
+         getCellularConsent, getRecordingConsent, setCellularConsent, setRecordingConsent,
+         type RecordingConsent } from './src/consent';
 import { buildDisputeBundle, shareBundle, shareLink } from './src/bundle';
 import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
@@ -98,6 +101,12 @@ export default function App() {
   const [coRows, setCoRows] = React.useState<any[]>([]);
   const [dsync, setDsync] = React.useState<any>(null);
   const [bundling, setBundling] = React.useState<string | null>(null);
+  // REQ-CON1. Read once and kept in state: the record button must know the answer
+  // BEFORE it is tapped, because the one thing it may never do is ask.
+  const [consent, setConsent] = React.useState<{ consent: RecordingConsent; basis: string | null }>(
+    { consent: null, basis: null });
+  const [cellOn, setCellOn] = React.useState(false);
+  const [setup, setSetup] = React.useState<null | { jurisdiction: string }>(null);
 
   /**
    * REQ-CAP5 + mandate #1: "saved" is confirmed AUDIBLY and visually; failure is
@@ -141,7 +150,8 @@ export default function App() {
       // must count both. One green tick that ignores half the queue is a lie.
       const ds = await decisionSyncStatus(db);
       setDsync(ds);
-      setDsync(ds);
+      setConsent(await getRecordingConsent(db, PROJECT_ID));
+      setCellOn(await getCellularConsent(db));
       setDelivery({ pending: (s?.pending ?? 0) + ds.pending, parked: (s?.parked ?? 0) + ds.parked });
       setDecisions(await listDecisions(db, PROJECT_ID));
       setCoRows(await ledger(db, PROJECT_ID));
@@ -157,6 +167,7 @@ export default function App() {
       await ensureAppOwnedSchema(db);
       await ensureDecisionSchema(db);
       await ensureChangeOrderSchema(db);
+      await ensureConsentSchema(db);
       await initFeedback();
 
       // THE GATE. If the write connection cannot promise durability we do not
@@ -233,6 +244,14 @@ export default function App() {
     if (gate) return;
     if (ui.k === 'idle' || ui.k === 'saved' || ui.k === 'refused') {
       setUi({ k: 'arming' });
+      // REQ-CON1: the answer is ALREADY KNOWN -- decided once at job setup. This is
+      // a LOOKUP, never a prompt. A consent dialog between a man's thumb and the
+      // thing he is trying to record is the #1 predicted abandonment point, and it
+      // is the one thing this path may never do. Checked BEFORE the mic opens: we
+      // must never record first and ask later, because by then the recording
+      // exists.
+      const may = await canRecordAudio(db, PROJECT_ID);
+      if (!may.allowed) { setUi({ k: 'refused', why: may.why }); return; }
       if (!(await requestMic())) { setUi({ k: 'refused', why: 'microphone permission denied' }); return; }
       await recorder.prepareToRecordAsync();
       recorder.record();
@@ -327,6 +346,65 @@ export default function App() {
 
   // A signature gets the whole screen. Nothing else is reachable while it is up --
   // one deliberate act, no way to wander off halfway through signing.
+  // REQ-CON1/SET2. Shown when the JOB has no recording decision -- reached from the
+  // banner, never from the record button. The strict default is pre-selected so the
+  // common case is one tap, which is what "≤ a few actions" has to mean for someone
+  // who does not think in software.
+  if (setup) {
+    const suggested = defaultConsentFor(setup.jurisdiction || null);
+    const choose = async (c: Exclude<RecordingConsent, null>) => {
+      await setRecordingConsent(db, {
+        projectId: PROJECT_ID, consent: c,
+        jurisdiction: setup.jurisdiction || null, decidedBy: 'Owner',
+      });
+      setConsent(await getRecordingConsent(db, PROJECT_ID));
+      setSetup(null);
+    };
+    return (
+      <View style={s.c}>
+        <Text style={s.h}>EZjobsite</Text>
+        <View style={s.card}>
+          <Text style={s.cardH}>Recording on this job</Text>
+          <Text style={s.cardNote}>
+            Decided once, here. The record button will never stop to ask you.
+          </Text>
+
+          <Text style={s.sub}>Where is this job? (2-letter state)</Text>
+          <TextInput style={s.moneyInput} value={setup.jurisdiction} autoCapitalize="characters"
+            maxLength={2} placeholder="e.g. CA" placeholderTextColor="#6e7681"
+            onChangeText={(v) => setSetup({ jurisdiction: v })} />
+          <Text style={s.dmeta}>
+            {setup.jurisdiction
+              ? `Suggested for ${setup.jurisdiction.toUpperCase()}: ${suggested === 'all_party'
+                  ? 'everyone must agree' : 'you may record conversations you are part of'}`
+              : 'Not set — we assume the strictest rule until you tell us.'}
+          </Text>
+
+          <Pressable style={[s.confirmWide, suggested !== 'all_party' && s.btnOff]}
+            onPress={() => choose('all_party')}>
+            <Text style={s.confirmT}>EVERYONE HAS AGREED</Text>
+          </Pressable>
+          <Pressable style={[s.confirmWide, suggested !== 'one_party' && s.btnOff]}
+            onPress={() => choose('one_party')}>
+            <Text style={s.confirmT}>I'M PART OF THE CONVERSATION</Text>
+          </Pressable>
+          <Pressable style={s.later} onPress={() => choose('no_recording')}>
+            <Text style={s.laterT}>No recording on this job</Text>
+          </Pressable>
+
+          <Text style={s.cardNote}>
+            {consentBasisText(suggested, setup.jurisdiction || null)}
+            {'\n\n'}This records what you chose. It is not legal advice — recording
+            rules differ by state and by who is in the room.
+          </Text>
+          <Pressable style={s.later} onPress={() => setSetup(null)}>
+            <Text style={s.laterT}>Back</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   if (sign) {
     return (
       <View style={s.c}>
@@ -438,6 +516,15 @@ export default function App() {
   return (
     <View style={s.c}>
       <Text style={s.h}>EZjobsite</Text>
+
+      {!gate && !initError && consent.consent === null && (
+        <Pressable style={s.consentBanner} onPress={() => setSetup({ jurisdiction: '' })}>
+          <Text style={s.consentT}>Recording isn’t set up for this job</Text>
+          <Text style={s.consentS}>
+            One tap to set it. Photos and typed notes work now — only voice and video wait.
+          </Text>
+        </Pressable>
+      )}
 
       {(gate || initError) && (
         <View style={s.gate}>
@@ -893,6 +980,10 @@ const s = StyleSheet.create({
   money: { backgroundColor: '#1c1400', borderColor: '#9e6a03', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
   moneyScope: { color: '#c9d1d9', fontSize: 14, marginBottom: 10 },
   bigMoney: { color: '#f0b72f', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
+  consentBanner: { backgroundColor: '#2d2410', borderColor: '#7d6320', borderWidth: 1,
+    borderRadius: 10, padding: 12, marginBottom: 14 },
+  consentT: { color: '#f0b72f', fontWeight: '700', fontSize: 14, marginBottom: 3 },
+  consentS: { color: '#a5934f', fontSize: 12, lineHeight: 17 },
   bundleBtn: { paddingVertical: 8 },
   bundleT: { color: '#58a6ff', fontSize: 14, fontWeight: '600' },
   lineRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6,

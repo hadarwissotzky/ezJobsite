@@ -32,6 +32,8 @@ import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Buffer } from 'buffer';
+import * as Network from 'expo-network';
+import { getCellularConsent, uploadGate, type UploadGate } from './consent';
 
 const BUCKET = 'captures';
 
@@ -49,6 +51,8 @@ export type DrainResult = {
   alreadyApplied: number;
   parked: number;
   retryable: number;
+  /** REQ-PROC6: why nothing moved, in words a person can act on. */
+  blocked: UploadGate | null;
 };
 
 type OutboxRow = {
@@ -73,8 +77,29 @@ export async function drainOutbox(
   supabase: SupabaseClient,
   ownerId: string
 ): Promise<DrainResult> {
-  const r: DrainResult = { attempted: 0, uploaded: 0, alreadyApplied: 0, parked: 0, retryable: 0 };
+  const r: DrainResult = { attempted: 0, uploaded: 0, alreadyApplied: 0, parked: 0, retryable: 0,
+                           blocked: null };
   const now = Date.now();
+
+  // REQ-CON2 + REQ-PROC6. Checked HERE, not at capture: mandate #7 says the
+  // network is opportunistic and never a precondition, so by the time we ask this
+  // the capture is already durable on the device. This only decides whether the
+  // bytes leave now or wait for Wi-Fi.
+  //
+  // Defaults OFF. A 200 MB walkthrough pushed over a hotspot is a bill the
+  // contractor never agreed to and finds out about at the end of the month.
+  const state = await Network.getNetworkStateAsync();
+  const gate = uploadGate(
+    { isConnected: !!state.isConnected,
+      isCellular: state.type === Network.NetworkStateType.CELLULAR },
+    await getCellularConsent(db)
+  );
+  if (!gate.upload) {
+    // Not an error, and not silence: the reason is returned so the UI can say
+    // "waiting for Wi-Fi" instead of showing a queue that never drains.
+    r.blocked = gate;
+    return r;
+  }
 
   const rows = await db.getAll<OutboxRow>(
     `SELECT mutation_id, capture_id, payload_json, payload_sha256, attempt_count
