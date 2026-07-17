@@ -256,3 +256,78 @@ export async function shareLink(url: string, shownContent: string): Promise<{ ok
     return { ok: false, reason: e?.message ?? String(e) };
   }
 }
+
+/**
+ * Client progress update — REP-2. The dispute bundle's opposite.
+ *
+ * The bundle is written for a fight: complete, hedged, every superseded value
+ * shown, six limitations at the top. Send that to a homeowner on a Friday and you
+ * have told her you are preparing to sue her.
+ *
+ * This is the Friday. Same data, different job: what changed, what it cost, what
+ * is waiting on her. No hashes, no GPS, no history of what the colour used to be.
+ * A client does not want an audit trail; she wants to know if the kitchen is on
+ * budget. If it ever comes to a fight, the bundle exists and says all of it.
+ *
+ * IT IS TEXT, NOT HTML. A progress update is READ IN A TEXT MESSAGE — that is how
+ * this contractor already talks to this client. An attachment is a thing she has
+ * to decide to open; a message is a thing she has already read by the time she
+ * decides.
+ */
+export async function buildProgressUpdate(
+  supabase: SupabaseClient, projectId: string, sinceDays = 7
+): Promise<{ ok: true; text: string; json: any } | { ok: false; reason: string }> {
+  const { data, error } = await supabase.rpc('progress_update', {
+    p_project_id: projectId, p_since_days: sinceDays,
+  });
+  if (error) return { ok: false, reason: error.message };
+  return { ok: true, text: renderProgressText(data), json: data };
+}
+
+/** Plain words. Written to be read on a phone, by someone who is not in the trade. */
+export function renderProgressText(p: any): string {
+  const lines: string[] = [];
+  lines.push(`${p.project} — update`);
+  lines.push('');
+
+  const decisions = p.decisions ?? [];
+  if (decisions.length) {
+    lines.push('What we settled:');
+    for (const d of decisions) lines.push(`  • ${d.subject}: ${d.now}`);
+    lines.push('');
+  }
+
+  const recent = p.approved_recently ?? [];
+  if (recent.length) {
+    lines.push('Approved and under way:');
+    for (const c of recent) lines.push(`  • ${c.what} — ${c.amount}`);
+    lines.push('');
+  }
+
+  const waiting = p.waiting_on_you ?? [];
+  if (waiting.length) {
+    // The ask goes LAST and alone. Everything above is news; this is the one thing
+    // she has to do, and burying it in the middle is how it gets missed.
+    lines.push(waiting.length === 1 ? 'Waiting on you:' : `Waiting on you (${waiting.length}):`);
+    for (const c of waiting) lines.push(`  • ${c.what} — ${c.amount}`);
+    lines.push('');
+  }
+
+  lines.push(`Approved so far: ${p.approved_total}`);
+  if (p.photos_taken) lines.push(`${p.photos_taken} photo${p.photos_taken > 1 ? 's' : ''} on file.`);
+
+  // No "generated automatically" footer. It is from the contractor; a machine
+  // stamp makes it junk mail, and junk mail does not get answered.
+  return lines.join('\n');
+}
+
+/** Send it the way this contractor already talks to this client. */
+export async function shareProgressUpdate(text: string): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    const { Share } = await import('react-native');
+    const r = await Share.share({ message: text });
+    return { ok: r.action !== Share.dismissedAction };
+  } catch (e: any) {
+    return { ok: false, reason: e?.message ?? String(e) };
+  }
+}

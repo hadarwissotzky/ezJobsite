@@ -200,6 +200,9 @@ const EN: Record<string, string> = {
   'st.proc.uploaded': 'sent to the cloud',
   'st.proc.processed': 'processed',
 
+  'rep.send': 'Send the client an update →',
+  'rep.nothing': 'Nothing new to tell them yet',
+
   'common.close': 'Close',
   'common.cancel': 'Cancel',
   'common.back': 'Back',
@@ -369,6 +372,9 @@ const ES: Record<string, string> = {
   'st.proc.queued': 'esperando para enviar',
   'st.proc.uploaded': 'enviado a la nube',
   'st.proc.processed': 'procesado',
+
+  'rep.send': 'Mandarle una actualización al cliente →',
+  'rep.nothing': 'Todavía no hay nada nuevo que contarle',
 
   'common.close': 'Cerrar',
   'common.cancel': 'Cancelar',

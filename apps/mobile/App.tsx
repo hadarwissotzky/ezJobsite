@@ -33,7 +33,8 @@ import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchem
 import { canRecordAudio, consentBasisText, defaultConsentFor, ensureConsentSchema,
          getCellularConsent, getRecordingConsent, setCellularConsent, setRecordingConsent,
          type RecordingConsent } from './src/consent';
-import { buildDisputeBundle, shareBundle, shareLink } from './src/bundle';
+import { buildDisputeBundle, buildProgressUpdate, shareBundle, shareLink,
+         shareProgressUpdate } from './src/bundle';
 import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
@@ -1396,6 +1397,19 @@ export default function App() {
       {coRows.length > 0 && (
         <>
           <Text style={s.sub}>Change orders ({coRows.length})</Text>
+        {/* REP-2. Sits ABOVE the evidence export on purpose: telling the client
+            what is happening is the weekly act; exporting an evidence bundle is
+            the thing you do when that stopped working. Ordering them the other way
+            round would put the lawsuit before the conversation. */}
+        <Pressable style={s.bundleBtn} onPress={async () => {
+          const r = await buildProgressUpdate(connector.client, projectId);
+          if (!r.ok) { setBundling(r.reason); return; }
+          const s2 = await shareProgressUpdate(r.text);
+          if (!s2.ok && s2.reason) setBundling(s2.reason);
+        }}>
+          <Text style={s.bundleT}>{T('rep.send')}</Text>
+        </Pressable>
+
         <Pressable style={s.bundleBtn} onPress={async () => {
           setBundling('Assembling…');
           const r = await buildDisputeBundle(connector.client, projectId);
