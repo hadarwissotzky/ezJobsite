@@ -164,6 +164,18 @@ const EN: Record<string, string> = {
   'fr.consentWhy': 'One question, once. Then the record button never asks you anything again.',
   'fr.ready': 'Ready — tap the green button',
 
+  // REQ-X3: one status per item. Plain, and about what to DO.
+  'st.needsJob': 'Needs a job',
+  'st.wontBackUp': 'Won’t back up — needs attention',
+  'st.waitingBackup': 'Waiting to back up',
+  'st.backedUp': 'Backed up',
+  'st.detail.waiting': 'not backed up yet',
+  'st.detail.noLocation': 'no location recorded',
+  'st.detail.unfiled': 'not filed to a job',
+  'st.screen.needsYou': '{n} need a job →',
+  'st.screen.notSafe': '{n} won’t back up — tap',
+  'st.screen.waiting': '{n} waiting to back up',
+
   'common.close': 'Close',
   'common.cancel': 'Cancel',
   'common.back': 'Back',
@@ -300,6 +312,17 @@ const ES: Record<string, string> = {
   'fr.jobWhy': 'Todo lo que captures se archiva solo en un trabajo. Puedes agregar más después.',
   'fr.consentWhy': 'Una pregunta, una vez. Después el botón de grabar ya no te pregunta nada.',
   'fr.ready': 'Listo — toca el botón verde',
+
+  'st.needsJob': 'Necesita un trabajo',
+  'st.wontBackUp': 'No se va a respaldar — necesita atención',
+  'st.waitingBackup': 'Esperando respaldo',
+  'st.backedUp': 'Respaldado',
+  'st.detail.waiting': 'todavía sin respaldo',
+  'st.detail.noLocation': 'sin ubicación',
+  'st.detail.unfiled': 'sin archivar en un trabajo',
+  'st.screen.needsYou': '{n} necesitan un trabajo →',
+  'st.screen.notSafe': '{n} no se van a respaldar — toca',
+  'st.screen.waiting': '{n} esperando respaldo',
 
   'common.close': 'Cerrar',
   'common.cancel': 'Cancelar',

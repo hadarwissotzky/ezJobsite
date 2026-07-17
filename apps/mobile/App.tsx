@@ -21,6 +21,7 @@ import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } fr
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
 import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
+import { captureStatus, levelColor, screenStatus } from './src/status';
 import { FIRST_RUN_TAPS, isFirstRun, markFirstRunDone, nextStep, savedLang, saveLang } from './src/firstrun';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          type Note } from './src/annotate';
@@ -140,6 +141,22 @@ export default function App() {
   const [noteDraft, setNoteDraft] = React.useState('');
   const [nCounts, setNCounts] = React.useState<Record<string, number>>({});
   const [rejected, setRejected] = React.useState<any[]>([]);
+  const [showDetail, setShowDetail] = React.useState(false);
+
+  /**
+   * REQ-X3. ONE status for the whole screen, chosen by what the user must DO —
+   * not a sum of every state the system finds interesting. A capture that is
+   * unfiled AND unsynced is ONE problem to him ("it needs a job"), because filing
+   * is the only action he can take; the sync happens by itself.
+   */
+  const screen = React.useMemo(() => screenStatus([
+    ...Array(inbox).fill(captureStatus({ inInbox: true, rejected: false,
+      pendingUpload: false, parked: false, hasLocation: true })),
+    ...Array(rejected.length + delivery.parked).fill(captureStatus({ inInbox: false,
+      rejected: true, pendingUpload: false, parked: true, hasLocation: true })),
+    ...Array(delivery.pending).fill(captureStatus({ inInbox: false, rejected: false,
+      pendingUpload: true, parked: false, hasLocation: true })),
+  ]), [inbox, rejected.length, delivery.parked, delivery.pending]);
   const [lang, setLangState] = React.useState<Lang>(getLang());
   // REQ-SET2. Derived from what EXISTS, never a stored step counter -- a counter
   // and reality drift apart the moment someone kills the app mid-setup.
@@ -924,38 +941,33 @@ export default function App() {
         <Text style={s.jobBarS}>{T('job.change')}</Text>
       </Pressable>
 
-      {/* A row the server refused for good. It is on this phone and will NEVER
-          reach the cloud -- the one fact mandate #1 says must never be silent.
-          Red, not amber: this is not "syncing later", it is "never". */}
-      {rejected.length > 0 && (
-        <View style={s.rejBanner}>
-          <Text style={s.rejT}>
-            {T({ k: 'err.refusedTitle', p: { n: rejected.length } })}
+      {/* REQ-X3: THE one status. Eight parallel banners collapsed to this.
+          Each of those eight was added honestly for a good reason, and stacked
+          together they were a wall of colour a man on a ladder cannot parse —
+          which meant he read none of them. Every "never silent" fix I made was
+          making the next one quieter. */}
+      {screen && (
+        <Pressable style={[s.oneStatus, {
+          backgroundColor: levelColor(screen.level).bg,
+          borderColor: levelColor(screen.level).border,
+        }]} onPress={async () => {
+          // The detail is REACHABLE, not displayed. X3 does not say lose the
+          // information; it says stop leading with it.
+          if (screen.level === 'needs_you') {
+            setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true);
+          } else setShowDetail((v) => !v);
+        }}>
+          <Text style={[s.oneStatusT, { color: levelColor(screen.level).text }]}>
+            {T(screen.primary)}
           </Text>
-          {rejected.slice(0, 2).map((r) => (
-            <Text key={r.row_id} style={s.rejS}>
-              {r.tbl} · {r.code ?? '?'} · {String(r.message ?? '').slice(0, 60)}
+          {showDetail && screen.detail.map((d, i) => (
+            <Text key={i} style={s.oneStatusD}>· {T(d)}</Text>
+          ))}
+          {showDetail && rejected.slice(0, 2).map((r) => (
+            <Text key={r.row_id} style={s.oneStatusD}>
+              · {r.tbl} {r.code}: {String(r.message ?? '').slice(0, 50)}
             </Text>
           ))}
-          <Text style={s.rejS}>{T('err.refusedBody')}</Text>
-        </View>
-      )}
-
-      {inbox > 0 && (
-        <Pressable style={s.inboxBanner} onPress={async () => {
-          setInboxRows(await listCommittedCaptures(db, INBOX_ID));
-          setInboxOpen(true);
-        }}>
-          <Text style={s.inboxBannerT}>
-            {T({ k: 'inbox.needJob', p: { n: inbox } })}
-          </Text>
-          <Text style={s.inboxBannerS}>{T('inbox.safe')}</Text>
-        </Pressable>
-      )}
-
-      {filed && (
-        <Pressable style={s.filed} onPress={() => setFiled(null)}>
-          <Text style={s.filedT}>{T(filed)}</Text>
         </Pressable>
       )}
 
@@ -1346,11 +1358,7 @@ export default function App() {
         {T({ k: 'st.onThisPhone', p: { n: saved.length } })}
         {delivery.pending > 0 ? T({ k: 'st.waiting', p: { n: delivery.pending } }) : ''}
         {delivery.parked > 0 ? T({ k: 'st.failedCount', p: { n: delivery.parked } }) : ''}
-      </Text>
-      {delivery.parked > 0 && (
-        <Text style={s.parked}>{T({ k: 'st.failedBody', p: { n: delivery.parked } })}</Text>
-      )}
-      <ScrollView style={{ flex: 1 }}>
+      </Text>      <ScrollView style={{ flex: 1 }}>
         {saved.slice().reverse().map((c) => (
           <Pressable key={c.capture_id} style={s.row} onPress={async () => {
               const v = await readCapture(db, c.capture_id);
@@ -1358,8 +1366,24 @@ export default function App() {
               setVnotes(await notesFor(db, c.capture_id));
             }}>
             <Text style={s.rowT}>{c.capture_id}</Text>
+            {/* ONE status per item. The modality, size and hash are DETAIL —
+                they belong on the viewer, which is one tap away. A row that
+                shouts its own SHA-256 at a man on a ladder is the system talking
+                about itself. */}
+            {(() => {
+              const st = captureStatus({
+                inInbox: c.project_id === INBOX_ID, rejected: false,
+                pendingUpload: false, parked: false,
+                hasLocation: c.gps_lat != null,
+              });
+              return (
+                <Text style={[s.rowS, { color: levelColor(st.level).text }]}>
+                  {T(st.primary)}
+                </Text>
+              );
+            })()}
             <Text style={s.rowS}>
-              {c.modality} · {(c.media_bytes / 1024).toFixed(1)} KB · {c.media_sha256.slice(0, 12)}…
+              {c.modality}
               {nCounts[c.capture_id] ? ` · ${nCounts[c.capture_id]} note${nCounts[c.capture_id] > 1 ? 's' : ''}` : ''}
             </Text>
             {/* MANDATE #9 made visible. A missing fix says WHY -- never 0,0 (a spot
@@ -1440,6 +1464,9 @@ const s = StyleSheet.create({
     paddingVertical: 10, borderWidth: 1, borderColor: '#30363d' },
   inboxJobT: { color: '#e6edf3', fontSize: 13, fontWeight: '600' },
   langT: { color: '#6e7681', fontSize: 13, fontWeight: '400' },
+  oneStatus: { borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 },
+  oneStatusT: { fontWeight: '700', fontSize: 14 },
+  oneStatusD: { color: '#8b949e', fontSize: 11, marginTop: 3 },
   // Thumb-sized. This is the first thing a new user ever touches, and they may be
   // wearing gloves when they do it.
   langBig: { backgroundColor: '#21262d', borderColor: '#30363d', borderWidth: 1,
