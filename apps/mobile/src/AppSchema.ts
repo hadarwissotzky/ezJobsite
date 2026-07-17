@@ -8,6 +8,23 @@ const project = new Table({
   name: column.text,
   status: column.text, // SERVER-owned (predeclaration §2)
   updated_at: column.text,
+  // REQ-SET1: "address/geofence/client so resolution and evidence have a home".
+  // These live on the POWERSYNC table, not an app-owned one. A project is a
+  // mutable relational row -- exactly what PowerSync exists to sync. Captures need
+  // an owned queue because they are append-only evidence whose commitment only
+  // SQLite can know; a jobsite address is not evidence. Building a second sync
+  // engine beside the one we adopted would be pattern-matching, not design.
+  address: column.text,
+  lat: column.real,
+  lng: column.real,
+  // How close counts as "on this job". Defaulted, never asked -- nobody on a
+  // ladder is choosing a radius in metres.
+  geofence_m: column.integer,
+  client_ref: column.text,
+  created_at_ms: column.integer,
+  // REQ-P1 context signal: the job you were just on is the job you are probably
+  // still on. Carries the no-GPS case.
+  last_used_ms: column.integer,
 });
 
 const capture = new Table(
