@@ -104,6 +104,35 @@ export function renderBundleHtml(b: any): string {
       ${!(c.approvals ?? []).length ? '<p class="meta">No signature on this change order.</p>' : ''}
     </section>`).join('');
 
+  // REQ-VAL7 for a READER. The JSON carried this a commit ago; the HTML is what a
+  // person actually opens, and "nobody said who owned this" is the sentence the
+  // whole section exists to put in front of them.
+  const resp = (b.responsibility ?? []).map((r: any) => `
+    <section class="${r.nobody_owns_this ? 'gap' : ''}">
+      <h3>${esc(r.subject)}</h3>
+      <p class="${r.nobody_owns_this ? 'bad' : 'ok'}">
+        ${r.nobody_owns_this
+          ? 'NOBODY was recorded as owning this.'
+          : `Assigned to <strong>${esc(r.assigned_to)}</strong>`}
+      </p>
+      ${(r.trades ?? []).length
+        ? `<p class="meta">Trades that touch it: ${(r.trades ?? []).map(esc).join(', ')}</p>` : ''}
+      ${(r.history ?? []).length > 1 ? `
+        <table>
+          <tr><th>Assigned to</th><th>By</th><th>When</th></tr>
+          ${r.history.map((h: any, i: number) => `
+            <tr class="${i === 0 ? 'current' : 'superseded'}">
+              <td>${esc(h.assigned_to)}</td><td>${esc(h.by ?? '—')}</td><td>${esc(h.at)}</td>
+            </tr>`).join('')}
+        </table>
+        <p class="note">This changed ${r.history.length - 1} time(s). Earlier answers are
+          shown because they are part of the record.</p>` : ''}
+    </section>`).join('');
+
+  const parties = (b.parties ?? []).map((p: any) => `
+    <tr><td>${esc(p.name)}</td><td>${esc(p.trade)}</td>
+        <td>${esc(p.scope_of_work ?? '—')}</td></tr>`).join('');
+
   const confs = (b.confirmations ?? []).map((c: any) => `
     <section>
       <h3>${esc(c.kind)} — ${esc(c.counterparty)}</h3>
@@ -150,6 +179,9 @@ export function renderBundleHtml(b: any): string {
   .limits { background: #fff8e5; border: 1px solid #e0c060; border-radius: 6px;
             padding: 12px 14px; }
   .limits li { margin-bottom: 8px; }
+  /* A gap is the expensive thing on the page. It gets the only accent that is not
+     already spoken for -- and the limitations at the top explain what it means. */
+  section.gap { border-left: 4px solid #b8860b; background: #fffdf5; }
 </style></head><body>
 <h1>Evidence bundle</h1>
 <p class="meta">Project ${esc(b.project_id)} · assembled ${esc(b.assembled_at)}</p>
@@ -163,6 +195,12 @@ export function renderBundleHtml(b: any): string {
 
 <h2>Decisions</h2>${decisions || '<p class="none">None recorded.</p>'}
 <h2>Change orders</h2>${cos || '<p class="none">None recorded.</p>'}
+<h2>Who was on this job</h2>
+${parties ? `<table><tr><th>Company</th><th>Trade</th><th>Scope they agreed to</th></tr>${parties}</table>`
+  : '<p class="none">No parties recorded.</p>'}
+
+<h2>Who owns what</h2>${resp || '<p class="none">No boundaries recorded.</p>'}
+
 <h2>Confirmations sent</h2>${confs || '<p class="none">None sent.</p>'}
 <h2>Captures</h2>
 <table><tr><th>Type</th><th>When</th><th>Where</th><th>Content hash</th></tr>${caps}</table>
