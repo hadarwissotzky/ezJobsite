@@ -25,6 +25,17 @@ const project = new Table({
   // REQ-P1 context signal: the job you were just on is the job you are probably
   // still on. Carries the no-GPS case.
   last_used_ms: column.integer,
+  // REQ-CON1. The spec's data model puts it here: "Project — ... status,
+  // recording_consent_state". My first cut invented a separate project_consent
+  // table, which was both wrong against the spec and DEVICE-LOCAL -- a second
+  // phone on the same job would not know the decision, and a job where recording
+  // is unlawful would happily record on the foreman's phone. It belongs on the
+  // project row, which PowerSync already syncs both ways.
+  recording_consent: column.text,
+  consent_basis: column.text,
+  consent_jurisdiction: column.text,
+  consent_decided_at_ms: column.integer,
+  consent_decided_by: column.text,
 });
 
 const capture = new Table(

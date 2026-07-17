@@ -91,6 +91,9 @@ export async function listProjects(db: AbstractPowerSyncDatabase): Promise<Proje
  * REQ-SET1 + REQ-PROC7: "a project can be created ... with no signal".
  * Local write + queued copy, the same shape as every other write here.
  */
+/** The server's project.owner_id is a UUID. Anything else is not a user. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function createProject(
   db: AbstractPowerSyncDatabase,
   o: { ownerId: string; name: string; address?: string | null;
@@ -98,6 +101,16 @@ export async function createProject(
 ): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
   const name = o.name.trim();
   if (!name) return { ok: false, reason: 'A job needs a name' };
+
+  // REFUSE AT THE DOOR. A project row with a non-UUID owner cannot be upserted
+  // (22P02), and because that code is not in the connector's fatal set it does not
+  // get discarded -- it throws, tx.complete() never runs, and THE WHOLE POWERSYNC
+  // QUEUE STALLS PERMANENTLY. One bad row silently stops every later sync while the
+  // app keeps saying "saved". Refusing loudly here costs one error message;
+  // allowing it cost every job I created tonight.
+  if (!UUID_RE.test(o.ownerId)) {
+    return { ok: false, reason: 'Not signed in yet — a job can’t be created until the app has a user' };
+  }
 
   const now = Date.now();
   const id = `prj-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;

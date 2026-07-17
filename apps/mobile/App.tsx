@@ -20,7 +20,8 @@ import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } fr
 import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
-import { addNote, ensureAnnotationSchema, noteCounts, notesFor, type Note } from './src/annotate';
+import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
+         type Note } from './src/annotate';
 import { createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
          INBOX_ID, listProjects, resolveProject, touchProject,
          type Project } from './src/projects';
@@ -49,7 +50,14 @@ const connector = new SupabaseConnector();
 // in this app's history was filed to that string. It is now STATE, seeded from the
 // last job used, so the app opens where the contractor left off.
 const LAST_PROJECT_KEY = 'last_project_id';
-const OWNER = 'owner-local';
+// The signed-in user's UUID. Was the literal 'owner-local' -- a spike constant
+// that survived into product code and caused a severe bug: project.owner_id is a
+// UUID on the server, so every job created on the device failed its upsert with
+// 22P02 (invalid uuid). 22P02 is not in the connector's fatal set, so it was not
+// discarded -- it THREW, tx.complete() never ran, and THE ENTIRE POWERSYNC UPLOAD
+// QUEUE STALLED PERMANENTLY. Jobs, consent and every later PowerSync write stopped
+// reaching the cloud, silently, with the app still saying "saved ✓".
+const OWNER_FALLBACK = 'owner-local';
 
 /**
  * REQ-VAL6: scope, subject and who-directed are INFERRED WITH DEFAULTS, never a
@@ -129,6 +137,10 @@ export default function App() {
   const [vnotes, setVnotes] = React.useState<Note[]>([]);
   const [noteDraft, setNoteDraft] = React.useState('');
   const [nCounts, setNCounts] = React.useState<Record<string, number>>({});
+  // Resolved from the session at startup. Nothing that syncs may be written with a
+  // placeholder: the server's types are the contract, and a string that cannot be
+  // a UUID is not a user.
+  const [OWNER, setOwner] = React.useState<string>(OWNER_FALLBACK);
   const [newJob, setNewJob] = React.useState<null | { name: string; address: string }>(null);
 
   /**
@@ -219,6 +231,8 @@ export default function App() {
 
       try {
         await connector.login('device1@example.com', 'bakeoff-spike-pw-2026');
+        const { data: u } = await connector.client.auth.getUser();
+        if (u?.user?.id) setOwner(u.user.id);
         // connect() is fire-and-forget by design, so its rejection lands nowhere
         // and surfaces as an unhandled "TypeError: Network request failed". Being
         // offline is the NORMAL case for this product, not an error -- a red
@@ -248,6 +262,8 @@ export default function App() {
           // and a stuck photo must never hold back the record of what was decided.
           const dr = await drainDecisionOutbox(db, connector.client, data.user.id);
           if (dr.attempted) console.log('drain decisions:', JSON.stringify(dr));
+          const nr = await drainNoteOutbox(db, connector.client, data.user.id);
+          if (nr.attempted) console.log('drain notes:', JSON.stringify(nr));
           const cr = await drainChangeOrderOutbox(db, connector.client, data.user.id);
           if (cr.attempted) console.log('drain change orders:', JSON.stringify(cr));
           // Pull anything this device does not have: a reinstall, a second phone,

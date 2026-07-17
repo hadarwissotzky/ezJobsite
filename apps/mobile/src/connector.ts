@@ -12,12 +12,60 @@ const POWERSYNC_URL = process.env.EXPO_PUBLIC_POWERSYNC_URL!;
 // Postgres error codes that mean "this write will NEVER succeed". Returning
 // without throwing DISCARDS the operation and unblocks the queue. Throwing on
 // these would stall the upload queue forever (the documented 4xx footgun).
+/**
+ * Errors a retry can NEVER fix. The payload is wrong, not the moment.
+ *
+ * The list matters more than it looks. PowerSync's contract is blunt: a 4xx from
+ * uploadData blocks the upload queue PERMANENTLY, and tx.complete() must run or
+ * the queue stalls forever. So any permanent error NOT in this set does not get
+ * discarded -- it throws, complete() never runs, and EVERY LATER WRITE STOPS,
+ * silently, while the app keeps saying "saved ✓".
+ *
+ * That is not hypothetical: 22P02 was missing, a project was written with the
+ * placeholder owner 'owner-local' instead of a UUID, and the queue sat at 17 ops
+ * and climbing. Jobs and consent stopped reaching the cloud with no error anywhere
+ * a user could see.
+ *
+ * The DATA-ERROR class below is the fix, and the principle is: if a retry in an
+ * hour would fail identically, discard it with evidence rather than wedge
+ * everything behind it. One bad row must never take the queue down with it.
+ */
 const FATAL_PG_CODES = new Set([
   '42501', // insufficient_privilege  <- Q2: client write to a SERVER-owned column
   '23514', // check_violation
   '23503', // foreign_key_violation
   '23505', // unique_violation
+  // --- data errors: the value itself is invalid and will be next time too ---
+  '22P02', // invalid_text_representation  <- 'owner-local' into a uuid column
+  '22001', // string_data_right_truncation
+  '22003', // numeric_value_out_of_range
+  '22007', // invalid_datetime_format
+  '22008', // datetime_field_overflow
+  '23502', // not_null_violation
+  '42703', // undefined_column   <- client sending a field the server does not have
+  '42P01', // undefined_table
 ]);
+
+/**
+ * Columns the SERVER owns. The client may READ them (they are in AppSchema so they
+ * sync down) but must never write them.
+ *
+ * Keep this in step with the GRANTs. The two together are one rule stated twice --
+ * the grant is what actually enforces it; this is what stops us tripping over the
+ * enforcement.
+ */
+const SERVER_OWNED: Record<string, string[]> = {
+  project: ['status'],
+};
+
+function stripServerOwned(table: string, data: Record<string, any> | undefined) {
+  if (!data) return data;
+  const owned = SERVER_OWNED[table];
+  if (!owned?.length) return data;
+  const out = { ...data };
+  for (const c of owned) delete out[c];
+  return out;
+}
 
 export class SupabaseConnector implements PowerSyncBackendConnector {
   readonly client: SupabaseClient;
@@ -64,14 +112,27 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
     try {
       for (const op of tx.crud) {
         const table = this.client.from(op.table);
+        // STRIP SERVER-OWNED COLUMNS BEFORE WRITING.
+        //
+        // PowerSync sends every local column, and an upsert UPDATES every column in
+        // the payload. `project.status` is server-owned (predeclaration §2) and has
+        // no UPDATE grant -- so including it made Postgres refuse the WHOLE
+        // statement with 42501. Because 42501 is in the fatal set, the connector
+        // then DISCARDED the row: the job existed on the phone, the app said saved,
+        // and it never reached the cloud. No error, no queue backlog, nothing to
+        // notice. That is the worst shape a bug can take here.
+        //
+        // Column-level grants alone cannot fix it: the client must not ATTEMPT the
+        // write. Stripping is the fix; the grant is the belt.
+        const data = stripServerOwned(op.table, op.opData);
         let result: any;
 
         switch (op.op) {
           case UpdateType.PUT:
-            result = await table.upsert({ ...op.opData, id: op.id });
+            result = await table.upsert({ ...data, id: op.id });
             break;
           case UpdateType.PATCH:
-            result = await table.update(op.opData ?? {}).eq('id', op.id);
+            result = await table.update(data ?? {}).eq('id', op.id);
             break;
           case UpdateType.DELETE:
             result = await table.delete().eq('id', op.id);

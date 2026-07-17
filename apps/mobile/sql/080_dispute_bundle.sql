@@ -166,7 +166,17 @@ begin
                                             'fix_age_ms', c.gps_fix_age_ms)
                     else null end,
         -- Says WHY there is no location rather than leaving an unexplained hole.
-        'location_status', coalesce(c.stamp_status, 'not recorded (captured before location stamping existed)')
+        'location_status', coalesce(c.stamp_status, 'not recorded (captured before location stamping existed)'),
+        -- REQ-CAP3 in the bundle. Often the only thing that EXPLAINS a photo --
+        -- "this is the crack he says we caused; it was here before we started".
+        -- Marked as commentary, not content: a note is what a person said ABOUT
+        -- the capture, afterwards, and is NOT covered by the media hash. Letting a
+        -- reader mistake it for part of the recording is how a bundle overclaims.
+        'notes', coalesce((select jsonb_agg(jsonb_build_object(
+                     'body', n.body, 'author', n.author, 'at', n.created_at,
+                     'is_commentary_not_recorded_content', true)
+                     order by n.created_at_ms)
+                   from public.capture_note n where n.capture_id = c.id), '[]'::jsonb)
       ) order by c.client_created_at)
       from public.capture c where c.project_id = p_project_id), '[]'::jsonb)
   ) into result;

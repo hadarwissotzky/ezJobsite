@@ -25,6 +25,8 @@
  * evidence.
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { sha256 } from 'js-sha256';
 
 export const ANNOTATION_DDL = [
   `CREATE TABLE IF NOT EXISTS capture_note (
@@ -43,6 +45,22 @@ export const ANNOTATION_DDL = [
      BEFORE DELETE ON capture_note
      BEGIN SELECT RAISE(ABORT, 'notes are never destroyed'); END`,
 
+  // Transport intent, enqueued INSIDE the note's transaction. capture_note is
+  // app-owned (it carries append-only triggers, which a PowerSync-managed view
+  // cannot), so it needs an owned queue -- the same reason decisions do, and NOT
+  // the reason projects do not.
+  `CREATE TABLE IF NOT EXISTS note_outbox (
+      mutation_id   TEXT NOT NULL PRIMARY KEY,
+      note_id       TEXT NOT NULL,
+      payload_json  TEXT NOT NULL,
+      payload_sha256 TEXT NOT NULL,
+      queued_at_ms  INTEGER NOT NULL,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at_ms INTEGER NOT NULL DEFAULT 0,
+      last_error_code TEXT,
+      last_error_text TEXT
+   ) STRICT`,
+
   `CREATE INDEX IF NOT EXISTS capture_note_by_capture
      ON capture_note (capture_id, created_at_ms DESC)`,
 ];
@@ -60,12 +78,27 @@ export async function addNote(
 ): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
   const body = o.body.trim();
   if (!body) return { ok: false, reason: 'empty note' };
-  const id = `nt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const now = Date.now();
+  const id = `nt-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const mutationId = `nm-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const payload = { mutation_id: mutationId, id, capture_id: o.captureId, body,
+                    author: o.author ?? null, created_at_ms: now };
+  const payloadJson = JSON.stringify(payload);
   try {
-    await db.execute(
-      `INSERT INTO capture_note (id, capture_id, body, author, created_at_ms) VALUES (?,?,?,?,?)`,
-      [id, o.captureId, body, o.author ?? null, Date.now()]
-    );
+    await db.writeTransaction(async (tx) => {
+      await tx.execute(
+        `INSERT INTO capture_note (id, capture_id, body, author, created_at_ms) VALUES (?,?,?,?,?)`,
+        [id, o.captureId, body, o.author ?? null, now]
+      );
+      // Atomic with the note. A crash between them would leave a note that exists
+      // on one phone and will never reach the bundle -- and the bundle is the only
+      // place a note ever has to earn its keep.
+      await tx.execute(
+        `INSERT INTO note_outbox (mutation_id, note_id, payload_json, payload_sha256, queued_at_ms)
+         VALUES (?,?,?,?,?)`,
+        [mutationId, id, payloadJson, sha256(payloadJson), now]
+      );
+    });
   } catch (e: any) {
     return { ok: false, reason: e?.message ?? String(e) };
   }
@@ -84,4 +117,41 @@ export async function noteCounts(db: AbstractPowerSyncDatabase): Promise<Record<
     `SELECT capture_id, count(*) AS n FROM capture_note GROUP BY capture_id`
   );
   return Object.fromEntries(rows.map((r) => [r.capture_id, r.n]));
+}
+
+/** Push notes. Same rules as every other owned queue here. */
+export async function drainNoteOutbox(
+  db: AbstractPowerSyncDatabase, supabase: SupabaseClient, ownerId: string
+) {
+  const r = { attempted: 0, uploaded: 0, alreadyApplied: 0, retryable: 0 };
+  const rows = await db.getAll<{ mutation_id: string; payload_json: string;
+                                 payload_sha256: string; attempt_count: number }>(
+    `SELECT mutation_id, payload_json, payload_sha256, attempt_count
+       FROM note_outbox WHERE next_attempt_at_ms <= ? ORDER BY queued_at_ms LIMIT 20`,
+    [Date.now()]
+  );
+  for (const row of rows) {
+    r.attempted++;
+    try {
+      const p = JSON.parse(row.payload_json);
+      const { data, error } = await supabase.rpc('ingest_note_v1', {
+        p_mutation_id: p.mutation_id, p_id: p.id, p_capture_id: p.capture_id,
+        p_owner_id: ownerId, p_body: p.body, p_author: p.author,
+        p_created_at_ms: p.created_at_ms, p_request_sha256: row.payload_sha256,
+      });
+      if (error) throw error;
+      await db.execute(`DELETE FROM note_outbox WHERE mutation_id = ?`, [row.mutation_id]);
+      if (data?.status === 'already_applied') r.alreadyApplied++; else r.uploaded++;
+    } catch (e: any) {
+      const n = row.attempt_count + 1;
+      await db.execute(
+        `UPDATE note_outbox SET attempt_count = ?, next_attempt_at_ms = ?,
+           last_error_code = ?, last_error_text = ? WHERE mutation_id = ?`,
+        [n, Date.now() + Math.min(60_000 * 2 ** Math.min(n, 6), 30 * 60_000),
+         e?.code ?? 'TRANSIENT', e?.message ?? String(e), row.mutation_id]
+      );
+      r.retryable++;
+    }
+  }
+  return r;
 }

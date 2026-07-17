@@ -44,23 +44,9 @@ export type RecordingConsent =
   | null;          // NOT SET -> voice/video unavailable. Never "probably fine".
 
 export const CONSENT_DDL = [
-  `CREATE TABLE IF NOT EXISTS project_consent (
-      project_id       TEXT NOT NULL PRIMARY KEY,
-      -- null is a real, meaningful state: "nobody has decided". It is NOT a
-      -- default-allow, and the arming gate treats it as no.
-      recording_consent TEXT
-        CHECK (recording_consent IS NULL
-               OR recording_consent IN ('all_party','one_party','no_recording')),
-      -- What we told them when they chose. Frozen, same rule as shown_content:
-      -- if the wording changes next year, this records what they actually agreed to.
-      consent_basis    TEXT,
-      jurisdiction     TEXT,
-      decided_at_ms    INTEGER,
-      decided_by       TEXT
-   ) STRICT`,
-
-  // CON2 is a DEVICE setting, not a project one: it is about this phone's data
-  // plan. The same job on the office iPad has no cellular question at all.
+  // CON2 only. It is a DEVICE setting, not a project one: it is about THIS phone's
+  // data plan. The same job on the office iPad has no cellular question at all, so
+  // syncing it would push one phone's billing choice onto another.
   `CREATE TABLE IF NOT EXISTS device_settings (
       k TEXT NOT NULL PRIMARY KEY,
       v TEXT NOT NULL
@@ -106,31 +92,29 @@ export async function setRecordingConsent(
   db: AbstractPowerSyncDatabase,
   o: { projectId: string; consent: Exclude<RecordingConsent, null>; jurisdiction: string | null; decidedBy: string }
 ) {
+  // On the project row -> PowerSync carries it to every device on this job. A
+  // recording decision that only one phone knows is worth very little: the whole
+  // point is that the crew cannot record where the owner said no.
   await db.execute(
-    `INSERT INTO project_consent (project_id, recording_consent, consent_basis,
-       jurisdiction, decided_at_ms, decided_by)
-     VALUES (?,?,?,?,?,?)
-     ON CONFLICT(project_id) DO UPDATE SET
-       recording_consent = excluded.recording_consent,
-       consent_basis = excluded.consent_basis,
-       jurisdiction = excluded.jurisdiction,
-       decided_at_ms = excluded.decided_at_ms,
-       decided_by = excluded.decided_by`,
-    [o.projectId, o.consent, consentBasisText(o.consent, o.jurisdiction),
-     o.jurisdiction, Date.now(), o.decidedBy]
+    `UPDATE project SET recording_consent = ?, consent_basis = ?,
+       consent_jurisdiction = ?, consent_decided_at_ms = ?, consent_decided_by = ?
+     WHERE id = ?`,
+    [o.consent, consentBasisText(o.consent, o.jurisdiction), o.jurisdiction,
+     Date.now(), o.decidedBy, o.projectId]
   );
 }
 
 export async function getRecordingConsent(
   db: AbstractPowerSyncDatabase, projectId: string
 ): Promise<{ consent: RecordingConsent; basis: string | null; jurisdiction: string | null }> {
-  const r = (await db.getAll<{ recording_consent: RecordingConsent; consent_basis: string | null; jurisdiction: string | null }>(
-    `SELECT recording_consent, consent_basis, jurisdiction FROM project_consent WHERE project_id = ?`,
-    [projectId]))[0];
+  const r = (await db.getAll<{ recording_consent: RecordingConsent; consent_basis: string | null;
+                               consent_jurisdiction: string | null }>(
+    `SELECT recording_consent, consent_basis, consent_jurisdiction
+       FROM project WHERE id = ?`, [projectId]))[0];
   return {
     consent: r?.recording_consent ?? null,
     basis: r?.consent_basis ?? null,
-    jurisdiction: r?.jurisdiction ?? null,
+    jurisdiction: r?.consent_jurisdiction ?? null,
   };
 }
 
