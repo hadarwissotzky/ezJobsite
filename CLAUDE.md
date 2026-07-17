@@ -79,6 +79,21 @@ BLAST RADIUS:
 
 **Do not inflate `COMPLETION`.** A commit that says `COMPLETION: 60% — the recovery sweep is unwritten` is worth more than one that says 100% and is wrong. The ledger rule applies here too: **☑ only when the edit exists.**
 
+#### This is ENFORCED, not advisory `[hadar 2026-07-16: "we need to take it from here — especially as we get more into code"]`
+
+`.githooks/commit-msg` **rejects** any commit missing a section, with an empty `WHY`/`GOALS`/`BLAST RADIUS`, or with a `COMPLETION` carrying no percentage. A convention honoured only when someone remembers is worth nothing exactly when code volume rises — which is when it was asked for.
+
+**Enable once per clone** (git does not ship hooks on clone):
+```bash
+git config core.hooksPath .githooks
+```
+**Verify it is live:** `git config core.hooksPath` → `.githooks`. If that prints nothing, **you are not protected** and the rule is back to voluntary.
+
+- **Exempt** (auto-generated or not-a-landed-change): `Merge …` · `Revert …` · `fixup!/squash! …` · `WIP:` checkpoints.
+- **Bypass:** `git commit --no-verify`. It exists for emergencies. **Use it and you own the gap** — nothing else will catch it.
+- A rejected message is preserved at `.git/COMMIT_EDITMSG.rejected`, so nothing you wrote is lost.
+- **The hook checks structure, not honesty.** It cannot tell a real `BLAST RADIUS` from `none`. It removes the excuse of forgetting; it cannot remove the temptation to under-report. That part is still on whoever commits.
+
 ---
 
 ## 4. The verification layer (the user's instruction #2)

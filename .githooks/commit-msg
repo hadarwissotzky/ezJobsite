@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Enforces CLAUDE.md §3.1 — every commit message must answer WHY / GOALS /
+# COMPLETION / BLAST RADIUS.
+#
+# Why this is a hook and not a convention: hadar, 2026-07-16 — "we need to take
+# it from here, especially as we get more into code". A convention that is only
+# honoured when someone remembers is worth nothing precisely when volume rises.
+# This project's recurring defect is claims outrunning evidence; BLAST RADIUS is
+# the countermeasure, and a countermeasure nobody runs is decoration.
+#
+# Binds Claude, Codex, and hadar equally — it runs on the commit, not on the author.
+#
+# Enable (once per clone):  git config core.hooksPath .githooks
+# Emergency bypass:         git commit --no-verify   (use it and you own the gap)
+
+set -uo pipefail
+MSG_FILE="$1"
+
+# Strip comments and trailing blanks.
+BODY="$(grep -v '^#' "$MSG_FILE" | sed -e 's/[[:space:]]*$//')"
+
+SUBJECT="$(printf '%s\n' "$BODY" | sed '/^$/d' | head -1)"
+
+# --- exemptions -------------------------------------------------------------
+# Auto-generated messages we do not author. Reverts keep the original subject,
+# so they carry the original reasoning by reference.
+case "$SUBJECT" in
+  "Merge "*|"Revert "*|"fixup! "*|"squash! "*|"Applied "*)
+    exit 0 ;;
+esac
+# An in-progress checkpoint (gstack continuous mode) is not a landed change.
+case "$SUBJECT" in WIP:*) exit 0 ;; esac
+
+fail() {
+  # Preserve what the author wrote so it is not lost to a rejected commit.
+  cp "$MSG_FILE" "$(dirname "$MSG_FILE")/COMMIT_EDITMSG.rejected" 2>/dev/null || true
+  cat >&2 <<BANNER
+
+  ✗ COMMIT REJECTED — CLAUDE.md §3.1
+
+  $1
+
+  Every commit must answer all four, under these exact headings:
+
+    WHY:            the intent. What prompted this, what breaks without it.
+                    Not a restatement of the diff. Name the source
+                    (e.g. "Codex #11 CRITICAL 2", "hadar 2026-07-16").
+    GOALS:          what is now true that wasn't. What it deliberately does NOT do.
+    COMPLETION:     N% — and what the remaining % is. 100% means nothing is owed.
+    BLAST RADIUS:   every other area touched — files beyond the obvious, docs whose
+                    claims this invalidates, decisions superseded, what must be
+                    re-checked. "None" only if actually true.
+
+  Your message was saved to .git/COMMIT_EDITMSG.rejected
+  Deliberate exception:  git commit --no-verify   (you own the gap)
+
+BANNER
+  exit 1
+}
+
+MISSING=()
+for H in "WHY:" "GOALS:" "COMPLETION:" "BLAST RADIUS:"; do
+  printf '%s\n' "$BODY" | grep -qE "^[[:space:]]*${H}" || MISSING+=("$H")
+done
+[ ${#MISSING[@]} -gt 0 ] && fail "Missing section(s): ${MISSING[*]}"
+
+# COMPLETION must carry an actual figure — "COMPLETION: done" is the vibe this
+# rule exists to stop.
+COMPLETION_LINE="$(printf '%s\n' "$BODY" | grep -E "^[[:space:]]*COMPLETION:" | head -1)"
+COMPLETION_BLOCK="$(printf '%s\n' "$BODY" | sed -n '/^[[:space:]]*COMPLETION:/,/^[[:space:]]*BLAST RADIUS:/p')"
+printf '%s\n' "$COMPLETION_BLOCK" | grep -qE '[0-9]+[[:space:]]*%' \
+  || fail "COMPLETION has no figure. Write a percentage and say what the remainder is.
+  Got: ${COMPLETION_LINE}"
+
+# Each heading needs something after it — an empty section is not an answer.
+for H in "WHY" "GOALS" "BLAST RADIUS"; do
+  SECTION="$(printf '%s\n' "$BODY" | awk -v h="^[[:space:]]*${H}:" '
+    $0 ~ h {found=1; sub(h, ""); }
+    found {print}
+  ' | awk 'NR==1 && NF>0 {print; next} NR>1 && /^[[:space:]]*(WHY|GOALS|COMPLETION|BLAST RADIUS):/ {exit} NR>1 {print}')"
+  printf '%s\n' "$SECTION" | grep -qE '[A-Za-z0-9]' || fail "Section '${H}:' is empty."
+done
+
+exit 0
