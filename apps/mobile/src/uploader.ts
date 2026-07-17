@@ -98,8 +98,18 @@ export async function drainOutbox(
 
     try {
       // --- 1. media -> storage, create-only ---------------------------------
-      const ext = payload.media_mime_type?.startsWith('text/') ? 'txt'
-        : payload.media_mime_type?.startsWith('audio/') ? 'm4a' : 'bin';
+      // Photos and video existed nowhere in this map, so every image would have
+      // landed in storage as an extensionless ".bin" -- undownloadable by anything
+      // that trusts a file extension, which is most things.
+      const mime: string = payload.media_mime_type ?? '';
+      const ext = mime.startsWith('text/') ? 'txt'
+        : mime.startsWith('audio/') ? 'm4a'
+        : mime === 'image/png' ? 'png'
+        : mime === 'image/heic' ? 'heic'
+        : mime.startsWith('image/') ? 'jpg'
+        : mime === 'video/mp4' ? 'mp4'
+        : mime.startsWith('video/') ? 'mov'
+        : 'bin';
       const key = objectKey(ownerId, payload.capture_id, payload.media_sha256, ext);
 
       const local = await db.getAll<{ media_relpath: string }>(
@@ -138,6 +148,14 @@ export async function drainOutbox(
         p_modality: payload.modality ?? 'text',
         p_captured_at_ms: payload.captured_at_ms,
         p_request_sha256: row.payload_sha256,
+        // MANDATE #9. `?? null` not `?? 0`: a capture queued before the stamp
+        // existed has no location, and 0,0 is a spot in the Gulf of Guinea that
+        // the server would rightly refuse. Null is the truth about those rows.
+        p_gps_lat: payload.gps_lat ?? null,
+        p_gps_lng: payload.gps_lng ?? null,
+        p_gps_accuracy_m: payload.gps_accuracy_m ?? null,
+        p_gps_fix_age_ms: payload.gps_fix_age_ms ?? null,
+        p_stamp_status: payload.stamp_status ?? null,
       });
       if (error) throw error;
 

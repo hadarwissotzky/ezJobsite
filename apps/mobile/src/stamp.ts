@@ -76,7 +76,13 @@ export async function stampNow(): Promise<Stamp> {
       lat: fix.coords.latitude,
       lng: fix.coords.longitude,
       accuracyM: fix.coords.accuracy ?? null,
-      fixAgeMs: Math.max(0, capturedAtMs - fix.timestamp),
+      // ROUNDED. iOS returns a FRACTIONAL timestamp, so this was a float
+      // (219.08984375), and capture_commit is a STRICT table: "cannot store REAL
+      // value in INTEGER column". Every stamped capture FAILED -- loudly, which is
+      // the right failure mode, but a total break of the capture path the moment
+      // location was granted. Sub-millisecond precision on the age of a GPS fix
+      // is meaningless anyway.
+      fixAgeMs: Math.round(Math.max(0, capturedAtMs - fix.timestamp)),
       status: 'ok',
     };
   } catch {

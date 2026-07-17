@@ -345,6 +345,13 @@ export async function performCapture(
     media_sha256: mediaSha256, media_bytes: mediaBytes, media_mime_type: opts.input.mimeType,
     modality: opts.input.modality,
     captured_at_ms: capturedAtMs,
+    // MANDATE #9 travels with the capture. Part of the payload hash, so a stamp
+    // cannot be altered in the outbox without the server refusing the replay.
+    gps_lat: opts.stamp?.lat ?? null,
+    gps_lng: opts.stamp?.lng ?? null,
+    gps_accuracy_m: opts.stamp?.accuracyM ?? null,
+    gps_fix_age_ms: opts.stamp?.fixAgeMs ?? null,
+    stamp_status: opts.stamp?.status ?? 'unavailable',
   });
   const requestSha256 = await sha256Hex(new Uint8Array(Buffer.from(payloadJson, 'utf8')));
 
