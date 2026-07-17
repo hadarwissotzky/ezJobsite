@@ -19,6 +19,7 @@ import {
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
+import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
 import { buildDisputeBundle, shareBundle, shareLink } from './src/bundle';
 import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
@@ -97,6 +98,28 @@ export default function App() {
   const [coRows, setCoRows] = React.useState<any[]>([]);
   const [dsync, setDsync] = React.useState<any>(null);
   const [bundling, setBundling] = React.useState<string | null>(null);
+
+  /**
+   * REQ-CAP5 + mandate #1: "saved" is confirmed AUDIBLY and visually; failure is
+   * loud, never silent.
+   *
+   * Driven off the UI STATE, not from each call site. Twelve call sites each
+   * remembering to beep is twelve chances to forget -- and an audit found the
+   * text-capture path had already forgotten, which meant a contractor typing a
+   * note on a ladder got no confirmation at all. A new capture path added
+   * tomorrow is audible by construction, because it cannot reach `saved` without
+   * passing through here.
+   *
+   * The GATE is upstream and unchanged: `saved` is only ever set from the ok:true
+   * branch of performCapture, which returns only after the SQLite transaction
+   * commits under synchronous=FULL. This never fires on a raw write -- that is the
+   * phantom-"saved" bug REQ-CAP5 exists to prevent.
+   */
+  React.useEffect(() => {
+    if (ui.k === 'saved') void signalSaved();
+    else if (ui.k === 'refused') void signalFailed();
+    else if (ui.k === 'recording') void signalArmed();
+  }, [ui]);
   // §7.2 line items. Kept OUT of `priced` so cancelling the composer cannot
   // disturb a figure the contractor has already read back and agreed with.
   const [lines, setLines] = React.useState<LineItem[]>([]);
@@ -134,6 +157,7 @@ export default function App() {
       await ensureAppOwnedSchema(db);
       await ensureDecisionSchema(db);
       await ensureChangeOrderSchema(db);
+      await initFeedback();
 
       // THE GATE. If the write connection cannot promise durability we do not
       // arm the recorder at all. Refusing loudly beats saying "saved" and lying.
