@@ -19,8 +19,8 @@ import {
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { textCapture, voiceCapture } from './src/modality';
 import { drainOutbox, outboxStatus } from './src/uploader';
-import { decisionHistory, ensureDecisionSchema, listDecisions, recordDecision,
-         type DecisionRow } from './src/decisions';
+import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
+         listDecisions, recordDecision, type DecisionRow } from './src/decisions';
 import { sendForConfirmation } from './src/confirmations';
 import { centsFromInput, createChangeOrder, ledger, money, parseMoney } from './src/changeorder';
 import { issueOtp, newOtpCode, renderApproval, signApproval, verifyOtp } from './src/signing';
@@ -86,6 +86,7 @@ export default function App() {
     amountText: string; confidence: 'high'|'low'|'none'; nteText: string;
   }>(null);
   const [coRows, setCoRows] = React.useState<any[]>([]);
+  const [dsync, setDsync] = React.useState<any>(null);
   // §7.1 signing. `shown` is frozen the moment the sheet opens.
   const [sign, setSign] = React.useState<null | {
     coId: string; shown: string; phone: string; code: string; sent: string | null;
@@ -99,7 +100,12 @@ export default function App() {
     try {
       setSaved(await listCommittedCaptures(db));
       const s = (await outboxStatus(db))[0];
-      setDelivery({ pending: s?.pending ?? 0, parked: s?.parked ?? 0 });
+      // Captures and decisions ride independent queues, so "not backed up yet"
+      // must count both. One green tick that ignores half the queue is a lie.
+      const ds = await decisionSyncStatus(db);
+      setDsync(ds);
+      setDsync(ds);
+      setDelivery({ pending: (s?.pending ?? 0) + ds.pending, parked: (s?.parked ?? 0) + ds.parked });
       setDecisions(await listDecisions(db, PROJECT_ID));
       try { setCoRows(await ledger(connector.client, PROJECT_ID)); } catch { /* offline */ }
     } catch { /* pre-init */ }
@@ -145,8 +151,14 @@ export default function App() {
           const { data } = await connector.client.auth.getUser();
           if (!data?.user) return;             // not signed in -> nothing to do
           const r = await drainOutbox(db, connector.client, data.user.id);
-          if (r.attempted) console.log('drain:', JSON.stringify(r));
-          if (r.uploaded || r.alreadyApplied || r.parked) await refresh();
+          if (r.attempted) console.log('drain captures:', JSON.stringify(r));
+          // Decisions drain on the same tick but through their own queue. They are
+          // NOT chained to the capture drain: a decision must not wait on a blob,
+          // and a stuck photo must never hold back the record of what was decided.
+          const dr = await drainDecisionOutbox(db, connector.client, data.user.id);
+          if (dr.attempted) console.log('drain decisions:', JSON.stringify(dr));
+          if (r.uploaded || r.alreadyApplied || r.parked ||
+              dr.uploaded || dr.alreadyApplied || dr.parked) await refresh();
         } catch (e: any) { /* offline is normal; backoff already recorded */ }
       };
       drain();
@@ -413,6 +425,12 @@ export default function App() {
       {decisions.length > 0 && (
         <>
           <Text style={s.sub}>Decisions ({decisions.length})</Text>
+          {dsync && (
+            <Text style={s.dmeta}>
+              cloud: {dsync.synced} synced · {dsync.pending} waiting · {dsync.parked} stuck
+              {dsync.lastError ? `\n${dsync.lastError}` : ''}
+            </Text>
+          )}
           {decisions.map((d) => (
             <Pressable key={d.id} style={s.drow} onPress={async () => {
               setHistory(await decisionHistory(db, d.id));
