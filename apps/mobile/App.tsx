@@ -472,6 +472,9 @@ export default function App() {
     }
   };
 
+  // REQ-CAP1 — one-action start: ONE large primary control, and the first tap
+  // records. No mode, no menu, no confirm. Built from the beginning; tagged now
+  // because an untagged requirement reads as an unbuilt one (see REQ-PROC2).
   const label =
     gate ? T('rec.unavailable') :
     ui.k === 'recording' ? T('rec.stop') :

@@ -277,6 +277,11 @@ export async function ensureResolutionSchema(db: AbstractPowerSyncDatabase) {
   for (const s of RESOLUTION_DDL) await db.execute(s);
 }
 
+/**
+ * REQ-P3 — reassign/override: a capture moves to the right project in ONE action.
+ *   The override is appended BESIDE the original, never over it — capture_commit
+ *   is append-only, and what the device believed at capture time stays a fact.
+ */
 export async function fileCapture(
   db: AbstractPowerSyncDatabase,
   o: { captureId: string; projectId: string; by: string }

@@ -50,6 +50,11 @@ export type SendResult =
   | { ok: true; token: string; url: string; shownContent: string }
   | { ok: false; reason: string };
 
+/**
+ * REQ-VAL2 — sub<->GC directive: capture a directive with who-directed + scope
+ *   (+ the change order's optional NTE) and send an "acknowledge you directed
+ *   this" card. The 'acknowledge' kind is that path.
+ */
 export async function sendForConfirmation(
   supabase: SupabaseClient,
   o: {

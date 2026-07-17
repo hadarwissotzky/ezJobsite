@@ -302,3 +302,96 @@
 **Also fixed this pass — the `2>&1 | tee` bug in the Codex prompt templates.** `2>&1` merges Codex's stderr progress/tool logs **into the saved review file**, polluting the artifact with run noise. **`CODEX-REVIEW-08-PROMPT.md` corrected** to `2> /tmp/codex-08-run.log | tee …`. **`#6`/`#7` already carried this fix** from the 2026-07-16 doc-drift commit (where they also had the worse heredoc-binds-to-`tee` bug, which would have sent the model an **empty prompt**). All three templates are now correct. *(The #8 run itself used the corrected form.)*
 
 **NET:** the bakeoff is now **falsifiable** — a pass requires named assertions, and a pass recorded without them is **an untested question, not a pass**. **Standing rule added to the bakeoff: record the EVIDENCE, not the verdict** ("Q1 ✅" with no assertion trail is precisely the false-pass this review exists to prevent, and the conclusion-stage Codex pass will correctly reject it). This is the **ezQuotePro "ALL TESTS PASSED" trap one layer up** — a green bakeoff green-lighting a rewrite on evidence that never existed. **No architecture decision was touched; ADR-2 remains open pending the bakeoff result.** | Codex #8 run + tightenings applied by Claude. | — (no decision owed; next gate = run the bakeoff, then a Codex pass on its conclusion before flipping ADR-2) |
+
+---
+
+## §5 — The build session, 2026-07-16/17 (61 commits): what actually bit
+
+*Written because CLAUDE.md §3 says this file is the project's memory of WHY, and I
+went 61 commits without touching it. Everything below was found by running the
+thing, not by reading it — and every one of them looked like success until it was
+measured.*
+
+### §5.1 The silent-failure family (the expensive one)
+
+Every bug that cost real time this session had the same shape: **the app said it
+worked, and it had not.** None threw. None appeared in a log. Each was found only
+by checking a claim against reality.
+
+| What | How it presented | What it actually was | How it was found |
+|---|---|---|---|
+| **PowerSync upload dead all session** | `connected: true`, queue clean, "saved ✓" | Client sent `created_at_ms`; Postgres had only `created_at`. PostgREST → PGRST204 → not a SQLSTATE → fell past the connector's fatal-code check → threw → `tx.complete()` never ran → **queue wedged at 25 and climbing**. | I wrote a comment claiming "PowerSync carries it to every device", then checked. **Not one job had ever reached the server.** |
+| **Q2's protection vs PowerSync's upload** | 42501, then a **silently discarded row** | The bakeoff enforced "status is server-owned" by REVOKING table UPDATE. PowerSync upserts; PostgREST needs **table-level** UPDATE for an upsert — column grants are not enough. Because 42501 is in the fatal set, the row was **discarded**: job on the phone, "saved ✓", gone. | Reproducing the exact upsert by hand with curl. The hint said it outright. |
+| **`owner-local` into a uuid column** | 22P02, queue poisoned | A spike constant that survived into product code. | Fixed at the door: `createProject` now refuses a non-UUID owner. |
+| **Every photo/video written as `.bin`** | hash intact, capture fine, **file unopenable** | The local extension came from the MODALITY, not the mime: `text→txt, voice→m4a, else→bin`. | Playing a capture back. The player reported `playing: true` with the position frozen at 0 for 3.2s — **decoding nothing**. |
+| **`bundle_limitations()` defined in two files** | nothing failed | 080 created it with 4; 090 rewrote it with 5; **re-running 080 silently reverted it** and the dispute bundle went back to overclaiming. `create or replace` is a replace, not a merge. | Counting array elements by hand. |
+| **`ingest_capture_v1` defined in two files** | would have broken every upload | 060 drops the 12-arg and creates a 17-arg. Re-running 010 recreates the 12-arg **alongside** it → PostgREST cannot resolve → uploads break. The overload bug I had already fixed once, loaded and waiting. | The duplicate-check script, on its first run. |
+| **"Text strings must be rendered within a `<Text>`"** | dev-only LogBox, no stack | A regex left `</Text>      <ScrollView` on ONE LINE. **In JSX, whitespace between elements on the same line is a text child.** Six invisible spaces. | Reading the file. Two static scans and a bisect all missed it — the offender is whitespace, and bisecting "passed" twice because the broken tree never rendered. |
+
+**The standing lesson:** a test that passes because the code never ran is not a
+passing test. I concluded "fixed" twice from exactly that.
+
+### §5.2 Guards built, because each of these bit
+
+Three checks now exist. Each exists because the class it catches actually cost hours:
+
+- **`scripts/check-schema-agreement.mjs`** — diffs AppSchema.ts against
+  `information_schema`. A client column the server lacks is FATAL: that is the
+  permanent silent stall. **Proven by injecting the real bug**; exits 1.
+- **`scripts/check-sql-duplicates.mjs`** — one object, one file. **Found a live
+  hazard on its first run** (`ingest_capture_v1` in 010 and 060).
+- **`sync_rejected` + a red banner** — a discard was an **in-memory array**: it died
+  with the process and no user ever saw it. That is how every job was dropped on
+  42501 with a clean queue.
+
+None run in CI, because there is no CI. That is the obvious next thing.
+
+### §5.3 Design decisions worth not re-litigating
+
+- **Projects ride PowerSync; captures/decisions/notes/scope ride owned outboxes.**
+  Not taste. Append-only tables carry triggers a PowerSync *view* cannot; a project
+  is a mutable row and that is exactly what PowerSync is for. My first cut built an
+  outbox for projects — **a second sync engine beside the one we adopted** — and it
+  failed loudly (`CREATE TABLE IF NOT EXISTS project` silently did nothing, because
+  PowerSync already defines `project`).
+- **Server-ownership is enforced by TRIGGER, not by GRANT.** The invariant was never
+  "the client cannot run UPDATE", it was "the client cannot change status". A grant
+  was the wrong instrument and was incompatible with the tool we adopted.
+- **The bundle and the progress update are opposites, deliberately.** The bundle is
+  for a fight (complete, hedged, every superseded value, six limitations). The
+  update is for a Friday (current value only, no hashes, the ask last and alone).
+  Sending the bundle to a homeowner tells her you are preparing to sue her.
+- **REQ-X3 was violated by my own "never silent" fixes.** The app grew EIGHT parallel
+  status banners, each added honestly for a good reason. Stacked, they are a wall a
+  man on a ladder cannot parse — **every fix made the next one quieter.**
+- **The state machine says the weaker true thing.** After a drain with no server
+  word, an item reports `captured`, not `uploaded`. Inferring success from the
+  absence of a queue row is the phantom-"saved" bug wearing a different hat.
+
+### §5.4 Requirements: what is actually blocked, and on what
+
+Not "needs an LLM" as a lump. Each named:
+
+| Requirement | Real blocker |
+|---|---|
+| CAP7 (pre-roll), REP-7 (pause=section break) | **A microphone.** This Mac has none (`system_profiler`: one audio device, output only). |
+| PROC1 / PROC3 / PROC5, REP-6 (AI walkthrough note), REQ-P1's content signal | **An LLM/STT key.** |
+| REP-3 (daily digest) | A scheduler + notification channel. Not a share button. |
+| TL4 (video → audio + keyframes) | Native media extraction + a journaled encrypted temp asset. A subsystem. |
+| REQ-VAL8 hosting | **A static host for one file**, then `EXPO_PUBLIC_CONFIRM_BASE`. Supabase Storage **refuses to serve renderable HTML** (verified: row says `text/html`, CDN serves `text/plain`, `.json` serves correctly — a deliberate anti-phishing measure). |
+| Trade taxonomy | A product decision about which trades/market. |
+| REP-4/5 | P2. |
+
+**REQ-PROC2 was already built and untagged** — my own audit counted it missing. The
+tag was the gap, not the behaviour. Worth checking the others before building.
+
+### §5.5 Measured, not asserted
+
+- **REQ-PROC4 acceptance: 100 cycles, 14 abandoned drains → 0 lost, 0 dup, 0 corrupt.**
+  With a **negative control** that is kept in the source and off by default: with it
+  on, `pass:false, lost:['cap-never-committed']`. A test that cannot fail is not a
+  test.
+- The kill is **simulated** (an abandoned drain), NOT a SIGKILL. A harness cannot
+  report on the process that killed it. `spike/harness/kill.py` does it from outside.
+- Media integrity sampled at **25 of 100**, not exhaustive.
+

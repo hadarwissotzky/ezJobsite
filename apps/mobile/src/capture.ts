@@ -295,6 +295,15 @@ export function extFor(mime: string, modality: string): string {
     : modality === 'voice' ? 'm4a' : 'bin';
 }
 
+/**
+ * REQ-CAP4 — local-first durable write before ANY network call, under
+ *   synchronous=FULL + F_FULLFSYNC (assertDurabilityProfile gates on it).
+ * REQ-CAP8 — the write-ahead journal: the outbox intent is committed in the SAME
+ *   transaction as the record, so a crash can never leave a durable capture that
+ *   nothing will ever try to upload.
+ * Both were built first and never tagged — and an untagged requirement reads as
+ * an unbuilt one (REQ-PROC2 sat in the 'missing' column while fully working).
+ */
 export async function performCapture(
   db: AbstractPowerSyncDatabase,
   opts: {
@@ -505,6 +514,10 @@ export async function exportCapture(
 // ---------------------------------------------------------------- recovery
 
 /** Spec §4. Small, because Codex cut the rest. */
+/**
+ * REQ-CAP6 — crash/fault recovery: an interrupted capture is detected on relaunch
+ *   and surfaced to keep or discard, never silently dropped.
+ */
 export async function recoverySweep(db: AbstractPowerSyncDatabase): Promise<{
   tmpDeleted: number; orphansDeleted: number; integrityErrors: string[];
 }> {
