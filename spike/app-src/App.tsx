@@ -9,6 +9,18 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
 import { SupabaseConnector } from './src/connector';
+import {
+  applyDurabilityProfile,
+  assertDurabilityProfile,
+  ensureAppOwnedSchema,
+  exportCapture,
+  failpoint,
+  listCommittedCaptures,
+  performCapture,
+  recoverySweep,
+  savedEvents,
+  type Boundary,
+} from './src/durability';
 
 // Which identity this instance runs as. Device 2 is launched with a different
 // value so two simulators can observe convergence (Q2).
@@ -27,6 +39,12 @@ const COMMAND_FILE = FS.documentDirectory + 'command.json';
 const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 let STATUS_SEQ = 0;
 let DB_INIT_OK = false;
+let DURABILITY: any = { ok: false, report: [], writeReport: [], poolDisagrees: false };
+let RECOVERY: { tmpDeleted: number; orphansDeleted: number; integrityErrors: string[] } = {
+  tmpDeleted: 0, orphansDeleted: 0, integrityErrors: [],
+};
+let LAST_CAPTURE: any = null;
+let LAST_EXPORT: any = null;
 
 // op-sqlite native adapter, passed EXPLICITLY. The bare `{ dbFilename }` form
 // does NOT auto-detect op-sqlite — it falls back to @journeyapps/react-native-quick-sqlite
@@ -57,8 +75,21 @@ export default function App() {
     (async () => {
       try {
         await db.init();
+        // Durability profile FIRST (spec §3): apply, then assert by readback.
+        // If the readback fails we must not arm the recorder — the app is
+        // usable for sync but performCapture() will refuse.
+        await applyDurabilityProfile(db);
+        await ensureAppOwnedSchema(db);
+        DURABILITY = await assertDurabilityProfile(db);
         DB_INIT_OK = true;
-        say(`db init (${DEVICE}) boot=${BOOT_ID}`);
+        say(`db init boot=${BOOT_ID} durability=${DURABILITY.ok ? 'OK' : 'FAILED'}`);
+        if (!DURABILITY.ok) {
+          say('DURABILITY ASSERTION FAILED — capture will refuse: ' +
+            DURABILITY.writeReport.filter((r: any) => !r.ok).map((r: any) => `${r.name}=${r.got}`).join(','));
+        }
+        // Recovery sweep on every launch (spec §4).
+        RECOVERY = await recoverySweep(db);
+        say(`recovery: tmp=${RECOVERY.tmpDeleted} orphans=${RECOVERY.orphansDeleted} integrityErr=${RECOVERY.integrityErrors.length}`);
         await connector.login(EMAIL, PASSWORD);
         say(`signed in ${EMAIL}`);
         // connect() is fire-and-forget by design.
@@ -116,12 +147,42 @@ export default function App() {
             return { buckets, captures, opstate, projects, pendingCrud };
           });
 
+          // --- app-owned commitment authority (spec §1). capture_commit is the
+          // ONLY thing that means "committed". Read it separately from the
+          // PowerSync projections so the two can never be conflated.
+          let commits: any[] = [], outbox: any[] = [];
+          try {
+            commits = await db.getAll(
+              `SELECT capture_id, attachment_id, mutation_id, media_relpath, media_sha256,
+                      media_bytes, request_sha256 FROM capture_commit ORDER BY committed_at_ms`);
+            outbox = await db.getAll(
+              `SELECT mutation_id, capture_id, attempt_count, last_error_code FROM capture_outbox`);
+          } catch { /* tables absent pre-init */ }
+
           const status = {
             device: DEVICE,
             // Per-process identity: only a live NEW process can change these.
             bootId: BOOT_ID,
             statusSeq: ++STATUS_SEQ,
             dbInitOk: DB_INIT_OK,
+            // Spec §3 — the gate. If false, performCapture refuses.
+            durabilityOk: DURABILITY.ok,
+            durabilityReport: DURABILITY.report,
+            durabilityWriteReport: DURABILITY.writeReport,
+            durabilityPoolDisagrees: DURABILITY.poolDisagrees,
+            recovery: RECOVERY,
+            // Spec §1 — the commitment authority, and delivery status separately.
+            captureCommits: commits,
+            captureOutbox: outbox,
+            // Spec §5 — the acknowledged set. Nonce-bound.
+            savedEvents,
+            // Spec §5 — the failpoint contract: the harness must observe this
+            // exact tuple before it terminates us.
+            failpointArmed: failpoint.armed,
+            failpointReached: failpoint.reached,
+            failpointParked: failpoint.parked,
+            lastCapture: LAST_CAPTURE,
+            lastExport: LAST_EXPORT,
             ts: new Date().toISOString(),
             connected: s.connected,
             hasSynced: s.hasSynced,
@@ -199,6 +260,44 @@ async function runCommand(cmd: any, say: (m: string) => void) {
       );
       say(`local processing_state=${cmd.value} (expect server refusal)`);
       break;
+    // ---- capture durability suite (docs/CAPTURE-DURABILITY-ARCH-v1-CODEX.md)
+    case 'arm_failpoint':
+      // Spec §5: arm BEFORE the capture. The failpoint parks the capture thread
+      // and publishes {trialNonce, captureId, boundary}; the harness kills only
+      // after observing that exact tuple.
+      failpoint.armed = (cmd.boundary as Boundary) ?? null;
+      failpoint.trialNonce = cmd.trialNonce ?? null;
+      failpoint.reached = null;
+      failpoint.parked = false;
+      say(`armed ${failpoint.armed} nonce=${failpoint.trialNonce}`);
+      break;
+
+    case 'do_capture': {
+      // Deterministic fixture bytes so the harness can hash them independently.
+      const size = cmd.size ?? 4096;
+      const seed = cmd.fixtureSeed ?? 'fixture';
+      const bytes = new Uint8Array(size);
+      let h = 2166136261 >>> 0;
+      for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+      for (let i = 0; i < size; i++) { h ^= i; h = Math.imul(h, 16777619) >>> 0; bytes[i] = h & 0xff; }
+      const r = await performCapture(db, {
+        ownerId: cmd.ownerId ?? 'owner', projectId: cmd.projectId ?? 'proj-bakeoff-1',
+        payloadBytes: bytes, mimeType: 'application/octet-stream',
+        trialNonce: cmd.trialNonce ?? null,
+      });
+      say(r.ok ? `capture ok ${r.captureId}` : `capture refused: ${r.reason}`);
+      LAST_CAPTURE = r;
+      break;
+    }
+
+    case 'export_capture': {
+      const dest = FS.documentDirectory + `export-${cmd.capture_id}.bin`;
+      const r = await exportCapture(db, cmd.capture_id, dest);
+      LAST_EXPORT = r;
+      say(`export ${cmd.capture_id}: ${r.ok ? `ok ${r.length}B` : r.reason}`);
+      break;
+    }
+
     default:
       say(`unknown action ${cmd.action}`);
   }
