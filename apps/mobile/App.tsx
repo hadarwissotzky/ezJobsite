@@ -19,6 +19,8 @@ import {
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { textCapture, voiceCapture } from './src/modality';
 import { drainOutbox, outboxStatus } from './src/uploader';
+import { decisionHistory, ensureDecisionSchema, listDecisions, recordDecision,
+         type DecisionRow } from './src/decisions';
 
 export const db = new PowerSyncDatabase({
   schema: AppSchema,
@@ -28,6 +30,25 @@ export const db = new PowerSyncDatabase({
 });
 
 const connector = new SupabaseConnector();
+const PROJECT_ID = 'proj-bakeoff-1';
+const OWNER = 'owner-local';
+
+/**
+ * REQ-VAL6: scope, subject and who-directed are INFERRED WITH DEFAULTS, never a
+ * form. The user gets ONE card and ONE action. These heuristics are deliberately
+ * dumb -- the AI structuring layer replaces them at the P1.5 gate. What matters
+ * now is that the SHAPE is right: defaulted + tap-to-change, never a questionnaire.
+ */
+function inferDecision(text: string): { subject: string; value: string; scope: 'project'|'party' } {
+  const t = text.trim();
+  // "<subject> is/= <value>" -> subject/value; else the whole thing is the value.
+  const m = t.match(/^(?:the\s+)?([\w\s]{2,24}?)\s+(?:is|=|to be|should be|will be)\s+(.+)$/i);
+  const subject = m ? m[1].trim() : t.split(/[\s,.]+/).slice(0, 3).join(' ');
+  const value = m ? m[2].trim() : t;
+  // party-scope if it names a trade/party; else project-scope.
+  const scope = /\b(electrician|plumber|mechanical|framer|sub|gc|crew)\b/i.test(t) ? 'party' : 'project';
+  return { subject, value, scope };
+}
 
 /**
  * The three states a capture can be in, from the user's point of view.
@@ -48,6 +69,12 @@ export default function App() {
   const [gate, setGate] = React.useState<string | null>(null);
   const [initError, setInitError] = React.useState<string | null>(null);
   const [delivery, setDelivery] = React.useState<{pending:number;parked:number}>({pending:0,parked:0});
+  const [decisions, setDecisions] = React.useState<DecisionRow[]>([]);
+  // The ONE confirm surface (REQ-VAL6). Null = not confirming anything.
+  const [card, setCard] = React.useState<null | {
+    captureId: string; subject: string; value: string; directedBy: string; scope: 'project'|'party';
+  }>(null);
+  const [history, setHistory] = React.useState<any[] | null>(null);
   const [saved, setSaved] = React.useState<any[]>([]);
   const [note, setNote] = React.useState('');
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -57,6 +84,7 @@ export default function App() {
       setSaved(await listCommittedCaptures(db));
       const s = (await outboxStatus(db))[0];
       setDelivery({ pending: s?.pending ?? 0, parked: s?.parked ?? 0 });
+      setDecisions(await listDecisions(db, PROJECT_ID));
     } catch { /* pre-init */ }
   }, []);
 
@@ -67,6 +95,7 @@ export default function App() {
       await db.init();
       await applyDurabilityProfile(db);
       await ensureAppOwnedSchema(db);
+      await ensureDecisionSchema(db);
 
       // THE GATE. If the write connection cannot promise durability we do not
       // arm the recorder at all. Refusing loudly beats saying "saved" and lying.
@@ -151,11 +180,17 @@ export default function App() {
     setUi({ k: 'saving' });
     try {
       const r = await performCapture(db, {
-        ownerId: 'owner-local', projectId: 'proj-bakeoff-1',
-        input: textCapture(note),
+        ownerId: OWNER, projectId: PROJECT_ID, input: textCapture(note),
       });
-      if (r.ok) { setUi({ k: 'saved', id: r.captureId }); setNote(''); }
-      else setUi({ k: 'refused', why: r.reason });
+      if (r.ok) {
+        setUi({ k: 'saved', id: r.captureId });
+        // Capture is SAVED already. The card is about what it MEANS, and it can
+        // be dismissed without losing anything -- the evidence is committed.
+        const inf = inferDecision(note);
+        setCard({ captureId: r.captureId, subject: inf.subject, value: inf.value,
+                  directedBy: 'Owner', scope: inf.scope });
+        setNote('');
+      } else setUi({ k: 'refused', why: r.reason });
       await refresh();
     } catch (e: any) {
       setUi({ k: 'refused', why: e?.message ?? String(e) });
@@ -219,6 +254,74 @@ export default function App() {
         </Pressable>
       </View>
 
+      {card && (
+        <View style={s.card}>
+          <Text style={s.cardH}>Is this the decision?</Text>
+          <Text style={s.cardV}>{card.value}</Text>
+          <View style={s.chips}>
+            {/* REQ-VAL4/VAL6: defaulted, tap-to-change, INSIDE the one surface. */}
+            <Pressable onPress={() => setCard({ ...card, directedBy: card.directedBy === 'Owner' ? 'GC' : card.directedBy === 'GC' ? 'Architect' : 'Owner' })}>
+              <Text style={s.chip}>directed by: {card.directedBy} ✎</Text>
+            </Pressable>
+            <Pressable onPress={() => setCard({ ...card, scope: card.scope === 'project' ? 'party' : 'project' })}>
+              <Text style={s.chip}>{card.scope}-scope ✎</Text>
+            </Pressable>
+            <Text style={[s.chip, s.chipDim]}>about: {card.subject}</Text>
+          </View>
+          <View style={s.cardBtns}>
+            <Pressable style={s.confirm} onPress={async () => {
+              const res = await recordDecision(db, {
+                projectId: PROJECT_ID, ownerId: OWNER, subject: card.subject, value: card.value,
+                captureId: card.captureId, directedBy: card.directedBy, scopeLevel: card.scope,
+              });
+              setCard(null);
+              setUi({ k: 'saved', id: card.captureId });
+              if (res.superseded) console.log('superseded:', res.superseded, '->', card.value);
+              await refresh();
+            }}>
+              <Text style={s.confirmT}>CONFIRM</Text>
+            </Pressable>
+            <Pressable style={s.later} onPress={() => setCard(null)}>
+              <Text style={s.laterT}>Not a decision</Text>
+            </Pressable>
+          </View>
+          <Text style={s.cardNote}>Already saved either way — this just says what it means.</Text>
+        </View>
+      )}
+
+      {decisions.length > 0 && (
+        <>
+          <Text style={s.sub}>Decisions ({decisions.length})</Text>
+          {decisions.map((d) => (
+            <Pressable key={d.id} style={s.drow} onPress={async () => {
+              setHistory(await decisionHistory(db, d.id));
+            }}>
+              <Text style={s.dsub}>{d.subject}</Text>
+              <Text style={s.dval}>{d.current_value}</Text>
+              <Text style={s.dmeta}>
+                {d.scope_level}-scope · {d.directed_by ?? 'unattributed'}
+                {d.version_count > 1 ? ` · changed ${d.version_count - 1}× (tap for history)` : ''}
+              </Text>
+            </Pressable>
+          ))}
+        </>
+      )}
+
+      {history && (
+        <View style={s.card}>
+          <Text style={s.cardH}>History — nothing is ever overwritten</Text>
+          {history.map((h, i) => (
+            <Text key={i} style={i === 0 ? s.hNow : s.hOld}>
+              {i === 0 ? '● now:  ' : '○ was: '}{h.value}
+              {h.directed_by ? `  (${h.directed_by})` : ''}
+            </Text>
+          ))}
+          <Pressable style={s.later} onPress={() => setHistory(null)}>
+            <Text style={s.laterT}>Close</Text>
+          </Pressable>
+        </View>
+      )}
+
       <Text style={s.sub}>
         Saved on this phone ({saved.length})
         {delivery.pending > 0 ? ` · ${delivery.pending} waiting to back up` : ''}
@@ -254,6 +357,25 @@ const s = StyleSheet.create({
   row: { borderTopWidth: 1, borderTopColor: '#21262d', paddingVertical: 10 },
   rowT: { color: '#c9d1d9', fontSize: 13, fontFamily: 'Menlo' },
   rowS: { color: '#6e7681', fontSize: 11, fontFamily: 'Menlo', marginTop: 2 },
+  card: { backgroundColor: '#0d2818', borderColor: '#238636', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16 },
+  cardH: { color: '#7ee787', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  cardV: { color: '#fff', fontSize: 17, lineHeight: 23, marginBottom: 10 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  chip: { color: '#7ee787', backgroundColor: '#132f1f', borderColor: '#238636', borderWidth: 1,
+          borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, fontSize: 12, overflow: 'hidden' },
+  chipDim: { color: '#6e7681', borderColor: '#30363d', backgroundColor: 'transparent' },
+  cardBtns: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  confirm: { flex: 1, backgroundColor: '#238636', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  confirmT: { color: '#fff', fontWeight: '800', letterSpacing: 1 },
+  later: { paddingHorizontal: 12, paddingVertical: 14 },
+  laterT: { color: '#8b949e', fontSize: 13 },
+  cardNote: { color: '#6e7681', fontSize: 11, marginTop: 8 },
+  drow: { borderTopWidth: 1, borderTopColor: '#21262d', paddingVertical: 10 },
+  dsub: { color: '#8b949e', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 },
+  dval: { color: '#e6edf3', fontSize: 15, marginTop: 2 },
+  dmeta: { color: '#6e7681', fontSize: 11, marginTop: 3 },
+  hNow: { color: '#7ee787', fontSize: 14, marginBottom: 4 },
+  hOld: { color: '#6e7681', fontSize: 13, marginBottom: 4, textDecorationLine: 'line-through' },
   parked: { color: '#ff7b72', fontSize: 12, marginBottom: 8, lineHeight: 16 },
   noteRow: { flexDirection: 'row', gap: 8, marginBottom: 22 },
   input: { flex: 1, backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
