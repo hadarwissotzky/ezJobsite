@@ -203,6 +203,13 @@ const EN: Record<string, string> = {
   'rep.send': 'Send the client an update →',
   'rep.nothing': 'Nothing new to tell them yet',
 
+  // REQ-P5 — propose, never auto-create.
+  'res.newHereFar': 'New job here? The nearest is {name}, {km} km away.',
+  'res.newHereNoJobs': 'New job here?',
+  'p5.create': 'YES — NEW JOB HERE',
+  'p5.notNew': 'No — it belongs to a job I already have',
+  'p5.pinned': 'We’ll pin it where you’re standing.',
+
   'common.close': 'Close',
   'common.cancel': 'Cancel',
   'common.back': 'Back',
@@ -375,6 +382,12 @@ const ES: Record<string, string> = {
 
   'rep.send': 'Mandarle una actualización al cliente →',
   'rep.nothing': 'Todavía no hay nada nuevo que contarle',
+
+  'res.newHereFar': '¿Trabajo nuevo aquí? El más cercano es {name}, a {km} km.',
+  'res.newHereNoJobs': '¿Trabajo nuevo aquí?',
+  'p5.create': 'SÍ — TRABAJO NUEVO AQUÍ',
+  'p5.notNew': 'No — es de un trabajo que ya tengo',
+  'p5.pinned': 'Lo fijamos donde estás parado.',
 
   'common.close': 'Cerrar',
   'common.cancel': 'Cancelar',

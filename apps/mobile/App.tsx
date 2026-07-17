@@ -135,6 +135,8 @@ export default function App() {
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [picker, setPicker] = React.useState(false);
   const [filed, setFiled] = React.useState<Msg | string | null>(null);
+  // REQ-P5. A proposal is NOT a project — it lives here until someone taps it.
+  const [proposal, setProposal] = React.useState<null | { lat: number | null; lng: number | null; why: Msg }>(null);
   const [inbox, setInbox] = React.useState(0);
   const [inboxOpen, setInboxOpen] = React.useState(false);
   const [inboxRows, setInboxRows] = React.useState<any[]>([]);
@@ -406,6 +408,11 @@ export default function App() {
       ? { lat: stamp.lat, lng: stamp.lng } : null;
     const r = await resolveProject(db, fix);
     if (r.projectId !== INBOX_ID) await touchProject(db, r.projectId);
+    // REQ-P5: the capture is ALREADY SAVED by the time this shows. The proposal is
+    // an offer, not a gate — mandate #1 says nothing blocks a capture, and mandate
+    // #2 says a project is never auto-created. Both hold: it saved to the Inbox,
+    // and he can accept the job or ignore it.
+    if (r.proposeNew) setProposal(r.proposeNew);
     return r;
   };
 
@@ -1106,6 +1113,29 @@ export default function App() {
         </Pressable>
       )}
 
+      {/* REQ-P5 — propose a new job, confirmation-gated. Shown only when the GPS
+          ACTIVELY says he is at none of his jobs; never when we are merely unsure
+          (that routes to the Inbox per REQ-P2), because proposing a new job when
+          the answer is "I don't know" is how a contractor ends up with four jobs
+          for one house. */}
+      {proposal && (
+        <View style={s.p5}>
+          <Text style={s.p5T}>{T(proposal.why)}</Text>
+          <Text style={s.p5S}>{T('p5.pinned')}</Text>
+          <Pressable style={s.confirmWide} onPress={async () => {
+            // Still not auto-created: this IS the confirm. It opens the create
+            // screen with the pin already set, so it is one tap to a named job.
+            setNewJob({ name: '', address: '' });
+            setProposal(null);
+          }}>
+            <Text style={s.confirmT}>{T('p5.create')}</Text>
+          </Pressable>
+          <Pressable style={s.later} onPress={() => setProposal(null)}>
+            <Text style={s.laterT}>{T('p5.notNew')}</Text>
+          </Pressable>
+        </View>
+      )}
+
       {!gate && !initError && consent.consent === null && (
         <Pressable style={s.consentBanner} onPress={() => setSetup({ jurisdiction: '' })}>
           <Text style={s.consentT}>{T('consent.notSetTitle')}</Text>
@@ -1616,6 +1646,10 @@ const s = StyleSheet.create({
   bndOwner: { color: '#7ee787', fontSize: 12, marginTop: 2 },
   bndGap: { color: '#f0b72f', fontSize: 12, marginTop: 2, fontWeight: '700' },
   bndJobs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  p5: { backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+    borderRadius: 10, padding: 12, marginBottom: 12 },
+  p5T: { color: '#e6edf3', fontWeight: '700', fontSize: 15, marginBottom: 2 },
+  p5S: { color: '#8b949e', fontSize: 12, marginBottom: 10 },
   oneStatus: { borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 },
   oneStatusT: { fontWeight: '700', fontSize: 14 },
   oneStatusD: { color: '#8b949e', fontSize: 11, marginTop: 3 },

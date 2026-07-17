@@ -155,6 +155,31 @@ export function distanceM(a: { lat: number; lng: number }, b: { lat: number; lng
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
+/**
+ * REQ-P5 — propose a new project, confirmation-gated.
+ *
+ * "When detection concludes no existing project fits, the system PROPOSES creating
+ *  a new project — pre-filling name / address (GPS) — for one-tap confirm.
+ *  A PROJECT IS NEVER AUTO-CREATED."
+ *
+ * That last sentence is mandate #2 (confirm, don't automate) applied to the thing
+ * that owns everything else. A silently auto-created job is worse than an
+ * unresolved capture: the capture at least sits in a queue a human looks at,
+ * whereas a phantom job looks like a real one and quietly collects evidence nobody
+ * is looking for.
+ *
+ * A proposal is NOT a project. It is a suggestion with a pre-filled GPS pin, and
+ * it exists only in the UI until someone taps it.
+ */
+export type NewProjectProposal = {
+  /** Where they are standing. The only field we can honestly pre-fill without an
+   *  LLM — name/client/description come from the recording, which is P1.5. */
+  lat: number | null;
+  lng: number | null;
+  /** Why we are proposing rather than filing. Shown, not hidden. */
+  why: Msg;
+};
+
 export type Resolution = {
   projectId: string;
   method: 'gps_auto' | 'last_used' | 'only_project' | 'unresolved';
@@ -162,6 +187,14 @@ export type Resolution = {
   /** REQ-PROC6 + REQ-X2: a message the render layer turns into the user's language. */
   why: Msg;
   candidates?: Array<{ id: string; name: string; distanceM: number }>;
+  /**
+   * REQ-P5. Present ONLY when we are confident no existing job fits — a real fix
+   * that matches nothing. NOT present when we are merely unsure (several jobs
+   * nearby, or no fix at all): "ambiguous existing-vs-new routes to the
+   * secondary/unresolved workflow", because proposing a new job when the answer is
+   * "I don't know" is how a contractor ends up with four jobs for one house.
+   */
+  proposeNew?: NewProjectProposal;
 };
 
 /**
@@ -185,6 +218,10 @@ export async function resolveProject(
 
   if (!all.length) {
     return { projectId: INBOX_ID, method: 'unresolved', confidence: 'none',
+             // Even with no jobs at all, we PROPOSE. The first job on a new phone
+             // is still a job someone has to name.
+             proposeNew: fix ? { lat: fix.lat, lng: fix.lng, why: msg('res.newHereNoJobs') }
+                             : undefined,
              why: msg('res.noJobsYet') };
   }
 
@@ -214,8 +251,16 @@ export async function resolveProject(
       .filter((p) => p.lat != null && p.lng != null)
       .map((p) => ({ p, d: distanceM(fix, { lat: p.lat!, lng: p.lng! }) }))
       .sort((a, b) => a.d - b.d)[0];
+    // REQ-P5: we have a FIX and it is inside nothing. That is not "unsure" -- the
+    // GPS is actively saying he is somewhere else, which is the one case where
+    // "this might be a new job" is a real suggestion rather than a guess.
     return {
       projectId: INBOX_ID, method: 'unresolved', confidence: 'none',
+      proposeNew: { lat: fix.lat, lng: fix.lng,
+                    why: nearest
+                      ? msg('res.newHereFar', { name: nearest.p.name,
+                                                km: Math.round(nearest.d / 100) / 10 })
+                      : msg('res.newHereNoJobs') },
       why: nearest
         ? msg('res.notAtAny', { name: nearest.p.name, km: Math.round(nearest.d / 100) / 10 })
         : msg('res.noPinned'),
