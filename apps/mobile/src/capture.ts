@@ -441,9 +441,18 @@ export async function performCapture(
 export async function listCommittedCaptures(db: AbstractPowerSyncDatabase, projectId?: string) {
   return db.getAll<{ capture_id: string; media_relpath: string; media_sha256: string;
                      media_bytes: number; modality: string; media_mime_type: string;
-                     gps_lat: number | null; gps_lng: number | null; stamp_status: string | null }>(
+                     gps_lat: number | null; gps_lng: number | null; stamp_status: string | null;
+                     project_id: string; pending_upload: number; server_state: string | null }>(
     `SELECT c.capture_id, c.media_relpath, c.media_sha256, c.media_bytes, c.media_mime_type,
-            c.gps_lat, c.gps_lng, c.stamp_status,
+            c.gps_lat, c.gps_lng, c.stamp_status, c.project_id,
+            -- REQ-PROC4: the per-item state, DERIVED from facts that already exist.
+            -- The outbox still holding the intent IS "queued"; the server's own
+            -- op_state IS "uploaded/processed". No stored state column -- that
+            -- would be a fifth place for the truth to live and the first to drift.
+            EXISTS (SELECT 1 FROM capture_outbox o WHERE o.capture_id = c.capture_id)
+              AS pending_upload,
+            (SELECT s.processing_state FROM capture_op_state s WHERE s.capture_id = c.capture_id)
+              AS server_state,
             -- pre-migration rows have no modality and CANNOT be backfilled
             -- (append-only). Derive for display; never invent it in the record.
             COALESCE(c.modality,

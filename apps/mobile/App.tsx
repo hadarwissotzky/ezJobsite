@@ -23,7 +23,7 @@ import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feed
 import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
 import { addParty, assignBoundary, drainScopeOutbox, ensurePartySchema, listBoundaries,
          listParties, nameBoundary } from './src/parties';
-import { captureStatus, levelColor, screenStatus } from './src/status';
+import { captureStatus, levelColor, procState, screenStatus } from './src/status';
 import { FIRST_RUN_TAPS, isFirstRun, markFirstRunDone, nextStep, savedLang, saveLang } from './src/firstrun';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          playCapture, stopPlayback, type Note } from './src/annotate';
@@ -1506,8 +1506,11 @@ export default function App() {
             {(() => {
               const st = captureStatus({
                 inInbox: c.project_id === INBOX_ID, rejected: false,
-                pendingUpload: false, parked: false,
+                pendingUpload: !!c.pending_upload, parked: false,
                 hasLocation: c.gps_lat != null,
+                // REQ-PROC4, as DETAIL beneath the one line (REQ-X3).
+                procState: procState({ pendingUpload: !!c.pending_upload,
+                                       serverState: c.server_state }),
               });
               return (
                 <Text style={[s.rowS, { color: levelColor(st.level).text }]}>

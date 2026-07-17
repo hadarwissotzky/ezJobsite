@@ -194,6 +194,12 @@ const EN: Record<string, string> = {
   'sc.noParties': 'Add the companies on this job first — then you can say who owns what.',
   'sc.note': 'Nothing here is guessed. If two trades both touch something, we ask — we don’t pick.',
 
+  // REQ-PROC4 per-item pipeline state. Plain words -- "queued" is jargon.
+  'st.proc.captured': 'saved on this phone',
+  'st.proc.queued': 'waiting to send',
+  'st.proc.uploaded': 'sent to the cloud',
+  'st.proc.processed': 'processed',
+
   'common.close': 'Close',
   'common.cancel': 'Cancel',
   'common.back': 'Back',
@@ -358,6 +364,11 @@ const ES: Record<string, string> = {
   'sc.changed': 'cambió {n}×',
   'sc.noParties': 'Primero agrega las empresas de este trabajo — después puedes decir quién es responsable de qué.',
   'sc.note': 'Aquí no se adivina nada. Si dos oficios tocan lo mismo, preguntamos — no elegimos.',
+
+  'st.proc.captured': 'guardado en este teléfono',
+  'st.proc.queued': 'esperando para enviar',
+  'st.proc.uploaded': 'enviado a la nube',
+  'st.proc.processed': 'procesado',
 
   'common.close': 'Cerrar',
   'common.cancel': 'Cancelar',

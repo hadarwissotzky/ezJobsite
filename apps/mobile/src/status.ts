@@ -34,6 +34,38 @@ import { msg, type Msg } from './i18n';
 
 export type Level = 'needs_you' | 'not_safe' | 'waiting' | 'safe';
 
+/**
+ * REQ-PROC4's per-item state: "captured -> queued -> uploaded -> processed".
+ *
+ * DERIVED, never stored. Each state is a FACT that already exists somewhere:
+ *   captured  -- capture_commit has the row (it could not be listed otherwise)
+ *   queued    -- capture_outbox still holds the intent
+ *   uploaded  -- the outbox is drained AND the server said so
+ *   processed -- the server's capture_op_state says so. SERVER-OWNED: only the
+ *                server knows whether its pipeline ran, and a client that could
+ *                write this could claim work that never happened.
+ *
+ * A stored state column would be a fifth place for the truth to live and the
+ * first place for it to drift. The queue IS the state.
+ */
+export type ProcState = 'captured' | 'queued' | 'uploaded' | 'processed';
+
+export function procState(c: {
+  pendingUpload: boolean;
+  serverState: string | null;   // capture_op_state.processing_state, synced down
+}): ProcState {
+  // The server's word wins when we have it: it is the only party that knows what
+  // its own pipeline did.
+  if (c.serverState === 'processed') return 'processed';
+  if (c.pendingUpload) return 'queued';
+  if (c.serverState === 'uploaded') return 'uploaded';
+  // No pending intent and NO server word. The bytes may have left, but nothing has
+  // confirmed they landed, so we say the weaker true thing. Claiming 'uploaded'
+  // from the ABSENCE of a queue row would be inferring success from silence --
+  // the phantom-"saved" bug wearing a different hat.
+  return 'captured';
+}
+
 export type Status = {
   level: Level;
   /** The ONE line. */
@@ -53,6 +85,8 @@ const RANK: Record<Level, number> = { needs_you: 0, not_safe: 1, waiting: 2, saf
  * real warnings off the screen.
  */
 export function captureStatus(c: {
+  /** REQ-PROC4: where it is in the pipeline. Detail, not the primary line. */
+  procState?: ProcState;
   inInbox: boolean;
   rejected: boolean;
   pendingUpload: boolean;
@@ -60,6 +94,10 @@ export function captureStatus(c: {
   hasLocation: boolean;
 }): Status {
   const detail: Msg[] = [];
+  // REQ-PROC4's state is DETAIL beneath the one primary line, exactly as REQ-X3
+  // demands: "captured -> queued -> uploaded -> processed" is the system
+  // describing its own pipeline, which is not what the user needs to know first.
+  if (c.procState) detail.push(msg(`st.proc.${c.procState}`));
   if (c.pendingUpload) detail.push(msg('st.detail.waiting'));
   if (!c.hasLocation) detail.push(msg('st.detail.noLocation'));
   if (c.inInbox) detail.push(msg('st.detail.unfiled'));
