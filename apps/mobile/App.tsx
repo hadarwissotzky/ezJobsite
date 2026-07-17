@@ -21,6 +21,8 @@ import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } fr
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
 import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
+import { addParty, assignBoundary, drainScopeOutbox, ensurePartySchema, listBoundaries,
+         listParties, nameBoundary } from './src/parties';
 import { captureStatus, levelColor, screenStatus } from './src/status';
 import { FIRST_RUN_TAPS, isFirstRun, markFirstRunDone, nextStep, savedLang, saveLang } from './src/firstrun';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
@@ -144,6 +146,12 @@ export default function App() {
   const [nCounts, setNCounts] = React.useState<Record<string, number>>({});
   const [rejected, setRejected] = React.useState<any[]>([]);
   const [showDetail, setShowDetail] = React.useState(false);
+  // REQ-VAL7
+  const [scopeOpen, setScopeOpen] = React.useState(false);
+  const [boundaries, setBoundaries] = React.useState<any[]>([]);
+  const [parties, setParties] = React.useState<any[]>([]);
+  const [bndDraft, setBndDraft] = React.useState('');
+  const [ptyDraft, setPtyDraft] = React.useState({ name: '', trade: '' });
 
   /**
    * REQ-X3. ONE status for the whole screen, chosen by what the user must DO —
@@ -212,6 +220,10 @@ export default function App() {
       setInbox(await inboxCount(db));
       setNCounts(await noteCounts(db));
       setRejected(await listRejected(db));
+      try {
+        setBoundaries(await listBoundaries(db, projectId));
+        setParties(await listParties(db, projectId));
+      } catch { /* schema not up yet */ }
       const s = (await outboxStatus(db))[0];
       // Captures and decisions ride independent queues, so "not backed up yet"
       // must count both. One green tick that ignores half the queue is a lie.
@@ -243,6 +255,7 @@ export default function App() {
       await ensureProjectSchema(db, OWNER);
       await ensureResolutionSchema(db);
       await ensureAnnotationSchema(db);
+      await ensurePartySchema(db);
       await ensureConsentSchema(db);
       const sl = await savedLang(db);
       if (sl) { setLang(sl); setLangState(sl); }
@@ -296,6 +309,8 @@ export default function App() {
           const dr = await drainDecisionOutbox(db, connector.client, data.user.id);
           if (dr.attempted) console.log('drain decisions:', JSON.stringify(dr));
           const nr = await drainNoteOutbox(db, connector.client, data.user.id);
+          const sr = await drainScopeOutbox(db, connector.client, data.user.id);
+          if (sr.attempted) console.log('drain scope:', JSON.stringify(sr));
           if (nr.attempted) console.log('drain notes:', JSON.stringify(nr));
           const cr = await drainChangeOrderOutbox(db, connector.client, data.user.id);
           if (cr.attempted) console.log('drain change orders:', JSON.stringify(cr));
@@ -711,6 +726,87 @@ export default function App() {
     }
   }
 
+  // REQ-VAL7. The air-handler screen: what might fall between trades, and who
+  // owns it. Gaps first — the unassigned boundary is the one that costs money.
+  if (scopeOpen) {
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: '#0d1117' }} contentContainerStyle={s.c}>
+        <Text style={s.h}>EZjobsite</Text>
+        <View style={s.card}>
+          <Text style={s.cardH}>{T('sc.title')}</Text>
+
+          {boundaries.map((b) => (
+            <View key={b.id} style={s.bndRow}>
+              <Text style={s.bndSubject}>{b.subject}</Text>
+              <Text style={b.assignedTo ? s.bndOwner : s.bndGap}>
+                {b.assignedTo ?? T('sc.nobody')}
+                {b.changes > 1 ? ` · ${T({ k: 'sc.changed', p: { n: b.changes } })}` : ''}
+              </Text>
+              {!b.assignedTo && (
+                <View style={s.bndJobs}>
+                  {parties.map((pt) => (
+                    <Pressable key={pt.id} style={s.inboxJob} onPress={async () => {
+                      await assignBoundary(db, { boundaryId: b.id, projectId,
+                        ownerId: OWNER, partyName: pt.name, directedBy: 'Owner' });
+                      setBoundaries(await listBoundaries(db, projectId));
+                    }}>
+                      <Text style={s.inboxJobT}>{pt.name}</Text>
+                    </Pressable>
+                  ))}
+                  {!parties.length && <Text style={s.cardNote}>{T('sc.noParties')}</Text>}
+                </View>
+              )}
+            </View>
+          ))}
+
+          <Text style={s.sub}>{T('sc.addBoundary')}</Text>
+          <View style={s.lineAdd}>
+            <TextInput style={[s.lineIn, { flex: 3 }]} value={bndDraft}
+              placeholder="e.g. whip to the air handler" placeholderTextColor="#6e7681"
+              onChangeText={setBndDraft} />
+            <Pressable style={[s.linePlus, !bndDraft.trim() && s.btnOff]}
+              disabled={!bndDraft.trim()}
+              onPress={async () => {
+                await nameBoundary(db, { projectId, subject: bndDraft,
+                  trades: parties.map((x) => x.trade) });
+                setBndDraft('');
+                setBoundaries(await listBoundaries(db, projectId));
+              }}>
+              <Text style={s.linePlusT}>+</Text>
+            </Pressable>
+          </View>
+
+          <Text style={s.sub}>{T('sc.addParty')}</Text>
+          {parties.map((pt) => (
+            <Text key={pt.id} style={s.dmeta}>{pt.name} · {pt.trade}</Text>
+          ))}
+          <View style={s.lineAdd}>
+            <TextInput style={[s.lineIn, { flex: 2 }]} value={ptyDraft.name}
+              placeholder={T('sc.partyName')} placeholderTextColor="#6e7681"
+              onChangeText={(v) => setPtyDraft({ ...ptyDraft, name: v })} />
+            <TextInput style={[s.lineIn, { flex: 2 }]} value={ptyDraft.trade}
+              placeholder={T('sc.partyTrade')} placeholderTextColor="#6e7681"
+              onChangeText={(v) => setPtyDraft({ ...ptyDraft, trade: v })} />
+            <Pressable style={[s.linePlus, (!ptyDraft.name.trim() || !ptyDraft.trade.trim()) && s.btnOff]}
+              disabled={!ptyDraft.name.trim() || !ptyDraft.trade.trim()}
+              onPress={async () => {
+                await addParty(db, { projectId, name: ptyDraft.name, trade: ptyDraft.trade });
+                setPtyDraft({ name: '', trade: '' });
+                setParties(await listParties(db, projectId));
+              }}>
+              <Text style={s.linePlusT}>+</Text>
+            </Pressable>
+          </View>
+
+          <Text style={s.cardNote}>{T('sc.note')}</Text>
+          <Pressable style={s.later} onPress={() => setScopeOpen(false)}>
+            <Text style={s.laterT}>{T('common.close')}</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    );
+  }
+
   if (newJob) {
     return (
       <View style={s.c}>
@@ -964,6 +1060,17 @@ export default function App() {
         </Text>
         <Text style={s.jobBarS}>{T('job.change')}</Text>
       </Pressable>
+
+      {/* REQ-VAL7's way in. Only when there IS a gap: a boundary nobody owns is
+          the expensive one, and a link that only appears when it matters is not
+          another badge competing for attention (REQ-X3). */}
+      {boundaries.some((b) => !b.assignedTo) && (
+        <Pressable style={s.scopeLink} onPress={() => setScopeOpen(true)}>
+          <Text style={s.scopeLinkT}>
+            {T({ k: 'sc.gaps', p: { n: boundaries.filter((b) => !b.assignedTo).length } })}
+          </Text>
+        </Pressable>
+      )}
 
       {/* REQ-X3: THE one status. Eight parallel banners collapsed to this.
           Each of those eight was added honestly for a good reason, and stacked
@@ -1482,6 +1589,13 @@ const s = StyleSheet.create({
     paddingVertical: 10, borderWidth: 1, borderColor: '#30363d' },
   inboxJobT: { color: '#e6edf3', fontSize: 13, fontWeight: '600' },
   langT: { color: '#6e7681', fontSize: 13, fontWeight: '400' },
+  scopeLink: { paddingVertical: 8, marginBottom: 6 },
+  scopeLinkT: { color: '#f0b72f', fontSize: 13, fontWeight: '600' },
+  bndRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#21262d' },
+  bndSubject: { color: '#e6edf3', fontSize: 15 },
+  bndOwner: { color: '#7ee787', fontSize: 12, marginTop: 2 },
+  bndGap: { color: '#f0b72f', fontSize: 12, marginTop: 2, fontWeight: '700' },
+  bndJobs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   oneStatus: { borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 },
   oneStatusT: { fontWeight: '700', fontSize: 14 },
   oneStatusD: { color: '#8b949e', fontSize: 11, marginTop: 3 },

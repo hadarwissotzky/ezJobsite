@@ -26,6 +26,8 @@
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { recordDecision } from './decisions';
+import { sha256 } from 'js-sha256';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 export const PARTY_DDL = [
   // ProjectParty, per the spec's data model: project × company, their TRADE on
@@ -59,7 +61,36 @@ export const PARTY_DDL = [
    ) STRICT`,
 ];
 
+export const SCOPE_OUTBOX_DDL = [
+  // Owned queue, same as decisions and notes: these are app-owned tables (the
+  // boundary carries a meaningful NULL that a PowerSync view cannot express as
+  // cleanly), so the intent is ours to carry.
+  `CREATE TABLE IF NOT EXISTS scope_outbox (
+      mutation_id  TEXT NOT NULL PRIMARY KEY,
+      kind         TEXT NOT NULL CHECK (kind IN ('party','boundary')),
+      row_id       TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      payload_sha256 TEXT NOT NULL,
+      queued_at_ms INTEGER NOT NULL,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at_ms INTEGER NOT NULL DEFAULT 0,
+      last_error_code TEXT,
+      last_error_text TEXT
+   ) STRICT`,
+];
+
+async function enqueue(db: AbstractPowerSyncDatabase, tx: any, kind: string, rowId: string, payload: any) {
+  const mutationId = `sm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const json = JSON.stringify({ ...payload, mutation_id: mutationId, kind });
+  await tx.execute(
+    `INSERT INTO scope_outbox (mutation_id, kind, row_id, payload_json, payload_sha256, queued_at_ms)
+     VALUES (?,?,?,?,?,?)`,
+    [mutationId, kind, rowId, json, sha256(json), Date.now()]
+  );
+}
+
 export async function ensurePartySchema(db: AbstractPowerSyncDatabase) {
+  for (const s of SCOPE_OUTBOX_DDL) await db.execute(s);
   for (const s of PARTY_DDL) await db.execute(s);
 }
 
@@ -70,12 +101,20 @@ export async function addParty(
   o: { projectId: string; name: string; trade: string; scopeOfWork?: string | null }
 ) {
   const id = `pty-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  await db.execute(
-    `INSERT INTO project_party (id, project_id, name, trade, scope_of_work, created_at_ms)
-     VALUES (?,?,?,?,?,?)`,
-    [id, o.projectId, o.name.trim(), o.trade.trim().toLowerCase(),
-     o.scopeOfWork?.trim() ?? null, Date.now()]
-  );
+  const now = Date.now();
+  await db.writeTransaction(async (tx) => {
+    await tx.execute(
+      `INSERT INTO project_party (id, project_id, name, trade, scope_of_work, created_at_ms)
+       VALUES (?,?,?,?,?,?)`,
+      [id, o.projectId, o.name.trim(), o.trade.trim().toLowerCase(),
+       o.scopeOfWork?.trim() ?? null, now]
+    );
+    // Atomic with the row. A crash between them leaves a party only this phone
+    // knows about — and a party nobody else can see cannot be assigned anything.
+    await enqueue(db, tx, 'party', id, { id, project_id: o.projectId,
+      name: o.name.trim(), trade: o.trade.trim().toLowerCase(),
+      scope_of_work: o.scopeOfWork?.trim() ?? null, created_at_ms: now });
+  });
   return id;
 }
 
@@ -97,12 +136,17 @@ export async function nameBoundary(
   o: { projectId: string; subject: string; trades: string[] }
 ) {
   const id = `bnd-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  await db.execute(
-    `INSERT INTO scope_boundary (id, project_id, subject, trades_json, created_at_ms)
-     VALUES (?,?,?,?,?)`,
-    [id, o.projectId, o.subject.trim(), JSON.stringify(o.trades.map((t) => t.toLowerCase())),
-     Date.now()]
-  );
+  const now = Date.now();
+  const trades = o.trades.map((x) => x.toLowerCase());
+  await db.writeTransaction(async (tx) => {
+    await tx.execute(
+      `INSERT INTO scope_boundary (id, project_id, subject, trades_json, created_at_ms)
+       VALUES (?,?,?,?,?)`,
+      [id, o.projectId, o.subject.trim(), JSON.stringify(trades), now]
+    );
+    await enqueue(db, tx, 'boundary', id, { id, project_id: o.projectId,
+      subject: o.subject.trim(), trades, decision_id: null, created_at_ms: now });
+  });
   return id;
 }
 
@@ -143,8 +187,17 @@ export async function assignBoundary(
     assignee: o.partyName,
   });
 
-  await db.execute(`UPDATE scope_boundary SET decision_id = ? WHERE id = ?`,
-    [decisionId, o.boundaryId]);
+  await db.writeTransaction(async (tx) => {
+    await tx.execute(`UPDATE scope_boundary SET decision_id = ? WHERE id = ?`,
+      [decisionId, o.boundaryId]);
+    // Re-queue so the server learns the boundary is answered. The ANSWER itself
+    // rides the decision chain (ingest_decision_v1) — this only carries the link.
+    // Duplicating the answer here would create a second copy that can disagree
+    // with the chain, and the chain is what a dispute turns on.
+    await enqueue(db, tx, 'boundary', o.boundaryId, { id: o.boundaryId,
+      project_id: o.projectId, subject: b.subject, trades: [],
+      decision_id: decisionId, created_at_ms: Date.now() });
+  });
   return { ok: true as const, decisionId };
 }
 
@@ -257,4 +310,44 @@ export async function boundariesForParty(
   db: AbstractPowerSyncDatabase, projectId: string, partyName: string
 ): Promise<BoundaryRow[]> {
   return (await listBoundaries(db, projectId)).filter((b) => b.assignedTo === partyName);
+}
+
+/** Push parties and boundaries. Same rules as every owned queue here. */
+export async function drainScopeOutbox(
+  db: AbstractPowerSyncDatabase, supabase: SupabaseClient, ownerId: string
+) {
+  const r = { attempted: 0, uploaded: 0, alreadyApplied: 0, retryable: 0 };
+  const rows = await db.getAll<{ mutation_id: string; payload_json: string;
+                                 payload_sha256: string; attempt_count: number }>(
+    `SELECT mutation_id, payload_json, payload_sha256, attempt_count
+       FROM scope_outbox WHERE next_attempt_at_ms <= ? ORDER BY queued_at_ms LIMIT 20`,
+    [Date.now()]
+  );
+  for (const row of rows) {
+    r.attempted++;
+    try {
+      const p = JSON.parse(row.payload_json);
+      const { data, error } = await supabase.rpc('ingest_scope_v1', {
+        p_mutation_id: p.mutation_id, p_kind: p.kind, p_id: p.id,
+        p_project_id: p.project_id, p_owner_id: ownerId,
+        p_name: p.name ?? null, p_trade: p.trade ?? null,
+        p_scope_of_work: p.scope_of_work ?? null, p_subject: p.subject ?? null,
+        p_trades: p.trades ?? null, p_decision_id: p.decision_id ?? null,
+        p_created_at_ms: p.created_at_ms, p_request_sha256: row.payload_sha256,
+      });
+      if (error) throw error;
+      await db.execute(`DELETE FROM scope_outbox WHERE mutation_id = ?`, [row.mutation_id]);
+      if (data?.status === 'already_applied') r.alreadyApplied++; else r.uploaded++;
+    } catch (e: any) {
+      const n = row.attempt_count + 1;
+      await db.execute(
+        `UPDATE scope_outbox SET attempt_count = ?, next_attempt_at_ms = ?,
+           last_error_code = ?, last_error_text = ? WHERE mutation_id = ?`,
+        [n, Date.now() + Math.min(60_000 * 2 ** Math.min(n, 6), 30 * 60_000),
+         e?.code ?? 'TRANSIENT', e?.message ?? String(e), row.mutation_id]
+      );
+      r.retryable++;
+    }
+  }
+  return r;
 }
