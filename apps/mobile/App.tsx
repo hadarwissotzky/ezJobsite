@@ -1446,68 +1446,70 @@ export default function App() {
                      (p.address ?? '').toLowerCase().includes(q));
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     return (
-      <View style={s.c}>
-        <View style={s.homeHead}>
-          <Text style={s.h}>Projects</Text>
-          <Pressable onPress={() => { const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n); }}>
-            <Text style={s.langPill}>{lang === 'en' ? 'ES' : 'EN'}</Text>
-          </Pressable>
+      <View style={s.homeC}>
+        <View style={s.homeTop}>
+          <Text style={s.brand}>EZ<Text style={s.brandAccent}>jobsite</Text></Text>
+          <View style={s.topRight}>
+            {inbox > 0 && (
+              <Pressable onPress={async () => {
+                setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true);
+              }}>
+                <Text style={s.chipWait}>{T({ k: 'home.inbox', p: { n: inbox } })}</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={() => {
+              const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n);
+            }}>
+              <Text style={s.langPill}>{lang === 'en' ? 'ES' : 'EN'}</Text>
+            </Pressable>
+          </View>
         </View>
 
-        <TextInput style={s.searchIn} value={search} onChangeText={setSearch}
-          placeholder={T('home.search')} placeholderTextColor="#8c959f" />
-
-        <Pressable style={s.newProjBtn} onPress={() => setNewJob({ name: '', address: '' })}>
-          <Text style={s.newProjT}>＋  {T('home.newProject')}</Text>
-        </Pressable>
-
-        {inbox > 0 && (
-          <Pressable style={s.inboxCard} onPress={async () => {
-            setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true);
-          }}>
-            <Text style={s.inboxCardIcon}>📥</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={s.inboxCardT}>{T({ k: 'home.inbox', p: { n: inbox } })}</Text>
-              <Text style={s.inboxCardS}>{T('home.inboxSub')}</Text>
-            </View>
-            <Text style={s.chev}>›</Text>
+        {/* CAPTURE FIRST — the trigger moment is "I need to get this down before it
+            slips", so recording starts before any job is chosen. GPS files it after. */}
+        <View style={s.hero}>
+          <Text style={s.heroH}>{T('home.gotOne')}</Text>
+          <Text style={s.heroSub}>{T('home.sayIt')}</Text>
+          <Pressable
+            style={[s.capBig, (!!gate || !!initError) && s.btnOff]}
+            disabled={!!gate || !!initError}
+            onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
+            <Text style={s.capBigIcon}>🎙</Text>
+            <Text style={s.capBigT}>{T('home.capture')}</Text>
           </Pressable>
-        )}
+          <Text style={s.heroHint}>{T('home.filesItself')}</Text>
+        </View>
 
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }}>
-          {shown.map((p) => (
-            <Pressable key={p.id} style={s.projCard} onPress={() => open(p.id)}>
-              {p.coverRelpath ? (
-                <Image source={{ uri: FS.documentDirectory + p.coverRelpath }}
-                  style={s.projCover} resizeMode="cover" />
-              ) : staticMapUrl(p.lat, p.lng) ? (
-                // REQ-MAP1: no photo yet → show the job's location as a static map.
-                <Image source={{ uri: staticMapUrl(p.lat, p.lng)! }}
-                  style={s.projCover} resizeMode="cover" />
-              ) : (
-                <View style={[s.projCover, s.projCoverEmpty]}>
-                  <Text style={s.projCoverEmptyT}>{p.name.slice(0, 1).toUpperCase()}</Text>
-                </View>
-              )}
-              <View style={s.projBody}>
-                <Text style={s.projName} numberOfLines={1}>{p.name}</Text>
-                <Text style={s.projMeta} numberOfLines={1}>
-                  {p.address ?? T('home.noAddress')}
-                </Text>
-                <Text style={s.projStats}>
-                  {T({ k: 'home.captures', p: { n: p.captureCount } })}
-                  {p.lastMs ? ` · ${ago(p.lastMs, now)}` : ''}
-                  {p.lat == null ? ` · ${T('home.notPinned')}` : ''}
-                </Text>
-              </View>
+        <View style={s.jobsWrap}>
+          <View style={s.jobsHead}>
+            <Text style={s.sectionLab}>{T('home.yourJobs')}</Text>
+            <Pressable onPress={() => setNewJob({ name: '', address: '' })}>
+              <Text style={s.addJob}>＋ {T('home.newProject')}</Text>
             </Pressable>
-          ))}
-          {!shown.length && (
-            <Text style={s.homeEmpty}>
-              {q ? T('home.noMatch') : T('home.noProjects')}
-            </Text>
+          </View>
+          {cards.length > 4 && (
+            <TextInput style={s.searchIn} value={search} onChangeText={setSearch}
+              placeholder={T('home.search')} placeholderTextColor="#8c959f" />
           )}
-        </ScrollView>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 28 }}>
+            {shown.map((p) => (
+              <Pressable key={p.id} style={s.jobItem} onPress={() => open(p.id)}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.jobItemName} numberOfLines={1}>{p.name}</Text>
+                  <Text style={s.jobItemMeta} numberOfLines={1}>
+                    {p.address ?? T('home.noAddress')}
+                    {p.lastMs ? ' · ' + ago(p.lastMs, now) : ''}
+                  </Text>
+                </View>
+                <Text style={s.jobCount}>{p.captureCount}</Text>
+                <Text style={s.chev}>›</Text>
+              </Pressable>
+            ))}
+            {!shown.length && (
+              <Text style={s.homeEmpty}>{q ? T('home.noMatch') : T('home.noProjects')}</Text>
+            )}
+          </ScrollView>
+        </View>
       </View>
     );
   }
@@ -2095,172 +2097,172 @@ export default function App() {
 // blue #0969da, amber #9a6700, red #cf222e. Overlays that sit ON photos keep a dark
 // translucent backing so their text reads over any image.
 const s = StyleSheet.create({
-  c: { flex: 1, paddingTop: 72, paddingHorizontal: 20, backgroundColor: '#f6f8fa' },
-  h: { color: '#1a7f37', fontSize: 26, fontWeight: '800', marginBottom: 18 },
-  btn: { backgroundColor: '#1f883d', paddingVertical: 28, borderRadius: 18, alignItems: 'center' },
-  btnRec: { backgroundColor: '#cf222e' },
-  fusedBtn: { backgroundColor: '#0969da', paddingVertical: 24, borderRadius: 18,
+  c: { flex: 1, paddingTop: 72, paddingHorizontal: 20, backgroundColor: '#FAFAF8' },
+  h: { color: '#0D0F12', fontFamily: 'BarlowCondensed_700Bold', fontSize: 30, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 18 },
+  btn: { backgroundColor: '#0D0F12', paddingVertical: 28, borderRadius: 18, alignItems: 'center' },
+  btnRec: { backgroundColor: '#C6281C' },
+  fusedBtn: { backgroundColor: '#FF5A00', paddingVertical: 24, borderRadius: 18,
     alignItems: 'center', marginBottom: 12 },
-  fusedT: { color: '#fff', fontSize: 22, fontWeight: '800', letterSpacing: 0.5 },
+  fusedT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 23, textTransform: 'uppercase', letterSpacing: 1.2 },
   // REQ-PROC8 entry — the accent, because reviewing the proposal is the next real move.
   reviewBtn: { alignSelf: 'center', backgroundColor: '#FFF1E8', borderColor: '#FF5A00',
     borderWidth: 1.5, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 22, marginTop: 10 },
-  reviewT: { color: '#FF5A00', fontSize: 17, fontWeight: '800', letterSpacing: 0.4 },
+  reviewT: { color: '#FF5A00', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18, textTransform: 'uppercase', letterSpacing: 1 },
   btnOff: { backgroundColor: '#c4cdd5' },
   mediaRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
   media: { flex: 1, backgroundColor: '#ffffff', borderRadius: 12, paddingVertical: 16,
-    alignItems: 'center', borderWidth: 1, borderColor: '#d0d7de' },
+    alignItems: 'center', borderWidth: 1, borderColor: '#E4E5E1' },
   mediaIcon: { fontSize: 26, marginBottom: 4 },
-  mediaT: { color: '#1f2328', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
+  mediaT: { color: '#0D0F12', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1.2 },
   stamp: { color: '#8c959f', fontSize: 10 },
-  btnT: { color: '#fff', fontSize: 24, fontWeight: '800', letterSpacing: 1 },
-  state: { color: '#57606a', fontSize: 15, marginTop: 14, marginBottom: 22, textAlign: 'center' },
-  sub: { color: '#57606a', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
-  row: { borderTopWidth: 1, borderTopColor: '#eaeef2', paddingVertical: 10 },
+  btnT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 25, textTransform: 'uppercase', letterSpacing: 1.2 },
+  state: { color: '#5C6570', fontFamily: 'Barlow_400Regular', fontSize: 15, marginTop: 14, marginBottom: 22, textAlign: 'center' },
+  sub: { color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
+  row: { borderTopWidth: 1, borderTopColor: '#E4E5E1', paddingVertical: 10 },
   rowT: { color: '#57606a', fontSize: 13, fontFamily: 'Menlo' },
   rowS: { color: '#8c959f', fontSize: 11, fontFamily: 'Menlo', marginTop: 2 },
   card: { backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16 },
-  cardH: { color: '#1a7f37', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
-  cardV: { color: '#1f2328', fontSize: 17, lineHeight: 23, marginBottom: 10 },
+  cardH: { color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
+  cardV: { color: '#0D0F12', fontSize: 17, lineHeight: 23, marginBottom: 10 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
-  chip: { color: '#1a7f37', backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1,
+  chip: { color: '#0E8A4C', backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1,
           borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, fontSize: 12, overflow: 'hidden' },
-  chipDim: { color: '#8c959f', borderColor: '#d0d7de', backgroundColor: 'transparent' },
-  chipOn: { color: '#fff', backgroundColor: '#1f883d', borderColor: '#1f883d' },
+  chipDim: { color: '#8c959f', borderColor: '#E4E5E1', backgroundColor: 'transparent' },
+  chipOn: { color: '#fff', backgroundColor: '#0D0F12', borderColor: '#0D0F12' },
   cardBtns: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  confirm: { flex: 1, backgroundColor: '#1f883d', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  confirm: { flex: 1, backgroundColor: '#0D0F12', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
   // Standalone (not inside s.cardBtns): must NOT use flex:1 -- see above.
-  confirmWide: { alignSelf: 'stretch', backgroundColor: '#1f883d', borderRadius: 10,
+  confirmWide: { alignSelf: 'stretch', backgroundColor: '#0D0F12', borderRadius: 10,
     paddingVertical: 16, alignItems: 'center', marginBottom: 10 },
-  confirmT: { color: '#fff', fontWeight: '800', letterSpacing: 1 },
+  confirmT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18, textTransform: 'uppercase', letterSpacing: 1.2 },
   later: { paddingHorizontal: 12, paddingVertical: 14 },
   laterT: { color: '#57606a', fontSize: 13 },
-  cardNote: { color: '#8c959f', fontSize: 11, marginTop: 8 },
-  drow: { borderTopWidth: 1, borderTopColor: '#eaeef2', paddingVertical: 10 },
+  cardNote: { color: '#5C6570', fontFamily: 'Barlow_400Regular', fontSize: 13, lineHeight: 19, marginTop: 8 },
+  drow: { borderTopWidth: 1, borderTopColor: '#E4E5E1', paddingVertical: 10 },
   dsub: { color: '#57606a', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 },
-  dval: { color: '#1f2328', fontSize: 15, marginTop: 2 },
-  dmeta: { color: '#8c959f', fontSize: 11, marginTop: 3 },
-  hNow: { color: '#1a7f37', fontSize: 14, marginBottom: 4 },
+  dval: { color: '#0D0F12', fontSize: 15, marginTop: 2 },
+  dmeta: { color: '#5C6570', fontFamily: 'Barlow_400Regular', fontSize: 12.5, marginTop: 3 },
+  hNow: { color: '#0E8A4C', fontSize: 14, marginBottom: 4 },
   hOld: { color: '#8c959f', fontSize: 13, marginBottom: 4, textDecorationLine: 'line-through' },
-  money: { backgroundColor: '#fff8c5', borderColor: '#d4a72c', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
+  money: { backgroundColor: '#fff8c5', borderColor: '#F5B000', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
   moneyScope: { color: '#57606a', fontSize: 14, marginBottom: 10 },
   bigMoney: { color: '#9a6700', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
-  viewImg: { width: '100%', height: 260, borderRadius: 8, backgroundColor: '#eaeef2',
+  viewImg: { width: '100%', height: 260, borderRadius: 8, backgroundColor: '#E4E5E1',
     marginBottom: 10 },
-  evid: { color: '#1f2328', fontSize: 15, marginBottom: 10 },
+  evid: { color: '#0D0F12', fontSize: 15, marginBottom: 10 },
   hash: { color: '#57606a', fontSize: 11, fontFamily: 'Menlo', marginBottom: 8 },
-  capNote: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#eaeef2' },
-  capNoteBody: { color: '#1f2328', fontSize: 14 },
+  capNote: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E4E5E1' },
+  capNoteBody: { color: '#0D0F12', fontSize: 14 },
   capNoteMeta: { color: '#8c959f', fontSize: 11, marginTop: 2 },
-  inboxItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eaeef2' },
+  inboxItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#E4E5E1' },
   inboxWhat: { color: '#57606a', fontSize: 12, marginBottom: 6 },
   inboxJobs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   inboxJob: { backgroundColor: '#ffffff', borderRadius: 8, paddingHorizontal: 12,
-    paddingVertical: 10, borderWidth: 1, borderColor: '#d0d7de' },
-  inboxJobT: { color: '#1f2328', fontSize: 13, fontWeight: '600' },
+    paddingVertical: 10, borderWidth: 1, borderColor: '#E4E5E1' },
+  inboxJobT: { color: '#0D0F12', fontSize: 13, fontWeight: '600' },
   langT: { color: '#8c959f', fontSize: 13, fontWeight: '400' },
   scopeLink: { paddingVertical: 8, marginBottom: 6 },
   scopeLinkT: { color: '#9a6700', fontSize: 13, fontWeight: '600' },
-  bndRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eaeef2' },
-  bndSubject: { color: '#1f2328', fontSize: 15 },
-  bndOwner: { color: '#1a7f37', fontSize: 12, marginTop: 2 },
+  bndRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#E4E5E1' },
+  bndSubject: { color: '#0D0F12', fontSize: 15 },
+  bndOwner: { color: '#0E8A4C', fontSize: 12, marginTop: 2 },
   bndGap: { color: '#9a6700', fontSize: 12, marginTop: 2, fontWeight: '700' },
   bndJobs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  p5: { backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
+  p5: { backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
     borderRadius: 10, padding: 12, marginBottom: 12 },
-  p5T: { color: '#1f2328', fontWeight: '700', fontSize: 15, marginBottom: 2 },
+  p5T: { color: '#0D0F12', fontWeight: '700', fontSize: 15, marginBottom: 2 },
   p5S: { color: '#57606a', fontSize: 12, marginBottom: 10 },
   oneStatus: { borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 },
   oneStatusT: { fontWeight: '700', fontSize: 14 },
   oneStatusD: { color: '#57606a', fontSize: 11, marginTop: 3 },
   // Thumb-sized. This is the first thing a new user ever touches, and they may be
   // wearing gloves when they do it.
-  langBig: { backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
+  langBig: { backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
     borderRadius: 14, paddingVertical: 28, alignItems: 'center', marginBottom: 16 },
-  langBigT: { color: '#1f2328', fontSize: 26, fontWeight: '700' },
+  langBigT: { color: '#0D0F12', fontFamily: 'Barlow_700Bold', fontSize: 26 },
   // first-run progress dots
   frDots: { flexDirection: 'row', justifyContent: 'center', marginBottom: 8, marginTop: 2 },
-  frDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#d0d7de', marginHorizontal: 4 },
-  frDotOn: { backgroundColor: '#1f883d', width: 20 },
+  frDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#E4E5E1', marginHorizontal: 4 },
+  frDotOn: { backgroundColor: '#0D0F12', width: 20 },
   // profile pick buttons (solo/company) — big touch targets (research: 48dp+, gloves)
-  pickWide: { alignSelf: 'stretch', backgroundColor: '#ffffff', borderColor: '#d0d7de',
+  pickWide: { alignSelf: 'stretch', backgroundColor: '#ffffff', borderColor: '#E4E5E1',
     borderWidth: 1, borderRadius: 12, paddingVertical: 18, alignItems: 'center', marginBottom: 10 },
-  pickOn: { borderColor: '#1f883d', backgroundColor: '#eafaf0', borderWidth: 2 },
-  pickT: { color: '#1f2328', fontSize: 18, fontWeight: '700' },
-  pickTOn: { color: '#1a7f37' },
+  pickOn: { borderColor: '#0D0F12', backgroundColor: '#eafaf0', borderWidth: 2 },
+  pickT: { color: '#0D0F12', fontSize: 18, fontWeight: '700' },
+  pickTOn: { color: '#0E8A4C' },
   // trade grid — 2-up big cells
   tradeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 6 },
-  tradeCell: { width: '48%', backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
+  tradeCell: { width: '48%', backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
     borderRadius: 12, paddingVertical: 20, alignItems: 'center', marginBottom: 10 },
-  tradeCellT: { color: '#1f2328', fontSize: 16, fontWeight: '700' },
+  tradeCellT: { color: '#0D0F12', fontSize: 16, fontWeight: '700' },
   jobBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
+    backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
     borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
-  jobBarT: { color: '#1f2328', fontWeight: '700', fontSize: 15, flex: 1 },
+  jobBarT: { color: '#0D0F12', fontWeight: '700', fontSize: 15, flex: 1 },
   jobBarS: { color: '#8c959f', fontSize: 11 },
-  jobRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eaeef2' },
-  jobName: { color: '#1f2328', fontSize: 16 },
-  jobNameOn: { color: '#1a7f37', fontSize: 16, fontWeight: '700' },
+  jobRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E4E5E1' },
+  jobName: { color: '#0D0F12', fontSize: 16 },
+  jobNameOn: { color: '#0E8A4C', fontSize: 16, fontWeight: '700' },
   jobMeta: { color: '#8c959f', fontSize: 12, marginTop: 2 },
-  consentBanner: { backgroundColor: '#fff8c5', borderColor: '#d4a72c', borderWidth: 1,
+  consentBanner: { backgroundColor: '#fff8c5', borderColor: '#F5B000', borderWidth: 1,
     borderRadius: 10, padding: 12, marginBottom: 14 },
   consentT: { color: '#9a6700', fontWeight: '700', fontSize: 14, marginBottom: 3 },
   consentS: { color: '#7d5e00', fontSize: 12, lineHeight: 17 },
   bundleBtn: { paddingVertical: 8 },
-  bundleT: { color: '#0969da', fontSize: 14, fontWeight: '600' },
+  bundleT: { color: '#FF5A00', fontSize: 14, fontWeight: '600' },
   lineRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6,
-    borderBottomWidth: 1, borderBottomColor: '#eaeef2' },
-  lineDesc: { color: '#1f2328', fontSize: 14, flex: 1 },
+    borderBottomWidth: 1, borderBottomColor: '#E4E5E1' },
+  lineDesc: { color: '#0D0F12', fontSize: 14, flex: 1 },
   lineMath: { color: '#57606a', fontSize: 12 },
   lineX: { color: '#8c959f', fontSize: 16, paddingHorizontal: 6 },
   lineAdd: { flexDirection: 'row', gap: 6, marginTop: 10, marginBottom: 4 },
-  lineIn: { flex: 1, backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
-    borderRadius: 8, color: '#1f2328', paddingHorizontal: 8, paddingVertical: 10, fontSize: 13 },
-  linePlus: { backgroundColor: '#eaeef2', borderRadius: 8, paddingHorizontal: 14,
+  lineIn: { flex: 1, backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
+    borderRadius: 8, color: '#0D0F12', paddingHorizontal: 8, paddingVertical: 10, fontSize: 13 },
+  linePlus: { backgroundColor: '#E4E5E1', borderRadius: 8, paddingHorizontal: 14,
     justifyContent: 'center' },
-  linePlusT: { color: '#1f2328', fontSize: 20, fontWeight: '800' },
-  moneyInput: { backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1, borderRadius: 8,
-                color: '#1f2328', padding: 12, fontSize: 18, marginBottom: 10, textAlign: 'center' },
-  ok: { color: '#1a7f37', fontSize: 14, marginBottom: 8 },
+  linePlusT: { color: '#0D0F12', fontSize: 20, fontWeight: '800' },
+  moneyInput: { backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 8,
+                color: '#0D0F12', padding: 12, fontSize: 18, marginBottom: 10, textAlign: 'center' },
+  ok: { color: '#0E8A4C', fontSize: 14, marginBottom: 8 },
   warn: { color: '#9a6700', fontSize: 12, marginBottom: 6 },
   ask: { marginTop: 8 },
-  askT: { color: '#0969da', fontSize: 13, fontWeight: '600' },
-  frozen: { color: '#1f2328', fontSize: 14, lineHeight: 20, backgroundColor: '#ffffff',
-            borderColor: '#d0d7de', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 8 },
-  link: { color: '#0969da', fontFamily: 'Menlo', fontSize: 11, marginVertical: 6 },
+  askT: { color: '#FF5A00', fontSize: 13, fontWeight: '600' },
+  frozen: { color: '#0D0F12', fontSize: 14, lineHeight: 20, backgroundColor: '#ffffff',
+            borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 8 },
+  link: { color: '#FF5A00', fontFamily: 'Menlo', fontSize: 11, marginVertical: 6 },
   noteRow: { flexDirection: 'row', gap: 8, marginBottom: 22 },
-  input: { flex: 1, backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
-           borderRadius: 10, color: '#1f2328', padding: 12, minHeight: 54, fontSize: 15 },
-  save: { backgroundColor: '#0969da', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center' },
+  input: { flex: 1, backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
+           borderRadius: 10, color: '#0D0F12', padding: 12, minHeight: 54, fontSize: 15 },
+  save: { backgroundColor: '#FF5A00', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center' },
   saveT: { color: '#fff', fontWeight: '800', letterSpacing: 1 },
-  gate: { backgroundColor: '#ffebe9', borderColor: '#cf222e', borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 18 },
-  gateT: { color: '#cf222e', fontWeight: '700', marginBottom: 6 },
+  gate: { backgroundColor: '#ffebe9', borderColor: '#C6281C', borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 18 },
+  gateT: { color: '#C6281C', fontWeight: '700', marginBottom: 6 },
   gateS: { color: '#57606a', fontSize: 13, lineHeight: 18 },
   mono: { color: '#57606a', fontFamily: 'Menlo', fontSize: 10, marginTop: 8 },
 
   // ── Projects home ──────────────────────────────────────────────────────
   homeHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   langPill: { color: '#57606a', fontSize: 12, fontWeight: '700', borderWidth: 1,
-    borderColor: '#d0d7de', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
-  searchIn: { backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
-    borderRadius: 10, color: '#1f2328', paddingHorizontal: 14, paddingVertical: 12,
+    borderColor: '#E4E5E1', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  searchIn: { backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
+    borderRadius: 10, color: '#0D0F12', paddingHorizontal: 14, paddingVertical: 12,
     fontSize: 15, marginBottom: 12 },
-  newProjBtn: { backgroundColor: '#1f883d', borderRadius: 12, paddingVertical: 16,
+  newProjBtn: { backgroundColor: '#0D0F12', borderRadius: 12, paddingVertical: 16,
     alignItems: 'center', marginBottom: 14 },
   newProjT: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.5 },
   inboxCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff8c5',
-    borderColor: '#d4a72c', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 14 },
+    borderColor: '#F5B000', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 14 },
   inboxCardIcon: { fontSize: 22 },
   inboxCardT: { color: '#9a6700', fontWeight: '700', fontSize: 15 },
   inboxCardS: { color: '#7d5e00', fontSize: 12, marginTop: 2 },
   chev: { color: '#9a6700', fontSize: 26, fontWeight: '300' },
-  projCard: { backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
+  projCard: { backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
     borderRadius: 14, overflow: 'hidden', marginBottom: 14 },
-  projCover: { width: '100%', height: 150, backgroundColor: '#eaeef2' },
+  projCover: { width: '100%', height: 150, backgroundColor: '#E4E5E1' },
   projCoverEmpty: { alignItems: 'center', justifyContent: 'center' },
   projCoverEmptyT: { color: '#afb8c1', fontSize: 64, fontWeight: '800' },
   projBody: { padding: 14 },
-  projName: { color: '#1f2328', fontSize: 18, fontWeight: '700' },
+  projName: { color: '#0D0F12', fontSize: 18, fontWeight: '700' },
   projMeta: { color: '#57606a', fontSize: 13, marginTop: 3 },
   projStats: { color: '#8c959f', fontSize: 12, marginTop: 8 },
   homeEmpty: { color: '#8c959f', fontSize: 14, textAlign: 'center', marginTop: 40, width: '100%' },
@@ -2269,14 +2271,14 @@ const s = StyleSheet.create({
   detailHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     marginBottom: 12 },
   backBtn: { paddingVertical: 4, paddingRight: 12 },
-  backT: { color: '#0969da', fontSize: 16, fontWeight: '600' },
+  backT: { color: '#FF5A00', fontSize: 16, fontWeight: '600' },
   jobBarAddr: { color: '#8c959f', fontSize: 12, marginTop: 2 },
-  detailMap: { width: '100%', height: 120, borderRadius: 10, marginBottom: 12, backgroundColor: '#eaeef2' },
+  detailMap: { width: '100%', height: 120, borderRadius: 10, marginBottom: 12, backgroundColor: '#E4E5E1' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingBottom: 40 },
   gridDate: { width: '100%', color: '#57606a', fontSize: 12, fontWeight: '700',
     textTransform: 'uppercase', letterSpacing: 1, marginTop: 12, marginBottom: 2 },
   tile: { width: '31.8%', aspectRatio: 1, backgroundColor: '#ffffff', borderRadius: 10,
-    overflow: 'hidden', borderWidth: 1, borderColor: '#d0d7de' },
+    overflow: 'hidden', borderWidth: 1, borderColor: '#E4E5E1' },
   tileImg: { width: '100%', height: '100%' },
   tileIcon: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#dafbe1' },
   tileIconT: { fontSize: 34 },
@@ -2290,4 +2292,41 @@ const s = StyleSheet.create({
     fontWeight: '700', backgroundColor: '#00000099', paddingHorizontal: 5, borderRadius: 6 },
   tileMeta: { position: 'absolute', bottom: 0, left: 0, right: 0, color: '#fff', fontSize: 10,
     paddingHorizontal: 5, paddingVertical: 3, backgroundColor: '#00000099' },
+  // ── capture-first home (prototype c1) ──────────────────────────────────────
+  homeC: { flex: 1, backgroundColor: '#FAFAF8', paddingTop: 54 },
+  homeTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 18, paddingBottom: 6 },
+  brand: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 22, color: '#0D0F12',
+    textTransform: 'uppercase', letterSpacing: 0.6 },
+  brandAccent: { color: '#FF5A00' },
+  topRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  chipWait: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, color: '#0D0F12',
+    backgroundColor: '#F5B000', textTransform: 'uppercase', letterSpacing: 1.2,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4, overflow: 'hidden' },
+  hero: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 26, paddingVertical: 16 },
+  heroH: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 34, color: '#0D0F12',
+    textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center' },
+  heroSub: { fontFamily: 'Barlow_400Regular', fontSize: 15, color: '#5C6570',
+    marginTop: 6, marginBottom: 20, textAlign: 'center' },
+  capBig: { width: 140, height: 140, borderRadius: 70, backgroundColor: '#FF5A00',
+    alignItems: 'center', justifyContent: 'center', shadowColor: '#FF5A00', shadowOpacity: 0.35,
+    shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
+  capBigIcon: { fontSize: 40, marginBottom: 2 },
+  capBigT: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 18, color: '#fff',
+    textTransform: 'uppercase', letterSpacing: 1.6 },
+  heroHint: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#5C6570',
+    marginTop: 12, textAlign: 'center' },
+  jobsWrap: { flex: 1, paddingHorizontal: 18, paddingTop: 4 },
+  jobsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 8 },
+  sectionLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, color: '#5C6570',
+    textTransform: 'uppercase', letterSpacing: 1.8 },
+  addJob: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 14, color: '#FF5A00',
+    textTransform: 'uppercase', letterSpacing: 1 },
+  jobItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
+    borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 14, paddingHorizontal: 14,
+    paddingVertical: 14, marginBottom: 8 },
+  jobItemName: { fontFamily: 'Barlow_600SemiBold', fontSize: 16.5, color: '#0D0F12' },
+  jobItemMeta: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#5C6570', marginTop: 2 },
+  jobCount: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, color: '#0D0F12', marginRight: 8 },
 });
