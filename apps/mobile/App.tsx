@@ -47,7 +47,7 @@ import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
 import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
          tagMap, tagsFor } from './src/tags';
 import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
-         INBOX_ID, listProjects, resolveProject, touchProject, distanceM,
+         INBOX_ID, listProjects, resolveProject, touchProject, distanceM, effectiveProject,
          type Project } from './src/projects';
 import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
          getCellularConsent, getTermsAccepted, setCellularConsent,
@@ -151,6 +151,12 @@ export default function App() {
     id: string; scope: string; amount_cents: number; status: string;
     project_id: string; pname: string; signed_by: string | null; created_at_ms: number }>>([]);
   const [recovered, setRecovered] = React.useState<{ cents: number; n: number }>({ cents: 0, n: 0 });
+  // The funnel ABOVE change orders — a walkthrough IS an extra in the making, and the
+  // Extras tab must show the whole pipeline, not only the signed paperwork at the end.
+  const [captured, setCaptured] = React.useState<Array<{
+    pair_id: string; start_ms: number; photos: number; voice_id: string | null }>>([]);
+  const [unsent, setUnsent] = React.useState<Array<{
+    id: string; subject: string; project_id: string; created_at_ms: number; pname: string }>>([]);
   const [ready, setReady] = React.useState(false);
   const [gate, setGate] = React.useState<string | null>(null);
   const [initError, setInitError] = React.useState<string | null>(null);
@@ -371,6 +377,26 @@ export default function App() {
           `SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS n
              FROM change_order WHERE status = 'approved'`))[0];
         setRecovered(rec ?? { cents: 0, n: 0 });
+        // Stage 1: captured walkthroughs not yet reviewed into a decision.
+        const pairRows = await db.getAll<{ pair_id: string; start_ms: number; photos: number; voice_id: string | null }>(
+          `SELECT cp.pair_id, MIN(cp.at_ms) AS start_ms,
+                  SUM(CASE WHEN cp.role = 'photo' THEN 1 ELSE 0 END) AS photos,
+                  (SELECT v.capture_id FROM capture_pair v
+                    WHERE v.pair_id = cp.pair_id AND v.role = 'voice'
+                    ORDER BY v.at_ms LIMIT 1) AS voice_id
+             FROM capture_pair cp GROUP BY cp.pair_id
+            ORDER BY start_ms DESC LIMIT 6`);
+        const reviewedIds = new Set((await db.getAll<{ capture_id: string }>(
+          `SELECT DISTINCT capture_id FROM decision_version WHERE capture_id IS NOT NULL`))
+          .map((r) => r.capture_id));
+        setCaptured(pairRows.filter((p) => !p.voice_id || !reviewedIds.has(p.voice_id)).slice(0, 4));
+        // Stage 2: decisions confirmed but never priced into a change order.
+        setUnsent(await db.getAll(
+          `SELECT d.id, d.subject, d.project_id, d.created_at_ms, COALESCE(p.name,'') AS pname
+             FROM decision d
+             LEFT JOIN change_order co ON co.decision_id = d.id
+             LEFT JOIN project p ON p.id = d.project_id
+            WHERE co.id IS NULL ORDER BY d.created_at_ms DESC LIMIT 4`));
       } catch { /* CO schema not up yet */ }
       // The Projects-home cards: counts, last activity and a cover photo per job.
       setCards(await projectCards(db, ps));
@@ -1650,6 +1676,46 @@ export default function App() {
 
           {homeTab === 'extras' && (
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 28 }}>
+              {/* Stage 1 — captured, not yet reviewed. THIS is what "I already have
+                  extras" means: the walkthrough is the extra, before any paperwork. */}
+              {captured.map((c) => (
+                <Pressable key={c.pair_id} style={[s.waitCard, s.waitCardTodo]}
+                  onPress={async () => {
+                    if (!c.voice_id) return;
+                    const pid = await effectiveProject(db, c.voice_id);
+                    if (pid) setProjectId(pid);
+                    setReview(c.voice_id);
+                  }}>
+                  <View style={s.waitRow1}>
+                    <Text style={s.waitName} numberOfLines={1}>
+                      🎙 {T('home.walkthrough')}{c.photos > 0 ? ` · 📸 ${c.photos}` : ''}
+                    </Text>
+                    <View style={[s.waitChip, s.waitChipTodo]}>
+                      <Text style={s.waitChipT}>{T('home.stReview')}</Text>
+                    </View>
+                  </View>
+                  <View style={s.waitRow2}>
+                    <Text style={s.waitMeta}>{ago(c.start_ms, now)} · {T('home.tapToReview')}</Text>
+                  </View>
+                </Pressable>
+              ))}
+              {/* Stage 2 — reviewed into a decision, no price/send yet. */}
+              {unsent.map((d) => (
+                <Pressable key={d.id} style={s.waitCard}
+                  onPress={() => { setProjectId(d.project_id); setNav('project'); }}>
+                  <View style={s.waitRow1}>
+                    <Text style={s.waitName} numberOfLines={1}>
+                      {d.pname ? d.pname + ' · ' : ''}{d.subject}
+                    </Text>
+                    <View style={[s.waitChip, s.waitChipDraft]}>
+                      <Text style={s.waitChipT}>{T('home.stConfirmed')}</Text>
+                    </View>
+                  </View>
+                  <View style={s.waitRow2}>
+                    <Text style={s.waitMeta}>{ago(d.created_at_ms, now)}</Text>
+                  </View>
+                </Pressable>
+              ))}
               {waiting.map((w) => {
                 const ok = w.status === 'approved';
                 const sent = w.status === 'sent';
@@ -1681,7 +1747,7 @@ export default function App() {
                   </Pressable>
                 );
               })}
-              {!waiting.length && (
+              {!waiting.length && !captured.length && !unsent.length && (
                 <Text style={s.homeEmpty}>{T('home.emptyExtras')}</Text>
               )}
               {recovered.n > 0 && (
@@ -2551,6 +2617,8 @@ const s = StyleSheet.create({
   homeTabT: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 16, color: '#5C6570',
     textTransform: 'uppercase', letterSpacing: 1.4 },
   homeTabTOn: { color: '#fff' },
+  waitCardTodo: { borderColor: '#FFD9C2', backgroundColor: '#FFF7F2' },
+  waitChipTodo: { backgroundColor: '#FF5A00' },
   waitCardOk: { backgroundColor: '#F3FAF5', borderColor: '#BFE3CD' },
   waitNameOk: { color: '#0E8A4C' },
   waitChipOk: { backgroundColor: '#0E8A4C' },
