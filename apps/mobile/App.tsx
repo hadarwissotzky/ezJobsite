@@ -1674,8 +1674,8 @@ export default function App() {
             </Pressable>
           </View>
 
-          {homeTab === 'extras' && (
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 28 }}>
+          {homeTab === 'extras' && (<>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 16 }}>
               {/* Stage 1 — captured, not yet reviewed. THIS is what "I already have
                   extras" means: the walkthrough is the extra, before any paperwork. */}
               {captured.map((c) => (
@@ -1750,20 +1750,19 @@ export default function App() {
               {!waiting.length && !captured.length && !unsent.length && (
                 <Text style={s.homeEmpty}>{T('home.emptyExtras')}</Text>
               )}
-              {(
-                <View style={s.recCard}>
-                  <View>
-                    <Text style={s.recLab}>{T('home.recovered')}</Text>
-                    <Text style={s.recVal}>{money(recovered.cents)}</Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={s.recLab}>{T('home.approvedN')}</Text>
-                    <Text style={s.recVal}>{recovered.n}</Text>
-                  </View>
-                </View>
-              )}
             </ScrollView>
-          )}
+            {/* Anchored: the scoreboard never scrolls away — the list moves, the goal doesn't. */}
+            <View style={s.recCard}>
+              <View>
+                <Text style={s.recLab}>{T('home.recovered')}</Text>
+                <Text style={s.recVal}>{money(recovered.cents)}</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={s.recLab}>{T('home.approvedN')}</Text>
+                <Text style={s.recVal}>{recovered.n}</Text>
+              </View>
+            </View>
+          </>)}
 
           {homeTab === 'jobs' && (<>
           <View style={s.jobsHead}>
