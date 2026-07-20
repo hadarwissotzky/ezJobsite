@@ -146,9 +146,10 @@ export default function App() {
   const [assignQ, setAssignQ] = React.useState('');
   // The wedge home (prototype c1): extras awaiting a signature, and the money already
   // recovered. Both read from real change_order rows — never invented.
+  const [homeTab, setHomeTab] = React.useState<'extras' | 'jobs'>('extras');
   const [waiting, setWaiting] = React.useState<Array<{
     id: string; scope: string; amount_cents: number; status: string;
-    project_id: string; pname: string }>>([]);
+    project_id: string; pname: string; signed_by: string | null; created_at_ms: number }>>([]);
   const [recovered, setRecovered] = React.useState<{ cents: number; n: number }>({ cents: 0, n: 0 });
   const [ready, setReady] = React.useState(false);
   const [gate, setGate] = React.useState<string | null>(null);
@@ -362,10 +363,10 @@ export default function App() {
       try {
         setWaiting(await db.getAll(
           `SELECT co.id, co.scope, co.amount_cents, co.status, co.project_id,
-                  COALESCE(p.name, '') AS pname
+                  COALESCE(p.name, '') AS pname, co.signed_by, co.created_at_ms
              FROM change_order co LEFT JOIN project p ON p.id = co.project_id
-            WHERE co.status IN ('draft','sent')
-            ORDER BY co.created_at_ms DESC LIMIT 4`));
+            WHERE co.status != 'superseded'
+            ORDER BY co.created_at_ms DESC LIMIT 5`));
         const rec = (await db.getAll<{ cents: number; n: number }>(
           `SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS n
              FROM change_order WHERE status = 'approved'`))[0];
@@ -1634,44 +1635,71 @@ export default function App() {
         </View>
 
         <View style={s.jobsWrap}>
-          {waiting.length > 0 && (
-            <>
-              <Text style={[s.sectionLab, { marginBottom: 8 }]}>{T('home.waiting')}</Text>
-              {waiting.map((w) => (
-                <Pressable key={w.id} style={s.waitCard}
-                  onPress={() => { setProjectId(w.project_id); setNav('project'); }}>
-                  <View style={s.waitRow1}>
-                    <Text style={s.waitName} numberOfLines={1}>
-                      {w.pname ? w.pname + ' — ' : ''}{w.scope}
-                    </Text>
-                    <Text style={s.waitAmt}>{money(w.amount_cents)}</Text>
-                  </View>
-                  <View style={s.waitRow2}>
-                    <Text style={s.waitMeta}>
-                      {w.status === 'sent' ? T('home.stSent') : T('home.stDraft')}
-                    </Text>
-                    <View style={[s.waitChip, w.status === 'sent' ? s.waitChipSent : s.waitChipDraft]}>
-                      <Text style={[s.waitChipT, w.status === 'sent' && { color: '#0D0F12' }]}>
-                        {w.status === 'sent' ? T('home.stSent') : T('home.stDraft')}
+          {/* Two audiences, two tabs: EXTRAS = the money (latest changes, the
+              green-light moment, the recovered collection); JOBS = navigation. */}
+          <View style={s.homeTabs}>
+            <Pressable style={[s.homeTab, homeTab === 'extras' && s.homeTabOn]}
+              onPress={() => setHomeTab('extras')}>
+              <Text style={[s.homeTabT, homeTab === 'extras' && s.homeTabTOn]}>{T('home.tabExtras')}</Text>
+            </Pressable>
+            <Pressable style={[s.homeTab, homeTab === 'jobs' && s.homeTabOn]}
+              onPress={() => setHomeTab('jobs')}>
+              <Text style={[s.homeTabT, homeTab === 'jobs' && s.homeTabTOn]}>{T('home.tabJobs')}</Text>
+            </Pressable>
+          </View>
+
+          {homeTab === 'extras' && (
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 28 }}>
+              {waiting.map((w) => {
+                const ok = w.status === 'approved';
+                const sent = w.status === 'sent';
+                const chip = ok ? T('home.stApproved') : sent ? T('home.stSent')
+                  : w.status === 'declined' ? T('home.stDeclined') : T('home.stDraft');
+                return (
+                  <Pressable key={w.id} style={[s.waitCard, ok && s.waitCardOk]}
+                    onPress={() => { setProjectId(w.project_id); setNav('project'); }}>
+                    <View style={s.waitRow1}>
+                      <Text style={[s.waitName, ok && s.waitNameOk]} numberOfLines={1}>
+                        {ok ? '✅ ' + T('home.greenLight') + ' — ' : ''}
+                        {w.pname ? w.pname + ' · ' : ''}{w.scope}
                       </Text>
+                      <Text style={[s.waitAmt, ok && s.waitNameOk]}>{money(w.amount_cents)}</Text>
                     </View>
+                    <View style={s.waitRow2}>
+                      <Text style={s.waitMeta} numberOfLines={1}>
+                        {ok && w.signed_by ? T({ k: 'home.signedBy', p: { name: w.signed_by } })
+                          : sent ? T('home.stSent') + ' · ' + ago(w.created_at_ms, now)
+                          : w.status === 'declined' ? T('home.stDeclined')
+                          : T('home.stDraft')}
+                      </Text>
+                      <View style={[s.waitChip,
+                        ok ? s.waitChipOk : sent ? s.waitChipSent
+                           : w.status === 'declined' ? s.waitChipNo : s.waitChipDraft]}>
+                        <Text style={[s.waitChipT, sent && { color: '#0D0F12' }]}>{chip}</Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              })}
+              {!waiting.length && (
+                <Text style={s.homeEmpty}>{T('home.emptyExtras')}</Text>
+              )}
+              {recovered.n > 0 && (
+                <View style={s.recCard}>
+                  <View>
+                    <Text style={s.recLab}>{T('home.recovered')}</Text>
+                    <Text style={s.recVal}>{money(recovered.cents)}</Text>
                   </View>
-                </Pressable>
-              ))}
-            </>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={s.recLab}>{T('home.approvedN')}</Text>
+                    <Text style={s.recVal}>{recovered.n}</Text>
+                  </View>
+                </View>
+              )}
+            </ScrollView>
           )}
-          {recovered.n > 0 && (
-            <View style={s.recCard}>
-              <View>
-                <Text style={s.recLab}>{T('home.recovered')}</Text>
-                <Text style={s.recVal}>{money(recovered.cents)}</Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={s.recLab}>{T('home.approvedN')}</Text>
-                <Text style={s.recVal}>{recovered.n}</Text>
-              </View>
-            </View>
-          )}
+
+          {homeTab === 'jobs' && (<>
           <View style={s.jobsHead}>
             <Text style={s.sectionLab}>{T('home.yourJobs')}</Text>
             <Pressable onPress={() => setNewJob({ name: '', address: '' })}>
@@ -1700,6 +1728,7 @@ export default function App() {
               <Text style={s.homeEmpty}>{q ? T('home.noMatch') : T('home.noProjects')}</Text>
             )}
           </ScrollView>
+          </>)}
         </View>
       </View>
     );
@@ -2515,7 +2544,19 @@ const s = StyleSheet.create({
   waitAmt: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, color: '#0D0F12' },
   waitRow2: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
   waitMeta: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#5C6570' },
-  waitChip: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 4 },
+  homeTabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  homeTab: { flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: '#E4E5E1',
+    backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  homeTabOn: { backgroundColor: '#0D0F12', borderColor: '#0D0F12' },
+  homeTabT: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 16, color: '#5C6570',
+    textTransform: 'uppercase', letterSpacing: 1.4 },
+  homeTabTOn: { color: '#fff' },
+  waitCardOk: { backgroundColor: '#F3FAF5', borderColor: '#BFE3CD' },
+  waitNameOk: { color: '#0E8A4C' },
+  waitChipOk: { backgroundColor: '#0E8A4C' },
+  waitChipNo: { backgroundColor: '#C6281C' },
+  waitChip: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 2,
+    transform: [{ skewX: '-10deg' }] },
   waitChipSent: { backgroundColor: '#F5B000' },
   waitChipDraft: { backgroundColor: '#0D0F12' },
   waitChipT: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12, color: '#fff',
