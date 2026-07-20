@@ -144,6 +144,12 @@ export default function App() {
     uris: string[]; secs: number;
   }>(null);
   const [assignQ, setAssignQ] = React.useState('');
+  // The wedge home (prototype c1): extras awaiting a signature, and the money already
+  // recovered. Both read from real change_order rows — never invented.
+  const [waiting, setWaiting] = React.useState<Array<{
+    id: string; scope: string; amount_cents: number; status: string;
+    project_id: string; pname: string }>>([]);
+  const [recovered, setRecovered] = React.useState<{ cents: number; n: number }>({ cents: 0, n: 0 });
   const [ready, setReady] = React.useState(false);
   const [gate, setGate] = React.useState<string | null>(null);
   const [initError, setInitError] = React.useState<string | null>(null);
@@ -353,6 +359,18 @@ export default function App() {
       setDsync(ds);
       const ps = await listProjects(db);
       setProjects(ps);
+      try {
+        setWaiting(await db.getAll(
+          `SELECT co.id, co.scope, co.amount_cents, co.status, co.project_id,
+                  COALESCE(p.name, '') AS pname
+             FROM change_order co LEFT JOIN project p ON p.id = co.project_id
+            WHERE co.status IN ('draft','sent')
+            ORDER BY co.created_at_ms DESC LIMIT 4`));
+        const rec = (await db.getAll<{ cents: number; n: number }>(
+          `SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS n
+             FROM change_order WHERE status = 'approved'`))[0];
+        setRecovered(rec ?? { cents: 0, n: 0 });
+      } catch { /* CO schema not up yet */ }
       // The Projects-home cards: counts, last activity and a cover photo per job.
       setCards(await projectCards(db, ps));
       // Open where he left off. A contractor who closes the app on the Elm St job
@@ -1603,17 +1621,57 @@ export default function App() {
         <View style={s.hero}>
           <Text style={s.heroH}>{T('home.gotOne')}</Text>
           <Text style={s.heroSub}>{T('home.sayIt')}</Text>
-          <Pressable
-            style={[s.capBig, (!!gate || !!initError) && s.btnOff]}
-            disabled={!!gate || !!initError}
-            onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
-            <Text style={s.capBigIcon}>🎙</Text>
-            <Text style={s.capBigT}>{T('home.capture')}</Text>
-          </Pressable>
+          <View style={s.capBigBase}>
+            <Pressable
+              style={[s.capBig, (!!gate || !!initError) && s.btnOff]}
+              disabled={!!gate || !!initError}
+              onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
+              <Text style={s.capBigIcon}>🎙</Text>
+              <Text style={s.capBigT}>{T('home.capture')}</Text>
+            </Pressable>
+          </View>
           <Text style={s.heroHint}>{T('home.filesItself')}</Text>
         </View>
 
         <View style={s.jobsWrap}>
+          {waiting.length > 0 && (
+            <>
+              <Text style={[s.sectionLab, { marginBottom: 8 }]}>{T('home.waiting')}</Text>
+              {waiting.map((w) => (
+                <Pressable key={w.id} style={s.waitCard}
+                  onPress={() => { setProjectId(w.project_id); setNav('project'); }}>
+                  <View style={s.waitRow1}>
+                    <Text style={s.waitName} numberOfLines={1}>
+                      {w.pname ? w.pname + ' — ' : ''}{w.scope}
+                    </Text>
+                    <Text style={s.waitAmt}>{money(w.amount_cents)}</Text>
+                  </View>
+                  <View style={s.waitRow2}>
+                    <Text style={s.waitMeta}>
+                      {w.status === 'sent' ? T('home.stSent') : T('home.stDraft')}
+                    </Text>
+                    <View style={[s.waitChip, w.status === 'sent' ? s.waitChipSent : s.waitChipDraft]}>
+                      <Text style={[s.waitChipT, w.status === 'sent' && { color: '#0D0F12' }]}>
+                        {w.status === 'sent' ? T('home.stSent') : T('home.stDraft')}
+                      </Text>
+                    </View>
+                  </View>
+                </Pressable>
+              ))}
+            </>
+          )}
+          {recovered.n > 0 && (
+            <View style={s.recCard}>
+              <View>
+                <Text style={s.recLab}>{T('home.recovered')}</Text>
+                <Text style={s.recVal}>{money(recovered.cents)}</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={s.recLab}>{T('home.approvedN')}</Text>
+                <Text style={s.recVal}>{recovered.n}</Text>
+              </View>
+            </View>
+          )}
           <View style={s.jobsHead}>
             <Text style={s.sectionLab}>{T('home.yourJobs')}</Text>
             <Pressable onPress={() => setNewJob({ name: '', address: '' })}>
@@ -2449,6 +2507,24 @@ const s = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 1.6 },
   heroHint: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#5C6570',
     marginTop: 12, textAlign: 'center' },
+  capBigBase: { borderRadius: 74, backgroundColor: '#E04E00', paddingBottom: 7 },
+  waitCard: { backgroundColor: '#fff', borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 14,
+    padding: 13, marginBottom: 8 },
+  waitRow1: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 },
+  waitName: { flex: 1, fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#0D0F12' },
+  waitAmt: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, color: '#0D0F12' },
+  waitRow2: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
+  waitMeta: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#5C6570' },
+  waitChip: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 4 },
+  waitChipSent: { backgroundColor: '#F5B000' },
+  waitChipDraft: { backgroundColor: '#0D0F12' },
+  waitChipT: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12, color: '#fff',
+    textTransform: 'uppercase', letterSpacing: 1 },
+  recCard: { backgroundColor: '#0D0F12', borderRadius: 16, padding: 15, marginBottom: 12,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  recLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12, color: '#9BA2AB',
+    textTransform: 'uppercase', letterSpacing: 1.4 },
+  recVal: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 28, color: '#fff', marginTop: 2 },
   jobsWrap: { flex: 1, paddingHorizontal: 18, paddingTop: 4 },
   jobsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     marginBottom: 8 },

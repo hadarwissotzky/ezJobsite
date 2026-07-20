@@ -353,8 +353,12 @@ export function FusedCapture({
       {micOn && (
         <View style={st.meterRow}>
           <View style={[st.recDot, (paused || interrupted) && st.recDotOff]} />
-          <View style={st.meterTrack}>
-            <View style={[st.meterFill, { width: `${Math.round(level * 100)}%` }]} />
+          <View style={st.waveRow}>
+            {[0,1,2,3,4,5,6,7,8,9,10,11].map((i) => {
+              const wob = 0.35 + (((i * 37 + Math.floor((recState.durationMillis ?? 0) / 180)) % 11) / 11) * 0.65;
+              return <View key={i} style={[st.waveBar,
+                { height: 4 + Math.round(level * 26 * wob) }]} />;
+            })}
           </View>
           <Text style={st.timer}>{two(Math.floor(secs / 60))}:{two(secs % 60)}</Text>
           {shots.length > 0 && <Text style={st.count}>📸 {shots.length}</Text>}
@@ -385,24 +389,29 @@ export function FusedCapture({
               <Text style={st.sideIcon}>🖼</Text>
               <Text style={st.sideLab}>{T('cap.gallery')}</Text>
             </Pressable>
-            {micOn && (
-              <Pressable style={st.sideBtn} onPress={togglePause} disabled={saving || interrupted}>
-                <Text style={st.sideIcon}>{paused ? '▶️' : '⏸'}</Text>
-                <Text style={st.sideLab}>{paused ? T('cap.resume') : T('cap.pause')}</Text>
-              </Pressable>
-            )}
           </View>
           <Pressable style={st.shutterOuter} onPress={snap} disabled={saving}>
             <View style={[st.shutterInner, recordingNow && st.shutterRec]} />
           </Pressable>
           <View style={st.sideCol}>
-            <Pressable
-              style={[st.done, (!shots.length && !spoke) && st.doneDim]}
-              onPress={finish} disabled={saving}>
-              {saving ? <ActivityIndicator color="#fff" /> : <Text style={st.doneT}>{T('cap.done')}</Text>}
-            </Pressable>
+            {micOn ? (
+              <Pressable style={st.sideBtn} onPress={togglePause} disabled={saving || interrupted}>
+                <Text style={st.sideIcon}>{paused ? '▶️' : '⏸'}</Text>
+                <Text style={st.sideLab}>{paused ? T('cap.resume') : T('cap.pause')}</Text>
+              </Pressable>
+            ) : <View style={st.sideBtn} />}
           </View>
         </View>
+        {/* The prototype's signature exit: a full-width white stop bar nobody can miss. */}
+        <Pressable style={[st.stopBar, (!shots.length && !spoke) && st.stopDim]}
+          onPress={finish} disabled={saving}>
+          {saving ? <ActivityIndicator color="#0D0F12" /> : (
+            <>
+              <View style={st.stopSq} />
+              <Text style={st.stopT}>{T('cap.doneBuild')}</Text>
+            </>
+          )}
+        </Pressable>
       </View>
 
       {saving && (
@@ -451,7 +460,7 @@ const st = StyleSheet.create({
   warnBox: { backgroundColor: 'rgba(245,176,0,0.95)' },
   warnT: { color: '#0D0F12', fontFamily: 'Barlow_700Bold', fontSize: 15, lineHeight: 21 },
 
-  stamp: { position: 'absolute', left: 16, bottom: 236, backgroundColor: 'rgba(0,0,0,0.45)',
+  stamp: { position: 'absolute', left: 16, bottom: 300, backgroundColor: 'rgba(0,0,0,0.45)',
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
   stampTime: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 22 },
   stampWhere: { color: '#e6edf3', fontFamily: 'Barlow_400Regular', fontSize: 14, marginTop: 2 },
@@ -463,15 +472,15 @@ const st = StyleSheet.create({
   recPillDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', marginRight: 8 },
   recPillDotDim: { opacity: 0.25 },
   recPillT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 17, letterSpacing: 1.5 },
-  meterRow: { position: 'absolute', left: 16, right: 16, bottom: 208, flexDirection: 'row', alignItems: 'center' },
+  meterRow: { position: 'absolute', left: 16, right: 16, bottom: 272, flexDirection: 'row', alignItems: 'center' },
   recDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#C6281C', marginRight: 10 },
   recDotOff: { backgroundColor: '#5C6570' },
-  meterTrack: { flex: 1, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' },
-  meterFill: { height: 6, borderRadius: 3, backgroundColor: '#3fb950' },
+  waveRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, height: 32 },
+  waveBar: { flex: 1, minHeight: 4, borderRadius: 2, backgroundColor: '#FF5A00' },
   timer: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 16, marginLeft: 10 },
   count: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 15, marginLeft: 8 },
 
-  thumbRow: { position: 'absolute', left: 16, right: 16, bottom: 148, maxHeight: 52 },
+  thumbRow: { position: 'absolute', left: 16, right: 16, bottom: 212, maxHeight: 52 },
   thumb: { width: 52, height: 52, borderRadius: 8, borderWidth: 2, borderColor: 'rgba(255,255,255,0.85)' },
 
   bottom: { position: 'absolute', left: 0, right: 0, bottom: 36, alignItems: 'center' },
@@ -488,10 +497,13 @@ const st = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center' },
   shutterInner: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#fff' },
   shutterRec: { backgroundColor: '#FF5A00' },
-  done: { width: 96, backgroundColor: '#0E8A4C', borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
-  doneDim: { opacity: 0.55 },
-  doneT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 17,
-    textTransform: 'uppercase', letterSpacing: 1 },
+  stopBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    backgroundColor: '#fff', borderRadius: 16, minHeight: 62, marginTop: 12,
+    marginHorizontal: 18, alignSelf: 'stretch' },
+  stopDim: { opacity: 0.6 },
+  stopSq: { width: 15, height: 15, borderRadius: 3, backgroundColor: '#C6281C' },
+  stopT: { color: '#0D0F12', fontFamily: 'BarlowCondensed_700Bold', fontSize: 20,
+    textTransform: 'uppercase', letterSpacing: 1.4 },
   savingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)',
     alignItems: 'center', justifyContent: 'center' },
   savingT: { color: '#fff', fontFamily: 'Barlow_600SemiBold', fontSize: 17, marginTop: 16 },
