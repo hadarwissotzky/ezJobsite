@@ -42,7 +42,7 @@ const EN: Record<string, string> = {
   'cap.photo': 'PHOTO',
   'cap.snapTalk': 'Snap + Talk',
   'cap.noLoc': 'location unavailable',
-  'cap.needCamera': 'EZjobsite needs the camera to capture a jobsite decision.',
+  'cap.needCamera': 'EZchangeorder needs the camera to capture a jobsite decision.',
   'cap.allowCamera': 'Allow camera',
   'cap.remindTitle': 'Remember to mention:',
   'cap.remind1': 'WHO & WHERE — client name & address',
@@ -184,7 +184,7 @@ const EN: Record<string, string> = {
   // --- errors that must never be silent (mandate #1) ---
   'err.refusedTitle': '{n} item(s) the server refused',
   'err.refusedBody': 'These are saved on this phone but will not reach the cloud. Send this screen to support — nothing is lost until this phone is.',
-  'err.cantStart': 'EZjobsite couldn’t start safely',
+  'err.cantStart': 'EZchangeorder couldn’t start safely',
   'err.micDenied': 'microphone permission denied',
   'err.needsPermission': '{what} needs permission — enable it in Settings',
 
@@ -322,7 +322,7 @@ const ES: Record<string, string> = {
   'cap.photo': 'FOTO',
   'cap.snapTalk': 'Foto + Voz',
   'cap.noLoc': 'ubicación no disponible',
-  'cap.needCamera': 'EZjobsite necesita la cámara para capturar una decisión de obra.',
+  'cap.needCamera': 'EZchangeorder necesita la cámara para capturar una decisión de obra.',
   'cap.allowCamera': 'Permitir cámara',
   'cap.remindTitle': 'Recuerda mencionar:',
   'cap.remind1': 'QUIÉN Y DÓNDE — nombre y dirección del cliente',
@@ -458,7 +458,7 @@ const ES: Record<string, string> = {
 
   'err.refusedTitle': 'El servidor rechazó {n} elemento(s)',
   'err.refusedBody': 'Están guardados en este teléfono pero no van a llegar a la nube. Manda esta pantalla a soporte — no se pierde nada mientras tengas el teléfono.',
-  'err.cantStart': 'EZjobsite no pudo iniciar de forma segura',
+  'err.cantStart': 'EZchangeorder no pudo iniciar de forma segura',
   'err.micDenied': 'permiso de micrófono denegado',
   'err.needsPermission': '{what} necesita permiso — actívalo en Ajustes',
 

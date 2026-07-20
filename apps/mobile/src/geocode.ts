@@ -22,7 +22,7 @@ import * as Location from 'expo-location';
 export type AddressHit = { label: string; lat: number; lng: number };
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
-const UA = 'EZjobsite/1.0 (jobsite field-capture app)';   // Nominatim requires an identifying UA
+const UA = 'EZchangeorder/1.0 (jobsite field-capture app)';   // Nominatim requires an identifying UA
 
 /** Typeahead suggestions for a partial address. [] on empty query, offline, or error. */
 export async function suggestAddresses(query: string): Promise<AddressHit[]> {

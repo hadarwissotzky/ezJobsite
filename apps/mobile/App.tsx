@@ -879,7 +879,7 @@ export default function App() {
   if (inboxOpen) {
     return (
       <View style={s.c}>
-        <Text style={s.h}>EZjobsite</Text>
+        <Text style={s.h}>EZchangeorder</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T({ k: 'inbox.title', p: { n: inboxRows.length } })}</Text>
           <Text style={s.cardNote}>
@@ -926,7 +926,7 @@ export default function App() {
   // then sign-in / register. Held until `ready` (and no init failure) so we never
   // flash sign-in over a valid session still being read from storage.
   if (ready && !initError) {
-    if (session === undefined) return <View style={s.c}><Text style={s.h}>EZjobsite</Text></View>;
+    if (session === undefined) return <View style={s.c}><Text style={s.h}>EZchangeorder</Text></View>;
     if (session === null) {
       if (!seenOnboarding) {
         return <Onboarding onDone={() => { void setSeenOnboarding(); setSeen(true); }} />;
@@ -939,7 +939,7 @@ export default function App() {
   // Nothing until we know. A null firstRun rendered the MAIN screen for a frame
   // and then swapped it for the language picker -- a flash of the wrong app, shown
   // to the one user who has never seen the right one.
-  if (firstRun === null && ready) return <View style={s.c}><Text style={s.h}>EZjobsite</Text></View>;
+  if (firstRun === null && ready) return <View style={s.c}><Text style={s.h}>EZchangeorder</Text></View>;
 
   // Enter setup when it's a first run OR the profile is missing — an existing user
   // (first_run_done already set) with no profile must still be asked who they are.
@@ -963,7 +963,7 @@ export default function App() {
     if (step === 'done') {
       // No celebration screen. They came here to record something.
       void markFirstRunDone(db).then(() => setFirstRun(false));
-      return <View style={s.c}><Text style={s.h}>EZjobsite</Text></View>;
+      return <View style={s.c}><Text style={s.h}>EZchangeorder</Text></View>;
     }
 
     // 1. LANGUAGE, FIRST AND WITHOUT WORDS.
@@ -974,7 +974,7 @@ export default function App() {
     if (step === 'lang') {
       return (
         <View style={s.c}>
-          <Text style={s.h}>EZjobsite</Text>
+          <Text style={s.h}>EZchangeorder</Text>
           <Dots />
           <View style={{ flex: 1, justifyContent: 'center' }}>
             <Pressable style={s.langBig} onPress={async () => {
@@ -1001,7 +1001,7 @@ export default function App() {
           (pSolo === true || pCompany.trim().length > 0);
         return (
           <View style={s.c}>
-            <Text style={s.h}>EZjobsite</Text>
+            <Text style={s.h}>EZchangeorder</Text>
             <Dots />
             <View style={s.card}>
               <Text style={s.cardH}>{T('fr.whoTitle')}</Text>
@@ -1038,7 +1038,7 @@ export default function App() {
       };
       return (
         <View style={s.c}>
-          <Text style={s.h}>EZjobsite</Text>
+          <Text style={s.h}>EZchangeorder</Text>
           <Dots />
           <View style={s.card}>
             <Text style={s.cardH}>{T('fr.tradeTitle')}</Text>
@@ -1068,7 +1068,7 @@ export default function App() {
     if (step === 'job') {
       return (
         <View style={s.c}>
-          <Text style={s.h}>EZjobsite</Text>
+          <Text style={s.h}>EZchangeorder</Text>
           <Dots />
           <View style={s.card}>
             <Text style={s.cardH}>{T('fr.jobTitle')}</Text>
@@ -1103,7 +1103,7 @@ export default function App() {
   if (scopeOpen) {
     return (
       <ScrollView style={{ flex: 1, backgroundColor: '#f6f8fa' }} contentContainerStyle={s.c}>
-        <Text style={s.h}>EZjobsite</Text>
+        <Text style={s.h}>EZchangeorder</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('sc.title')}</Text>
 
@@ -1182,7 +1182,7 @@ export default function App() {
   if (newJob) {
     return (
       <View style={s.c}>
-        <Text style={s.h}>EZjobsite</Text>
+        <Text style={s.h}>EZchangeorder</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('job.newTitle')}</Text>
           <TextInput style={s.moneyInput} value={newJob.name} autoFocus
@@ -1231,7 +1231,7 @@ export default function App() {
   if (picker) {
     return (
       <View style={s.c}>
-        <Text style={s.h}>EZjobsite</Text>
+        <Text style={s.h}>EZchangeorder</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('job.which')}</Text>
           {projects.map((p) => (
@@ -1272,7 +1272,7 @@ export default function App() {
     };
     return (
       <View style={s.c}>
-        <Text style={s.h}>EZjobsite</Text>
+        <Text style={s.h}>EZchangeorder</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('terms.title')}</Text>
           <Text style={s.cardNote}>{T('terms.body')}</Text>
@@ -1295,7 +1295,7 @@ export default function App() {
   if (sign) {
     return (
       <View style={s.c}>
-        <Text style={s.h}>EZjobsite</Text>
+        <Text style={s.h}>EZchangeorder</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('sig.required')}</Text>
           <Text style={s.frozen}>{sign.shown}</Text>
@@ -1359,7 +1359,7 @@ export default function App() {
                     const r = await signApproval(connector.client, {
                       changeOrderId: sign.coId, projectId: projectId, shownContent: sign.shown,
                       signerLabel: 'Owner', legalName: sign.legalName, phoneE164: sign.phone,
-                      otpVerifiedAt: sign.verifiedAt!, action: 'approved', userAgent: 'EZjobsite iOS',
+                      otpVerifiedAt: sign.verifiedAt!, action: 'approved', userAgent: 'EZchangeorder iOS',
                     });
                     if (r.ok) {
                       // The signature is authored on the server (it needs the OTP
@@ -1376,7 +1376,7 @@ export default function App() {
                     changeOrderId: sign.coId, projectId: projectId, shownContent: sign.shown,
                     signerLabel: 'Owner', legalName: sign.legalName || 'declined',
                     phoneE164: sign.phone, otpVerifiedAt: sign.verifiedAt!,
-                    action: 'declined', userAgent: 'EZjobsite iOS',
+                    action: 'declined', userAgent: 'EZchangeorder iOS',
                   });
                   await applyLocalApproval(db, sign.coId, 'declined', sign.legalName);
                   setSign(null); await refresh();
@@ -1404,7 +1404,7 @@ export default function App() {
   // database opens and the durability profile is asserted.
   // Fonts gate with the durability gate: never flash unstyled text, never flash the
   // capture screen before the database is up.
-  if (!ready || !fontsLoaded) return <View style={s.c}><Text style={s.h}>EZjobsite</Text></View>;
+  if (!ready || !fontsLoaded) return <View style={s.c}><Text style={s.h}>EZchangeorder</Text></View>;
 
   // REQ-PROC8: reviewing what the model proposed for a capture. Overlays everything.
   if (review) {
@@ -1426,7 +1426,7 @@ export default function App() {
   if (showCapture) {
     return (
       <FusedCapture
-        projectName={projects.find((p) => p.id === projectId)?.name ?? 'EZjobsite'}
+        projectName={projects.find((p) => p.id === projectId)?.name ?? 'EZchangeorder'}
         onCapture={onFusedCapture}
         onClose={() => setShowCapture(false)}
       />
@@ -1448,7 +1448,7 @@ export default function App() {
     return (
       <View style={s.homeC}>
         <View style={s.homeTop}>
-          <Text style={s.brand}>EZ<Text style={s.brandAccent}>jobsite</Text></Text>
+          <Text style={s.brand}>EZ<Text style={s.brandAccent}>changeorder</Text></Text>
           <View style={s.topRight}>
             {inbox > 0 && (
               <Pressable onPress={async () => {
@@ -1615,7 +1615,7 @@ export default function App() {
 
       {(gate || initError) && (
         <View style={s.gate}>
-          <Text style={s.gateT}>{initError ? 'EZjobsite couldn’t start safely' : 'Can’t record safely on this device'}</Text>
+          <Text style={s.gateT}>{initError ? 'EZchangeorder couldn’t start safely' : 'Can’t record safely on this device'}</Text>
           <Text style={s.gateS}>
             The database can’t guarantee a save would survive. Rather than tell you
             something is saved and lose it, recording is off.
