@@ -41,6 +41,25 @@ export async function suggestAddresses(query: string): Promise<AddressHit[]> {
   }
 }
 
+/**
+ * The street address for a KNOWN fix. Used to make a capture's stamp readable:
+ * a contractor cannot check "37.76543, -122.45678", but can check "841 Hickory Hill Rd".
+ * Keyless (OS reverse-geocoder). Needs network; null offline, and the caller must then
+ * fall back to something honest rather than printing coordinates.
+ */
+export async function addressFor(lat: number, lng: number): Promise<string | null> {
+  try {
+    const [a] = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+    if (!a) return null;
+    const street = [a.streetNumber, a.street].filter(Boolean).join(' ');
+    const rest = [a.city, a.region].filter(Boolean).join(', ');
+    const label = [street, rest].filter(Boolean).join(' · ');
+    return label || null;
+  } catch {
+    return null;
+  }
+}
+
 /** The street address at the current GPS fix, via the OS reverse-geocoder. null if unavailable. */
 export async function addressFromHere(): Promise<AddressHit | null> {
   try {

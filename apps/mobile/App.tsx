@@ -31,7 +31,8 @@ import { ReviewScreen } from './src/ui/reviewscreen';
 import { useFonts } from 'expo-font';
 import { Barlow_400Regular, Barlow_500Medium, Barlow_600SemiBold, Barlow_700Bold } from '@expo-google-fonts/barlow';
 import { BarlowCondensed_600SemiBold, BarlowCondensed_700Bold } from '@expo-google-fonts/barlow-condensed';
-import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
+import { describeStamp, ensureLocationPermission, stampNow, type Stamp } from './src/stamp';
+import { addressFor } from './src/geocode';
 import { resolveJurisdiction } from './src/jurisdiction';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
 import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
@@ -577,6 +578,27 @@ export default function App() {
     if (r.proposeNew) setProposal(r.proposeNew);
     return r;
   };
+
+  /**
+   * Turn a fix into WORDS for the capture stamp. A coordinate pair is unreadable to the
+   * person holding the phone and worthless to a client reading the photo later, so the
+   * stamp never prints one: it shows the street address (best evidence), falling back to
+   * the job we resolved to, and stays honestly empty when neither is available offline.
+   */
+  const resolveStampLabel = React.useCallback(async (st: Stamp) => {
+    let job: string | null = null;
+    let place: string | null = null;
+    try {
+      if (st.lat != null && st.lng != null) {
+        const r = await resolveProject(db, { lat: st.lat, lng: st.lng });
+        if (r.projectId !== INBOX_ID) {
+          job = (await listProjects(db)).find((p) => p.id === r.projectId)?.name ?? null;
+        }
+        place = await addressFor(st.lat, st.lng);   // network; null when offline
+      }
+    } catch { /* leave both null — the stamp then says so plainly */ }
+    return { place: place ?? job, job };
+  }, []);
 
   // REQ-CAP-FUSED (walkthrough): commit N photos + ONE voice narration as one decision
   // moment. Every capture shares a pair_id; "saved" fires ONLY after ALL of them commit
@@ -1429,6 +1451,7 @@ export default function App() {
         projectName={projects.find((p) => p.id === projectId)?.name ?? 'EZchangeorder'}
         onCapture={onFusedCapture}
         onClose={() => setShowCapture(false)}
+        resolveLabel={resolveStampLabel}
       />
     );
   }

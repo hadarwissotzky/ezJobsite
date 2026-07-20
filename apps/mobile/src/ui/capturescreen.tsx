@@ -38,24 +38,33 @@ function clockLine(ms: number): string {
   return `${two(d.getHours())}:${two(d.getMinutes())} · ${days[d.getDay()]} ${mon[d.getMonth()]} ${d.getDate()}`;
 }
 
-function StampBlock({ stamp, now }: { stamp: Stamp | null; now: number }) {
-  const where = stamp?.lat != null && stamp?.lng != null
-    ? `${stamp.lat.toFixed(5)}, ${stamp.lng.toFixed(5)}`
-    : T('cap.noLoc');
+/**
+ * The stamp burned onto every photo. NEVER shows raw coordinates: "37.76543, -122.45678"
+ * is unreadable to the person holding the phone and worthless as evidence to a client
+ * later. It shows a resolved PLACE — the street address, or the job we're standing on —
+ * and says so honestly when neither could be resolved (offline, no fix).
+ */
+function StampBlock({ place, now }: { place: string | null; now: number }) {
   return (
     <View style={st.stamp}>
       <Text style={st.stampTime}>{clockLine(now)}</Text>
-      <Text style={st.stampWhere}>📍 {where}</Text>
+      <Text style={st.stampWhere}>📍 {place ?? T('cap.noLoc')}</Text>
     </View>
   );
 }
 
 export function FusedCapture({
-  projectName, onCapture, onClose,
+  projectName, onCapture, onClose, resolveLabel,
 }: {
   projectName: string;
   onCapture: (a: FusedArtifacts) => Promise<void>;
   onClose: () => void;
+  /**
+   * Turn a fix into words a person can check. Returns the street address (best
+   * evidence) and/or the job we resolved to (best context). Owned by App, which has
+   * the database; this screen never sees a coordinate it would be tempted to print.
+   */
+  resolveLabel: (s: Stamp) => Promise<{ place: string | null; job: string | null }>;
 }) {
   const [perm, requestPerm] = useCameraPermissions();
   const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
@@ -64,6 +73,10 @@ export function FusedCapture({
   const bakeRef = React.useRef<View>(null);
 
   const [stamp, setStamp] = React.useState<Stamp | null>(null);
+  // Resolved from the fix: `place` is what gets burned onto the photo (address, else
+  // the job); `job` is shown live so the user knows where this will file.
+  const [place, setPlace] = React.useState<string | null>(null);
+  const [job, setJob] = React.useState<string | null>(null);
   const [now, setNow] = React.useState(Date.now());
   const [micOn, setMicOn] = React.useState(false);
   const [facing, setFacing] = React.useState<CameraType>('back');
@@ -78,7 +91,13 @@ export function FusedCapture({
     if (!perm.granted) { requestPerm(); return; }
     let live = true;
     (async () => {
-      setStamp(await stampNow());
+      const fix = await stampNow();
+      setStamp(fix);
+      // Resolve the fix into words BEFORE the shutter, so the stamp is ready to bake and
+      // the user can see which job this will file to while they are still framing.
+      resolveLabel(fix)
+        .then((r) => { if (live) { setPlace(r.place); setJob(r.job); } })
+        .catch(() => { /* unresolved stays honest: the stamp says so */ });
       if (await requestMic()) {
         try {
           await recorder.prepareToRecordAsync();
@@ -163,13 +182,13 @@ export function FusedCapture({
         <View ref={bakeRef} collapsable={false} style={[st.fill, st.baker]}>
           <Image source={{ uri: bakeShot.uri }} style={st.fill} resizeMode="cover"
             onLoad={() => bakeResolve.current?.()} />
-          <StampBlock stamp={stamp} now={bakeShot.atMs} />
+          <StampBlock place={place} now={bakeShot.atMs} />
         </View>
       )}
 
       <View style={st.topBar}>
         <Pressable onPress={onClose} hitSlop={16}><Text style={st.icon}>✕</Text></Pressable>
-        <Text style={st.project} numberOfLines={1}>{projectName}</Text>
+        <Text style={st.project} numberOfLines={1}>{job ?? projectName}</Text>
         <View style={st.topRight}>
           <Pressable onPress={() => setFlash((f) => (f === 'off' ? 'on' : 'off'))} hitSlop={12}>
             <Text style={st.icon}>{flash === 'on' ? '⚡' : '🚫'}</Text>
@@ -191,7 +210,7 @@ export function FusedCapture({
         </View>
       )}
 
-      <StampBlock stamp={stamp} now={now} />
+      <StampBlock place={place} now={now} />
 
       {micOn && (
         <View style={st.meterRow}>
