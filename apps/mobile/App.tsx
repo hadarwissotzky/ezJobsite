@@ -1750,7 +1750,7 @@ export default function App() {
               {!waiting.length && !captured.length && !unsent.length && (
                 <Text style={s.homeEmpty}>{T('home.emptyExtras')}</Text>
               )}
-              {recovered.n > 0 && (
+              {(
                 <View style={s.recCard}>
                   <View>
                     <Text style={s.recLab}>{T('home.recovered')}</Text>
