@@ -131,6 +131,17 @@ const STEPS = {
 
     const text = (r.text ?? '').replace(/'/g, "''");
     const lang = (r.language ?? '').replace(/'/g, "''");
+    // The narration TIMELINE. verbose_json has carried per-segment start/end all
+    // along; we were discarding it. Kept compact ({s,e,t}, seconds rounded to 0.1)
+    // because it is read back by the app to tie mid-walkthrough photos to the
+    // sentence being spoken when the shutter fired.
+    const segs = Array.isArray(r.segments)
+      ? JSON.stringify(r.segments.map((s) => ({
+          s: Math.round((s.start ?? 0) * 10) / 10,
+          e: Math.round((s.end ?? 0) * 10) / 10,
+          t: (s.text ?? '').trim(),
+        }))).replace(/'/g, "''")
+      : null;
     // Written BESIDE the original, never over it.
     // INSERT beside the capture, never UPDATE it. The append-only trigger refused
     // the column version and was right: a re-transcription next year with a better
@@ -139,9 +150,10 @@ const STEPS = {
     // old row stays, with which engine said it.
     const dur = Number(r.duration ?? 0) || 'null';
     sql(`insert into public.capture_transcript
-           (id, capture_id, owner_id, text, source_language, engine, engine_model, duration_sec)
+           (id, capture_id, owner_id, text, source_language, engine, engine_model, duration_sec, segments)
          select 'tr-' || substr(md5(random()::text),1,10), '${job.capture_id}', c.owner_id,
-                '${text}', '${lang}', 'openai', 'whisper-1', ${dur}
+                '${text}', '${lang}', 'openai', 'whisper-1', ${dur},
+                ${segs === null ? 'null' : `'${segs}'::jsonb`}
            from public.capture c where c.id = '${job.capture_id}'`);
   },
   /**

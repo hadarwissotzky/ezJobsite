@@ -26,6 +26,7 @@ import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } fr
 import { photoCapture, pickFromLibrary, recordVideo, textCapture, voiceCapture } from './src/modality';
 import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
 import { ensurePairSchema, linkPair } from './src/pair';
+import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { useFonts } from 'expo-font';
@@ -46,7 +47,7 @@ import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
 import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
          tagMap, tagsFor } from './src/tags';
 import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
-         INBOX_ID, listProjects, resolveProject, touchProject,
+         INBOX_ID, listProjects, resolveProject, touchProject, distanceM,
          type Project } from './src/projects';
 import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
          getCellularConsent, getTermsAccepted, setCellularConsent,
@@ -135,6 +136,11 @@ export default function App() {
   const [showCapture, setShowCapture] = React.useState(false);   // REQ-CAP-FUSED screen
   // REQ-PROC8: the capture whose AI proposal is being reviewed, or null.
   const [review, setReview] = React.useState<string | null>(null);
+  // Walkthrough saved to the Inbox and awaiting a job: a change order MUST belong to a
+  // job, so this sheet asks — nearby jobs, search, or create one here. Captures are
+  // already durable before it opens; dismissing leaves them safe in the Inbox.
+  const [assign, setAssign] = React.useState<null | { ids: string[]; lat: number | null; lng: number | null }>(null);
+  const [assignQ, setAssignQ] = React.useState('');
   const [ready, setReady] = React.useState(false);
   const [gate, setGate] = React.useState<string | null>(null);
   const [initError, setInitError] = React.useState<string | null>(null);
@@ -478,6 +484,9 @@ export default function App() {
           if (cr.attempted) console.log('drain change orders:', JSON.stringify(cr));
           // Pull anything this device does not have: a reinstall, a second phone,
           // or a CO authored before the device became the author.
+          // Tie walkthrough photos to the sentences spoken over them, once the
+          // transcript (with segments) has landed server-side. Idempotent per pair.
+          try { await runAutoTags(db, connector.client); } catch { /* offline is normal */ }
           const hy = await hydrateChangeOrders(db, connector.client, projectId, data.user.id);
           if (hy.pulled || hy.statusUpdated) { console.log('hydrate:', JSON.stringify(hy)); await refresh(); }
           if (r.uploaded || r.alreadyApplied || r.parked ||
@@ -604,13 +613,17 @@ export default function App() {
   // moment. Every capture shares a pair_id; "saved" fires ONLY after ALL of them commit
   // (mandate #1). A partial group (some photos in, voice failed) is surfaced honestly,
   // never a silent "saved". Each photo carries its OWN snap time; the voice spans the walk.
+  // REQ-CAP-FUSED, walkthrough commit. Order is mandate #1's: COMMIT DURABLY FIRST —
+  // to the resolved job when GPS is sure, to the Inbox when it is not — and only THEN
+  // ask the human where it belongs. Holding bytes in memory while a sheet waits for a
+  // tap is how a phone call destroys a walkthrough.
   const onFusedCapture = async (a: FusedArtifacts) => {
     setShowCapture(false);
     setUi({ k: 'saving' });
     try {
       const res = await resolveFor(a.stamp);
       const pairId = `pair-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      let firstId: string | null = null;
+      const ids: string[] = [];
       for (const ph of a.photos) {
         const pr = await performCapture(db, {
           ownerId: OWNER, projectId: res.projectId,
@@ -619,20 +632,28 @@ export default function App() {
         });
         if (!pr.ok) { setUi({ k: 'refused', why: pr.reason }); return; }
         await linkPair(db, pairId, pr.captureId, 'photo', ph.atMs);
-        if (!firstId) firstId = pr.captureId;
+        ids.push(pr.captureId);
       }
-      if (a.audioBytes) {
+      // The narration, possibly split by a phone call: every segment commits, in order.
+      // A failed later segment refuses loudly but never un-saves the earlier ones.
+      for (const seg of a.audioSegments) {
         const vr = await performCapture(db, {
           ownerId: OWNER, projectId: res.projectId,
-          input: voiceCapture(a.audioBytes, a.audioMime), stamp: a.stamp,
+          input: voiceCapture(seg.bytes, seg.mime),
+          stamp: { ...a.stamp, capturedAtMs: seg.startedAtMs },
         });
-        if (!vr.ok) { setUi({ k: 'refused', why: `photos saved; voice did not: ${vr.reason}` }); return; }
-        await linkPair(db, pairId, vr.captureId, 'voice', a.stamp.capturedAtMs);
-        if (!firstId) firstId = vr.captureId;   // voice-only capture (no photos)
+        if (!vr.ok) { setUi({ k: 'refused', why: `some saved; audio did not: ${vr.reason}` }); return; }
+        await linkPair(db, pairId, vr.captureId, 'voice', seg.startedAtMs);
+        ids.push(vr.captureId);
       }
-      if (!firstId) { setUi({ k: 'refused', why: 'nothing to save' }); return; }
-      if (res.confidence !== 'high') setFiled(res.why);
-      setUi({ k: 'saved', id: firstId });
+      if (!ids.length) { setUi({ k: 'refused', why: 'nothing to save' }); return; }
+      setUi({ k: 'saved', id: ids[0] });
+      if (res.projectId === INBOX_ID) {
+        // Saved safe — now the ONE question a change order cannot skip: which job?
+        setAssign({ ids, lat: a.stamp.lat, lng: a.stamp.lng });
+      } else if (res.confidence !== 'high') {
+        setFiled(res.why);
+      }
     } catch (e: any) {
       setUi({ k: 'refused', why: e?.message ?? String(e) });
     } finally {
@@ -1441,6 +1462,75 @@ export default function App() {
         onDone={async () => { setReview(null); await refresh(); }}
         onClose={() => setReview(null)}
       />
+    );
+  }
+
+  // WHICH JOB? — a change order must belong to a job. The captures are ALREADY saved
+  // (Inbox) before this renders; this sheet only files them. Options, per the spec:
+  // nearby jobs first, search by name/address, or create a new job right here.
+  if (assign) {
+    const q = assignQ.trim().toLowerCase();
+    const candidates = projects
+      .filter((p) => p.id !== INBOX_ID)
+      .map((p) => ({
+        ...p,
+        distM: assign.lat != null && assign.lng != null && p.lat != null && p.lng != null
+          ? distanceM({ lat: assign.lat, lng: assign.lng }, { lat: p.lat, lng: p.lng })
+          : null,
+      }))
+      .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.address ?? '').toLowerCase().includes(q))
+      .sort((a, b) => (a.distM ?? Infinity) - (b.distM ?? Infinity));
+    const fileAll = async (projId: string) => {
+      for (const id of assign.ids) {
+        await fileCapture(db, { captureId: id, projectId: projId, by: OWNER });
+      }
+      setAssign(null); setAssignQ(''); setFiled(null);
+      setProjectId(projId);
+      await refresh();
+    };
+    const newJobHere = async () => {
+      // Seed the job from where the user is standing: reverse-geocoded address when
+      // reachable, honest fallback when not. GPS pin comes from the capture's own fix.
+      const addr = assign.lat != null && assign.lng != null
+        ? await addressFor(assign.lat, assign.lng) : null;
+      const r = await createProject(db, {
+        ownerId: OWNER, name: addr ?? T('assign.newJobName'),
+        address: addr, lat: assign.lat, lng: assign.lng,
+      });
+      if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return; }
+      await fileAll(r.id);
+    };
+    return (
+      <View style={s.homeC}>
+        <View style={{ paddingHorizontal: 18, paddingTop: 8, flex: 1 }}>
+          <Text style={s.h}>{T('assign.title')}</Text>
+          <Text style={[s.cardNote, { marginTop: 0, marginBottom: 12 }]}>{T('assign.sub')}</Text>
+          <TextInput style={s.searchIn} value={assignQ} onChangeText={setAssignQ}
+            placeholder={T('assign.search')} placeholderTextColor="#8c959f" />
+          <Pressable style={s.assignNew} onPress={newJobHere}>
+            <Text style={s.assignNewT}>＋ {T('assign.newHere')}</Text>
+          </Pressable>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+            {candidates.map((p) => (
+              <Pressable key={p.id} style={s.jobItem} onPress={() => fileAll(p.id)}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.jobItemName} numberOfLines={1}>{p.name}</Text>
+                  <Text style={s.jobItemMeta} numberOfLines={1}>
+                    {p.distM != null
+                      ? (p.distM < 950 ? `${Math.round(p.distM)} m` : `${(p.distM / 1000).toFixed(1)} km`)
+                      : (p.address ?? '')}
+                  </Text>
+                </View>
+                <Text style={s.chev}>›</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <Pressable style={[s.btn, { backgroundColor: 'transparent', minHeight: 50 }]}
+            onPress={() => { setAssign(null); setAssignQ(''); }}>
+            <Text style={[s.laterT, { fontSize: 15 }]}>{T('assign.later')}</Text>
+          </Pressable>
+        </View>
+      </View>
     );
   }
 
@@ -2345,6 +2435,10 @@ const s = StyleSheet.create({
   sectionLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, color: '#5C6570',
     textTransform: 'uppercase', letterSpacing: 1.8 },
   addJob: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 14, color: '#FF5A00',
+    textTransform: 'uppercase', letterSpacing: 1 },
+  assignNew: { backgroundColor: '#FF5A00', borderRadius: 14, minHeight: 56, alignItems: 'center',
+    justifyContent: 'center', marginBottom: 12 },
+  assignNewT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18,
     textTransform: 'uppercase', letterSpacing: 1 },
   jobItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
     borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 14, paddingHorizontal: 14,
