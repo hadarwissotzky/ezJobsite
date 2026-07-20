@@ -135,6 +135,13 @@ export type ArmCheck = { allowed: true } | { allowed: false; why: Msg };
 export async function canRecordAudio(
   db: AbstractPowerSyncDatabase, projectId: string
 ): Promise<ArmCheck> {
+  // PERSONAL-USE MODEL (decision: hadar, 2026-07-17). The recording-consent
+  // acceptance is carried by the app Terms & Conditions, accepted ONCE. Once
+  // accepted, recording is enabled on every job -- there is no per-job form. This
+  // is an explicit, logged change to REQ-CON1: consent is still a deliberate human
+  // act (the user taps I ACCEPT on the Terms), it is just global and one-time
+  // rather than per-project. See getTermsAccepted / IMPLEMENTATION_NOTES §5.6.
+  if (await getTermsAccepted(db)) return { allowed: true };
   const { consent } = await getRecordingConsent(db, projectId);
   if (consent === 'all_party' || consent === 'one_party') return { allowed: true };
   if (consent === 'no_recording') {
@@ -142,6 +149,38 @@ export async function canRecordAudio(
   }
   // null. Never "probably fine": a wrong guess here is a potential crime, not a bug.
   return { allowed: false, why: msg('consent.needed') };
+}
+
+// ============ Terms acceptance (personal-use consent model) ============
+//
+// DECISION (hadar, 2026-07-17): the app is positioned as personal-use, and the
+// recording-consent acceptance is carried by the Terms & Conditions, which the user
+// accepts ONCE. This replaces the per-job recording-consent form. Recorded once,
+// globally, in device_settings -- keyed by version so a future Terms revision forces
+// a fresh acceptance rather than silently riding an old one.
+//
+// HONEST BOUNDARY, stated not hidden: the user's acceptance binds the USER. Other
+// people in a recorded conversation are not party to these Terms; in all-party states
+// the user still carries that. The T&C wording (owner's counsel) addresses it, and
+// the Terms screen surfaces a state-aware reminder -- the app never silently asserts
+// third-party consent. This is the one carve-out logged against REQ-CON1/mandate #2.
+
+const TERMS_KEY = 'terms_accepted_version';
+/** Bump when the Terms text materially changes -> users re-accept. */
+export const CURRENT_TERMS_VERSION = '2026-07-17';
+
+export async function getTermsAccepted(db: AbstractPowerSyncDatabase): Promise<boolean> {
+  const r = (await db.getAll<{ v: string }>(
+    `SELECT v FROM device_settings WHERE k = ?`, [TERMS_KEY]))[0];
+  return r?.v === CURRENT_TERMS_VERSION;      // an older accepted version does not count
+}
+
+export async function setTermsAccepted(db: AbstractPowerSyncDatabase): Promise<void> {
+  await db.execute(
+    `INSERT INTO device_settings (k, v) VALUES (?,?)
+     ON CONFLICT(k) DO UPDATE SET v = excluded.v`,
+    [TERMS_KEY, CURRENT_TERMS_VERSION]
+  );
 }
 
 // ============ REQ-CON2: cellular upload ============

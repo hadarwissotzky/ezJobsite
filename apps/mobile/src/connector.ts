@@ -4,6 +4,7 @@ import {
   UpdateType,
 } from '@powersync/react-native';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
@@ -108,13 +109,37 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
 
   constructor() {
     this.client = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+      auth: {
+        // Persist the session across app restarts. Without a storage adapter,
+        // supabase-js falls back to localStorage (undefined in React Native) and
+        // the token is lost on every cold start -- so "valid token -> main screen"
+        // could never work. AsyncStorage is the documented Expo/Supabase adapter.
+        storage: AsyncStorage,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+      },
     });
   }
 
   async login(email: string, password: string) {
     const { error } = await this.client.auth.signInWithPassword({ email, password });
     if (error) throw error;
+  }
+
+  /**
+   * Registration. Returns whether a session came back immediately: with email
+   * confirmation OFF, signUp logs the user straight in (session present); with it
+   * ON, no session yet and the caller must tell the user to check their email.
+   */
+  async signUp(email: string, password: string): Promise<{ needsEmailConfirm: boolean }> {
+    const { data, error } = await this.client.auth.signUp({ email, password });
+    if (error) throw error;
+    return { needsEmailConfirm: !data.session };
+  }
+
+  async signOut() {
+    await this.client.auth.signOut();
   }
 
   async fetchCredentials() {

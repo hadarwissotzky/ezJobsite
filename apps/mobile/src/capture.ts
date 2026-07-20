@@ -451,9 +451,10 @@ export async function listCommittedCaptures(db: AbstractPowerSyncDatabase, proje
   return db.getAll<{ capture_id: string; media_relpath: string; media_sha256: string;
                      media_bytes: number; modality: string; media_mime_type: string;
                      gps_lat: number | null; gps_lng: number | null; stamp_status: string | null;
-                     project_id: string; pending_upload: number; server_state: string | null }>(
+                     project_id: string; pending_upload: number; server_state: string | null;
+                     captured_at_ms: number }>(
     `SELECT c.capture_id, c.media_relpath, c.media_sha256, c.media_bytes, c.media_mime_type,
-            c.gps_lat, c.gps_lng, c.stamp_status, c.project_id,
+            c.gps_lat, c.gps_lng, c.stamp_status, c.project_id, c.captured_at_ms,
             -- REQ-PROC4: the per-item state, DERIVED from facts that already exist.
             -- The outbox still holding the intent IS "queued"; the server's own
             -- op_state IS "uploaded/processed". No stored state column -- that

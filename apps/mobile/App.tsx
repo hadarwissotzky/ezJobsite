@@ -3,11 +3,17 @@ import 'react-native-get-random-values';
 
 import { OPSqliteOpenFactory } from '@powersync/op-sqlite';
 import { PowerSyncDatabase } from '@powersync/react-native';
+import * as FS from 'expo-file-system/legacy';
 import React from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Dimensions, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
+import { ago, projectCards, staticMapUrl, type ProjectCard } from './src/ui/home';
 import { REJECT_DDL, SupabaseConnector } from './src/connector';
+import { getSeenOnboarding, setSeenOnboarding } from './src/auth';
+import { Onboarding } from './src/ui/onboarding';
+import { AuthScreen } from './src/ui/authscreen';
+import type { Session } from '@supabase/supabase-js';
 import { readCapture,
   applyDurabilityProfile,
   assertDurabilityProfile,
@@ -17,22 +23,33 @@ import { readCapture,
   recoverySweep,
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
-import { pickFromLibrary, recordVideo, snapPhoto, textCapture, voiceCapture } from './src/modality';
+import { photoCapture, pickFromLibrary, recordVideo, textCapture, voiceCapture } from './src/modality';
+import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
+import { ensurePairSchema, linkPair } from './src/pair';
+import { AddressInput } from './src/ui/addressinput';
+import { ReviewScreen } from './src/ui/reviewscreen';
+import { useFonts } from 'expo-font';
+import { Barlow_400Regular, Barlow_500Medium, Barlow_600SemiBold, Barlow_700Bold } from '@expo-google-fonts/barlow';
+import { BarlowCondensed_600SemiBold, BarlowCondensed_700Bold } from '@expo-google-fonts/barlow-condensed';
 import { describeStamp, ensureLocationPermission, stampNow } from './src/stamp';
+import { resolveJurisdiction } from './src/jurisdiction';
 import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
 import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
 import { addParty, assignBoundary, drainScopeOutbox, ensurePartySchema, listBoundaries,
          listParties, nameBoundary } from './src/parties';
-import { captureStatus, levelColor, procState, screenStatus } from './src/status';
+import { captureStatus, levelColor, screenStatus } from './src/status';
 import { FIRST_RUN_TAPS, isFirstRun, markFirstRunDone, nextStep, savedLang, saveLang } from './src/firstrun';
+import { hasProfile as hasProfileFn, saveProfile, TRADES } from './src/profile';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          playCapture, stopPlayback, type Note } from './src/annotate';
+import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
+         tagMap, tagsFor } from './src/tags';
 import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
          INBOX_ID, listProjects, resolveProject, touchProject,
          type Project } from './src/projects';
-import { canRecordAudio, consentBasisText, defaultConsentFor, ensureConsentSchema,
-         getCellularConsent, getRecordingConsent, setCellularConsent, setRecordingConsent,
-         type RecordingConsent } from './src/consent';
+import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
+         getCellularConsent, getTermsAccepted, setCellularConsent,
+         setTermsAccepted } from './src/consent';
 import { buildDisputeBundle, buildProgressUpdate, shareBundle, shareLink,
          shareProgressUpdate } from './src/bundle';
 import { drainOutbox, outboxStatus } from './src/uploader';
@@ -82,6 +99,17 @@ function inferDecision(text: string): { subject: string; value: string; scope: '
   return { subject, value, scope };
 }
 
+/** Date-header label for the photo grid: "Today" / "Yesterday" / "Mon, Jul 14". */
+function dayLabel(ms: number): string {
+  const d = new Date(ms);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
 /**
  * The three states a capture can be in, from the user's point of view.
  * "Saved" is the ONLY one that makes a promise, and it is only ever shown
@@ -96,10 +124,24 @@ type UiState =
   | { k: 'refused'; why: Msg | string };
 
 export default function App() {
+  // The design language (prototype): condensed display for things you RECOGNISE,
+  // humanist body for things you READ. Gated below so text never flashes unstyled.
+  const [fontsLoaded] = useFonts({
+    Barlow_400Regular, Barlow_500Medium, Barlow_600SemiBold, Barlow_700Bold,
+    BarlowCondensed_600SemiBold, BarlowCondensed_700Bold,
+  });
   const [ui, setUi] = React.useState<UiState>({ k: 'idle' });
+  const [showCapture, setShowCapture] = React.useState(false);   // REQ-CAP-FUSED screen
+  // REQ-PROC8: the capture whose AI proposal is being reviewed, or null.
+  const [review, setReview] = React.useState<string | null>(null);
   const [ready, setReady] = React.useState(false);
   const [gate, setGate] = React.useState<string | null>(null);
   const [initError, setInitError] = React.useState<string | null>(null);
+  // AUTH. `session` undefined = still checking the stored token; null = logged out;
+  // a Session = logged in. A valid stored token lands straight on the main screen.
+  const [session, setSession] = React.useState<Session | null | undefined>(undefined);
+  // The 4-slide intro is shown once to a logged-out newcomer, then never again.
+  const [seenOnboarding, setSeen] = React.useState(false);
   const [delivery, setDelivery] = React.useState<{pending:number;parked:number}>({pending:0,parked:0});
   const [decisions, setDecisions] = React.useState<DecisionRow[]>([]);
   // The ONE confirm surface (REQ-VAL6). Null = not confirming anything.
@@ -122,17 +164,43 @@ export default function App() {
   const [coRows, setCoRows] = React.useState<any[]>([]);
   const [dsync, setDsync] = React.useState<any>(null);
   const [bundling, setBundling] = React.useState<string | null>(null);
-  // REQ-CON1. Read once and kept in state: the record button must know the answer
-  // BEFORE it is tapped, because the one thing it may never do is ask.
-  const [consent, setConsent] = React.useState<{ consent: RecordingConsent; basis: string | null }>(
-    { consent: null, basis: null });
   const [cellOn, setCellOn] = React.useState(false);
-  const [setup, setSetup] = React.useState<null | { jurisdiction: string }>(null);
+  // PERSONAL-USE CONSENT MODEL (decision: hadar, 2026-07-17). Recording consent is
+  // carried by a ONE-TIME Terms acceptance, not a per-job form -- see consent.ts
+  // getTermsAccepted and IMPLEMENTATION_NOTES §5.6. `terms` = accepted? (null while
+  // loading). `showTerms` opens the acceptance screen at the first record tap; `jur`
+  // is the GPS-detected state, used ONLY for a non-blocking all-party reminder -- the
+  // app never asserts third-party consent on the user's behalf.
+  const [terms, setTerms] = React.useState<boolean | null>(null);
+  const [showTerms, setShowTerms] = React.useState<
+    null | { jur: string | null; detecting: boolean }
+  >(null);
+  const openTerms = React.useCallback(() => {
+    setShowTerms({ jur: null, detecting: true });
+    (async () => {
+      // Same best-effort fix the capture path uses (mandate #9), resolved to a state
+      // OFFLINE (mandate #7). Powers only the reminder; never blocks acceptance.
+      let jur: string | null = null;
+      if (await ensureLocationPermission()) {
+        const fix = await stampNow();
+        if (fix.status === 'ok' && fix.lat != null && fix.lng != null) {
+          jur = resolveJurisdiction(fix.lat, fix.lng);
+        }
+      }
+      setShowTerms((t) => (t ? { ...t, jur, detecting: false } : t));
+    })();
+  }, []);
 
   // REQ-SET1/EVID2. Null until the first job exists -- a new user has no jobs, and
   // pretending otherwise is what the hardcoded constant was doing.
   const [projectId, setProjectId] = React.useState<string>(INBOX_ID);
   const [projects, setProjects] = React.useState<Project[]>([]);
+  // CompanyCam-style shell: the app opens on the Projects list; a capture happens
+  // INSIDE a project. 'home' = the project list, 'project' = one project's
+  // camera-first workspace + capture grid.
+  const [nav, setNav] = React.useState<'home' | 'project'>('home');
+  const [cards, setCards] = React.useState<ProjectCard[]>([]);
+  const [search, setSearch] = React.useState('');
   const [picker, setPicker] = React.useState(false);
   const [filed, setFiled] = React.useState<Msg | string | null>(null);
   // REQ-P5. A proposal is NOT a project — it lives here until someone taps it.
@@ -142,6 +210,19 @@ export default function App() {
   const [inboxRows, setInboxRows] = React.useState<any[]>([]);
   // REQ-EVID1 + REQ-CAP3.
   const [viewing, setViewing] = React.useState<any>(null);
+  // REQ-GAL2: the full-screen viewer is a PAGER across this project's captures.
+  // `viewer.index` is the position in `saved`; `viewing` holds the loaded evidence
+  // for the current page (verified hash + notes), refreshed by the effect below.
+  const [viewer, setViewer] = React.useState<null | { index: number }>(null);
+  const pagerRef = React.useRef<ScrollView | null>(null);
+  // REQ-GAL3 user tags: the current capture's tags (viewer), a draft, the grid's
+  // capture→tags map + the project's distinct tags (filter chips), and the active
+  // filter.
+  const [vtags, setVtags] = React.useState<string[]>([]);
+  const [tagDraft, setTagDraft] = React.useState('');
+  const [gridTags, setGridTags] = React.useState<Record<string, string[]>>({});
+  const [projTags, setProjTags] = React.useState<string[]>([]);
+  const [tagFilter, setTagFilter] = React.useState<string | null>(null);
   const [vnotes, setVnotes] = React.useState<Note[]>([]);
   const [noteDraft, setNoteDraft] = React.useState('');
   const [playing, setPlaying] = React.useState(false);
@@ -176,11 +257,22 @@ export default function App() {
   const [firstRun, setFirstRun] = React.useState<boolean | null>(null);
   const [langPicked, setLangPicked] = React.useState(false);
   const [frJob, setFrJob] = React.useState('');
+  // First-run profile ("who you are"). hasProfileState gates the step; the rest is
+  // the in-step form. `pSub` is the sub-screen: 'who' (name + solo/company) then
+  // 'trade' (skippable grid). Kept minimal on purpose — see src/profile.ts.
+  const [hasProfileState, setHasProfile] = React.useState(false);
+  const [pSub, setPSub] = React.useState<'who' | 'trade'>('who');
+  const [pName, setPName] = React.useState('');
+  const [pSolo, setPSolo] = React.useState<boolean | null>(null);
+  const [pCompany, setPCompany] = React.useState('');
+  const [pTrade, setPTrade] = React.useState<string | null>(null);
   // Resolved from the session at startup. Nothing that syncs may be written with a
   // placeholder: the server's types are the contract, and a string that cannot be
   // a UUID is not a user.
   const [OWNER, setOwner] = React.useState<string>(OWNER_FALLBACK);
-  const [newJob, setNewJob] = React.useState<null | { name: string; address: string }>(null);
+  const [newJob, setNewJob] = React.useState<
+    null | { name: string; address: string; lat?: number | null; lng?: number | null }
+  >(null);
 
   /**
    * REQ-CAP5 + mandate #1: "saved" is confirmed AUDIBLY and visually; failure is
@@ -216,16 +308,33 @@ export default function App() {
   const [note, setNote] = React.useState('');
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
+  // refresh() must read the CURRENT project, but it is a stable useCallback([])
+  // so the init effect (deps [refresh]) never re-runs. A render-synced ref bridges
+  // the two: assigned every render, so refresh always sees the live project without
+  // being rebuilt when it changes. (Before this, refresh closed over the initial
+  // INBOX id and every project switch queried the wrong job — invisible while the
+  // spike had one project, load-bearing the moment there are two.)
+  const projectIdRef = React.useRef(projectId);
+  projectIdRef.current = projectId;
+
   const refresh = React.useCallback(async () => {
     try {
+      const pid = projectIdRef.current;
       // REQ-EVID2: this job's captures, not every capture on the phone.
-      setSaved(await listCommittedCaptures(db, projectId));
+      const rows = await listCommittedCaptures(db, pid);
+      setSaved(rows);
+      // REQ-GAL3: tags for this project's captures — the grid filter + per-tile chips.
+      const ids = rows.map((c) => c.capture_id);
+      try {
+        setGridTags(await tagMap(db, ids));
+        setProjTags(await projectTags(db, ids));
+      } catch { /* schema not up yet */ }
       setInbox(await inboxCount(db));
       setNCounts(await noteCounts(db));
       setRejected(await listRejected(db));
       try {
-        setBoundaries(await listBoundaries(db, projectId));
-        setParties(await listParties(db, projectId));
+        setBoundaries(await listBoundaries(db, pid));
+        setParties(await listParties(db, pid));
       } catch { /* schema not up yet */ }
       const s = (await outboxStatus(db))[0];
       // Captures and decisions ride independent queues, so "not backed up yet"
@@ -234,16 +343,41 @@ export default function App() {
       setDsync(ds);
       const ps = await listProjects(db);
       setProjects(ps);
+      // The Projects-home cards: counts, last activity and a cover photo per job.
+      setCards(await projectCards(db, ps));
       // Open where he left off. A contractor who closes the app on the Elm St job
       // and reopens it in the same truck should not have to find it again.
       setProjectId((cur) => (cur === INBOX_ID && ps.length ? ps[0].id : cur));
-      setConsent(await getRecordingConsent(db, projectId));
+      setTerms(await getTermsAccepted(db));
       setCellOn(await getCellularConsent(db));
       setDelivery({ pending: (s?.pending ?? 0) + ds.pending, parked: (s?.parked ?? 0) + ds.parked });
-      setDecisions(await listDecisions(db, projectId));
-      setCoRows(await ledger(db, projectId));
+      setDecisions(await listDecisions(db, pid));
+      setCoRows(await ledger(db, pid));
     } catch { /* pre-init */ }
   }, []);
+
+  // Reload the workspace whenever the selected project changes — opening a job from
+  // the Projects home, or the auto-select above, both land the right captures.
+  React.useEffect(() => { if (ready) void refresh(); }, [projectId, ready, refresh]);
+
+  // REQ-GAL2: load the current page's evidence (verified hash + notes) whenever the
+  // pager lands on a new capture. readCapture re-hashes from disk, so the
+  // intact/tampered verdict is real, per-page. Playback is stopped on a page change.
+  React.useEffect(() => {
+    if (!viewer) return;
+    const c = saved[viewer.index];
+    if (!c) return;
+    let live = true;
+    (async () => {
+      stopPlayback(); setPlaying(false); setPlayErr(null);
+      const v = await readCapture(db, c.capture_id);
+      if (!live) return;
+      setViewing({ ...v, captureId: c.capture_id });
+      setVnotes(await notesFor(db, c.capture_id));
+      setVtags(await tagsFor(db, c.capture_id));
+    })();
+    return () => { live = false; };
+  }, [viewer, saved]);
 
   React.useEffect(() => {
     const cleanups: Array<() => void> = [];
@@ -258,11 +392,16 @@ export default function App() {
       await ensureProjectSchema(db, OWNER);
       await ensureResolutionSchema(db);
       await ensureAnnotationSchema(db);
+      await ensureTagSchema(db);
       await ensurePartySchema(db);
       await ensureConsentSchema(db);
+      await ensurePairSchema(db);
       const sl = await savedLang(db);
-      if (sl) { setLang(sl); setLangState(sl); }
+      // setLangPicked too: a returning user already chose a language, so the setup
+      // flow must not re-show the language screen when it re-enters for a missing profile.
+      if (sl) { setLang(sl); setLangState(sl); setLangPicked(true); }
       setFirstRun(await isFirstRun(db));
+      setHasProfile(await hasProfileFn(db));
       await initFeedback();
 
       // THE GATE. If the write connection cannot promise durability we do not
@@ -278,22 +417,39 @@ export default function App() {
         console.warn('captures with unreadable media:', rec.integrityErrors);
       }
 
+      // AUTH (replaces the bakeoff hardcoded login). A stored token -> straight to
+      // the main screen; no token -> the onboarding/sign-in flow renders. The intro
+      // is shown once, so load that flag before deciding what to draw.
+      setSeen(await getSeenOnboarding());
+      let connected = false;
+      const applySession = (s: Session | null) => {
+        setSession(s);
+        if (s?.user?.id) {
+          setOwner(s.user.id);
+          // connect() is fire-and-forget: offline is the NORMAL case for this
+          // product, not an error, and PowerSync retries internally. Once per app
+          // run -- a token refresh must not stack another connection.
+          if (!connected) {
+            connected = true;
+            db.connect(connector).catch((e) =>
+              console.log('sync will connect when there is signal', e?.message ?? e));
+          }
+        }
+      };
       try {
-        await connector.login('device1@example.com', 'bakeoff-spike-pw-2026');
-        const { data: u } = await connector.client.auth.getUser();
-        if (u?.user?.id) setOwner(u.user.id);
-        // connect() is fire-and-forget by design, so its rejection lands nowhere
-        // and surfaces as an unhandled "TypeError: Network request failed". Being
-        // offline is the NORMAL case for this product, not an error -- a red
-        // banner on a jobsite with no signal is the tool blaming the user for the
-        // conditions it was built for. PowerSync retries internally; we note it
-        // and carry on.
-        db.connect(connector).catch((e) =>
-          console.log('sync will connect when there is signal', e?.message ?? e));
+        const { data: sess } = await connector.client.auth.getSession();
+        applySession(sess.session ?? null);
       } catch (e) {
-        // Offline is normal and is NOT an error. Capture must work regardless.
-        console.log('not signed in / offline — capture still works', e);
+        console.log('session check failed — treating as logged out', e);
+        setSession(null);
       }
+      // Keep session + sync in step on later sign-in / sign-out. Skip INITIAL_SESSION:
+      // getSession above already applied the startup state.
+      const { data: authSub } = connector.client.auth.onAuthStateChange((event, s) => {
+        if (event === 'INITIAL_SESSION') return;
+        applySession(s);
+      });
+      cleanups.push(() => authSub.subscription.unsubscribe());
       await refresh();
       setReady(true);
 
@@ -313,8 +469,10 @@ export default function App() {
           if (dr.attempted) console.log('drain decisions:', JSON.stringify(dr));
           const nr = await drainNoteOutbox(db, connector.client, data.user.id);
           const sr = await drainScopeOutbox(db, connector.client, data.user.id);
+          const tg = await drainTagOutbox(db, connector.client, data.user.id);
           if (sr.attempted) console.log('drain scope:', JSON.stringify(sr));
           if (nr.attempted) console.log('drain notes:', JSON.stringify(nr));
+          if (tg.attempted) console.log('drain tags:', JSON.stringify(tg));
           const cr = await drainChangeOrderOutbox(db, connector.client, data.user.id);
           if (cr.attempted) console.log('drain change orders:', JSON.stringify(cr));
           // Pull anything this device does not have: a reinstall, a second phone,
@@ -345,12 +503,16 @@ export default function App() {
     if (gate) return;
     if (ui.k === 'idle' || ui.k === 'saved' || ui.k === 'refused') {
       setUi({ k: 'arming' });
-      // REQ-CON1: the answer is ALREADY KNOWN -- decided once at job setup. This is
-      // a LOOKUP, never a prompt. A consent dialog between a man's thumb and the
-      // thing he is trying to record is the #1 predicted abandonment point, and it
-      // is the one thing this path may never do. Checked BEFORE the mic opens: we
-      // must never record first and ask later, because by then the recording
-      // exists.
+      // PERSONAL-USE MODEL: recording consent is a ONE-TIME Terms acceptance, not a
+      // per-job prompt. If the Terms are not yet accepted, open the acceptance screen
+      // (once, ever) instead of arming; after I ACCEPT the user taps record again and
+      // this gate passes. Mandate #2 is still honoured -- a human explicitly accepts.
+      if (!terms) { setUi({ k: 'idle' }); openTerms(); return; }
+      // REQ-CON1: the answer is ALREADY KNOWN -- decided once at Terms acceptance.
+      // This is a LOOKUP, never a prompt. A consent dialog between a man's thumb and
+      // the thing he is trying to record is the #1 predicted abandonment point, and it
+      // is the one thing this path may never do. Checked BEFORE the mic opens: we must
+      // never record first and ask later, because by then the recording exists.
       const may = await canRecordAudio(db, projectId);
       if (!may.allowed) { setUi({ k: 'refused', why: may.why }); return; }
       if (!(await requestMic())) { setUi({ k: 'refused', why: 'microphone permission denied' }); return; }
@@ -414,6 +576,46 @@ export default function App() {
     // and he can accept the job or ignore it.
     if (r.proposeNew) setProposal(r.proposeNew);
     return r;
+  };
+
+  // REQ-CAP-FUSED (walkthrough): commit N photos + ONE voice narration as one decision
+  // moment. Every capture shares a pair_id; "saved" fires ONLY after ALL of them commit
+  // (mandate #1). A partial group (some photos in, voice failed) is surfaced honestly,
+  // never a silent "saved". Each photo carries its OWN snap time; the voice spans the walk.
+  const onFusedCapture = async (a: FusedArtifacts) => {
+    setShowCapture(false);
+    setUi({ k: 'saving' });
+    try {
+      const res = await resolveFor(a.stamp);
+      const pairId = `pair-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      let firstId: string | null = null;
+      for (const ph of a.photos) {
+        const pr = await performCapture(db, {
+          ownerId: OWNER, projectId: res.projectId,
+          input: photoCapture(ph.bytes, ph.mime),
+          stamp: { ...a.stamp, capturedAtMs: ph.atMs },   // each photo's own snap time
+        });
+        if (!pr.ok) { setUi({ k: 'refused', why: pr.reason }); return; }
+        await linkPair(db, pairId, pr.captureId, 'photo', ph.atMs);
+        if (!firstId) firstId = pr.captureId;
+      }
+      if (a.audioBytes) {
+        const vr = await performCapture(db, {
+          ownerId: OWNER, projectId: res.projectId,
+          input: voiceCapture(a.audioBytes, a.audioMime), stamp: a.stamp,
+        });
+        if (!vr.ok) { setUi({ k: 'refused', why: `photos saved; voice did not: ${vr.reason}` }); return; }
+        await linkPair(db, pairId, vr.captureId, 'voice', a.stamp.capturedAtMs);
+        if (!firstId) firstId = vr.captureId;   // voice-only capture (no photos)
+      }
+      if (!firstId) { setUi({ k: 'refused', why: 'nothing to save' }); return; }
+      if (res.confidence !== 'high') setFiled(res.why);
+      setUi({ k: 'saved', id: firstId });
+    } catch (e: any) {
+      setUi({ k: 'refused', why: e?.message ?? String(e) });
+    } finally {
+      await refresh();
+    }
   };
 
   const onMedia = async (produce: () => Promise<any>, label: string) => {
@@ -513,101 +715,164 @@ export default function App() {
    * nothing interpreted. This is the screen an inspector or a peer would be shown.
    * REQ-CAP3 lives here too: a note about any capture, of any modality.
    */
-  if (viewing) {
-    const v = viewing;
+  // REQ-GAL2 — full-screen swipe viewer. A horizontal pager across this project's
+  // captures; the current page's evidence (verified hash, notes) loads beneath it.
+  if (viewer) {
+    const W = Dimensions.get('window').width;
+    const v = viewing;                 // evidence for the current page
+    const cur = saved[viewer.index];   // the row being viewed
+    const close = () => { stopPlayback(); setPlaying(false); setViewer(null); setViewing(null); };
     return (
-      <ScrollView style={{ flex: 1, backgroundColor: '#0d1117' }} contentContainerStyle={s.c}>
-        <Text style={s.h}>EZjobsite</Text>
-        <View style={s.card}>
-          <Text style={s.cardH}>{v.modality} capture</Text>
+      <View style={{ flex: 1, backgroundColor: '#f6f8fa' }}>
+        <View style={[s.detailHead, { paddingTop: 60, paddingHorizontal: 20 }]}>
+          <Pressable style={s.backBtn} onPress={close}>
+            <Text style={s.backT}>‹ {T('common.close')}</Text>
+          </Pressable>
+          <Text style={s.jobBarS}>{viewer.index + 1} / {saved.length}</Text>
+        </View>
 
-          {!v.ok ? (
-            // The row says it exists and the file does not. Loud, never swallowed:
-            // this is the loss mandate #1 forbids, and the user must know BEFORE
-            // they rely on it in a dispute.
-            <Text style={s.warn}>{v.reason}</Text>
-          ) : (
-            <>
-              {v.modality === 'photo' && (
-                <Image source={{ uri: v.uri }} style={s.viewImg} resizeMode="contain" />
-              )}
-              {v.text !== undefined && <Text style={s.frozen}>{v.text}</Text>}
-              {/* REQ-EVID1 for the PRIMARY modality. A viewer that shows a byte
-                  count for a voice note cannot show the evidence — an inspector
-                  asking "what did he say?" got a hash. Plays from disk, so it
-                  works in the basement where the question gets asked. */}
-              {(v.modality === 'voice' || v.modality === 'video') && (
-                <>
-                  <Pressable style={s.confirmWide} onPress={async () => {
-                    if (playing) { stopPlayback(); setPlaying(false); return; }
-                    const r = await playCapture(v.uri);
-                    if (!r.ok) { setPlayErr(r.reason); return; }
-                    setPlayErr(null); setPlaying(true);
-                  }}>
-                    <Text style={s.confirmT}>{T(playing ? 'ev.stop' : 'ev.play')}</Text>
-                  </Pressable>
-                  <Text style={s.cardNote}>
-                    {T({ k: 'ev.audioMeta', p: { kb: (v.bytes / 1024).toFixed(1) } })}
+        {/* Swipe = paging. Photos pinch-zoom via a nested zoomable ScrollView
+            (native on iOS; Android degrades to no-zoom, still swipes). Media renders
+            from local media_relpath; the integrity verdict comes from `viewing`. */}
+        <ScrollView
+          ref={pagerRef}
+          horizontal pagingEnabled showsHorizontalScrollIndicator={false}
+          onLayout={() => pagerRef.current?.scrollTo({ x: viewer.index * W, animated: false })}
+          onMomentumScrollEnd={(e) => {
+            const i = Math.round(e.nativeEvent.contentOffset.x / W);
+            if (i !== viewer.index && saved[i]) setViewer({ index: i });
+          }}
+          style={{ maxHeight: 300, flexGrow: 0 }}>
+          {saved.map((c) => (
+            <View key={c.capture_id} style={{ width: W, height: 300, alignItems: 'center', justifyContent: 'center' }}>
+              {c.modality === 'photo' ? (
+                <ScrollView maximumZoomScale={4} minimumZoomScale={1}
+                  contentContainerStyle={{ width: W, height: 300, alignItems: 'center', justifyContent: 'center' }}>
+                  <Image source={{ uri: FS.documentDirectory + c.media_relpath }}
+                    style={{ width: W, height: 300 }} resizeMode="contain" />
+                </ScrollView>
+              ) : (
+                <View style={[s.viewImg, s.tileIcon, { width: W - 40, height: 260 }]}>
+                  <Text style={{ fontSize: 72 }}>
+                    {c.modality === 'video' ? '🎥' : c.modality === 'voice' ? '🎙' : '📝'}
                   </Text>
-                  {playErr && (
-                    <Text style={s.warn}>{T({ k: 'ev.playFailed', p: { why: playErr } })}</Text>
-                  )}
-                </>
+                </View>
               )}
-              {v.modality === 'video' && (
-                <Text style={s.cardNote}>
-                  Video · {(v.bytes / 1024 / 1024).toFixed(1)} MB. Playback isn’t built yet.
-                </Text>
-              )}
-
-              {/* The stamp, plainly. This is what makes it evidence rather than a file. */}
-              <Text style={s.sub}>{T('ev.recorded')}</Text>
-              <Text style={s.evid}>{new Date(v.capturedAtMs).toLocaleString()}</Text>
-              <Text style={s.sub}>{T('ev.where')}</Text>
-              <Text style={s.evid}>{describeStamp({ lat: v.lat, lng: v.lng, stamp_status: v.stampStatus })}</Text>
-              <Text style={s.sub}>{T('ev.hash')}</Text>
-              <Text style={s.hash}>{v.sha256}</Text>
-              <Text style={v.intact ? s.ok : s.warn}>
-                {v.intact ? T('ev.intact') : T('ev.tampered')}
-              </Text>
-            </>
-          )}
-
-          {/* REQ-CAP3: a note on any capture, any modality. */}
-          <Text style={s.sub}>Notes ({vnotes.length})</Text>
-          {vnotes.map((n) => (
-            <View key={n.id} style={s.capNote}>
-              <Text style={s.capNoteBody}>{n.body}</Text>
-              <Text style={s.capNoteMeta}>
-                {n.author ?? 'you'} · {new Date(n.created_at_ms).toLocaleString()}
-              </Text>
             </View>
           ))}
-          <TextInput style={s.moneyInput} value={noteDraft} multiline
-            placeholder={T('ev.addNote')} placeholderTextColor="#6e7681"
-            onChangeText={setNoteDraft} />
-          <Pressable style={[s.confirmWide, !noteDraft.trim() && s.btnOff]}
-            disabled={!noteDraft.trim()}
-            onPress={async () => {
-              const r = await addNote(db, { captureId: v.captureId, body: noteDraft, author: 'Owner' });
-              if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return; }
-              setNoteDraft('');
-              setVnotes(await notesFor(db, v.captureId));
-              setNCounts(await noteCounts(db));
-            }}>
-            <Text style={s.confirmT}>{T('ev.addNoteBtn')}</Text>
-          </Pressable>
-          <Text style={s.cardNote}>
-            Notes are added, never replaced — an earlier note is never overwritten by
-            a later one. The note is what someone said ABOUT this; it isn’t part of
-            what was recorded.
-          </Text>
+        </ScrollView>
 
-          <Pressable style={s.later} onPress={() => { stopPlayback(); setPlaying(false); setViewing(null); }}>
-            <Text style={s.laterT}>{T('common.close')}</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }}>
+          <View style={s.card}>
+            <Text style={s.cardH}>{cur?.modality} capture</Text>
+            {!v || v.captureId !== cur?.capture_id ? (
+              <Text style={s.cardNote}>Loading…</Text>
+            ) : !v.ok ? (
+              // Row says it exists, file does not. Loud, never swallowed (mandate #1).
+              <Text style={s.warn}>{v.reason}</Text>
+            ) : (
+              <>
+                {v.text !== undefined && <Text style={s.frozen}>{v.text}</Text>}
+                {(v.modality === 'voice' || v.modality === 'video') && (
+                  <>
+                    <Pressable style={s.confirmWide} onPress={async () => {
+                      if (playing) { stopPlayback(); setPlaying(false); return; }
+                      const r = await playCapture(v.uri);
+                      if (!r.ok) { setPlayErr(r.reason); return; }
+                      setPlayErr(null); setPlaying(true);
+                    }}>
+                      <Text style={s.confirmT}>{T(playing ? 'ev.stop' : 'ev.play')}</Text>
+                    </Pressable>
+                    {playErr && <Text style={s.warn}>{T({ k: 'ev.playFailed', p: { why: playErr } })}</Text>}
+                  </>
+                )}
+                {v.modality === 'video' && (
+                  <Text style={s.cardNote}>
+                    Video · {(v.bytes / 1024 / 1024).toFixed(1)} MB. Raw video isn’t
+                    retained — the audio and stills are the evidence (REQ-TL4).
+                  </Text>
+                )}
+                <Text style={s.sub}>{T('ev.recorded')}</Text>
+                <Text style={s.evid}>{new Date(v.capturedAtMs).toLocaleString()}</Text>
+                <Text style={s.sub}>{T('ev.where')}</Text>
+                <Text style={s.evid}>{describeStamp({ lat: v.lat, lng: v.lng, stamp_status: v.stampStatus })}</Text>
+                <Text style={s.sub}>{T('ev.hash')}</Text>
+                <Text style={s.hash}>{v.sha256}</Text>
+                <Text style={v.intact ? s.ok : s.warn}>
+                  {v.intact ? T('ev.intact') : T('ev.tampered')}
+                </Text>
+              </>
+            )}
+
+            {/* REQ-GAL3: user tags. Tap a chip to retract (an event, not a delete);
+                type to add. Tags organize the grid; they are not part of the media. */}
+            <Text style={s.sub}>Tags</Text>
+            <View style={s.chips}>
+              {vtags.map((tg) => (
+                <Pressable key={tg} onPress={async () => {
+                  if (!cur) return;
+                  await retractTag(db, { captureId: cur.capture_id, tag: tg, author: 'Owner' });
+                  const ids = saved.map((c) => c.capture_id);
+                  setVtags(await tagsFor(db, cur.capture_id));
+                  setGridTags(await tagMap(db, ids));
+                  setProjTags(await projectTags(db, ids));
+                }}>
+                  <Text style={s.chip}>{tg} ✕</Text>
+                </Pressable>
+              ))}
+              {!vtags.length && <Text style={s.cardNote}>No tags yet</Text>}
+            </View>
+            <View style={s.lineAdd}>
+              <TextInput style={[s.lineIn, { flex: 3 }]} value={tagDraft}
+                placeholder="add a tag (e.g. roof, before)" placeholderTextColor="#8c959f"
+                autoCapitalize="none" onChangeText={setTagDraft} />
+              <Pressable style={[s.linePlus, !tagDraft.trim() && s.btnOff]}
+                disabled={!tagDraft.trim() || !cur}
+                onPress={async () => {
+                  if (!cur) return;
+                  await addTag(db, { captureId: cur.capture_id, tag: tagDraft, author: 'Owner' });
+                  const ids = saved.map((c) => c.capture_id);
+                  setTagDraft('');
+                  setVtags(await tagsFor(db, cur.capture_id));
+                  setGridTags(await tagMap(db, ids));
+                  setProjTags(await projectTags(db, ids));
+                }}>
+                <Text style={s.linePlusT}>+</Text>
+              </Pressable>
+            </View>
+
+            {/* REQ-CAP3: a note on any capture, any modality. */}
+            <Text style={s.sub}>Notes ({vnotes.length})</Text>
+            {vnotes.map((n) => (
+              <View key={n.id} style={s.capNote}>
+                <Text style={s.capNoteBody}>{n.body}</Text>
+                <Text style={s.capNoteMeta}>
+                  {n.author ?? 'you'} · {new Date(n.created_at_ms).toLocaleString()}
+                </Text>
+              </View>
+            ))}
+            <TextInput style={s.moneyInput} value={noteDraft} multiline
+              placeholder={T('ev.addNote')} placeholderTextColor="#8c959f"
+              onChangeText={setNoteDraft} />
+            <Pressable style={[s.confirmWide, !noteDraft.trim() && s.btnOff]}
+              disabled={!noteDraft.trim() || !cur}
+              onPress={async () => {
+                if (!cur) return;
+                const r = await addNote(db, { captureId: cur.capture_id, body: noteDraft, author: 'Owner' });
+                if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return; }
+                setNoteDraft('');
+                setVnotes(await notesFor(db, cur.capture_id));
+                setNCounts(await noteCounts(db));
+              }}>
+              <Text style={s.confirmT}>{T('ev.addNoteBtn')}</Text>
+            </Pressable>
+            <Text style={s.cardNote}>
+              Notes are added, never replaced. The note is what someone said ABOUT
+              this; it isn’t part of what was recorded.
+            </Text>
+          </View>
+        </ScrollView>
+      </View>
     );
   }
 
@@ -656,18 +921,44 @@ export default function App() {
     );
   }
 
+  // AUTH GATE — before first-run, before the main app. A stored token flows straight
+  // through to the main screen; a logged-out newcomer sees the 4-slide intro once,
+  // then sign-in / register. Held until `ready` (and no init failure) so we never
+  // flash sign-in over a valid session still being read from storage.
+  if (ready && !initError) {
+    if (session === undefined) return <View style={s.c}><Text style={s.h}>EZjobsite</Text></View>;
+    if (session === null) {
+      if (!seenOnboarding) {
+        return <Onboarding onDone={() => { void setSeenOnboarding(); setSeen(true); }} />;
+      }
+      return <AuthScreen connector={connector} />;
+    }
+  }
+
   // REQ-SET2. Shown before anything else, and only once.
   // Nothing until we know. A null firstRun rendered the MAIN screen for a frame
   // and then swapped it for the language picker -- a flash of the wrong app, shown
   // to the one user who has never seen the right one.
   if (firstRun === null && ready) return <View style={s.c}><Text style={s.h}>EZjobsite</Text></View>;
 
-  if (firstRun && ready && !gate) {
+  // Enter setup when it's a first run OR the profile is missing — an existing user
+  // (first_run_done already set) with no profile must still be asked who they are.
+  if ((firstRun || !hasProfileState) && ready && !gate) {
     const step = nextStep({
       langChosen: !!langPicked,
+      hasProfile: hasProfileState,
       hasJob: projects.some((p) => p.id !== INBOX_ID),
-      hasConsent: consent.consent !== null,
     });
+    // Small progress spine across the three setup steps (research: progress
+    // indicators lower onboarding anxiety). Language is step 0 here.
+    const stepIndex = step === 'lang' ? 0 : step === 'profile' ? 1 : 2;
+    const Dots = () => (
+      <View style={s.frDots}>
+        {[0, 1, 2].map((d) => (
+          <View key={d} style={[s.frDot, d === stepIndex && s.frDotOn]} />
+        ))}
+      </View>
+    );
 
     if (step === 'done') {
       // No celebration screen. They came here to record something.
@@ -684,6 +975,7 @@ export default function App() {
       return (
         <View style={s.c}>
           <Text style={s.h}>EZjobsite</Text>
+          <Dots />
           <View style={{ flex: 1, justifyContent: 'center' }}>
             <Pressable style={s.langBig} onPress={async () => {
               setLang('en'); setLangState('en'); await saveLang(db, 'en'); setLangPicked(true);
@@ -700,6 +992,76 @@ export default function App() {
       );
     }
 
+    // 2. WHO YOU ARE — name + solo/company, then trade (skippable). The minimum that
+    //    personalises a proposal; NOT a Jobber-style survey (research 2026-07-17).
+    //    Two sub-screens inside one step so a skipped trade still advances cleanly.
+    if (step === 'profile') {
+      if (pSub === 'who') {
+        const canGo = pName.trim().length > 0 && pSolo !== null &&
+          (pSolo === true || pCompany.trim().length > 0);
+        return (
+          <View style={s.c}>
+            <Text style={s.h}>EZjobsite</Text>
+            <Dots />
+            <View style={s.card}>
+              <Text style={s.cardH}>{T('fr.whoTitle')}</Text>
+              <Text style={s.cardNote}>{T('fr.whoWhy')}</Text>
+              <TextInput style={s.moneyInput} value={pName} autoFocus
+                placeholder={T('fr.yourName')} placeholderTextColor="#8c959f"
+                onChangeText={setPName} />
+              <Pressable style={[s.pickWide, pSolo === true && s.pickOn]} onPress={() => setPSolo(true)}>
+                <Text style={[s.pickT, pSolo === true && s.pickTOn]}>{T('fr.solo')}</Text>
+              </Pressable>
+              <Pressable style={[s.pickWide, pSolo === false && s.pickOn]} onPress={() => setPSolo(false)}>
+                <Text style={[s.pickT, pSolo === false && s.pickTOn]}>{T('fr.company')}</Text>
+              </Pressable>
+              {pSolo === false && (
+                <TextInput style={s.moneyInput} value={pCompany}
+                  placeholder={T('fr.companyName')} placeholderTextColor="#8c959f"
+                  onChangeText={setPCompany} />
+              )}
+              <Pressable style={[s.confirmWide, !canGo && s.btnOff]} disabled={!canGo}
+                onPress={() => setPSub('trade')}>
+                <Text style={s.confirmT}>{T('fr.continue')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        );
+      }
+      // trade sub-screen — big-button grid, skippable
+      const finish = async (trade: string | null) => {
+        await saveProfile(connector, db, {
+          name: pName, isSolo: pSolo === true,
+          company: pSolo === false ? pCompany : null, trade,
+        });
+        setHasProfile(true);
+      };
+      return (
+        <View style={s.c}>
+          <Text style={s.h}>EZjobsite</Text>
+          <Dots />
+          <View style={s.card}>
+            <Text style={s.cardH}>{T('fr.tradeTitle')}</Text>
+            <Text style={s.cardNote}>{T('fr.tradeWhy')}</Text>
+            <View style={s.tradeGrid}>
+              {TRADES.map((tr) => (
+                <Pressable key={tr} style={[s.tradeCell, pTrade === tr && s.pickOn]}
+                  onPress={() => setPTrade(tr)}>
+                  <Text style={[s.tradeCellT, pTrade === tr && s.pickTOn]}>{T('trade.' + tr)}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable style={s.confirmWide} onPress={() => finish(pTrade)}>
+              <Text style={s.confirmT}>{T('fr.continue')}</Text>
+            </Pressable>
+            <Pressable style={s.later} onPress={() => finish(null)}>
+              <Text style={s.laterT}>{T('fr.skip')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
     // 2. THE JOB. Consent belongs to a project, so there must be one first.
     //    A name is enough -- the address can come later, and demanding one from a
     //    man standing in the room is how you get "asdf".
@@ -707,11 +1069,12 @@ export default function App() {
       return (
         <View style={s.c}>
           <Text style={s.h}>EZjobsite</Text>
+          <Dots />
           <View style={s.card}>
             <Text style={s.cardH}>{T('fr.jobTitle')}</Text>
             <Text style={s.cardNote}>{T('fr.jobWhy')}</Text>
             <TextInput style={s.moneyInput} value={frJob} autoFocus
-              placeholder={T('job.name')} placeholderTextColor="#6e7681"
+              placeholder={T('job.name')} placeholderTextColor="#8c959f"
               onChangeText={setFrJob} />
             <Pressable style={[s.confirmWide, !frJob.trim() && s.btnOff]}
               disabled={!frJob.trim()}
@@ -730,18 +1093,16 @@ export default function App() {
       );
     }
 
-    // 3. CONSENT. One tap, strict default. Reuses the same screen the app uses
-    //    later -- one implementation, so the legal wording can never drift.
-    if (step === 'consent' && !setup) {
-      setSetup({ jurisdiction: '' });
-    }
+    // CONSENT IS NOT A FIRST-RUN STEP (2026-07-17). It is deferred to the first
+    // record tap (canRecordAudio gate) + the dismissible banner below. See
+    // firstrun.ts header point 3.
   }
 
   // REQ-VAL7. The air-handler screen: what might fall between trades, and who
   // owns it. Gaps first — the unassigned boundary is the one that costs money.
   if (scopeOpen) {
     return (
-      <ScrollView style={{ flex: 1, backgroundColor: '#0d1117' }} contentContainerStyle={s.c}>
+      <ScrollView style={{ flex: 1, backgroundColor: '#f6f8fa' }} contentContainerStyle={s.c}>
         <Text style={s.h}>EZjobsite</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('sc.title')}</Text>
@@ -773,7 +1134,7 @@ export default function App() {
           <Text style={s.sub}>{T('sc.addBoundary')}</Text>
           <View style={s.lineAdd}>
             <TextInput style={[s.lineIn, { flex: 3 }]} value={bndDraft}
-              placeholder="e.g. whip to the air handler" placeholderTextColor="#6e7681"
+              placeholder="e.g. whip to the air handler" placeholderTextColor="#8c959f"
               onChangeText={setBndDraft} />
             <Pressable style={[s.linePlus, !bndDraft.trim() && s.btnOff]}
               disabled={!bndDraft.trim()}
@@ -793,10 +1154,10 @@ export default function App() {
           ))}
           <View style={s.lineAdd}>
             <TextInput style={[s.lineIn, { flex: 2 }]} value={ptyDraft.name}
-              placeholder={T('sc.partyName')} placeholderTextColor="#6e7681"
+              placeholder={T('sc.partyName')} placeholderTextColor="#8c959f"
               onChangeText={(v) => setPtyDraft({ ...ptyDraft, name: v })} />
             <TextInput style={[s.lineIn, { flex: 2 }]} value={ptyDraft.trade}
-              placeholder={T('sc.partyTrade')} placeholderTextColor="#6e7681"
+              placeholder={T('sc.partyTrade')} placeholderTextColor="#8c959f"
               onChangeText={(v) => setPtyDraft({ ...ptyDraft, trade: v })} />
             <Pressable style={[s.linePlus, (!ptyDraft.name.trim() || !ptyDraft.trade.trim()) && s.btnOff]}
               disabled={!ptyDraft.name.trim() || !ptyDraft.trade.trim()}
@@ -825,14 +1186,16 @@ export default function App() {
         <View style={s.card}>
           <Text style={s.cardH}>{T('job.newTitle')}</Text>
           <TextInput style={s.moneyInput} value={newJob.name} autoFocus
-            placeholder={T('job.name')} placeholderTextColor="#6e7681"
+            placeholder={T('job.name')} placeholderTextColor="#8c959f"
             onChangeText={(v) => setNewJob({ ...newJob, name: v })} />
-          <TextInput style={s.moneyInput} value={newJob.address}
-            placeholder={T('job.address')} placeholderTextColor="#6e7681"
-            onChangeText={(v) => setNewJob({ ...newJob, address: v })} />
+          <AddressInput
+            value={newJob.address}
+            onChangeText={(v) => setNewJob({ ...newJob, address: v })}
+            onPick={(h) => setNewJob({ ...newJob, address: h.label, lat: h.lat, lng: h.lng })}
+          />
           <Text style={s.cardNote}>
-            We’ll pin this job to where you are now, so captures here file
-            themselves. You can add the address later.
+            Start typing an address or tap “use my location”. If you skip it, we pin
+            the job to where you are now, so captures here file themselves.
           </Text>
           <Pressable style={[s.confirmWide, !newJob.name.trim() && s.btnOff]}
             disabled={!newJob.name.trim()}
@@ -842,12 +1205,16 @@ export default function App() {
               const st = await stampNow();
               const r = await createProject(db, {
                 ownerId: OWNER, name: newJob.name, address: newJob.address || null,
-                lat: st.lat, lng: st.lng,
+                // Prefer the chosen address's coords (pins the map there); fall back
+                // to where the user is standing.
+                lat: newJob.lat ?? st.lat, lng: newJob.lng ?? st.lng,
               });
               if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return; }
               setProjectId(r.id);
               setProjects(await listProjects(db));
               setNewJob(null); setPicker(false);
+              // CompanyCam: creating a job drops you into it, ready to capture.
+              setNav('project');
               await refresh();
             }}>
             <Text style={s.confirmT}>{T('job.create')}</Text>
@@ -893,55 +1260,32 @@ export default function App() {
     );
   }
 
-  if (setup) {
-    const suggested = defaultConsentFor(setup.jurisdiction || null);
-    const choose = async (c: Exclude<RecordingConsent, null>) => {
-      await setRecordingConsent(db, {
-        projectId: projectId, consent: c,
-        jurisdiction: setup.jurisdiction || null, decidedBy: 'Owner',
-      });
-      setConsent(await getRecordingConsent(db, projectId));
-      setSetup(null);
+  // ONE-TIME TERMS ACCEPTANCE (personal-use consent model, 2026-07-17). Shown at the
+  // first record tap, once ever. The all-party reminder is informational -- it never
+  // blocks acceptance, and the app never asserts third-party consent for the user.
+  if (showTerms) {
+    const allParty = showTerms.jur ? defaultConsentFor(showTerms.jur) === 'all_party' : false;
+    const accept = async () => {
+      await setTermsAccepted(db);
+      setTerms(true);
+      setShowTerms(null);
     };
     return (
       <View style={s.c}>
         <Text style={s.h}>EZjobsite</Text>
         <View style={s.card}>
-          <Text style={s.cardH}>{T('consent.title')}</Text>
-          <Text style={s.cardNote}>
-            Decided once, here. The record button will never stop to ask you.
-          </Text>
-
-          <Text style={s.sub}>Where is this job? (2-letter state)</Text>
-          <TextInput style={s.moneyInput} value={setup.jurisdiction} autoCapitalize="characters"
-            maxLength={2} placeholder="e.g. CA" placeholderTextColor="#6e7681"
-            onChangeText={(v) => setSetup({ jurisdiction: v })} />
-          <Text style={s.dmeta}>
-            {setup.jurisdiction
-              ? `Suggested for ${setup.jurisdiction.toUpperCase()}: ${suggested === 'all_party'
-                  ? 'everyone must agree' : 'you may record conversations you are part of'}`
-              : 'Not set — we assume the strictest rule until you tell us.'}
-          </Text>
-
-          <Pressable style={[s.confirmWide, suggested !== 'all_party' && s.btnOff]}
-            onPress={() => choose('all_party')}>
-            <Text style={s.confirmT}>{T('consent.everyone')}</Text>
+          <Text style={s.cardH}>{T('terms.title')}</Text>
+          <Text style={s.cardNote}>{T('terms.body')}</Text>
+          {showTerms.detecting ? (
+            <Text style={s.dmeta}>Checking your location…</Text>
+          ) : allParty && showTerms.jur ? (
+            <Text style={s.warn}>{T({ k: 'terms.reminder', p: { state: showTerms.jur } })}</Text>
+          ) : null}
+          <Pressable style={s.confirmWide} onPress={accept}>
+            <Text style={s.confirmT}>{T('terms.accept')}</Text>
           </Pressable>
-          <Pressable style={[s.confirmWide, suggested !== 'one_party' && s.btnOff]}
-            onPress={() => choose('one_party')}>
-            <Text style={s.confirmT}>{T('consent.imPart')}</Text>
-          </Pressable>
-          <Pressable style={s.later} onPress={() => choose('no_recording')}>
-            <Text style={s.laterT}>{T('consent.none')}</Text>
-          </Pressable>
-
-          <Text style={s.cardNote}>
-            {consentBasisText(suggested, setup.jurisdiction || null)}
-            {'\n\n'}This records what you chose. It is not legal advice — recording
-            rules differ by state and by who is in the room.
-          </Text>
-          <Pressable style={s.later} onPress={() => setSetup(null)}>
-            <Text style={s.laterT}>{T('common.back')}</Text>
+          <Pressable style={s.later} onPress={() => setShowTerms(null)}>
+            <Text style={s.laterT}>{T('terms.later')}</Text>
           </Pressable>
         </View>
       </View>
@@ -960,7 +1304,7 @@ export default function App() {
             <>
               <Text style={s.sub}>{T('sig.ownersMobile')}</Text>
               <TextInput style={s.moneyInput} value={sign.phone} keyboardType="phone-pad"
-                placeholder="+15551234567" placeholderTextColor="#6e7681"
+                placeholder="+15551234567" placeholderTextColor="#8c959f"
                 onChangeText={(v) => setSign({ ...sign, phone: v })} />
               {!sign.sent ? (
                 <Pressable style={[s.confirmWide, sign.phone.length < 8 && s.btnOff]}
@@ -982,7 +1326,7 @@ export default function App() {
                     For now: {sign.sent}
                   </Text>
                   <TextInput style={s.moneyInput} value={sign.code} keyboardType="number-pad"
-                    placeholder={T('sig.enterCode')} placeholderTextColor="#6e7681"
+                    placeholder={T('sig.enterCode')} placeholderTextColor="#8c959f"
                     onChangeText={(v) => setSign({ ...sign, code: v })} />
                   <Pressable style={[s.confirmWide, sign.code.length !== 6 && s.btnOff]}
                     disabled={sign.code.length !== 6}
@@ -1006,7 +1350,7 @@ export default function App() {
               <Text style={s.ok}>{T('sig.verified')}</Text>
               <Text style={s.sub}>{T('sig.typeName')}</Text>
               <TextInput style={s.moneyInput} value={sign.legalName}
-                placeholder={T('sig.legalName')} placeholderTextColor="#6e7681"
+                placeholder={T('sig.legalName')} placeholderTextColor="#8c959f"
                 onChangeText={(v) => setSign({ ...sign, legalName: v })} />
               <View style={s.cardBtns}>
                 <Pressable style={[s.confirm, sign.legalName.trim().length < 2 && s.btnOff]}
@@ -1056,21 +1400,152 @@ export default function App() {
     );
   }
 
+  // Cold start: a quiet splash rather than a flash of the capture screen while the
+  // database opens and the durability profile is asserted.
+  // Fonts gate with the durability gate: never flash unstyled text, never flash the
+  // capture screen before the database is up.
+  if (!ready || !fontsLoaded) return <View style={s.c}><Text style={s.h}>EZjobsite</Text></View>;
+
+  // REQ-PROC8: reviewing what the model proposed for a capture. Overlays everything.
+  if (review) {
+    return (
+      <ReviewScreen
+        db={db}
+        client={connector.client}
+        captureId={review}
+        projectId={projectId}
+        projectName={projects.find((p) => p.id === projectId)?.name ?? 'This job'}
+        ownerId={OWNER}
+        onDone={async () => { setReview(null); await refresh(); }}
+        onClose={() => setReview(null)}
+      />
+    );
+  }
+
+  // REQ-CAP-FUSED: the fused photo+voice capture screen overlays everything when open.
+  if (showCapture) {
+    return (
+      <FusedCapture
+        projectName={projects.find((p) => p.id === projectId)?.name ?? 'EZjobsite'}
+        onCapture={onFusedCapture}
+        onClose={() => setShowCapture(false)}
+      />
+    );
+  }
+
+  // ── PROJECTS HOME ─────────────────────────────────────────────────────────
+  // CompanyCam's organising idea: you land on your JOBS, each shown by its most
+  // recent photo, and you dive into one to capture. Filing is by GPS underneath,
+  // so this list is navigation, not the thing that decides where a capture goes.
+  if (nav === 'home') {
+    const now = Date.now();
+    const q = search.trim().toLowerCase();
+    const shown = cards
+      .filter((p) => p.id !== INBOX_ID)
+      .filter((p) => !q || p.name.toLowerCase().includes(q) ||
+                     (p.address ?? '').toLowerCase().includes(q));
+    const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
+    return (
+      <View style={s.c}>
+        <View style={s.homeHead}>
+          <Text style={s.h}>Projects</Text>
+          <Pressable onPress={() => { const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n); }}>
+            <Text style={s.langPill}>{lang === 'en' ? 'ES' : 'EN'}</Text>
+          </Pressable>
+        </View>
+
+        <TextInput style={s.searchIn} value={search} onChangeText={setSearch}
+          placeholder={T('home.search')} placeholderTextColor="#8c959f" />
+
+        <Pressable style={s.newProjBtn} onPress={() => setNewJob({ name: '', address: '' })}>
+          <Text style={s.newProjT}>＋  {T('home.newProject')}</Text>
+        </Pressable>
+
+        {inbox > 0 && (
+          <Pressable style={s.inboxCard} onPress={async () => {
+            setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true);
+          }}>
+            <Text style={s.inboxCardIcon}>📥</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.inboxCardT}>{T({ k: 'home.inbox', p: { n: inbox } })}</Text>
+              <Text style={s.inboxCardS}>{T('home.inboxSub')}</Text>
+            </View>
+            <Text style={s.chev}>›</Text>
+          </Pressable>
+        )}
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }}>
+          {shown.map((p) => (
+            <Pressable key={p.id} style={s.projCard} onPress={() => open(p.id)}>
+              {p.coverRelpath ? (
+                <Image source={{ uri: FS.documentDirectory + p.coverRelpath }}
+                  style={s.projCover} resizeMode="cover" />
+              ) : staticMapUrl(p.lat, p.lng) ? (
+                // REQ-MAP1: no photo yet → show the job's location as a static map.
+                <Image source={{ uri: staticMapUrl(p.lat, p.lng)! }}
+                  style={s.projCover} resizeMode="cover" />
+              ) : (
+                <View style={[s.projCover, s.projCoverEmpty]}>
+                  <Text style={s.projCoverEmptyT}>{p.name.slice(0, 1).toUpperCase()}</Text>
+                </View>
+              )}
+              <View style={s.projBody}>
+                <Text style={s.projName} numberOfLines={1}>{p.name}</Text>
+                <Text style={s.projMeta} numberOfLines={1}>
+                  {p.address ?? T('home.noAddress')}
+                </Text>
+                <Text style={s.projStats}>
+                  {T({ k: 'home.captures', p: { n: p.captureCount } })}
+                  {p.lastMs ? ` · ${ago(p.lastMs, now)}` : ''}
+                  {p.lat == null ? ` · ${T('home.notPinned')}` : ''}
+                </Text>
+              </View>
+            </Pressable>
+          ))}
+          {!shown.length && (
+            <Text style={s.homeEmpty}>
+              {q ? T('home.noMatch') : T('home.noProjects')}
+            </Text>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ── PROJECT DETAIL (camera-first workspace) ───────────────────────────────
   return (
     <View style={s.c}>
-      <Pressable onPress={() => { const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n); }}>
-        <Text style={s.h}>EZjobsite <Text style={s.langT}>{lang === 'en' ? 'ES' : 'EN'}</Text></Text>
-      </Pressable>
+      <View style={s.detailHead}>
+        <Pressable style={s.backBtn} onPress={() => { setNav('home'); void refresh(); }}>
+          <Text style={s.backT}>‹ {T('home.projects')}</Text>
+        </Pressable>
+        <Pressable onPress={() => { const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n); }}>
+          <Text style={s.langPill}>{lang === 'en' ? 'ES' : 'EN'}</Text>
+        </Pressable>
+      </View>
 
-      {/* Which job you're on, and one tap to change it. A capture tool that does
-          not tell you where things are going is asking for trust it has not
-          earned. */}
+      {/* The project you're in. Tapping it still opens the switcher — the back
+          arrow is the primary way home, the title is the quick jump. */}
       <Pressable style={s.jobBar} onPress={() => setPicker(true)}>
-        <Text style={s.jobBarT}>
-          {projects.find((p) => p.id === projectId)?.name ?? T('job.pick')}
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={s.jobBarT} numberOfLines={1}>
+            {projects.find((p) => p.id === projectId)?.name ?? T('job.pick')}
+          </Text>
+          <Text style={s.jobBarAddr} numberOfLines={1}>
+            {projects.find((p) => p.id === projectId)?.address ?? T('home.noAddress')}
+          </Text>
+        </View>
         <Text style={s.jobBarS}>{T('job.change')}</Text>
       </Pressable>
+
+      {/* REQ-MAP1: a static map of the job location, when pinned + configured. */}
+      {(() => {
+        const proj = projects.find((p) => p.id === projectId);
+        const url = proj ? staticMapUrl(proj.lat, proj.lng) : null;
+        return url ? (
+          <Image source={{ uri: url }} style={s.detailMap} resizeMode="cover" />
+        ) : null;
+      })()}
 
       {/* REQ-VAL7's way in. Only when there IS a gap: a boundary nobody owns is
           the expensive one, and a link that only appears when it matters is not
@@ -1136,13 +1611,6 @@ export default function App() {
         </View>
       )}
 
-      {!gate && !initError && consent.consent === null && (
-        <Pressable style={s.consentBanner} onPress={() => setSetup({ jurisdiction: '' })}>
-          <Text style={s.consentT}>{T('consent.notSetTitle')}</Text>
-          <Text style={s.consentS}>{T('consent.notSetBody')}</Text>
-        </Pressable>
-      )}
-
       {(gate || initError) && (
         <View style={s.gate}>
           <Text style={s.gateT}>{initError ? 'EZjobsite couldn’t start safely' : 'Can’t record safely on this device'}</Text>
@@ -1154,29 +1622,34 @@ export default function App() {
         </View>
       )}
 
+      {/* REQ-CAP-FUSED: the flagship — snap a photo WHILE narrating, one decision
+          moment. Records audio, so it passes the one-time Terms gate like recording. */}
       <Pressable
-        onPress={onPress}
-        disabled={!ready || !!gate || !!initError || ui.k === 'saving' || ui.k === 'arming'}
-        style={[s.btn, ui.k === 'recording' && s.btnRec, (!!gate || !!initError || !ready) && s.btnOff]}
+        onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}
+        disabled={!ready || !!gate || !!initError}
+        style={[s.fusedBtn, (!!gate || !!initError || !ready) && s.btnOff]}
       >
-        <Text style={s.btnT}>{label}</Text>
+        <Text style={s.fusedT}>📸🎙  {T('cap.snapTalk')}</Text>
       </Pressable>
 
       <Text style={s.state}>
         {ui.k === 'saved' ? T('st.savedNotBacked')
           : ui.k === 'refused' ? T({ k: 'cap.notSaved', p: { why: T(ui.why) } })
-          : ui.k === 'recording' ? 'Recording…'
           : ui.k === 'saving' ? 'Finishing…'
           : ready ? T('rec.ready') : T('st.starting')}
       </Text>
 
-      {/* REQ-CAP2: all four modalities, all working with no signal. Big targets,
-          one touch each -- mandate #3 assumes gloves, a ladder and a loud room. */}
-      <View style={s.mediaRow}>
-        <Pressable style={[s.media, gate && s.btnOff]} disabled={!!gate}
-          onPress={() => onMedia(snapPhoto, 'Camera')}>
-          <Text style={s.mediaIcon}>📷</Text><Text style={s.mediaT}>{T('cap.photo')}</Text>
+      {/* REQ-PROC8: the pipeline structures what was said; this is where a human
+          checks it. Offered right after a save, when the moment is still in mind. */}
+      {ui.k === 'saved' && (
+        <Pressable style={s.reviewBtn} onPress={() => setReview(ui.id)}>
+          <Text style={s.reviewT}>{T('rev.open')}</Text>
         </Pressable>
+      )}
+
+      {/* Consolidated capture: Snap + Talk (above) is the one screen for photo + voice.
+          These stay as secondary "other ways" — a clip of video, an existing photo. */}
+      <View style={s.mediaRow}>
         <Pressable style={[s.media, gate && s.btnOff]} disabled={!!gate}
           onPress={() => onMedia(recordVideo, 'Camera')}>
           <Text style={s.mediaIcon}>🎥</Text><Text style={s.mediaT}>{T('cap.video')}</Text>
@@ -1194,7 +1667,7 @@ export default function App() {
           value={note}
           onChangeText={setNote}
           placeholder={T('cap.whatDecided')}
-          placeholderTextColor="#6e7681"
+          placeholderTextColor="#8c959f"
           multiline
           editable={!gate && ui.k !== 'saving'}
         />
@@ -1339,13 +1812,13 @@ export default function App() {
 
             <View style={s.lineAdd}>
               <TextInput style={[s.lineIn, { flex: 2 }]} value={draftLine.desc}
-                placeholder="what" placeholderTextColor="#6e7681"
+                placeholder="what" placeholderTextColor="#8c959f"
                 onChangeText={(v) => setDraftLine({ ...draftLine, desc: v })} />
               <TextInput style={s.lineIn} value={draftLine.qty} keyboardType="decimal-pad"
-                placeholder="qty" placeholderTextColor="#6e7681"
+                placeholder="qty" placeholderTextColor="#8c959f"
                 onChangeText={(v) => setDraftLine({ ...draftLine, qty: v })} />
               <TextInput style={s.lineIn} value={draftLine.unit} keyboardType="decimal-pad"
-                placeholder="each" placeholderTextColor="#6e7681"
+                placeholder="each" placeholderTextColor="#8c959f"
                 onChangeText={(v) => setDraftLine({ ...draftLine, unit: v })} />
               <Pressable style={s.linePlus} onPress={() => {
                 const qty = parseFloat(draftLine.qty);
@@ -1383,7 +1856,7 @@ export default function App() {
               onChangeText={(v) => setPriced({ ...priced, amountText: v })}
               keyboardType="decimal-pad"
               placeholder="0.00"
-              placeholderTextColor="#6e7681"
+              placeholderTextColor="#8c959f"
             />
             <Text style={s.sub}>Not to exceed (optional)</Text>
             <TextInput
@@ -1392,7 +1865,7 @@ export default function App() {
               onChangeText={(v) => setPriced({ ...priced, nteText: v })}
               keyboardType="decimal-pad"
               placeholder="optional cap for T&M"
-              placeholderTextColor="#6e7681"
+              placeholderTextColor="#8c959f"
             />
 
             <View style={s.cardBtns}>
@@ -1535,171 +2008,286 @@ export default function App() {
       <Text style={s.sub}>
         {T({ k: 'st.onThisPhone', p: { n: saved.length } })}
         {delivery.pending > 0 ? T({ k: 'st.waiting', p: { n: delivery.pending } }) : ''}
-
       </Text>
 
-      <ScrollView style={{ flex: 1 }}>
-        {saved.slice().reverse().map((c) => (
-          <Pressable key={c.capture_id} style={s.row} onPress={async () => {
-              const v = await readCapture(db, c.capture_id);
-              setViewing({ ...v, captureId: c.capture_id });
-              setVnotes(await notesFor(db, c.capture_id));
-            }}>
-            <Text style={s.rowT}>{c.capture_id}</Text>
-            {/* ONE status per item. The modality, size and hash are DETAIL —
-                they belong on the viewer, which is one tap away. A row that
-                shouts its own SHA-256 at a man on a ladder is the system talking
-                about itself. */}
-            {(() => {
-              const st = captureStatus({
-                inInbox: c.project_id === INBOX_ID, rejected: false,
-                pendingUpload: !!c.pending_upload, parked: false,
-                hasLocation: c.gps_lat != null,
-                // REQ-PROC4, as DETAIL beneath the one line (REQ-X3).
-                procState: procState({ pendingUpload: !!c.pending_upload,
-                                       serverState: c.server_state }),
-              });
-              return (
-                <Text style={[s.rowS, { color: levelColor(st.level).text }]}>
-                  {T(st.primary)}
-                </Text>
-              );
-            })()}
-            <Text style={s.rowS}>
-              {c.modality}
-              {nCounts[c.capture_id] ? ` · ${nCounts[c.capture_id]} note${nCounts[c.capture_id] > 1 ? 's' : ''}` : ''}
-            </Text>
-            {/* MANDATE #9 made visible. A missing fix says WHY -- never 0,0 (a spot
-                in the Atlantic) and never a guess. Captures taken before the stamp
-                existed show "no location" honestly: capture_commit is append-only,
-                so those rows cannot be backfilled, and that is a true fact about
-                them rather than a bug in this line. */}
-            <Text style={s.stamp}>{describeStamp(c)}</Text>
+      {/* REQ-GAL3: filter the grid by tag. "all" clears the filter. */}
+      {projTags.length > 0 && (
+        <View style={[s.chips, { marginBottom: 8 }]}>
+          <Pressable onPress={() => setTagFilter(null)}>
+            <Text style={[s.chip, !tagFilter && s.chipOn]}>all</Text>
           </Pressable>
-        ))}
+          {projTags.map((tg) => (
+            <Pressable key={tg} onPress={() => setTagFilter(tagFilter === tg ? null : tg)}>
+              <Text style={[s.chip, tagFilter === tg && s.chipOn]}>{tg}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      {/* CompanyCam's core surface: a reverse-chron GRID of everything captured
+          here. Photos and videos show their own frame; voice and text get a
+          labelled tile. One tap opens the full evidence viewer (REQ-EVID1). The
+          per-item state is a quiet corner dot, not a shouted line — the one
+          status banner up top already carries what needs doing (REQ-X3). */}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={s.grid}>
+        {/* REQ-GAL1: reverse-chron, DATE-GROUPED. `saved` is newest-first; a
+            full-width header emitted at each day boundary forces a flex-wrap break,
+            so tiles group cleanly under their day. Tap a tile → the swipe viewer at
+            that index. */}
+        {(() => {
+          let lastDay = '';
+          const nodes: React.ReactNode[] = [];
+          saved.forEach((c, i) => {
+            // REQ-GAL3 filter: skip captures without the active tag. `i` stays the
+            // index in `saved` so the viewer pager (which shows all) still aligns.
+            if (tagFilter && !(gridTags[c.capture_id] ?? []).includes(tagFilter)) return;
+            const day = new Date(c.captured_at_ms).toDateString();
+            if (day !== lastDay) {
+              lastDay = day;
+              nodes.push(
+                <Text key={`d-${day}`} style={s.gridDate}>{dayLabel(c.captured_at_ms)}</Text>
+              );
+            }
+            const st = captureStatus({
+              inInbox: c.project_id === INBOX_ID, rejected: false,
+              pendingUpload: !!c.pending_upload, parked: false,
+              hasLocation: c.gps_lat != null,
+            });
+            nodes.push(
+              <Pressable key={c.capture_id} style={s.tile} onPress={() => setViewer({ index: i })}>
+                {c.modality === 'photo' ? (
+                  <Image source={{ uri: FS.documentDirectory + c.media_relpath }}
+                    style={s.tileImg} resizeMode="cover" />
+                ) : (
+                  <View style={[s.tileImg, s.tileIcon]}>
+                    <Text style={s.tileIconT}>
+                      {c.modality === 'video' ? '🎥' : c.modality === 'voice' ? '🎙' : '📝'}
+                    </Text>
+                  </View>
+                )}
+                {/* corner dot = still on this phone / not yet backed up. */}
+                {(!!c.pending_upload || c.gps_lat == null) && (
+                  <View style={s.tileDot}>
+                    <View style={[s.tileDotInner, { backgroundColor: levelColor(st.level).text }]} />
+                  </View>
+                )}
+                {nCounts[c.capture_id] ? (
+                  <Text style={s.tileNotes}>💬 {nCounts[c.capture_id]}</Text>
+                ) : null}
+                <Text style={s.tileMeta} numberOfLines={1}>
+                  {c.modality}{c.gps_lat == null ? ' · 📍?' : ''}
+                </Text>
+              </Pressable>
+            );
+          });
+          return nodes;
+        })()}
+        {!saved.length && (
+          <Text style={s.homeEmpty}>{T('detail.noCaptures')}</Text>
+        )}
       </ScrollView>
     </View>
   );
 }
 
+// Light theme. Palette (GitHub-light / CompanyCam-ish): page #f6f8fa, surfaces
+// #ffffff, borders #d0d7de, text #1f2328 / #57606a / #8c959f, brand green #1f883d,
+// blue #0969da, amber #9a6700, red #cf222e. Overlays that sit ON photos keep a dark
+// translucent backing so their text reads over any image.
 const s = StyleSheet.create({
-  c: { flex: 1, paddingTop: 72, paddingHorizontal: 20, backgroundColor: '#0b0b0c' },
-  h: { color: '#7ee787', fontSize: 26, fontWeight: '800', marginBottom: 18 },
-  btn: { backgroundColor: '#238636', paddingVertical: 28, borderRadius: 18, alignItems: 'center' },
-  btnRec: { backgroundColor: '#da3633' },
-  btnOff: { backgroundColor: '#30363d' },
+  c: { flex: 1, paddingTop: 72, paddingHorizontal: 20, backgroundColor: '#f6f8fa' },
+  h: { color: '#1a7f37', fontSize: 26, fontWeight: '800', marginBottom: 18 },
+  btn: { backgroundColor: '#1f883d', paddingVertical: 28, borderRadius: 18, alignItems: 'center' },
+  btnRec: { backgroundColor: '#cf222e' },
+  fusedBtn: { backgroundColor: '#0969da', paddingVertical: 24, borderRadius: 18,
+    alignItems: 'center', marginBottom: 12 },
+  fusedT: { color: '#fff', fontSize: 22, fontWeight: '800', letterSpacing: 0.5 },
+  // REQ-PROC8 entry — the accent, because reviewing the proposal is the next real move.
+  reviewBtn: { alignSelf: 'center', backgroundColor: '#FFF1E8', borderColor: '#FF5A00',
+    borderWidth: 1.5, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 22, marginTop: 10 },
+  reviewT: { color: '#FF5A00', fontSize: 17, fontWeight: '800', letterSpacing: 0.4 },
+  btnOff: { backgroundColor: '#c4cdd5' },
   mediaRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
-  media: { flex: 1, backgroundColor: '#21262d', borderRadius: 12, paddingVertical: 16,
-    alignItems: 'center', borderWidth: 1, borderColor: '#30363d' },
+  media: { flex: 1, backgroundColor: '#ffffff', borderRadius: 12, paddingVertical: 16,
+    alignItems: 'center', borderWidth: 1, borderColor: '#d0d7de' },
   mediaIcon: { fontSize: 26, marginBottom: 4 },
-  mediaT: { color: '#e6edf3', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
-  stamp: { color: '#6e7681', fontSize: 10 },
+  mediaT: { color: '#1f2328', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
+  stamp: { color: '#8c959f', fontSize: 10 },
   btnT: { color: '#fff', fontSize: 24, fontWeight: '800', letterSpacing: 1 },
-  state: { color: '#c9d1d9', fontSize: 15, marginTop: 14, marginBottom: 22, textAlign: 'center' },
-  sub: { color: '#8b949e', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
-  row: { borderTopWidth: 1, borderTopColor: '#21262d', paddingVertical: 10 },
-  rowT: { color: '#c9d1d9', fontSize: 13, fontFamily: 'Menlo' },
-  rowS: { color: '#6e7681', fontSize: 11, fontFamily: 'Menlo', marginTop: 2 },
-  card: { backgroundColor: '#0d2818', borderColor: '#238636', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16 },
-  cardH: { color: '#7ee787', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
-  cardV: { color: '#fff', fontSize: 17, lineHeight: 23, marginBottom: 10 },
+  state: { color: '#57606a', fontSize: 15, marginTop: 14, marginBottom: 22, textAlign: 'center' },
+  sub: { color: '#57606a', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  row: { borderTopWidth: 1, borderTopColor: '#eaeef2', paddingVertical: 10 },
+  rowT: { color: '#57606a', fontSize: 13, fontFamily: 'Menlo' },
+  rowS: { color: '#8c959f', fontSize: 11, fontFamily: 'Menlo', marginTop: 2 },
+  card: { backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16 },
+  cardH: { color: '#1a7f37', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  cardV: { color: '#1f2328', fontSize: 17, lineHeight: 23, marginBottom: 10 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
-  chip: { color: '#7ee787', backgroundColor: '#132f1f', borderColor: '#238636', borderWidth: 1,
+  chip: { color: '#1a7f37', backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1,
           borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, fontSize: 12, overflow: 'hidden' },
-  chipDim: { color: '#6e7681', borderColor: '#30363d', backgroundColor: 'transparent' },
+  chipDim: { color: '#8c959f', borderColor: '#d0d7de', backgroundColor: 'transparent' },
+  chipOn: { color: '#fff', backgroundColor: '#1f883d', borderColor: '#1f883d' },
   cardBtns: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  confirm: { flex: 1, backgroundColor: '#238636', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  confirm: { flex: 1, backgroundColor: '#1f883d', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
   // Standalone (not inside s.cardBtns): must NOT use flex:1 -- see above.
-  confirmWide: { alignSelf: 'stretch', backgroundColor: '#238636', borderRadius: 10,
+  confirmWide: { alignSelf: 'stretch', backgroundColor: '#1f883d', borderRadius: 10,
     paddingVertical: 16, alignItems: 'center', marginBottom: 10 },
   confirmT: { color: '#fff', fontWeight: '800', letterSpacing: 1 },
   later: { paddingHorizontal: 12, paddingVertical: 14 },
-  laterT: { color: '#8b949e', fontSize: 13 },
-  cardNote: { color: '#6e7681', fontSize: 11, marginTop: 8 },
-  drow: { borderTopWidth: 1, borderTopColor: '#21262d', paddingVertical: 10 },
-  dsub: { color: '#8b949e', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 },
-  dval: { color: '#e6edf3', fontSize: 15, marginTop: 2 },
-  dmeta: { color: '#6e7681', fontSize: 11, marginTop: 3 },
-  hNow: { color: '#7ee787', fontSize: 14, marginBottom: 4 },
-  hOld: { color: '#6e7681', fontSize: 13, marginBottom: 4, textDecorationLine: 'line-through' },
-  money: { backgroundColor: '#1c1400', borderColor: '#9e6a03', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
-  moneyScope: { color: '#c9d1d9', fontSize: 14, marginBottom: 10 },
-  bigMoney: { color: '#f0b72f', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
-  viewImg: { width: '100%', height: 260, borderRadius: 8, backgroundColor: '#010409',
+  laterT: { color: '#57606a', fontSize: 13 },
+  cardNote: { color: '#8c959f', fontSize: 11, marginTop: 8 },
+  drow: { borderTopWidth: 1, borderTopColor: '#eaeef2', paddingVertical: 10 },
+  dsub: { color: '#57606a', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 },
+  dval: { color: '#1f2328', fontSize: 15, marginTop: 2 },
+  dmeta: { color: '#8c959f', fontSize: 11, marginTop: 3 },
+  hNow: { color: '#1a7f37', fontSize: 14, marginBottom: 4 },
+  hOld: { color: '#8c959f', fontSize: 13, marginBottom: 4, textDecorationLine: 'line-through' },
+  money: { backgroundColor: '#fff8c5', borderColor: '#d4a72c', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
+  moneyScope: { color: '#57606a', fontSize: 14, marginBottom: 10 },
+  bigMoney: { color: '#9a6700', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
+  viewImg: { width: '100%', height: 260, borderRadius: 8, backgroundColor: '#eaeef2',
     marginBottom: 10 },
-  evid: { color: '#e6edf3', fontSize: 15, marginBottom: 10 },
-  hash: { color: '#8b949e', fontSize: 11, fontFamily: 'Menlo', marginBottom: 8 },
-  capNote: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#21262d' },
-  capNoteBody: { color: '#e6edf3', fontSize: 14 },
-  capNoteMeta: { color: '#6e7681', fontSize: 11, marginTop: 2 },
-  inboxItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#21262d' },
-  inboxWhat: { color: '#8b949e', fontSize: 12, marginBottom: 6 },
+  evid: { color: '#1f2328', fontSize: 15, marginBottom: 10 },
+  hash: { color: '#57606a', fontSize: 11, fontFamily: 'Menlo', marginBottom: 8 },
+  capNote: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#eaeef2' },
+  capNoteBody: { color: '#1f2328', fontSize: 14 },
+  capNoteMeta: { color: '#8c959f', fontSize: 11, marginTop: 2 },
+  inboxItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eaeef2' },
+  inboxWhat: { color: '#57606a', fontSize: 12, marginBottom: 6 },
   inboxJobs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  inboxJob: { backgroundColor: '#21262d', borderRadius: 8, paddingHorizontal: 12,
-    paddingVertical: 10, borderWidth: 1, borderColor: '#30363d' },
-  inboxJobT: { color: '#e6edf3', fontSize: 13, fontWeight: '600' },
-  langT: { color: '#6e7681', fontSize: 13, fontWeight: '400' },
+  inboxJob: { backgroundColor: '#ffffff', borderRadius: 8, paddingHorizontal: 12,
+    paddingVertical: 10, borderWidth: 1, borderColor: '#d0d7de' },
+  inboxJobT: { color: '#1f2328', fontSize: 13, fontWeight: '600' },
+  langT: { color: '#8c959f', fontSize: 13, fontWeight: '400' },
   scopeLink: { paddingVertical: 8, marginBottom: 6 },
-  scopeLinkT: { color: '#f0b72f', fontSize: 13, fontWeight: '600' },
-  bndRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#21262d' },
-  bndSubject: { color: '#e6edf3', fontSize: 15 },
-  bndOwner: { color: '#7ee787', fontSize: 12, marginTop: 2 },
-  bndGap: { color: '#f0b72f', fontSize: 12, marginTop: 2, fontWeight: '700' },
+  scopeLinkT: { color: '#9a6700', fontSize: 13, fontWeight: '600' },
+  bndRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eaeef2' },
+  bndSubject: { color: '#1f2328', fontSize: 15 },
+  bndOwner: { color: '#1a7f37', fontSize: 12, marginTop: 2 },
+  bndGap: { color: '#9a6700', fontSize: 12, marginTop: 2, fontWeight: '700' },
   bndJobs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  p5: { backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+  p5: { backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
     borderRadius: 10, padding: 12, marginBottom: 12 },
-  p5T: { color: '#e6edf3', fontWeight: '700', fontSize: 15, marginBottom: 2 },
-  p5S: { color: '#8b949e', fontSize: 12, marginBottom: 10 },
+  p5T: { color: '#1f2328', fontWeight: '700', fontSize: 15, marginBottom: 2 },
+  p5S: { color: '#57606a', fontSize: 12, marginBottom: 10 },
   oneStatus: { borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 },
   oneStatusT: { fontWeight: '700', fontSize: 14 },
-  oneStatusD: { color: '#8b949e', fontSize: 11, marginTop: 3 },
+  oneStatusD: { color: '#57606a', fontSize: 11, marginTop: 3 },
   // Thumb-sized. This is the first thing a new user ever touches, and they may be
   // wearing gloves when they do it.
-  langBig: { backgroundColor: '#21262d', borderColor: '#30363d', borderWidth: 1,
+  langBig: { backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
     borderRadius: 14, paddingVertical: 28, alignItems: 'center', marginBottom: 16 },
-  langBigT: { color: '#e6edf3', fontSize: 26, fontWeight: '700' },
+  langBigT: { color: '#1f2328', fontSize: 26, fontWeight: '700' },
+  // first-run progress dots
+  frDots: { flexDirection: 'row', justifyContent: 'center', marginBottom: 8, marginTop: 2 },
+  frDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#d0d7de', marginHorizontal: 4 },
+  frDotOn: { backgroundColor: '#1f883d', width: 20 },
+  // profile pick buttons (solo/company) — big touch targets (research: 48dp+, gloves)
+  pickWide: { alignSelf: 'stretch', backgroundColor: '#ffffff', borderColor: '#d0d7de',
+    borderWidth: 1, borderRadius: 12, paddingVertical: 18, alignItems: 'center', marginBottom: 10 },
+  pickOn: { borderColor: '#1f883d', backgroundColor: '#eafaf0', borderWidth: 2 },
+  pickT: { color: '#1f2328', fontSize: 18, fontWeight: '700' },
+  pickTOn: { color: '#1a7f37' },
+  // trade grid — 2-up big cells
+  tradeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 6 },
+  tradeCell: { width: '48%', backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
+    borderRadius: 12, paddingVertical: 20, alignItems: 'center', marginBottom: 10 },
+  tradeCellT: { color: '#1f2328', fontSize: 16, fontWeight: '700' },
   jobBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+    backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
     borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
-  jobBarT: { color: '#e6edf3', fontWeight: '700', fontSize: 15, flex: 1 },
-  jobBarS: { color: '#6e7681', fontSize: 11 },
-  jobRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#21262d' },
-  jobName: { color: '#e6edf3', fontSize: 16 },
-  jobNameOn: { color: '#7ee787', fontSize: 16, fontWeight: '700' },
-  jobMeta: { color: '#6e7681', fontSize: 12, marginTop: 2 },
-  consentBanner: { backgroundColor: '#2d2410', borderColor: '#7d6320', borderWidth: 1,
+  jobBarT: { color: '#1f2328', fontWeight: '700', fontSize: 15, flex: 1 },
+  jobBarS: { color: '#8c959f', fontSize: 11 },
+  jobRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eaeef2' },
+  jobName: { color: '#1f2328', fontSize: 16 },
+  jobNameOn: { color: '#1a7f37', fontSize: 16, fontWeight: '700' },
+  jobMeta: { color: '#8c959f', fontSize: 12, marginTop: 2 },
+  consentBanner: { backgroundColor: '#fff8c5', borderColor: '#d4a72c', borderWidth: 1,
     borderRadius: 10, padding: 12, marginBottom: 14 },
-  consentT: { color: '#f0b72f', fontWeight: '700', fontSize: 14, marginBottom: 3 },
-  consentS: { color: '#a5934f', fontSize: 12, lineHeight: 17 },
+  consentT: { color: '#9a6700', fontWeight: '700', fontSize: 14, marginBottom: 3 },
+  consentS: { color: '#7d5e00', fontSize: 12, lineHeight: 17 },
   bundleBtn: { paddingVertical: 8 },
-  bundleT: { color: '#58a6ff', fontSize: 14, fontWeight: '600' },
+  bundleT: { color: '#0969da', fontSize: 14, fontWeight: '600' },
   lineRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6,
-    borderBottomWidth: 1, borderBottomColor: '#21262d' },
-  lineDesc: { color: '#e6edf3', fontSize: 14, flex: 1 },
-  lineMath: { color: '#8b949e', fontSize: 12 },
-  lineX: { color: '#6e7681', fontSize: 16, paddingHorizontal: 6 },
+    borderBottomWidth: 1, borderBottomColor: '#eaeef2' },
+  lineDesc: { color: '#1f2328', fontSize: 14, flex: 1 },
+  lineMath: { color: '#57606a', fontSize: 12 },
+  lineX: { color: '#8c959f', fontSize: 16, paddingHorizontal: 6 },
   lineAdd: { flexDirection: 'row', gap: 6, marginTop: 10, marginBottom: 4 },
-  lineIn: { flex: 1, backgroundColor: '#0b0b0c', borderColor: '#30363d', borderWidth: 1,
-    borderRadius: 8, color: '#e6edf3', paddingHorizontal: 8, paddingVertical: 10, fontSize: 13 },
-  linePlus: { backgroundColor: '#21262d', borderRadius: 8, paddingHorizontal: 14,
+  lineIn: { flex: 1, backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
+    borderRadius: 8, color: '#1f2328', paddingHorizontal: 8, paddingVertical: 10, fontSize: 13 },
+  linePlus: { backgroundColor: '#eaeef2', borderRadius: 8, paddingHorizontal: 14,
     justifyContent: 'center' },
-  linePlusT: { color: '#e6edf3', fontSize: 20, fontWeight: '800' },
-  moneyInput: { backgroundColor: '#0b0b0c', borderColor: '#30363d', borderWidth: 1, borderRadius: 8,
-                color: '#e6edf3', padding: 12, fontSize: 18, marginBottom: 10, textAlign: 'center' },
-  ok: { color: '#7ee787', fontSize: 14, marginBottom: 8 },
-  warn: { color: '#f0b72f', fontSize: 12, marginBottom: 6 },
+  linePlusT: { color: '#1f2328', fontSize: 20, fontWeight: '800' },
+  moneyInput: { backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1, borderRadius: 8,
+                color: '#1f2328', padding: 12, fontSize: 18, marginBottom: 10, textAlign: 'center' },
+  ok: { color: '#1a7f37', fontSize: 14, marginBottom: 8 },
+  warn: { color: '#9a6700', fontSize: 12, marginBottom: 6 },
   ask: { marginTop: 8 },
-  askT: { color: '#58a6ff', fontSize: 13, fontWeight: '600' },
-  frozen: { color: '#e6edf3', fontSize: 14, lineHeight: 20, backgroundColor: '#0b0b0c',
-            borderColor: '#30363d', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 8 },
-  link: { color: '#58a6ff', fontFamily: 'Menlo', fontSize: 11, marginVertical: 6 },
+  askT: { color: '#0969da', fontSize: 13, fontWeight: '600' },
+  frozen: { color: '#1f2328', fontSize: 14, lineHeight: 20, backgroundColor: '#ffffff',
+            borderColor: '#d0d7de', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 8 },
+  link: { color: '#0969da', fontFamily: 'Menlo', fontSize: 11, marginVertical: 6 },
   noteRow: { flexDirection: 'row', gap: 8, marginBottom: 22 },
-  input: { flex: 1, backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
-           borderRadius: 10, color: '#c9d1d9', padding: 12, minHeight: 54, fontSize: 15 },
-  save: { backgroundColor: '#1f6feb', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center' },
+  input: { flex: 1, backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
+           borderRadius: 10, color: '#1f2328', padding: 12, minHeight: 54, fontSize: 15 },
+  save: { backgroundColor: '#0969da', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center' },
   saveT: { color: '#fff', fontWeight: '800', letterSpacing: 1 },
-  gate: { backgroundColor: '#3d1d1d', borderColor: '#da3633', borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 18 },
-  gateT: { color: '#ff7b72', fontWeight: '700', marginBottom: 6 },
-  gateS: { color: '#c9d1d9', fontSize: 13, lineHeight: 18 },
-  mono: { color: '#8b949e', fontFamily: 'Menlo', fontSize: 10, marginTop: 8 },
+  gate: { backgroundColor: '#ffebe9', borderColor: '#cf222e', borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 18 },
+  gateT: { color: '#cf222e', fontWeight: '700', marginBottom: 6 },
+  gateS: { color: '#57606a', fontSize: 13, lineHeight: 18 },
+  mono: { color: '#57606a', fontFamily: 'Menlo', fontSize: 10, marginTop: 8 },
+
+  // ── Projects home ──────────────────────────────────────────────────────
+  homeHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  langPill: { color: '#57606a', fontSize: 12, fontWeight: '700', borderWidth: 1,
+    borderColor: '#d0d7de', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  searchIn: { backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
+    borderRadius: 10, color: '#1f2328', paddingHorizontal: 14, paddingVertical: 12,
+    fontSize: 15, marginBottom: 12 },
+  newProjBtn: { backgroundColor: '#1f883d', borderRadius: 12, paddingVertical: 16,
+    alignItems: 'center', marginBottom: 14 },
+  newProjT: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.5 },
+  inboxCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff8c5',
+    borderColor: '#d4a72c', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 14 },
+  inboxCardIcon: { fontSize: 22 },
+  inboxCardT: { color: '#9a6700', fontWeight: '700', fontSize: 15 },
+  inboxCardS: { color: '#7d5e00', fontSize: 12, marginTop: 2 },
+  chev: { color: '#9a6700', fontSize: 26, fontWeight: '300' },
+  projCard: { backgroundColor: '#ffffff', borderColor: '#d0d7de', borderWidth: 1,
+    borderRadius: 14, overflow: 'hidden', marginBottom: 14 },
+  projCover: { width: '100%', height: 150, backgroundColor: '#eaeef2' },
+  projCoverEmpty: { alignItems: 'center', justifyContent: 'center' },
+  projCoverEmptyT: { color: '#afb8c1', fontSize: 64, fontWeight: '800' },
+  projBody: { padding: 14 },
+  projName: { color: '#1f2328', fontSize: 18, fontWeight: '700' },
+  projMeta: { color: '#57606a', fontSize: 13, marginTop: 3 },
+  projStats: { color: '#8c959f', fontSize: 12, marginTop: 8 },
+  homeEmpty: { color: '#8c959f', fontSize: 14, textAlign: 'center', marginTop: 40, width: '100%' },
+
+  // ── Project detail ─────────────────────────────────────────────────────
+  detailHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 12 },
+  backBtn: { paddingVertical: 4, paddingRight: 12 },
+  backT: { color: '#0969da', fontSize: 16, fontWeight: '600' },
+  jobBarAddr: { color: '#8c959f', fontSize: 12, marginTop: 2 },
+  detailMap: { width: '100%', height: 120, borderRadius: 10, marginBottom: 12, backgroundColor: '#eaeef2' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingBottom: 40 },
+  gridDate: { width: '100%', color: '#57606a', fontSize: 12, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 1, marginTop: 12, marginBottom: 2 },
+  tile: { width: '31.8%', aspectRatio: 1, backgroundColor: '#ffffff', borderRadius: 10,
+    overflow: 'hidden', borderWidth: 1, borderColor: '#d0d7de' },
+  tileImg: { width: '100%', height: '100%' },
+  tileIcon: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#dafbe1' },
+  tileIconT: { fontSize: 34 },
+  // Badges sit over a photo, so they keep a dark translucent backing + light text
+  // regardless of theme — a caption strip on a photo is dark everywhere.
+  tileDot: { position: 'absolute', top: 6, right: 6, width: 14, height: 14, borderRadius: 7,
+    backgroundColor: '#ffffffcc', borderWidth: 1, borderColor: '#00000022',
+    alignItems: 'center', justifyContent: 'center' },
+  tileDotInner: { width: 8, height: 8, borderRadius: 4 },
+  tileNotes: { position: 'absolute', bottom: 22, left: 6, color: '#fff', fontSize: 11,
+    fontWeight: '700', backgroundColor: '#00000099', paddingHorizontal: 5, borderRadius: 6 },
+  tileMeta: { position: 'absolute', bottom: 0, left: 0, right: 0, color: '#fff', fontSize: 10,
+    paddingHorizontal: 5, paddingVertical: 3, backgroundColor: '#00000099' },
 });

@@ -10,7 +10,7 @@
  * performCapture(), and let that hash + install them under a content-addressed
  * path it controls. The recorder's temp file is an input, not the record.
  */
-import { AudioModule, RecordingPresets, useAudioRecorder } from 'expo-audio';
+import { AudioModule, RecordingPresets, useAudioRecorder, useAudioRecorderState } from 'expo-audio';
 import * as FS from 'expo-file-system/legacy';
 import { Buffer } from 'buffer';
 
@@ -34,4 +34,4 @@ export async function readRecordingBytes(uri: string): Promise<Uint8Array> {
   return new Uint8Array(Buffer.from(b64, 'base64'));
 }
 
-export { RecordingPresets, useAudioRecorder };
+export { RecordingPresets, useAudioRecorder, useAudioRecorderState };

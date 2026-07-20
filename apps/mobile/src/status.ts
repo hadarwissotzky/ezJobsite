@@ -138,11 +138,11 @@ export function screenStatus(items: Status[]): Status | null {
 export function levelColor(l: Level): { bg: string; border: string; text: string } {
   switch (l) {
     // Amber, not red: he has to do something, but nothing is wrong.
-    case 'needs_you': return { bg: '#2d2410', border: '#7d6320', text: '#f0b72f' };
+    case 'needs_you': return { bg: '#fff8c5', border: '#d4a72c', text: '#7d5e00' };
     // Red is reserved. If everything is red, nothing is.
-    case 'not_safe':  return { bg: '#3d1418', border: '#b62324', text: '#ff7b72' };
+    case 'not_safe':  return { bg: '#ffebe9', border: '#cf222e', text: '#cf222e' };
     // Grey. Waiting is normal and must not look like a fault.
-    case 'waiting':   return { bg: '#161b22', border: '#30363d', text: '#8b949e' };
-    case 'safe':      return { bg: '#0d1117', border: '#21262d', text: '#7ee787' };
+    case 'waiting':   return { bg: '#f6f8fa', border: '#d0d7de', text: '#57606a' };
+    case 'safe':      return { bg: '#dafbe1', border: '#2da44e', text: '#1a7f37' };
   }
 }

@@ -26,7 +26,15 @@
  *  2. THE JOB. Because consent belongs to a project (REQ-CON1) — there is nothing
  *     to attach a recording decision to until a job exists. A name is enough.
  *
- *  3. CONSENT. One tap, strict default pre-selected (see consent.ts).
+ *  3. CONSENT IS NOT ASKED HERE (changed 2026-07-17, hadar). Same reasoning as #4
+ *     below: a recording-consent form shown before the user has ever tried to
+ *     record is a legal question asked at the moment it makes the LEAST sense, and
+ *     it blocked onboarding on a form the user did not come to fill. Consent is
+ *     DEFERRED to the first time the record button is actually tapped -- gated by
+ *     canRecordAudio, and surfaced by a dismissible banner until then. Photos and
+ *     typed notes, which need no consent, work immediately. It is NOT auto-approved:
+ *     mandate #2 forbids silently deciding it is lawful to record a person, so
+ *     deferral gives a form-free start WITHOUT crossing that line.
  *
  *  4. PERMISSIONS ARE NOT ASKED HERE AT ALL.
  *     This is the part most first-runs get wrong. iOS gives you ONE chance at each
@@ -85,29 +93,34 @@ export async function saveLang(db: AbstractPowerSyncDatabase, l: Lang) {
   );
 }
 
-export type Step = 'lang' | 'job' | 'consent' | 'done';
+export type Step = 'lang' | 'profile' | 'job' | 'done';
 
 /**
  * Where the user is. Derived from what actually exists, NOT from a stored step
  * counter: a counter and reality drift apart the moment someone kills the app
- * mid-setup, and then a user with a job and consent gets asked to make a job
- * again. The state IS the answer.
+ * mid-setup, and then a user with a job gets asked to make a job again. The state
+ * IS the answer. Consent is deliberately NOT a step here -- it is deferred to the
+ * first record tap (see the header comment, point 3).
+ *
+ * Order (research-grounded 2026-07-17): language first (everything after is words),
+ * THEN who-you-are (name/business/trade -- the minimum that personalises a proposal),
+ * THEN the first job. Value-first slides + sign-in happen BEFORE this, pre-login.
  */
 export function nextStep(o: {
-  langChosen: boolean; hasJob: boolean; hasConsent: boolean;
+  langChosen: boolean; hasProfile: boolean; hasJob: boolean;
 }): Step {
   if (!o.langChosen) return 'lang';
+  if (!o.hasProfile) return 'profile';
   if (!o.hasJob) return 'job';
-  if (!o.hasConsent) return 'consent';
   return 'done';
 }
 
 /** How many taps first-run costs, so the claim can be checked rather than asserted. */
 export const FIRST_RUN_TAPS = {
   lang: 1,       // tap your language
+  profile: 3,    // name (type) + solo/company + trade (or skip)
   job: 2,        // type a name (1 field) + CREATE
-  consent: 1,    // tap the pre-selected answer
-  total: 4,
+  total: 6,      // consent is deferred to first record, not part of first-run
   /**
    * REQ-X1 budgets the CAPTURE path at <=2 touches and the SEND path at <=3.
    * First-run is not in either budget -- it happens once, before any capture --
