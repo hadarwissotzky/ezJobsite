@@ -37,6 +37,10 @@ export type FusedArtifacts = {
   /** The narration, possibly in several files if a call interrupted it. Ordered. */
   audioSegments: FusedAudioSegment[];
   stamp: Stamp;
+  /** The receipt: local thumbnail URIs + recorded seconds, so the NEXT screen can
+   *  show what was just captured and the flow reads as one continuous workflow. */
+  previewUris: string[];
+  durationSecs: number;
 };
 
 function two(n: number) { return n < 10 ? '0' + n : '' + n; }
@@ -267,6 +271,8 @@ export function FusedCapture({
         photos, audioSegments,
         stamp: stamp ?? { capturedAtMs: Date.now(), lat: null, lng: null,
           accuracyM: null, fixAgeMs: null, status: 'unavailable' },
+        previewUris: shots.map((x) => x.uri),
+        durationSecs: secs,
       });
     } finally { setSaving(false); }
   };
@@ -328,6 +334,17 @@ export function FusedCapture({
       {warnEmpty && (
         <View style={[st.remind, st.warnBox]}>
           <Text style={st.warnT}>{T('cap.nothingYet')}</Text>
+        </View>
+      )}
+
+      {/* THE state indicator. A camcorder-red REC pill, blinking, with the running
+          time — visible from arm's length in sun. Grey PAUSED when paused. */}
+      {micOn && !interrupted && (
+        <View style={[st.recPill, paused && st.recPillPaused]}>
+          <View style={[st.recPillDot, (paused || now % 2000 < 1000) && st.recPillDotDim]} />
+          <Text style={st.recPillT}>
+            {paused ? T('cap.pause').toUpperCase() : 'REC'} {two(Math.floor(secs / 60))}:{two(secs % 60)}
+          </Text>
         </View>
       )}
 
@@ -439,6 +456,13 @@ const st = StyleSheet.create({
   stampTime: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 22 },
   stampWhere: { color: '#e6edf3', fontFamily: 'Barlow_400Regular', fontSize: 14, marginTop: 2 },
 
+  recPill: { position: 'absolute', top: 112, alignSelf: 'center', flexDirection: 'row',
+    alignItems: 'center', backgroundColor: '#C6281C', borderRadius: 999,
+    paddingHorizontal: 14, paddingVertical: 7 },
+  recPillPaused: { backgroundColor: 'rgba(0,0,0,0.55)' },
+  recPillDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', marginRight: 8 },
+  recPillDotDim: { opacity: 0.25 },
+  recPillT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 17, letterSpacing: 1.5 },
   meterRow: { position: 'absolute', left: 16, right: 16, bottom: 208, flexDirection: 'row', alignItems: 'center' },
   recDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#C6281C', marginRight: 10 },
   recDotOff: { backgroundColor: '#5C6570' },

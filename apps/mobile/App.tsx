@@ -139,7 +139,10 @@ export default function App() {
   // Walkthrough saved to the Inbox and awaiting a job: a change order MUST belong to a
   // job, so this sheet asks — nearby jobs, search, or create one here. Captures are
   // already durable before it opens; dismissing leaves them safe in the Inbox.
-  const [assign, setAssign] = React.useState<null | { ids: string[]; lat: number | null; lng: number | null }>(null);
+  const [assign, setAssign] = React.useState<null | {
+    ids: string[]; lat: number | null; lng: number | null;
+    uris: string[]; secs: number;
+  }>(null);
   const [assignQ, setAssignQ] = React.useState('');
   const [ready, setReady] = React.useState(false);
   const [gate, setGate] = React.useState<string | null>(null);
@@ -650,7 +653,8 @@ export default function App() {
       setUi({ k: 'saved', id: ids[0] });
       if (res.projectId === INBOX_ID) {
         // Saved safe — now the ONE question a change order cannot skip: which job?
-        setAssign({ ids, lat: a.stamp.lat, lng: a.stamp.lng });
+        setAssign({ ids, lat: a.stamp.lat, lng: a.stamp.lng,
+                    uris: a.previewUris, secs: a.durationSecs });
       } else if (res.confidence !== 'high') {
         setFiled(res.why);
       }
@@ -1500,35 +1504,51 @@ export default function App() {
       if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return; }
       await fileAll(r.id);
     };
+    // SAME dark world as the capture screen — this is step two of the SAME workflow,
+    // not a different app. It opens with the receipt of the walk just taken (green
+    // check, thumbnails, duration), then asks the one remaining question.
+    const mm = `${Math.floor(assign.secs / 60)}:${String(assign.secs % 60).padStart(2, '0')}`;
     return (
-      <View style={s.homeC}>
-        <View style={{ paddingHorizontal: 18, paddingTop: 8, flex: 1 }}>
-          <Text style={s.h}>{T('assign.title')}</Text>
-          <Text style={[s.cardNote, { marginTop: 0, marginBottom: 12 }]}>{T('assign.sub')}</Text>
-          <TextInput style={s.searchIn} value={assignQ} onChangeText={setAssignQ}
-            placeholder={T('assign.search')} placeholderTextColor="#8c959f" />
+      <View style={s.assignC}>
+        <View style={s.assignReceipt}>
+          <Text style={s.assignSaved}>✓ {T('assign.saved')}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 6 }} style={{ flexGrow: 0 }}>
+              {assign.uris.slice(0, 8).map((u, i) => (
+                <Image key={i} source={{ uri: u }} style={s.assignThumb} />
+              ))}
+            </ScrollView>
+            <Text style={s.assignMeta}>
+              {assign.uris.length > 0 ? `📸 ${assign.uris.length}   ` : ''}{assign.secs > 0 ? `🎙 ${mm}` : ''}
+            </Text>
+          </View>
+        </View>
+        <View style={{ paddingHorizontal: 18, flex: 1 }}>
+          <Text style={s.assignH}>{T('assign.title')}</Text>
+          <TextInput style={s.assignSearch} value={assignQ} onChangeText={setAssignQ}
+            placeholder={T('assign.search')} placeholderTextColor="#7d848d" />
           <Pressable style={s.assignNew} onPress={newJobHere}>
             <Text style={s.assignNewT}>＋ {T('assign.newHere')}</Text>
           </Pressable>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
             {candidates.map((p) => (
-              <Pressable key={p.id} style={s.jobItem} onPress={() => fileAll(p.id)}>
+              <Pressable key={p.id} style={s.assignRow} onPress={() => fileAll(p.id)}>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.jobItemName} numberOfLines={1}>{p.name}</Text>
-                  <Text style={s.jobItemMeta} numberOfLines={1}>
+                  <Text style={s.assignRowName} numberOfLines={1}>{p.name}</Text>
+                  <Text style={s.assignRowMeta} numberOfLines={1}>
                     {p.distM != null
-                      ? (p.distM < 950 ? `${Math.round(p.distM)} m` : `${(p.distM / 1000).toFixed(1)} km`)
+                      ? `📍 ${p.distM < 950 ? `${Math.round(p.distM)} m` : `${(p.distM / 1000).toFixed(1)} km`}`
                       : (p.address ?? '')}
                   </Text>
                 </View>
-                <Text style={s.chev}>›</Text>
+                <Text style={s.assignChev}>›</Text>
               </Pressable>
             ))}
           </ScrollView>
-          <Pressable style={[s.btn, { backgroundColor: 'transparent', minHeight: 50 }]}
-            onPress={() => { setAssign(null); setAssignQ(''); }}>
-            <Text style={[s.laterT, { fontSize: 15 }]}>{T('assign.later')}</Text>
-          </Pressable>
+          {/* Deliberately NO dismiss/"later" — a change order cannot move without a
+              job. The sheet never dead-ends: "new job right here" is a local create
+              and always succeeds, even offline. */}
         </View>
       </View>
     );
@@ -2436,6 +2456,25 @@ const s = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 1.8 },
   addJob: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 14, color: '#FF5A00',
     textTransform: 'uppercase', letterSpacing: 1 },
+  assignC: { flex: 1, backgroundColor: '#0D0F12', paddingTop: 54 },
+  assignReceipt: { marginHorizontal: 18, backgroundColor: '#15271C', borderColor: '#1E5236',
+    borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 16 },
+  assignSaved: { color: '#3fb950', fontFamily: 'BarlowCondensed_700Bold', fontSize: 19,
+    textTransform: 'uppercase', letterSpacing: 1 },
+  assignThumb: { width: 44, height: 44, borderRadius: 8, borderWidth: 1, borderColor: '#2A2E35' },
+  assignMeta: { color: '#AEB4BD', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 16,
+    marginLeft: 12, letterSpacing: 1 },
+  assignH: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 28,
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
+  assignSearch: { backgroundColor: '#1B1E24', borderColor: '#2A2E35', borderWidth: 1,
+    borderRadius: 12, paddingHorizontal: 14, minHeight: 52, fontSize: 16, color: '#fff',
+    fontFamily: 'Barlow_400Regular', marginBottom: 10 },
+  assignRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1B1E24',
+    borderColor: '#2A2E35', borderWidth: 1, borderRadius: 14, paddingHorizontal: 14,
+    paddingVertical: 15, marginBottom: 8 },
+  assignRowName: { color: '#fff', fontFamily: 'Barlow_600SemiBold', fontSize: 16.5 },
+  assignRowMeta: { color: '#8A9099', fontFamily: 'Barlow_400Regular', fontSize: 13.5, marginTop: 2 },
+  assignChev: { color: '#5C6570', fontSize: 22, marginLeft: 8 },
   assignNew: { backgroundColor: '#FF5A00', borderRadius: 14, minHeight: 56, alignItems: 'center',
     justifyContent: 'center', marginBottom: 12 },
   assignNewT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18,
