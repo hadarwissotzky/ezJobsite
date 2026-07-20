@@ -27,6 +27,7 @@ A Project carries: **name, description, address** (→ derived GPS/geofence for 
   - Accept: **both field (quick-create on site) and office (create + edit/merge/cleanup) can create**; a field-created project is immediately usable for capture. `[✅ hadar — both, field quick-create + office cleanup]`
 - **REQ-PM4 — Project status lifecycle.** A project has a status so lists/feeds can filter active vs. done. `[trace: hadar "projects list"]`
   - Accept: status is set and filterable; v1 = **Active + Archived** (minimum). `[✅ hadar]`
+  - **⚠️ REVERSED 2026-07-17 (hadar sign-off).** The Active/Archived-only cap is superseded by a 4-state lifecycle **`lead → in-progress → complete → archived`** + user color labels, for CompanyCam-parity project management. **Build detail is authoritative in `PRD-companycam-parity.md §5.B` (REQ-PM4 ELEVATE+REVERSE, REQ-PM14 labels).** Logged in `IMPLEMENTATION_NOTES.md §2`. The 2-state minimum remains a valid P1 fallback if the lifecycle slips.
 - **REQ-PM5 — Edit / archive a project.** Project info can be edited; a finished project can be archived (kept for warranty/retrieval, out of the active list). `[trace: EVID retrieval; companycam retention]`
   - Accept: edit + archive without losing history.
 

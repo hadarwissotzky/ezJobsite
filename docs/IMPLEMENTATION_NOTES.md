@@ -40,6 +40,8 @@
 
 | Date | Decision | Trade-off / why | Approved by |
 |---|---|---|---|
+| 2026-07-17 | **CompanyCam-parity + wedge PRD authored (`PRD-companycam-parity.md`).** Phased backlog on v1 (not a rewrite). Foundation (auth/company/roles) specced as prerequisite. Maps = **static images only** (no native map SDK). Payments = **excluded** (non-goal). Nav = bottom tab bar incl. Feed. Annotations = **text-only for now** (drawing deferred). Wedge included end-to-end (proposal-review surface `REQ-PROC8` + CO/confirm/sign wired + real delivery channel). New REQ families: `REQ-AUTH/ORG/ROLE`, `REQ-GAL1..6`, `REQ-MAP1`, `REQ-NAV1`, `REQ-PROC8`, `REQ-PM14`. 10 new use cases registered in MASTER. | Breadth-first parity vs. finishing de-risk numbers; user chose to build the rounded product and keep the transaction layer as differentiator. | hadar |
+| 2026-07-17 | **REVERSAL: project status `Active/Archived` → `lead → in-progress → complete → archived` + user color labels** (`REQ-PM4`). | CompanyCam-parity project management; the 2-state cap was too thin for a lead pipeline. 2-state remains the P1 fallback. Reversal noted at `PM-LAYER.md` REQ-PM4 + `SPEC §8` Project + `PRD-companycam-parity.md §10`. | hadar |
 | 2026-07-14 | Phase goal = **de-risk hard parts** via thin slice + test, not ship MVP | Cheapest path to kill/validate the scary unknowns before big investment. | hadar |
 | 2026-07-14 | v1 scope = **priced verbal change-order wedge**, data model architected for broad capture | Lead with the money use case nobody owns; avoid the all-in-one trap. | hadar |
 | 2026-07-14 | Capture is **multimodal**: text, audio, video, image | User requirement — one capture primitive, four input types. | hadar |
@@ -136,6 +138,19 @@
 ## §4 — Cross-model review (Codex)
 
 *Log each adversarial cross-model pass here: date, what was reviewed, findings ranked by severity, and how each was reconciled. Until the real Codex CLI has been run locally (see CLAUDE.md §4), entries here from the cloud session are **same-model stand-in** reviews and are labeled as such.*
+
+**2026-07-17 — REAL Codex cross-check (codex-cli 0.144.4, local) of `PRD-companycam-parity.md`.** First genuine cross-model pass (not a stand-in). Full output saved to scratchpad `codex-prd-review.md`. 4 Critical, ~9 High, ~8 Medium, ~3 Low. The PRD was materially over-certified; findings accepted and reconciled as below.
+
+- **CRIT — wrong price-read-back citation + weak confirm gate (accepted, FIXED).** `REQ-VAL6` is scope/assignment, not price read-back; and `numbers_confirmed_at set` is a DB condition, not proof a human read the number back. Fixed §5.E to cite mandate #6 + the read-back flow, and to require an explicit human read-back/correct action before commit AND send, with a negative test that an unconfirmed path is impossible (mandate #2).
+- **CRIT — immutability asserted without the erasure carve-out (accepted, FIXED).** Mandate #5 requires the hard-delete + hash/metadata-stub exception stated wherever "immutable" appears. Added the carve-out to §6 and the GAL3/comments/status-history claims.
+- **CRIT — video "playback" contradicts REQ-TL4 (accepted, FIXED).** TL4 discards raw video after extracting audio + stills, so no playable video exists. GAL1/GAL2 now show extracted stills for video, not playback.
+- **CRIT — reversal not authoritative (accepted, FIXED).** 4-state lifecycle is the target; 2-state is a *collapse* of it (not a competing schema). Clarified in §5.B + PM-LAYER note.
+- **CRIT/HIGH — sync-split asserted as settled (accepted, FIXED).** CLAUDE §5 still flags the outbox/PowerSync split as needing sign-off and SPEC still reads "PowerSync deferred." PRD §6 no longer treats the split as ground truth; it inherits the open sign-off as an explicit open decision.
+- **HIGH — `REQ-VAL(1–8)` pseudo-ID + `REQ-ORG1`/`REQ-ROLE1`/`REQ-COLLAB3` mis-elevations (accepted, FIXED).** Bundled/incorrect IDs destroy traceability. Split into specific REQs; reframed Company entity + role-model as **NEW** (net-new tenant/authz model, not "elevation"), with client marked no-login (not a Member seat); fixed the comments trace to COLLAB-2.
+- **HIGH — §8 falsely claimed the 8 criteria PASS (accepted, FIXED — the important one).** This is the project's recurring defect (claims > evidence). §8 rewritten from "passes" to "must pass — current gaps named," incl. the missing end-to-end capture→confirm→send touch budget (crit 3 / REQ-X1 ≤3), incomplete failure modes (crit 7), and solo-buildability decomposition (crit 6).
+- **HIGH/MEDIUM — missing failure modes + offline/prefetch/security contracts (accepted, DEFERRED to build-spec).** Notifications, collaboration, public share-links, static-map, auth-transition, offline gallery working-set, `labels[]` conflict semantics, Feed event sources. Reconciled: these are per-REQ **build-spec** obligations; PRD now states each REQ needs a build spec (with a failure matrix) before it is "dev-ready," and lists them as known gaps rather than claiming coverage.
+- **DESIGN DECISIONS — hadar resolved 4 of 5 as over-modelled (2026-07-17), leaving 1 open (PRD §11):** (1✅) **ownership = the creator**, who can always delete their own content, EXCEPT an approved request is frozen (mandate #1); projects archive-not-delete when non-empty, delete when empty — no capturing/host/controller tangle. (4✅) **erasure ends access; revoke kills the link** — no share-link expiry/rotation machinery. (5✅) **offline = not in the global system yet** — grid shows synced+local, no prefetch/working-set obligation. (3◑) role model settled; server-as-tenancy-authority is a build-spec detail. (2⛔ **OPEN**) the outbox-vs-PowerSync split is a real doc contradiction (`CLAUDE.md §5` unsigned vs `SPEC §0/§6.1` "PowerSync deferred") and needs a one-line ruling + a reconciliation edit. Encoded in PRD §6 "Content ownership & lifecycle" + the REQs; §11 tracks the one open item.
+- **LOW (accepted, FIXED):** dangling "GAL6" ref in §8; "MASTER §9" nonexistent; mandate #7 mis-cite on AUTH1.
 
 **2026-07-15 — Stand-in adversarial critic (same-model, NOT the real Codex cross-check).** Reviewed CLAUDE.md + SPEC v0.1 + VERIFICATION_PLAN + NOTES. 5 Critical, 8 High, 6 Medium, 3 Low findings. Reconciled into SPEC v0.2/v0.3:
 
@@ -430,4 +445,37 @@ tag was the gap, not the behaviour. Worth checking the others before building.
   `complete_step`: it sat in `running` until the lease lapsed, was reclaimed, and
   died at `attempts >= 5`. The second is the dangerous one — **silent**, and it hit
   every photo *and* every resumed job whose work was already complete.
+
+### §5.6 Recording-consent model change — LOGGED DECISION (mandate #2 / REQ-CON1)
+
+**Decision (hadar, 2026-07-17, on-device during the first real-hardware session):** the
+product is positioned as **personal-use**, and the recording-consent acceptance is
+**carried by the app's Terms & Conditions, accepted ONCE**, rather than a per-job
+in-app consent form. This is recorded here because it **changes a non-negotiable
+mandate**, which the operating contract (CLAUDE.md §2) permits *only* via an explicit,
+logged decision — this is that log.
+
+**What changed in the build:**
+- First-run no longer includes a consent step (already deferred earlier the same day);
+  the per-job recording-consent form and its "recording isn't set up" banner are
+  **removed**.
+- A **one-time Terms acceptance** (`getTermsAccepted`/`setTermsAccepted`, `consent.ts`,
+  version-keyed in `device_settings`) gates recording. `canRecordAudio` short-circuits
+  to `allowed` once accepted. The screen appears at the **first record tap**, once ever.
+- The GPS→state resolver built earlier (`jurisdiction.ts`) is **repurposed** from the
+  deleted per-job form into a **non-blocking all-party-state reminder** on the Terms
+  screen.
+
+**Why this is NOT a silent auto-approve (the line that was held):** mandate #2 forbids
+*silently* deciding it is lawful to record a person. A one-time Terms acceptance is
+still a **deliberate human act** — the user taps I ACCEPT — so a human remains in the
+loop (mandate #10). What was removed is the *per-job repetition*, not the human.
+
+**Stated residual boundary (honest, not hidden):** the user's acceptance binds the
+**user**. Other people in a recorded conversation are not party to these Terms; in the
+~12 all-party states the user still carries that responsibility. The T&C wording is the
+owner's/counsel's to write; the app surfaces the state-aware reminder and never asserts
+third-party consent on the user's behalf. The strict per-job basis logic (`ALL_PARTY_STATES`,
+`defaultConsentFor`, `setRecordingConsent`) remains in `consent.ts` — unused by the UI
+now, retained so this decision is reversible.
 

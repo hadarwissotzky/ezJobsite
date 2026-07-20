@@ -31,3 +31,4 @@ supabase/.temp
 
 # repo-import leftover (safe to delete)
 _import.tar
+.gstack/

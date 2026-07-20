@@ -70,7 +70,7 @@ Legend — Modes: 🎙️voice 📷photo 🎥video ✍️text · Jobs: V=Validat
 | **SET-3** | Load the original estimate/scope (for CO reference) | — | ✍️ | **P1.5** | S |
 | **SET-4** | Crew first-run + permissions | — | ✍️ | **P1** | S |
 | **PM-1** | Create a project (name+address→geofence); field quick-create + office cleanup | — | ✍️ | **P1** | hadar |
-| **PM-2** | Edit / archive a project (Active/Archived) | — | ✍️ | **P1** | hadar |
+| **PM-2** | Edit project + status lifecycle (lead→in-progress→complete→archived) | — | ✍️ | **P1** (2-state) / **P1.5** (4-state, see `PRD-companycam-parity.md`) | hadar |
 | **PM-3** | Projects list (filter/sort) | — | ✍️ | **P1** | hadar |
 | **PM-4** | Search project (name/address/client) | — | ✍️ | **P1** | hadar |
 | **PM-5** | Nearby projects (GPS browse) | — | — | **P1** | hadar |
@@ -108,8 +108,18 @@ Legend — Modes: 🎙️voice 📷photo 🎥video ✍️text · Jobs: V=Validat
 | **SCOPE-1** | Decision scope level (project vs party) + assignee on actionable decisions | V | 🎙️ | **P1** | hadar |
 | **SCOPE-2** | Responsibility delineation across trades (air-handler problem); flag gaps/overlaps | V | 🎙️ | **P1** capture / **P1.5** detect | hadar |
 | **SCOPE-3** | Capture party role + scope-of-work on invite; per-party scope review | — | ✍️ | **P1** field / **P1.5** review | hadar |
+| **AUTH-1** | Real account (sign-up/login), session persists, capture attributes offline | — | ✍️ | **P1**-prereq | hadar+CC |
+| **AUTH-2** | Owner-pays seat + free crew/collaborator/client seats | — | — | **P1**-prereq | hadar |
+| **ORG-1** | Company/org owns projects+captures; authorship on every item | — | — | **P1**-prereq | hadar+CC |
+| **PM-14** | Project labels (user color tags, filter list by) | — | ✍️ | **P1.5** | hadar+CC |
+| **VIEW-1** | Project photo grid (reverse-chron, date-grouped, mixed modality) | R | 📷 | **P1.5** | hadar+CC |
+| **VIEW-2** | Full-screen photo viewer (swipe, zoom, evidence panel, notes) | R | 📷🎥🎙️ | **P1.5** | hadar+CC |
+| **VIEW-3** | User tags on captures (filter grid by tag) | R | 📷 | **P1.5** | hadar+CC |
+| **MAP-1** | Static map thumbnail per job (pin at lat/lng; online-fetch, cached) | — | — | **P1.5** | hadar (static-only) |
+| **NAV-1** | Bottom tab bar (Projects · Feed · Camera · Notifications · Profile) | — | — | **P1.5** | hadar+CC |
+| **SHARE-1** | Live shared project-timeline link (auto-updates as captures land) | R | 📷 | **P1.5/P2** | hadar+CC |
 
-*73 deduped use cases (14 + ~35 seed + 10 project-management + 7 CompanyCam-AI teardown + 3 decision/notification + 5 language + 2 offline + 4 collaborator + 4 communication + 3 scope/responsibility). Layer docs: `LANGUAGE-LAYER.md`, `PM-LAYER.md`, `COMMUNICATION-LAYER.md`; offline in `SPEC §6.3` (REQ-PROC6/7). Checklist/Tasks is now a first-class handler (`SPEC §7.4`); walkthrough-note + pause=section-break detail in `companycam-ai-features-analysis.md` and `SPEC §6.2/§7.3`.*
+*83 deduped use cases (14 + ~35 seed + 10 project-management + 7 CompanyCam-AI teardown + 3 decision/notification + 5 language + 2 offline + 4 collaborator + 4 communication + 3 scope/responsibility + 10 CompanyCam-parity: AUTH/ORG/VIEW/MAP/NAV/SHARE + project labels). Layer docs: `LANGUAGE-LAYER.md`, `PM-LAYER.md`, `COMMUNICATION-LAYER.md`, `PRD-companycam-parity.md`; offline in `SPEC §6.3` (REQ-PROC6/7). Checklist/Tasks is now a first-class handler (`SPEC §7.4`); walkthrough-note + pause=section-break detail in `companycam-ai-features-analysis.md` and `SPEC §6.2/§7.3`.*
 
 ---
 
