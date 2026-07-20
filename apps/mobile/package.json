@@ -4,14 +4,19 @@
   "main": "index.ts",
   "dependencies": {
     "@azure/core-asynciterator-polyfill": "^1.0.2",
+    "@expo-google-fonts/barlow": "^0.4.1",
+    "@expo-google-fonts/barlow-condensed": "^0.4.1",
     "@powersync/op-sqlite": "^0.9.15",
     "@powersync/react-native": "^1.35.9",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@supabase/supabase-js": "^2.110.7",
     "buffer": "^6.0.3",
     "expo": "~54.0.0",
     "expo-audio": "~1.1.1",
+    "expo-camera": "~17.0.10",
     "expo-crypto": "~15.0.9",
     "expo-file-system": "~19.0.23",
+    "expo-font": "~14.0.12",
     "expo-haptics": "~15.0.8",
     "expo-image-picker": "~17.0.11",
     "expo-location": "~19.0.8",
@@ -21,11 +26,15 @@
     "js-sha256": "^0.11.1",
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "react-native-get-random-values": "~1.11.0"
+    "react-native-get-random-values": "~1.11.0",
+    "react-native-view-shot": "4.0.3"
   },
   "devDependencies": {
     "@types/react": "~19.1.10",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "expo-asset": "~12.0.13"
   },
   "scripts": {
     "start": "expo start",

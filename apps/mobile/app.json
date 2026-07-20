@@ -38,7 +38,16 @@
         }
       ],
       "expo-image-picker",
-      "expo-location"
+      "expo-location",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "EZjobsite uses the camera so you can snap a jobsite decision while you talk about it.",
+          "microphonePermission": "EZjobsite records what you say while you capture, so nothing gets lost.",
+          "recordAudioAndroid": true
+        }
+      ],
+      "expo-font"
     ]
   }
 }
