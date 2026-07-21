@@ -41,7 +41,7 @@ import { addParty, assignBoundary, drainScopeOutbox, ensurePartySchema, listBoun
          listParties, nameBoundary } from './src/parties';
 import { captureStatus, levelColor, screenStatus } from './src/status';
 import { FIRST_RUN_TAPS, isFirstRun, markFirstRunDone, nextStep, savedLang, saveLang } from './src/firstrun';
-import { hasProfile as hasProfileFn, saveProfile, TRADES } from './src/profile';
+import { getProfile, hasProfile as hasProfileFn, saveProfile, TRADES } from './src/profile';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          playCapture, stopPlayback, type Note } from './src/annotate';
 import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
@@ -60,7 +60,7 @@ import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisio
 import { sendForConfirmation } from './src/confirmations';
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine,
-         money, parseMoney, validateLines, type LineItem } from './src/changeorder';
+         money, parseMoney, validateLines, type LineItem, type LedgerRow } from './src/changeorder';
 import { issueOtp, newOtpCode, renderApproval, signApproval, verifyOtp } from './src/signing';
 
 export const db = new PowerSyncDatabase({
@@ -184,7 +184,7 @@ export default function App() {
     decisionId: string; scope: string; whoDirected: string;
     amountText: string; confidence: 'high'|'low'|'none'; nteText: string;
   }>(null);
-  const [coRows, setCoRows] = React.useState<any[]>([]);
+  const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
   const [dsync, setDsync] = React.useState<any>(null);
   const [bundling, setBundling] = React.useState<string | null>(null);
   const [cellOn, setCellOn] = React.useState(false);
@@ -278,8 +278,6 @@ export default function App() {
   // REQ-SET2. Derived from what EXISTS, never a stored step counter -- a counter
   // and reality drift apart the moment someone kills the app mid-setup.
   const [firstRun, setFirstRun] = React.useState<boolean | null>(null);
-  const [langPicked, setLangPicked] = React.useState(false);
-  const [frJob, setFrJob] = React.useState('');
   // First-run profile ("who you are"). hasProfileState gates the step; the rest is
   // the in-step form. `pSub` is the sub-screen: 'who' (name + solo/company) then
   // 'trade' (skippable grid). Kept minimal on purpose — see src/profile.ts.
@@ -452,9 +450,9 @@ export default function App() {
       await ensureConsentSchema(db);
       await ensurePairSchema(db);
       const sl = await savedLang(db);
-      // setLangPicked too: a returning user already chose a language, so the setup
-      // flow must not re-show the language screen when it re-enters for a missing profile.
-      if (sl) { setLang(sl); setLangState(sl); setLangPicked(true); }
+      // Restore the display language a returning user already chose. Language is now
+      // part of the profile form, not a gate, so there's no separate "picked" flag.
+      if (sl) { setLang(sl); setLangState(sl); }
       setFirstRun(await isFirstRun(db));
       setHasProfile(await hasProfileFn(db));
       await initFeedback();
@@ -1036,69 +1034,56 @@ export default function App() {
   // Enter setup when it's a first run OR the profile is missing — an existing user
   // (first_run_done already set) with no profile must still be asked who they are.
   if ((firstRun || !hasProfileState) && ready && !gate) {
-    const step = nextStep({
-      langChosen: !!langPicked,
-      hasProfile: hasProfileState,
-      hasJob: projects.some((p) => p.id !== INBOX_ID),
-    });
-    // Small progress spine across the three setup steps (research: progress
-    // indicators lower onboarding anxiety). Language is step 0 here.
-    const stepIndex = step === 'lang' ? 0 : step === 'profile' ? 1 : 2;
+    const step = nextStep({ hasProfile: hasProfileState });
+    // Progress spine across the two profile sub-screens (research: progress
+    // indicators lower onboarding anxiety). 'who' is 0, 'trade' is 1.
+    const stepIndex = pSub === 'who' ? 0 : 1;
     const Dots = () => (
       <View style={s.frDots}>
-        {[0, 1, 2].map((d) => (
+        {[0, 1].map((d) => (
           <View key={d} style={[s.frDot, d === stepIndex && s.frDotOn]} />
         ))}
       </View>
     );
 
     if (step === 'done') {
-      // No celebration screen. They came here to record something.
+      // No celebration screen. They came here to create an extra.
       void markFirstRunDone(db).then(() => setFirstRun(false));
       return <View style={s.c}><Text style={s.h}>EZchangeorder</Text></View>;
     }
 
-    // 1. LANGUAGE, FIRST AND WITHOUT WORDS.
-    //    Asking someone to read English to choose Spanish is the joke every app
-    //    makes. Both options are shown in their OWN language, side by side, so
-    //    this screen needs no reading at all -- you recognise your language or you
-    //    do not.
-    if (step === 'lang') {
-      return (
-        <View style={s.c}>
-          <Text style={s.h}>EZchangeorder</Text>
-          <Dots />
-          <View style={{ flex: 1, justifyContent: 'center' }}>
-            <Pressable style={s.langBig} onPress={async () => {
-              setLang('en'); setLangState('en'); await saveLang(db, 'en'); setLangPicked(true);
-            }}>
-              <Text style={s.langBigT}>English</Text>
-            </Pressable>
-            <Pressable style={s.langBig} onPress={async () => {
-              setLang('es'); setLangState('es'); await saveLang(db, 'es'); setLangPicked(true);
-            }}>
-              <Text style={s.langBigT}>Español</Text>
-            </Pressable>
-          </View>
-        </View>
-      );
-    }
-
-    // 2. WHO YOU ARE — name + solo/company, then trade (skippable). The minimum that
-    //    personalises a proposal; NOT a Jobber-style survey (research 2026-07-17).
-    //    Two sub-screens inside one step so a skipped trade still advances cleanly.
+    // THE PROFILE — the one setup screen (2026-07-20). Language folds in as a
+    // bilingual toggle at the top; NO job step follows — the user lands on the
+    // capture-first home and starts by creating an extra. name + solo/company,
+    // then trade (skippable); the minimum that personalises a proposal.
     if (step === 'profile') {
       if (pSub === 'who') {
-        const canGo = pName.trim().length > 0 && pSolo !== null &&
-          (pSolo === true || pCompany.trim().length > 0);
+        // Company name is OPTIONAL (hadar 2026-07-20): picking Company but leaving
+        // the name blank must not block onboarding. Only name + solo/company gate.
+        const canGo = pName.trim().length > 0 && pSolo !== null;
         return (
           <View style={s.c}>
             <Text style={s.h}>EZchangeorder</Text>
             <Dots />
             <View style={s.card}>
+              {/* LANGUAGE, folded in. Each option in its OWN name so choosing needs
+                  no reading — but it is no longer a gate before the app explains
+                  itself. Tapping switches the whole form live. */}
+              <Text style={s.frLangLab}>Language · Idioma</Text>
+              <View style={s.frLangRow}>
+                <Pressable style={[s.frLangChip, lang === 'en' && s.frLangChipOn]}
+                  onPress={async () => { setLang('en'); setLangState('en'); await saveLang(db, 'en'); }}>
+                  <Text style={[s.frLangChipT, lang === 'en' && s.frLangChipTOn]}>English</Text>
+                </Pressable>
+                <Pressable style={[s.frLangChip, lang === 'es' && s.frLangChipOn]}
+                  onPress={async () => { setLang('es'); setLangState('es'); await saveLang(db, 'es'); }}>
+                  <Text style={[s.frLangChipT, lang === 'es' && s.frLangChipTOn]}>Español</Text>
+                </Pressable>
+              </View>
+
               <Text style={s.cardH}>{T('fr.whoTitle')}</Text>
               <Text style={s.cardNote}>{T('fr.whoWhy')}</Text>
-              <TextInput style={s.moneyInput} value={pName} autoFocus
+              <TextInput style={s.moneyInput} value={pName}
                 placeholder={T('fr.yourName')} placeholderTextColor="#8c959f"
                 onChangeText={setPName} />
               <Pressable style={[s.pickWide, pSolo === true && s.pickOn]} onPress={() => setPSolo(true)}>
@@ -1154,40 +1139,11 @@ export default function App() {
       );
     }
 
-    // 2. THE JOB. Consent belongs to a project, so there must be one first.
-    //    A name is enough -- the address can come later, and demanding one from a
-    //    man standing in the room is how you get "asdf".
-    if (step === 'job') {
-      return (
-        <View style={s.c}>
-          <Text style={s.h}>EZchangeorder</Text>
-          <Dots />
-          <View style={s.card}>
-            <Text style={s.cardH}>{T('fr.jobTitle')}</Text>
-            <Text style={s.cardNote}>{T('fr.jobWhy')}</Text>
-            <TextInput style={s.moneyInput} value={frJob} autoFocus
-              placeholder={T('job.name')} placeholderTextColor="#8c959f"
-              onChangeText={setFrJob} />
-            <Pressable style={[s.confirmWide, !frJob.trim() && s.btnOff]}
-              disabled={!frJob.trim()}
-              onPress={async () => {
-                const st = await stampNow();
-                const r = await createProject(db, { ownerId: OWNER, name: frJob,
-                  lat: st.lat, lng: st.lng });
-                if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return; }
-                setProjectId(r.id);
-                setProjects(await listProjects(db));
-              }}>
-              <Text style={s.confirmT}>{T('job.create')}</Text>
-            </Pressable>
-          </View>
-        </View>
-      );
-    }
-
-    // CONSENT IS NOT A FIRST-RUN STEP (2026-07-17). It is deferred to the first
-    // record tap (canRecordAudio gate) + the dismissible banner below. See
-    // firstrun.ts header point 3.
+    // NO JOB STEP (2026-07-20). The user does not start by filing a job — after the
+    // profile they land on the capture-first home and create an EXTRA. The job is
+    // created/assigned during that flow (capture → assign sheet). Consent is still
+    // deferred to the first record tap (canRecordAudio gate) + dismissible banner
+    // below; by then the capture has a job to attach to. See firstrun.ts header.
   }
 
   // REQ-VAL7. The air-handler screen: what might fall between trades, and who
@@ -1305,6 +1261,17 @@ export default function App() {
               setProjectId(r.id);
               setProjects(await listProjects(db));
               setNewJob(null); setPicker(false);
+              // If we got here FROM the post-recording assign flow, the walk's
+              // captures were waiting on a job — file them to the one just created,
+              // then close the assign sheet. The extra now HAS a job (mandate #8).
+              if (assign) {
+                for (const id of assign.ids) {
+                  await fileCapture(db, { captureId: id, projectId: r.id, by: OWNER });
+                }
+                setAssign(null); setAssignQ(''); setFiled(null);
+                await refresh();
+                return;
+              }
               // CompanyCam: creating a job drops you into it, ready to capture.
               setNav('project');
               await refresh();
@@ -1538,16 +1505,15 @@ export default function App() {
       await refresh();
     };
     const newJobHere = async () => {
-      // Seed the job from where the user is standing: reverse-geocoded address when
-      // reachable, honest fallback when not. GPS pin comes from the capture's own fix.
+      // OPEN the create-job screen, PRE-FILLED from where the user is standing —
+      // reverse-geocoded address when reachable, blank-but-editable when not, GPS
+      // pinned to the capture's own fix. It no longer creates silently: a job
+      // carries a name + address the user should SEE and can correct before it
+      // exists (mandate #2). `assign` stays set while that screen is up, so the
+      // create handler files this walk's captures to the new job once confirmed.
       const addr = assign.lat != null && assign.lng != null
         ? await addressFor(assign.lat, assign.lng) : null;
-      const r = await createProject(db, {
-        ownerId: OWNER, name: addr ?? T('assign.newJobName'),
-        address: addr, lat: assign.lat, lng: assign.lng,
-      });
-      if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return; }
-      await fileAll(r.id);
+      setNewJob({ name: addr ?? '', address: addr ?? '', lat: assign.lat, lng: assign.lng });
     };
     // SAME dark world as the capture screen — this is step two of the SAME workflow,
     // not a different app. It opens with the receipt of the walk just taken (green
@@ -2187,63 +2153,126 @@ export default function App() {
         );
       })()}
 
-      {coRows.length > 0 && (
+      {/* ── THE LEDGER (prototype c4) ──────────────────────────────────────────
+          The money at a glance. Where the pipeline USED to dump an unstyled list,
+          this is the contractor's answer to "where do I stand on this job?": what's
+          approved, what's still out, and the notation status of each one. */}
+      {coRows.length > 0 && (() => {
+        const approved = coRows.filter((c) => c.status === 'approved');
+        const awaiting = coRows.filter((c) => c.status === 'sent');
+        // DERIVED HERE from raw cents, in one place. Summing formatted "$1,850"
+        // strings would be a parser bug with a lawyer attached (mandate #6).
+        const approvedCents = approved.reduce((n, c) => n + c.amount_cents, 0);
+        const awaitingCents = awaiting.reduce((n, c) => n + c.amount_cents, 0);
+        const proj = projects.find((p) => p.id === projectId);
+        // STEP 3 — send the priced approval. Creates the FROZEN priced link the
+        // client opens: company (from profile), scope, price, and the running total
+        // already approved on this job, all frozen together (mandate #5/#6). The
+        // share sheet delivers it from a number the client already recognises.
+        const sendPricedApproval = async (c: LedgerRow) => {
+          if (!CONFIRM_BASE) { setUi({ k: 'refused', why: 'no approval link base configured' }); return; }
+          const prof = await getProfile(db);
+          const r = await sendForConfirmation(connector.client, {
+            kind: 'confirm', decisionId: c.decision_id, projectId,
+            projectName: proj?.name ?? 'this job',
+            subject: c.scope, value: c.scope,
+            directedBy: c.who_directed || 'Owner',
+            counterparty: c.who_directed || 'Owner',
+            channel: 'link', whenMs: Date.now(), linkBase: CONFIRM_BASE,
+            amountCents: c.amount_cents, companyName: prof?.company || prof?.name || null,
+            approvedRunningCents: approvedCents, changeOrderId: c.id,
+          });
+          if (r.ok) setSentLink({ url: r.url, shown: r.shownContent });
+          else setUi({ k: 'refused', why: r.reason });
+        };
+        return (
         <>
-          <Text style={s.sub}>Change orders ({coRows.length})</Text>
-        {/* REP-2. Sits ABOVE the evidence export on purpose: telling the client
-            what is happening is the weekly act; exporting an evidence bundle is
-            the thing you do when that stopped working. Ordering them the other way
-            round would put the lawsuit before the conversation. */}
-        <Pressable style={s.bundleBtn} onPress={async () => {
-          const r = await buildProgressUpdate(connector.client, projectId);
-          if (!r.ok) { setBundling(r.reason); return; }
-          const s2 = await shareProgressUpdate(r.text);
-          if (!s2.ok && s2.reason) setBundling(s2.reason);
-        }}>
-          <Text style={s.bundleT}>{T('rep.send')}</Text>
-        </Pressable>
+          <Text style={s.ledgerHead}>Extras</Text>
 
-        <Pressable style={s.bundleBtn} onPress={async () => {
-          setBundling('Assembling…');
-          const r = await buildDisputeBundle(connector.client, projectId);
-          if (!r.ok) { setBundling(`Could not assemble: ${r.reason}`); return; }
-          const s2 = await shareBundle(r.htmlPath);
-          setBundling(s2.ok
-            ? `Bundle ready — ${(r.json.change_orders ?? []).length} change order(s), ` +
-              `${(r.json.decisions ?? []).length} decision(s), ${(r.json.captures ?? []).length} capture(s)`
-            : s2.reason ?? 'saved');
-        }}>
-          <Text style={s.bundleT}>Export evidence bundle →</Text>
-        </Pressable>
-        {bundling && <Text style={s.dmeta}>{bundling}</Text>}
-          {coRows.map((c) => (
-            <View key={c.id} style={s.drow}>
-              <Text style={s.dval}>{c.amount} {c.is_mini ? '· mini' : ''}</Text>
-              <Text style={s.dsub}>{c.scope}</Text>
-              <Text style={s.dmeta}>
-                {c.status}{c.nte ? ` · NTE ${c.nte}` : ''}
-                {c.signed_by ? ` · signed ${c.signed_by}` : ''}
-                {c.approved_running ? ` · approved to date ${c.approved_running}` : ''}
-              </Text>
-              {!c.signed_by && (
-                <Pressable style={s.ask} onPress={() => setSign({
-                  coId: c.id,
-                  // FROZEN HERE. Rendered once. If the CO changed after this
-                  // point the signature would evidence the wrong thing.
-                  shown: renderApproval({
-                    scope: c.scope, amount: c.amount, nte: c.nte,
-                    whoDirected: 'Owner', projectName: 'Bakeoff Project',
-                  }),
-                  phone: '', code: '', sent: null, legalName: '',
-                  verifiedAt: null, err: null,
-                })}>
-                  <Text style={s.askT}>Get it signed →</Text>
-                </Pressable>
-              )}
+          {/* Dark totals card — reads as the summary, not another row. */}
+          <View style={s.totalCard}>
+            <View style={s.tcRow}>
+              <Text style={s.tcRowLabel}>Approved extras ({approved.length})</Text>
+              <Text style={s.tcRowVal}>{money(approvedCents)}</Text>
             </View>
-          ))}
+            <View style={s.tcRow}>
+              <Text style={s.tcRowLabel}>Awaiting approval ({awaiting.length})</Text>
+              <Text style={[s.tcRowVal, s.tcCaution]}>{money(awaitingCents)}</Text>
+            </View>
+            <View style={s.tcGrand}>
+              <Text style={s.tcGrandLabel}>Extras total if approved</Text>
+              <Text style={s.tcGrandVal}>{money(approvedCents + awaitingCents)}</Text>
+            </View>
+          </View>
+
+          {/* Notation status. HONEST: we know it was sent and is not yet signed.
+              We do NOT claim "viewed 26h ago · 1 reminder sent" like the mockup —
+              that state isn't tracked yet, and a fabricated status is mandate #1's
+              dishonest "saved" wearing a different hat. */}
+          {awaiting.length > 0 && (
+            <View style={s.flag}>
+              <Text style={s.flagT}>
+                ⚑ {awaiting.length} sent, not yet signed — {money(awaitingCents)} awaiting approval.
+              </Text>
+            </View>
+          )}
+
+          {/* REP-2. Telling the client what's happening is the weekly act; the
+              evidence bundle is break-glass. Order reflects that. */}
+          <Pressable style={s.bundleBtn} onPress={async () => {
+            const r = await buildProgressUpdate(connector.client, projectId);
+            if (!r.ok) { setBundling(r.reason); return; }
+            const s2 = await shareProgressUpdate(r.text);
+            if (!s2.ok && s2.reason) setBundling(s2.reason);
+          }}>
+            <Text style={s.bundleT}>{T('rep.send')}</Text>
+          </Pressable>
+          <Pressable style={s.bundleBtn} onPress={async () => {
+            setBundling('Assembling…');
+            const r = await buildDisputeBundle(connector.client, projectId);
+            if (!r.ok) { setBundling(`Could not assemble: ${r.reason}`); return; }
+            const s2 = await shareBundle(r.htmlPath);
+            setBundling(s2.ok
+              ? `Bundle ready — ${(r.json.change_orders ?? []).length} change order(s), ` +
+                `${(r.json.decisions ?? []).length} decision(s), ${(r.json.captures ?? []).length} capture(s)`
+              : s2.reason ?? 'saved');
+          }}>
+            <Text style={s.bundleT}>Export evidence bundle →</Text>
+          </Pressable>
+          {bundling && <Text style={s.dmeta}>{bundling}</Text>}
+
+          {/* Each extra as a c4 card, its status the angled-ish chip = notation status. */}
+          {coRows.map((c) => {
+            const chip = coChip(c.status);
+            return (
+              <View key={c.id} style={s.coCard}>
+                <View style={s.coR1}>
+                  <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>
+                  <View style={[s.chipBase, chip.bg]}>
+                    <Text style={[s.chipText, chip.dark && s.chipTextDark]}>{chip.label}</Text>
+                  </View>
+                </View>
+                <View style={s.coR2}>
+                  <Text style={s.coAmt}>
+                    {c.amount}{c.is_mini ? ' · mini' : ''}{c.nte ? ` · NTE ${c.nte}` : ''}
+                  </Text>
+                  {c.signed_by ? (
+                    <Text style={s.coSub}>Signed by {c.signed_by}</Text>
+                  ) : (
+                    <Pressable onPress={() => sendPricedApproval(c)}>
+                      <Text style={s.coNudge}>
+                        {c.status === 'sent' ? 'Resend link →' : 'Send for approval →'}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+                {!c.synced && <Text style={s.coOnPhone}>On this phone · not backed up yet</Text>}
+              </View>
+            );
+          })}
         </>
-      )}
+        );
+      })()}
 
 
       {sentLink && (
@@ -2377,6 +2406,18 @@ export default function App() {
   );
 }
 
+/** Change-order status → its notation chip (prototype c4). Caution-yellow needs
+    dark text to stay legible; everything else is white-on-colour. */
+function coChip(status: string): { label: string; bg: any; dark: boolean } {
+  switch (status) {
+    case 'approved':   return { label: 'Approved', bg: s.chipApproved, dark: false };
+    case 'sent':       return { label: 'Sent',     bg: s.chipPending,  dark: true  };
+    case 'declined':   return { label: 'Declined', bg: s.chipDeclined, dark: false };
+    case 'superseded': return { label: 'Revised',  bg: s.chipRevised,  dark: false };
+    default:           return { label: 'Draft',    bg: s.chipDraft,    dark: false };
+  }
+}
+
 // Light theme. Palette (GitHub-light / CompanyCam-ish): page #f6f8fa, surfaces
 // #ffffff, borders #d0d7de, text #1f2328 / #57606a / #8c959f, brand green #1f883d,
 // blue #0969da, amber #9a6700, red #cf222e. Overlays that sit ON photos keep a dark
@@ -2427,6 +2468,49 @@ const s = StyleSheet.create({
   dsub: { color: '#57606a', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 },
   dval: { color: '#0D0F12', fontSize: 15, marginTop: 2 },
   dmeta: { color: '#5C6570', fontFamily: 'Barlow_400Regular', fontSize: 12.5, marginTop: 3 },
+
+  // ── THE LEDGER (prototype c4) ──────────────────────────────────────────────
+  ledgerHead: { color: '#0D0F12', fontFamily: 'BarlowCondensed_700Bold', fontSize: 24,
+    textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 6, marginBottom: 10 },
+  totalCard: { backgroundColor: '#0D0F12', borderRadius: 18, padding: 16, marginBottom: 8 },
+  tcRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3 },
+  tcRowLabel: { color: '#AEB4BD', fontFamily: 'Barlow_500Medium', fontSize: 14.5 },
+  tcRowVal: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18,
+    fontVariant: ['tabular-nums'] },
+  tcCaution: { color: '#F5B000' },
+  tcGrand: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline',
+    borderTopWidth: 1, borderTopColor: '#2A2E35', marginTop: 9, paddingTop: 9 },
+  tcGrandLabel: { color: '#FF5A00', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 14,
+    textTransform: 'uppercase', letterSpacing: 1.6 },
+  tcGrandVal: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 30,
+    fontVariant: ['tabular-nums'] },
+  flag: { backgroundColor: '#FFF7E0', borderColor: '#F0DE9E', borderWidth: 1, borderRadius: 12,
+    paddingVertical: 10, paddingHorizontal: 12, marginBottom: 8 },
+  flagT: { color: '#6B5300', fontFamily: 'Barlow_500Medium', fontSize: 13 },
+  coCard: { backgroundColor: '#fff', borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 14,
+    paddingVertical: 13, paddingHorizontal: 14, marginBottom: 9 },
+  coR1: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  coNm: { flex: 1, color: '#0D0F12', fontFamily: 'Barlow_600SemiBold', fontSize: 15.5 },
+  coR2: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 7 },
+  coAmt: { color: '#0D0F12', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18,
+    fontVariant: ['tabular-nums'] },
+  coSub: { color: '#5C6570', fontFamily: 'Barlow_400Regular', fontSize: 12.5, flexShrink: 1,
+    textAlign: 'right' },
+  coNudge: { color: '#FF5A00', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13,
+    textTransform: 'uppercase', letterSpacing: 0.6 },
+  coOnPhone: { color: '#8c959f', fontFamily: 'Barlow_400Regular', fontSize: 11.5, marginTop: 5 },
+  // Chips = the notation status. Rounded (not clip-path angled): a clean pill reads
+  // better in gloves/sunlight than a cosmetic skew (FIELD-UX). Colour carries meaning.
+  chipBase: { borderRadius: 6, paddingVertical: 3, paddingHorizontal: 10 },
+  chipText: { color: '#fff', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5,
+    textTransform: 'uppercase', letterSpacing: 0.9 },
+  chipTextDark: { color: '#0D0F12' },
+  chipApproved: { backgroundColor: '#0E8A4C' },
+  chipPending: { backgroundColor: '#F5B000' },
+  chipDeclined: { backgroundColor: '#C6281C' },
+  chipRevised: { backgroundColor: '#0D0F12' },
+  chipDraft: { backgroundColor: '#5C6570' },
+
   hNow: { color: '#0E8A4C', fontSize: 14, marginBottom: 4 },
   hOld: { color: '#8c959f', fontSize: 13, marginBottom: 4, textDecorationLine: 'line-through' },
   money: { backgroundColor: '#fff8c5', borderColor: '#F5B000', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
@@ -2462,9 +2546,16 @@ const s = StyleSheet.create({
   oneStatusD: { color: '#57606a', fontSize: 11, marginTop: 3 },
   // Thumb-sized. This is the first thing a new user ever touches, and they may be
   // wearing gloves when they do it.
-  langBig: { backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
-    borderRadius: 14, paddingVertical: 28, alignItems: 'center', marginBottom: 16 },
-  langBigT: { color: '#0D0F12', fontFamily: 'Barlow_700Bold', fontSize: 26 },
+  // Language toggle inside the profile form (folded in 2026-07-20). Each option in
+  // its own name so it needs no reading; the selected one fills with ink.
+  frLangLab: { color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5,
+    textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
+  frLangRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
+  frLangChip: { flex: 1, backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
+    borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  frLangChipOn: { backgroundColor: '#0D0F12', borderColor: '#0D0F12' },
+  frLangChipT: { color: '#0D0F12', fontFamily: 'Barlow_700Bold', fontSize: 17 },
+  frLangChipTOn: { color: '#ffffff' },
   // first-run progress dots
   frDots: { flexDirection: 'row', justifyContent: 'center', marginBottom: 8, marginTop: 2 },
   frDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#E4E5E1', marginHorizontal: 4 },

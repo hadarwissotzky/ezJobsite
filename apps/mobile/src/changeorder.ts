@@ -336,16 +336,24 @@ export type LedgerRow = {
   id: string; scope: string; amount: string; nte: string | null;
   status: string; is_mini: number; signed_by: string | null;
   approved_running: string; synced: number;
+  // Raw cents alongside the formatted string: the c4 ledger totals (approved sum,
+  // awaiting sum) are DERIVED in the UI, and deriving them from formatted "$1,850"
+  // strings would be a parser bug waiting to happen. One number, two renderings.
+  amount_cents: number;
+  // Needed to send a priced approval: the confirmation is keyed to the decision,
+  // and the report names who directed the extra.
+  decision_id: string; who_directed: string;
 };
 
 export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): Promise<LedgerRow[]> {
   const rows = await db.getAll<{
-    id: string; scope: string; amount_cents: number; nte_cents: number | null;
+    id: string; decision_id: string; who_directed: string; scope: string;
+    amount_cents: number; nte_cents: number | null;
     status: string; is_mini: number; signed_by: string | null;
     created_at_ms: number; pending: number;
   }>(
-    `SELECT co.id, co.scope, co.amount_cents, co.nte_cents, co.status, co.is_mini,
-            co.signed_by, co.created_at_ms,
+    `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.amount_cents, co.nte_cents,
+            co.status, co.is_mini, co.signed_by, co.created_at_ms,
             EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending
        FROM change_order co
       WHERE co.project_id = ?
@@ -357,10 +365,12 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
   return rows.map((r) => {
     if (r.status === 'approved') running += r.amount_cents;
     return {
-      id: r.id, scope: r.scope, amount: money(r.amount_cents),
+      id: r.id, decision_id: r.decision_id, who_directed: r.who_directed,
+      scope: r.scope, amount: money(r.amount_cents),
       nte: r.nte_cents == null ? null : money(r.nte_cents),
       status: r.status, is_mini: r.is_mini, signed_by: r.signed_by,
       approved_running: money(running),
+      amount_cents: r.amount_cents,
       // "on this phone" and "in the cloud" are different facts and the sender is
       // entitled to know which one they are looking at.
       synced: r.pending ? 0 : 1,
