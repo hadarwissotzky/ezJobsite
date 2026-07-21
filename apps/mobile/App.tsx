@@ -2266,6 +2266,9 @@ export default function App() {
                     </Pressable>
                   )}
                 </View>
+                {/* PRD R7: the list is ordered by create date, so the row states it —
+                    an order you can't see is an order the user has to take on faith. */}
+                <Text style={s.coCreated}>Created {c.created}</Text>
                 {!c.synced && <Text style={s.coOnPhone}>On this phone · not backed up yet</Text>}
               </View>
             );
@@ -2499,6 +2502,13 @@ const s = StyleSheet.create({
   coNudge: { color: '#FF5A00', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13,
     textTransform: 'uppercase', letterSpacing: 0.6 },
   coOnPhone: { color: '#8c959f', fontFamily: 'Barlow_400Regular', fontSize: 11.5, marginTop: 5 },
+  // Create date on each ledger row (PRD R7). Hairline above it so it reads as the
+  // row's footer rather than another fact competing with the money.
+  coCreated: {
+    color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 11,
+    textTransform: 'uppercase', letterSpacing: 1, marginTop: 6, paddingTop: 6,
+    borderTopWidth: 1, borderTopColor: '#E4E5E1',
+  },
   // Chips = the notation status. Rounded (not clip-path angled): a clean pill reads
   // better in gloves/sunlight than a cosmetic skew (FIELD-UX). Colour carries meaning.
   chipBase: { borderRadius: 6, paddingVertical: 3, paddingHorizontal: 10 },

@@ -343,7 +343,23 @@ export type LedgerRow = {
   // Needed to send a priced approval: the confirmation is keyed to the decision,
   // and the report names who directed the extra.
   decision_id: string; who_directed: string;
+  // The CAPTURE moment (not sent, not approved). PRD R7: the ledger is ordered by
+  // this, newest first, and every row shows it. Raw ms alongside the rendered label
+  // for the same reason as amount_cents -- never re-parse a formatted string.
+  created_at_ms: number; created: string;
 };
+
+/**
+ * "Jul 20 · 2:14 pm" — the create moment as the ledger row shows it (PRD R7).
+ * Deliberately no year: a job's extras live inside weeks, and the year is noise on a
+ * phone row. The full timestamp stays in the record's history (R6).
+ */
+export function createdLabel(ms: number): string {
+  const d = new Date(ms);
+  const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return `${date} · ${time.toLowerCase()}`;
+}
 
 export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): Promise<LedgerRow[]> {
   const rows = await db.getAll<{
@@ -361,8 +377,12 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     [projectId]
   );
 
+  // The SQL stays ASCENDING on purpose. `approved_running` is a running total and only
+  // means anything computed forward through time; flipping the ORDER BY to DESC would
+  // still "work" and silently invert every running figure on the screen. So: accumulate
+  // chronologically, then reverse for presentation (PRD R7 = newest created first).
   let running = 0;
-  return rows.map((r) => {
+  const chronological = rows.map((r) => {
     if (r.status === 'approved') running += r.amount_cents;
     return {
       id: r.id, decision_id: r.decision_id, who_directed: r.who_directed,
@@ -371,11 +391,13 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
       status: r.status, is_mini: r.is_mini, signed_by: r.signed_by,
       approved_running: money(running),
       amount_cents: r.amount_cents,
+      created_at_ms: r.created_at_ms, created: createdLabel(r.created_at_ms),
       // "on this phone" and "in the cloud" are different facts and the sender is
       // entitled to know which one they are looking at.
       synced: r.pending ? 0 : 1,
     };
   });
+  return chronological.reverse();
 }
 
 /** Mark the outcome of a signature locally. The signing path is online-only. */
