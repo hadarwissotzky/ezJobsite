@@ -20,16 +20,39 @@ import { sha256 } from 'js-sha256';
 
 export type SendKind = 'confirm' | 'acknowledge';
 
+/** Integer cents → "$1,850". Same shape as changeorder.money; kept local so this
+ *  file has no import cycle with the CO module. */
+function usd(cents: number): string {
+  const s = Math.abs(cents).toString().padStart(3, '0');
+  const whole = s.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `$${whole}.${s.slice(-2)}`;
+}
+
 /**
  * The exact words the counterparty will see. Rendered once, here, and never
  * again. Plain language on purpose: the reader is an owner on a phone, not a
  * user of this app.
+ *
+ * When a price is present this is a PRICED APPROVAL: the dollar figure is baked
+ * into the frozen text, so the binding instrument and the nicely-rendered page
+ * carry the SAME number (mandate #5/#6). The page renders it beautifully; this
+ * text is the legal fallback and the thing that is hashed.
  */
 export function renderCard(o: {
   kind: SendKind; subject: string; value: string; directedBy: string;
-  projectName: string; whenMs: number;
+  projectName: string; whenMs: number; amountCents?: number | null;
+  companyName?: string | null;
 }): string {
   const when = new Date(o.whenMs).toLocaleString();
+  const priced = typeof o.amountCents === 'number';
+  const asker = o.companyName ? `${o.companyName}\n` : '';
+  if (priced) {
+    return `${asker}Approval requested — an extra outside the original scope.\n\n` +
+      `${o.value}\n\n` +
+      `Price: ${usd(o.amountCents as number)}\n` +
+      `Directed by: ${o.directedBy}\nJob: ${o.projectName}\nDate: ${when}\n\n` +
+      `Nothing proceeds until you approve.`;
+  }
   return o.kind === 'confirm'
     ? `Please confirm this is what we agreed.\n\n` +
       `${o.subject}: ${o.value}\n\n` +
@@ -62,6 +85,12 @@ export async function sendForConfirmation(
     subject: string; value: string; directedBy: string; counterparty: string;
     channel: 'email' | 'sms' | 'link'; destination?: string; whenMs: number;
     linkBase: string;
+    // Priced approval (optional). When present, the price + context are FROZEN
+    // alongside shown_content so the client's page can render the report the
+    // prototype describes without the number ever drifting from the signed one.
+    amountCents?: number | null; nteCents?: number | null;
+    companyName?: string | null; approvedRunningCents?: number | null;
+    changeOrderId?: string | null;
   }
 ): Promise<SendResult> {
   const shownContent = renderCard(o);
@@ -77,10 +106,21 @@ export async function sendForConfirmation(
     p_counterparty: o.counterparty,
     p_channel: o.channel,
     p_destination: o.destination ?? null,
+    // Frozen priced fields — null on the plain decision-confirm path.
+    p_amount_cents: o.amountCents ?? null,
+    p_nte_cents: o.nteCents ?? null,
+    p_scope_title: o.value,
+    p_company_name: o.companyName ?? null,
+    p_job_label: o.projectName,
+    p_approved_running_cents: o.approvedRunningCents ?? null,
+    p_change_order_id: o.changeOrderId ?? null,
   });
   if (error) return { ok: false, reason: error.message };
 
-  return { ok: true, token, url: `${o.linkBase}/c/${token}`, shownContent };
+  // ?t= query, not a /c/{token} path: a static host (GitHub Pages) serves the file
+  // directly and cannot rewrite pretty paths. The page reads either form, but the
+  // query form works everywhere without host config.
+  return { ok: true, token, url: `${o.linkBase}/confirm.html?t=${token}`, shownContent };
 }
 
 /** Delivery state, per REQ-VAL8 "visible to the sender". */

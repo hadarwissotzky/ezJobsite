@@ -1,0 +1,46 @@
+name: Deploy client approval page
+
+# The no-login approval page the client opens (apps/web/confirm.html). Supabase
+# Storage refuses to serve HTML, so it is published to GitHub Pages instead. The
+# Supabase URL + anon key (public by design) are substituted at build from repo
+# Variables, so a fork never deploys against this project's backend by accident.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/confirm.html'
+      - '.github/workflows/deploy-confirm-page.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Substitute Supabase config
+        run: |
+          mkdir -p _site
+          sed -e "s|__SUPABASE_URL__|${{ vars.SUPABASE_URL }}|g" \
+              -e "s|__ANON_KEY__|${{ vars.SUPABASE_ANON_KEY }}|g" \
+              apps/web/confirm.html > _site/confirm.html
+          # index.html so the bare Pages URL isn't a 404 while testing.
+          cp _site/confirm.html _site/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

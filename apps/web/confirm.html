@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Please confirm</title>
+<title>Approval</title>
 <!--
-  The no-login confirmation page — REQ-VAL1/2/3/8.
+  The no-login approval page — REQ-VAL1/2/3/8, and the client-facing REPORT.
 
   WHO IS READING THIS: a homeowner or a GC standing in a doorway, on their own
   phone, who has never heard of this app and will never make an account for it.
@@ -14,184 +14,265 @@
   get their answer and the job stops. REQ-VAL3's no-login rule is not a
   convenience -- it is the only reason this loop closes at all.
 
+  WHAT IT SHOWS (2026-07-20): for an EXTRA, the money is the report. The page now
+  renders the priced approval -- who is asking, the scope, the FIXED PRICE, the
+  running total already approved on the job, and a type-your-name-to-sign action.
+  Every value is FROZEN at send (confirmation_fetch returns exactly what was
+  stored): the price shown here is the price signed here. It cannot drift from the
+  binding record, because the record is what it reads.
+
   WHY THIS IS A STATIC FILE IN A STORAGE BUCKET, and not an Edge Function:
   the page is inert. Every value it displays comes from confirmation_fetch(token),
-  which is already granted to anon. There is no server logic to host, so hosting a
-  server would be adding a moving part to run zero code.
+  already granted to anon. There is no server logic to host.
 
-  THE ANON KEY IS PUBLIC BY DESIGN. It is not a secret and never was: it
-  identifies the project, and RLS plus the RPC grants are what actually protect
-  the data. anon can reach exactly two functions and no table.
+  THE ANON KEY IS PUBLIC BY DESIGN. It identifies the project; RLS plus the RPC
+  grants are what protect the data. anon can reach exactly two functions, no table.
 
-  THE TOKEN IS THE CREDENTIAL. Stated plainly rather than dressed up: whoever
-  holds the link can answer. That is the trade REQ-VAL3 makes deliberately, and
-  the bundle's limitations section says so out loud rather than implying more.
+  THE TOKEN IS THE CREDENTIAL. Whoever holds the link can answer. That is the trade
+  REQ-VAL3 makes deliberately, stated plainly rather than dressed up.
 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: light dark; }
+  :root {
+    --ink:#0D0F12; --paper:#FAFAF8; --card:#FFFFFF; --orange:#FF5A00;
+    --steel:#5C6570; --line:#E4E5E1; --approve:#0E8A4C; --caution:#F5B000; --danger:#C6281C;
+    --disp:'Barlow Condensed', 'Arial Narrow', sans-serif;
+    --body:'Barlow', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
-    font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    margin: 0; padding: 24px 18px 48px; max-width: 560px; margin-inline: auto;
-    background: #fff; color: #111;
+    font-family: var(--body); font-size: 17px; line-height: 1.5;
+    margin: 0; padding: 0 0 40px; background: var(--paper); color: var(--ink);
+    max-width: 480px; margin-inline: auto; min-height: 100vh;
   }
-  @media (prefers-color-scheme: dark) { body { background: #0d1117; color: #e6edf3; } }
+  .wrap { padding: 0 16px; }
 
-  .who { font-size: 14px; color: #6a737d; margin-bottom: 4px; }
-  h1 { font-size: 21px; margin: 0 0 18px; line-height: 1.3; }
+  /* Branded header — who is asking + which job. */
+  .brand { display: flex; align-items: center; gap: 12px; padding: 22px 16px 14px; }
+  .logo {
+    width: 46px; height: 46px; border-radius: 12px; background: var(--ink); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--disp); font-weight: 700; font-size: 18px; letter-spacing: .5px; flex: none;
+  }
+  .cn { font-family: var(--disp); font-weight: 700; font-size: 20px; text-transform: uppercase; letter-spacing: .3px; line-height: 1.1; }
+  .cs { font-size: 13.5px; color: var(--steel); margin-top: 2px; }
 
-  /* The frozen text, presented as a quotation of what was sent. Monospace-ish
-     and boxed so it reads as a fixed document, not as app chrome that might
-     change under them. */
   .card {
-    white-space: pre-wrap; background: #f6f8fa; border: 1px solid #d8dee4;
-    border-radius: 12px; padding: 18px; font-size: 17px; line-height: 1.6;
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    padding: 18px; margin-bottom: 12px;
   }
-  @media (prefers-color-scheme: dark) {
-    .card { background: #161b22; border-color: #30363d; }
-  }
+  .kicker { font-family: var(--disp); font-weight: 600; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--orange); }
+  .title { font-family: var(--disp); font-weight: 700; font-size: 26px; line-height: 1.12; text-transform: uppercase; letter-spacing: .3px; margin: 6px 0 0; }
+  .scope { font-size: 16px; color: #26292e; margin-top: 10px; line-height: 1.55; }
 
-  /* Big. Thumb-sized. This may be answered one-handed, outdoors, by someone with
-     reading glasses in their other pocket. */
-  .btns { display: flex; flex-direction: column; gap: 12px; margin-top: 26px; }
+  .price { display: flex; justify-content: space-between; align-items: baseline; }
+  .pl { font-family: var(--disp); font-weight: 600; font-size: 13px; letter-spacing: .13em; text-transform: uppercase; color: var(--steel); }
+  .pv { font-family: var(--disp); font-weight: 700; font-size: 40px; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
+  .clause { font-size: 13.5px; color: var(--steel); margin-top: 8px; line-height: 1.5; }
+  .totals { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+  .trow { display: flex; justify-content: space-between; font-size: 14.5px; padding: 3px 0; color: var(--steel); }
+  .trow b { color: var(--ink); font-family: var(--disp); font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; }
+
+  /* Frozen legal wording, available but not shouting. */
+  .exact { margin-top: 10px; }
+  .exact summary { font-size: 13px; color: var(--steel); cursor: pointer; }
+  .exact .doc { white-space: pre-wrap; background: #F3F4F2; border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 13.5px; line-height: 1.55; margin-top: 8px; color: #26292e; }
+
+  /* Actions. Big, thumb-sized — answered one-handed, outdoors. */
+  .sign { width: 100%; font-family: var(--body); font-size: 17px; padding: 15px 16px; border: 1.5px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); margin-bottom: 10px; }
+  .sign:focus { outline: none; border-color: var(--ink); }
   button {
-    font: inherit; font-weight: 700; font-size: 18px; border: 0; border-radius: 12px;
-    padding: 18px; cursor: pointer; width: 100%;
+    font-family: var(--disp); font-weight: 700; font-size: 20px; letter-spacing: .04em; text-transform: uppercase;
+    border: 0; border-radius: 14px; padding: 17px; cursor: pointer; width: 100%; min-height: 60px;
   }
-  .yes { background: #1a7f37; color: #fff; }
-  .no  { background: transparent; color: #b00; border: 1.5px solid #d0a0a0; }
-  button:disabled { opacity: .45; }
+  .approve { background: var(--approve); color: #fff; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .approve:disabled { opacity: .4; }
+  .ghost { background: none; color: var(--steel); font-size: 16px; margin-top: 6px; }
+  .decline { background: none; color: var(--danger); border: 1.5px solid #E4C4C4; }
+  .recordnote { font-size: 12px; color: var(--steel); text-align: center; margin-top: 12px; line-height: 1.5; }
 
-  .note { color: #6a737d; font-size: 13px; margin-top: 22px; line-height: 1.5; }
-  .done { text-align: center; padding: 30px 0; }
-  .done .mark { font-size: 46px; line-height: 1; }
-  .done h2 { font-size: 20px; margin: 14px 0 6px; }
-  .err { color: #b00; }
-  textarea {
-    width: 100%; font: inherit; font-size: 16px; padding: 12px; border-radius: 10px;
-    border: 1px solid #d8dee4; margin-top: 12px; background: transparent; color: inherit;
-  }
+  textarea { width: 100%; font-family: var(--body); font-size: 16px; padding: 12px; border-radius: 12px; border: 1.5px solid var(--line); background: #fff; color: var(--ink); margin: 10px 0; min-height: 88px; resize: none; }
+
+  /* Legacy plain-confirm fallback (no price). */
+  .plaincard { white-space: pre-wrap; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; font-size: 16.5px; line-height: 1.6; }
+  h1.plain { font-size: 21px; margin: 4px 0 16px; line-height: 1.3; }
+  .who { font-size: 14px; color: var(--steel); margin-bottom: 4px; }
+  .btns { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; }
+  .yes { background: var(--approve); color: #fff; }
+  .no { background: none; color: var(--danger); border: 1.5px solid #E4C4C4; }
+
+  /* Terminal screens. */
+  .done { text-align: center; padding: 46px 22px; }
+  .done .mark { font-size: 52px; line-height: 1; }
+  .done h2 { font-family: var(--disp); font-weight: 700; text-transform: uppercase; letter-spacing: .3px; font-size: 26px; margin: 16px 0 8px; }
+  .done p { color: var(--steel); font-size: 15.5px; line-height: 1.55; margin: 0; }
+  .err { color: var(--danger); }
 </style>
 </head>
 <body>
-<div id="root">Loading…</div>
+<div id="root"><div class="done"><div class="mark">·</div><p>Loading…</p></div></div>
 
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// Injected at deploy time. The anon key is public by design -- see the comment
-// at the top of this file.
+// Injected at deploy time. The anon key is public by design (see the top comment).
 const SUPABASE_URL = '__SUPABASE_URL__';
 const ANON_KEY = '__ANON_KEY__';
 
 const supabase = createClient(SUPABASE_URL, ANON_KEY);
 const root = document.getElementById('root');
-const token = new URLSearchParams(location.search).get('t');
+// The link may arrive either way: ?t=TOKEN (works on any static host with no
+// rewrite) or a pretty /c/TOKEN path (needs a host rewrite). Accept both so the
+// choice of host never silently breaks every link.
+const token = new URLSearchParams(location.search).get('t')
+  || (location.pathname.match(/\/c\/([^/?#]+)/) || [])[1] || null;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-function screen(html) { root.innerHTML = html; }
+// Integer cents -> "$1,850". Money never becomes a float here either.
+const usd = (cents) => {
+  if (cents == null) return '';
+  const s = Math.abs(cents).toString().padStart(3, '0');
+  const whole = s.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return '$' + whole + '.' + s.slice(-2);
+};
+// Initials for the logo tile, from the company name.
+const initials = (name) => String(name || '')
+  .split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '•';
 
+function screen(html) { root.innerHTML = html; }
 function done(mark, title, sub) {
-  // Once they have answered, there is nothing left to do here. No upsell, no
-  // "create an account to see more" -- they did the contractor a favour and they
-  // get to leave.
   screen(`<div class="done"><div class="mark">${mark}</div>
-    <h2>${esc(title)}</h2><p class="note">${esc(sub)}</p></div>`);
+    <h2>${esc(title)}</h2><p>${esc(sub)}</p></div>`);
 }
 
 async function load() {
   if (!token) { done('⚠️', 'This link is incomplete', 'Ask for the link again.'); return; }
 
   const { data, error } = await supabase.rpc('confirmation_fetch', { p_token: token });
-  if (error) {
-    // Never blame the reader for a network they do not control.
-    done('⚠️', 'Could not load this', 'Check your connection and open the link again.');
-    return;
-  }
+  if (error) { done('⚠️', 'Could not load this', 'Check your connection and open the link again.'); return; }
 
-  if (data.status === 'not_found') {
-    done('⚠️', 'This link is not valid', 'It may have been mistyped. Ask for a new one.');
-    return;
-  }
-  if (data.status === 'expired') {
-    done('⏰', 'This link has expired', 'Ask for a new one — nothing is lost.');
-    return;
-  }
+  if (data.status === 'not_found') { done('⚠️', 'This link is not valid', 'It may have been mistyped. Ask for a new one.'); return; }
+  if (data.status === 'expired') { done('⏰', 'This link has expired', 'Ask for a new one — nothing is lost.'); return; }
   if (data.status === 'already_answered') {
     const when = data.answered_at ? new Date(data.answered_at).toLocaleString() : '';
-    // Single-use, and honest about it: their first answer stands, and we show it
-    // rather than quietly letting them answer twice.
-    done(data.answered_action === 'confirmed' ? '✅' : '✋',
-      `You already ${data.answered_action === 'confirmed' ? 'confirmed' : 'declined'} this`,
+    const who = data.signed_name ? ` by ${data.signed_name}` : '';
+    const approved = data.answered_action === 'confirmed';
+    done(approved ? '✅' : '✋',
+      approved ? `Already approved${who ? ' — signed' + who.slice(3) : ''}` : 'Already answered',
       when ? `Answered ${when}. Your answer stands.` : 'Your answer stands.');
     return;
   }
-
-  render(data);
+  // A price present means this is a priced approval; otherwise the legacy confirm.
+  (data.amount_cents != null) ? renderPriced(data) : renderPlain(data);
 }
 
-function render(d) {
+function renderPriced(d) {
+  const company = d.company_name || 'Your contractor';
+  const priced = usd(d.amount_cents);
+  const priorApproved = (d.approved_running_cents != null && d.approved_running_cents > 0)
+    ? `<div class="trow"><span>Extras you've approved on this job</span><span class="money">${esc(usd(d.approved_running_cents))}</span></div>` : '';
+  const nte = (d.nte_cents != null)
+    ? `<div class="clause">Not to exceed ${esc(usd(d.nte_cents))}.</div>` : '';
+
+  screen(`
+    <div class="brand">
+      <div class="logo">${esc(initials(company))}</div>
+      <div>
+        <div class="cn">${esc(company)}</div>
+        <div class="cs">${esc(d.job_label || '')}</div>
+      </div>
+    </div>
+    <div class="wrap">
+      <div class="card">
+        <div class="kicker">Approval requested</div>
+        <div class="title">${esc(d.scope_title || 'Extra work')}</div>
+        <div class="scope">This is an extra, outside the original scope. Please review the price and approve before the work goes ahead.</div>
+      </div>
+
+      <div class="card">
+        <div class="price"><span class="pl">Fixed price</span><span class="pv">${esc(priced)}</span></div>
+        <div class="clause">This work is outside the contracted scope and is billed as an extra. Nothing proceeds until you approve.</div>
+        ${nte}
+        <div class="totals">
+          <div class="trow"><span>This request</span><b>${esc(priced)}</b></div>
+          ${priorApproved}
+        </div>
+        <details class="exact">
+          <summary>See the exact wording</summary>
+          <div class="doc">${esc(d.shown_content)}</div>
+        </details>
+      </div>
+
+      <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
+      <button class="approve" id="approve" disabled>✓ Approve — ${esc(priced)}</button>
+      <button class="ghost" id="ask">Ask a question instead</button>
+      <p class="recordnote">Your response, your name, and the date &amp; time become part of the project record. No account needed.</p>
+    </div>`);
+
+  const nameEl = document.getElementById('name');
+  const approveEl = document.getElementById('approve');
+  nameEl.addEventListener('input', () => { approveEl.disabled = nameEl.value.trim().length < 2; });
+  approveEl.onclick = () => answer('confirmed', null, nameEl.value.trim());
+  document.getElementById('ask').onclick = () => askQuestion(d, false);
+}
+
+// Decline / question path — optional reason. Demanding an explanation to say "not
+// yet" is how you get no answer at all, so the note is optional.
+function askQuestion(d, priced) {
+  screen(`
+    <div class="wrap" style="padding-top:24px">
+      <h1 class="plain">What's your question?</h1>
+      <textarea id="note" placeholder="Optional — what would you like to ask or change?"></textarea>
+      <div class="btns">
+        <button class="decline" id="send">Send to ${esc(d.company_name || 'the contractor')}</button>
+        <button class="ghost" id="back">Back</button>
+      </div>
+    </div>`);
+  document.getElementById('send').onclick = () =>
+    answer('declined', document.getElementById('note').value, null);
+  document.getElementById('back').onclick = () => (d.amount_cents != null ? renderPriced(d) : renderPlain(d));
+}
+
+// Legacy no-price confirmation (a decision, no cost change). Kept working.
+function renderPlain(d) {
   const verb = d.kind === 'confirm' ? 'confirm' : 'acknowledge';
   screen(`
-    <div class="who">For ${esc(d.counterparty)}</div>
-    <h1>Please read this and ${verb} it.</h1>
-    <div class="card">${esc(d.shown_content)}</div>
-    <div class="btns">
-      <button class="yes" id="yes">Yes — that's right</button>
-      <button class="no" id="no">No — that's not right</button>
-    </div>
-    <p class="note">
-      Your answer is recorded with the date and time, and the contractor is told.
-      You do not need an account. Anyone with this link can answer it.
-    </p>`);
-
-  document.getElementById('yes').onclick = () => answer('confirmed');
-  document.getElementById('no').onclick = () => {
-    // A decline without a reason starts an argument; a decline WITH one starts a
-    // conversation. Optional, because demanding an explanation to say "no" is how
-    // you get no answer at all.
-    screen(`
-      <h1>What's wrong with it?</h1>
-      <div class="card">${esc(d.shown_content)}</div>
-      <textarea id="note" rows="3" placeholder="Optional — what should it say instead?"></textarea>
+    <div class="wrap" style="padding-top:24px">
+      <div class="who">For ${esc(d.counterparty)}</div>
+      <h1 class="plain">Please read this and ${verb} it.</h1>
+      <div class="plaincard">${esc(d.shown_content)}</div>
       <div class="btns">
-        <button class="no" id="send">Send my answer</button>
-        <button class="yes" id="back" style="background:#6a737d">Back</button>
-      </div>`);
-    document.getElementById('send').onclick = () =>
-      answer('declined', document.getElementById('note').value);
-    document.getElementById('back').onclick = () => render(d);
-  };
+        <button class="yes" id="yes">Yes — that's right</button>
+        <button class="no" id="no">No — that's not right</button>
+      </div>
+      <p class="recordnote">Your answer is recorded with the date and time, and the contractor is told. No account needed.</p>
+    </div>`);
+  document.getElementById('yes').onclick = () => answer('confirmed', null, null);
+  document.getElementById('no').onclick = () => askQuestion(d, false);
 }
 
-async function answer(action, note) {
+async function answer(action, note, name) {
   document.querySelectorAll('button').forEach((b) => (b.disabled = true));
   const { data, error } = await supabase.rpc('confirmation_respond', {
     p_token: token, p_action: action, p_note: note || null,
-    // An identity SIGNAL, not identity proof. Named honestly in the schema and
-    // named honestly here.
-    p_user_agent: navigator.userAgent,
+    p_user_agent: navigator.userAgent,   // an identity SIGNAL, not proof.
+    p_signed_name: name || null,
   });
 
   if (error) {
-    // The answer did NOT land. Say so, and let them retry -- a silent failure here
-    // means the contractor waits for a reply that is never coming.
     screen(`<div class="done"><div class="mark err">⚠️</div>
       <h2>That didn't send</h2>
-      <p class="note">Nothing was recorded. Please tap again.</p>
-      <div class="btns"><button class="yes" onclick="location.reload()">Try again</button></div>
-      </div>`);
+      <p>Nothing was recorded. Please tap again.</p>
+      <div class="btns"><button class="yes" onclick="location.reload()">Try again</button></div></div>`);
     return;
   }
-
-  if (data.status === 'already_answered') {
-    done('✅', 'Already answered', 'Your first answer stands.');
-    return;
-  }
+  if (data.status === 'already_answered') { done('✅', 'Already answered', 'Your first answer stands.'); return; }
   done(action === 'confirmed' ? '✅' : '✋',
-    action === 'confirmed' ? 'Thank you — confirmed' : 'Thank you — sent',
+    action === 'confirmed' ? (name ? `Approved — signed ${name}` : 'Thank you — confirmed') : 'Thank you — sent',
     'The contractor has your answer. You can close this page.');
 }
 
