@@ -10,7 +10,7 @@
  * render complete without it, so its absence is a specified state, not a hole.
  */
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import type { ExtraRecord, RecordPerson } from '../record';
 import { C, F, T, chipStyle, display, label, money as moneyStyle } from './theme';
 
@@ -111,19 +111,36 @@ export function RecordScreen(props: {
           <Text style={[T.body, { marginTop: 6 }]}>{rec.description}</Text>
         </View>
 
-        {/* ---- 5. photos (only when evidence exists) ---- */}
+        {/* ---- 5. evidence: the real pictures ---- */}
         {rec.photos.length > 0 && (
           <View style={T.card}>
             <Text style={label}>Evidence · {rec.photos.length}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
               {rec.photos.map((p) => (
-                <View key={p.captureId} style={{
-                  width: 74, height: 74, borderRadius: 10, backgroundColor: '#D8D2C6',
-                  alignItems: 'center', justifyContent: 'flex-end', padding: 4,
-                }}>
-                  <Text style={{ fontFamily: F.dispSemi, fontSize: 9, color: C.ink }}>
-                    {p.modality.toUpperCase()}
-                  </Text>
+                <View key={p.captureId}>
+                  {/* A video's first frame is not decodable by <Image>, so only a photo
+                      renders as one; a video keeps a labelled tile rather than a broken
+                      image box. */}
+                  {p.modality === 'photo' ? (
+                    <Image
+                      source={{ uri: p.uri }}
+                      style={{
+                        width: 86, height: 86, borderRadius: 10,
+                        backgroundColor: '#D8D2C6', borderWidth: 1, borderColor: C.line,
+                      }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={{
+                      width: 86, height: 86, borderRadius: 10, backgroundColor: C.ink,
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Text style={{ fontFamily: F.dispSemi, fontSize: 10, color: '#fff' }}>
+                        {p.modality.toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={{ ...T.bodySteel, fontSize: 10, marginTop: 3 }}>{p.at}</Text>
                 </View>
               ))}
             </View>

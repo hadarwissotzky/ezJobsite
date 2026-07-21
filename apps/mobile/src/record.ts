@@ -20,6 +20,7 @@
  * slice of R6, not something to fake here.
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import * as FS from 'expo-file-system/legacy';
 import { createdLabel, money } from './changeorder';
 
 export type RecordPerson = {
@@ -34,7 +35,13 @@ export type RecordPerson = {
 
 export type RecordEvent = { at: string; what: string; hot?: boolean };
 
-export type RecordPhoto = { captureId: string; modality: string; at: string };
+export type RecordPhoto = {
+  captureId: string;
+  modality: string;
+  at: string;
+  /** On-device file URI, ready for <Image source={{uri}}>. */
+  uri: string;
+};
 
 export type ExtraRecord = {
   id: string;
@@ -124,19 +131,41 @@ export async function extraRecord(
        FROM decision_version WHERE decision_id = ? ORDER BY created_at_ms`,
     [co.decision_id]);
 
-  // Captures referenced by that chain — the evidence actually attached to this item.
+  // Evidence attached to this item.
+  //
+  // The linkage is NOT decision_version.capture_id alone. A fused capture session
+  // writes each photo as its OWN capture_commit row and ties them to the narration
+  // through `capture_pair` (pair_id, role='photo'|'voice'). So the chain's capture is
+  // typically the VOICE one, and querying only it returns no pictures — which is
+  // exactly why the record showed none. Walk the pair to reach the siblings.
   const captureIds = versions.map((v) => v.capture_id).filter((x): x is string => !!x);
   let photos: RecordPhoto[] = [];
   if (captureIds.length) {
     const marks = captureIds.map(() => '?').join(',');
-    const caps = await db.getAll<{ capture_id: string; modality: string | null; captured_at_ms: number }>(
-      `SELECT capture_id, modality, captured_at_ms FROM capture_commit
-        WHERE capture_id IN (${marks}) ORDER BY captured_at_ms`, captureIds);
+    const caps = await db.getAll<{
+      capture_id: string; modality: string | null; captured_at_ms: number; media_relpath: string;
+    }>(
+      `SELECT DISTINCT cc.capture_id, cc.modality, cc.captured_at_ms, cc.media_relpath
+         FROM capture_commit cc
+        WHERE cc.capture_id IN (${marks})
+           OR cc.capture_id IN (
+                SELECT p2.capture_id FROM capture_pair p2
+                 WHERE p2.pair_id IN (
+                   SELECT p1.pair_id FROM capture_pair p1 WHERE p1.capture_id IN (${marks})
+                 )
+              )
+        ORDER BY cc.captured_at_ms`,
+      [...captureIds, ...captureIds]);
     photos = caps
       .filter((c) => c.modality === 'photo' || c.modality === 'video')
       .map((c) => ({
         captureId: c.capture_id, modality: c.modality ?? 'photo',
         at: createdLabel(c.captured_at_ms),
+        // The same path readCapture() resolves. We deliberately do NOT call
+        // readCapture() here: it reads the whole file to recompute a sha256, which is
+        // an integrity check, not a render path — doing it per tile would stall the
+        // screen on a job with a dozen photos.
+        uri: FS.documentDirectory + c.media_relpath,
       }));
   }
 
