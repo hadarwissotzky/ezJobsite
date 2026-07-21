@@ -29,6 +29,8 @@ import { ensurePairSchema, linkPair } from './src/pair';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
+import { RecordScreen } from './src/ui/recordscreen';
+import { extraRecord, type ExtraRecord } from './src/record';
 import { useFonts } from 'expo-font';
 import { Barlow_400Regular, Barlow_500Medium, Barlow_600SemiBold, Barlow_700Bold } from '@expo-google-fonts/barlow';
 import { BarlowCondensed_600SemiBold, BarlowCondensed_700Bold } from '@expo-google-fonts/barlow-condensed';
@@ -185,6 +187,10 @@ export default function App() {
     amountText: string; confidence: 'high'|'low'|'none'; nteText: string;
   }>(null);
   const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
+  // PRD R6b: the extra record. Held as assembled data, not an id, so the screen is a
+  // pure render of a snapshot read once — re-reading mid-scroll is how a record starts
+  // disagreeing with itself.
+  const [record, setRecord] = React.useState<ExtraRecord | null>(null);
   const [dsync, setDsync] = React.useState<any>(null);
   const [bundling, setBundling] = React.useState<string | null>(null);
   const [cellOn, setCellOn] = React.useState(false);
@@ -1565,6 +1571,23 @@ export default function App() {
     );
   }
 
+  // PRD R6b: the extra record. Overlays everything, like review and capture.
+  if (record) {
+    return (
+      <RecordScreen
+        rec={record}
+        onBack={() => setRecord(null)}
+        // R1: capture stays one tap away on secondary screens. Leaving the record to
+        // capture is the point — a new extra should never require going home first.
+        onCapture={() => {
+          if (!terms) { openTerms(); return; }
+          setRecord(null);
+          setShowCapture(true);
+        }}
+      />
+    );
+  }
+
   // REQ-CAP-FUSED: the fused photo+voice capture screen overlays everything when open.
   if (showCapture) {
     return (
@@ -2245,7 +2268,17 @@ export default function App() {
           {coRows.map((c) => {
             const chip = coChip(c.status);
             return (
-              <View key={c.id} style={s.coCard}>
+              // R6b: the row is the way into the record. The whole card is the target —
+              // a gloved thumb does not find a chevron.
+              <Pressable
+                key={c.id}
+                style={s.coCard}
+                accessibilityLabel={`Open record: ${c.scope}`}
+                onPress={async () => {
+                  const prof = await getProfile(db);
+                  const r = await extraRecord(db, c.id, prof?.name ?? null);
+                  if (r) setRecord(r);
+                }}>
                 <View style={s.coR1}>
                   <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>
                   <View style={[s.chipBase, chip.bg]}>
@@ -2270,7 +2303,7 @@ export default function App() {
                     an order you can't see is an order the user has to take on faith. */}
                 <Text style={s.coCreated}>Created {c.created}</Text>
                 {!c.synced && <Text style={s.coOnPhone}>On this phone · not backed up yet</Text>}
-              </View>
+              </Pressable>
             );
           })}
         </>
