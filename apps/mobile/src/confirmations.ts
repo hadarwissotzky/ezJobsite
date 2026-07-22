@@ -41,15 +41,30 @@ function usd(cents: number): string {
 export function renderCard(o: {
   kind: SendKind; subject: string; value: string; directedBy: string;
   projectName: string; whenMs: number; amountCents?: number | null;
+  nteCents?: number | null;
   companyName?: string | null;
 }): string {
   const when = new Date(o.whenMs).toLocaleString();
   const priced = typeof o.amountCents === 'number';
   const asker = o.companyName ? `${o.companyName}\n` : '';
   if (priced) {
+    // A NOT-TO-EXCEED IS A DIFFERENT CONTRACTUAL INSTRUMENT, AND THIS TEXT IS THE
+    // INSTRUMENT. shown_content is what the client reads and signs, frozen at send.
+    // This function did not accept nteCents at all, so a capped T&M extra was shown
+    // as a flat "Price: $X": the cap and its clause vanished from the document the
+    // client signed, and their copy then disagreed with what the contractor thought
+    // was agreed -- the exact dispute this product exists to prevent.
+    // PRD R3: NTE is "cap amount + mandatory auto-inserted line". The line is not
+    // decoration; it is the term that stops the cap being read as the final price.
+    const nte = typeof o.nteCents === 'number' ? o.nteCents : null;
+    const priceBlock = nte === null
+      ? `Price: ${usd(o.amountCents as number)}\n`
+      : `Price: ${usd(o.amountCents as number)} (time & materials)\n` +
+        `Not to exceed: ${usd(nte)}\n` +
+        `Work will not exceed ${usd(nte)} without a new approval.\n`;
     return `${asker}Approval requested — an extra outside the original scope.\n\n` +
       `${o.value}\n\n` +
-      `Price: ${usd(o.amountCents as number)}\n` +
+      priceBlock +
       `Directed by: ${o.directedBy}\nJob: ${o.projectName}\nDate: ${when}\n\n` +
       `Nothing proceeds until you approve.`;
   }

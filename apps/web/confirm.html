@@ -175,8 +175,14 @@ function renderPriced(d) {
   const priced = usd(d.amount_cents);
   const priorApproved = (d.approved_running_cents != null && d.approved_running_cents > 0)
     ? `<div class="trow"><span>Extras you've approved on this job</span><span class="money">${esc(usd(d.approved_running_cents))}</span></div>` : '';
-  const nte = (d.nte_cents != null)
-    ? `<div class="clause">Not to exceed ${esc(usd(d.nte_cents))}.</div>` : '';
+  // PRD R3: a not-to-exceed is a cap PLUS a mandatory clause, and it is a different
+  // instrument from a fixed price. Calling it "Fixed price" (as this page did
+  // unconditionally) misrepresents what the client is signing, and "Not to exceed $X."
+  // alone omits the term that stops the cap being read as the final number.
+  const isNte = d.nte_cents != null;
+  const nte = isNte
+    ? `<div class="clause"><b>Not to exceed ${esc(usd(d.nte_cents))}.</b>
+         Work will not exceed ${esc(usd(d.nte_cents))} without a new approval.</div>` : '';
 
   screen(`
     <div class="brand">
@@ -194,11 +200,11 @@ function renderPriced(d) {
       </div>
 
       <div class="card">
-        <div class="price"><span class="pl">Fixed price</span><span class="pv">${esc(priced)}</span></div>
+        <div class="price"><span class="pl">${isNte ? 'Time &amp; materials' : 'Fixed price'}</span><span class="pv">${esc(priced)}</span></div>
         <div class="clause">This work is outside the contracted scope and is billed as an extra. Nothing proceeds until you approve.</div>
         ${nte}
         <div class="totals">
-          <div class="trow"><span>This request</span><b>${esc(priced)}</b></div>
+          <div class="trow"><span>This request</span><b>${esc(priced)}${isNte ? ` <span style="font-weight:400">(max ${esc(usd(d.nte_cents))})</span>` : ''}</b></div>
           ${priorApproved}
         </div>
         <details class="exact">
@@ -208,7 +214,7 @@ function renderPriced(d) {
       </div>
 
       <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
-      <button class="approve" id="approve" disabled>✓ Approve — ${esc(priced)}</button>
+      <button class="approve" id="approve" disabled>✓ Approve${isNte ? ` — up to ${esc(usd(d.nte_cents))}` : ` — ${esc(priced)}`}</button>
       <button class="ghost" id="ask">Ask a question instead</button>
       <button class="ghost" id="decline">Decline — do not proceed</button>
       <p class="recordnote">Your response, your name, and the date &amp; time become part of the project record. No account needed.</p>

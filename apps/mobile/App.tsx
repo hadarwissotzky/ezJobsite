@@ -2215,7 +2215,12 @@ export default function App() {
             directedBy: c.who_directed || 'Owner',
             counterparty: c.who_directed || 'Owner',
             channel: 'link', whenMs: Date.now(), linkBase: CONFIRM_BASE,
-            amountCents: c.amount_cents, companyName: prof?.company || prof?.name || null,
+            amountCents: c.amount_cents,
+            // The cap travels with the price or the client signs the wrong
+            // instrument: renderCard bakes the not-to-exceed clause into the frozen
+            // shown_content, and the approval page renders it, only if this is here.
+            nteCents: c.nte_cents,
+            companyName: prof?.company || prof?.name || null,
             approvedRunningCents: approvedCents, changeOrderId: c.id,
           });
           if (r.ok) {

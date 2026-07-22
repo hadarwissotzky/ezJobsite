@@ -344,6 +344,11 @@ export type LedgerRow = {
   // Needed to send a priced approval: the confirmation is keyed to the decision,
   // and the report names who directed the extra.
   decision_id: string; who_directed: string;
+  // Raw cap alongside the formatted `nte`, for the same reason as amount_cents:
+  // the SENDER must pass the number, and it previously exposed only the formatted
+  // string, so sendPricedApproval had nothing to pass and every not-to-exceed went
+  // out as a flat fixed price.
+  nte_cents: number | null;
   // When the CHANGE ORDER was created, which is the moment the price was confirmed
   // (see createChangeOrder: created_at_ms = Date.now() at insert). It is NOT the
   // capture moment -- an earlier version of this comment claimed it was, and the
@@ -397,6 +402,7 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
       id: r.id, decision_id: r.decision_id, who_directed: r.who_directed,
       scope: r.scope, amount: money(r.amount_cents),
       nte: r.nte_cents == null ? null : money(r.nte_cents),
+      nte_cents: r.nte_cents,
       status: r.status, is_mini: r.is_mini, signed_by: r.signed_by,
       approved_running: money(running),
       amount_cents: r.amount_cents,
