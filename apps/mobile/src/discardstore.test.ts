@@ -151,3 +151,31 @@ test('an unknown capture is refused, not silently ok', async () => {
   assert.equal(r.ok, false);
   assert.equal((r as any).reason, 'not_found');
 });
+
+// A WALKTHROUGH THAT NEVER BECAME AN EXTRA. Photos and a recording with no
+// change_order at all — hadar's "walkthough that i cannt delete". It has no
+// ledger row, so nothing in the extras list can remove it; the gallery is the
+// only place it is reachable. The guard must allow it: with no extra there is
+// nothing sent, and nothing is owed to anyone.
+test('a walkthrough with no extra is deletable', async () => {
+  const { raw, db } = fresh();
+  const now = Date.now();
+  for (const id of ['wV', 'wP1', 'wP2']) {
+    raw.prepare(
+      `INSERT INTO capture_commit (capture_id, attachment_id, mutation_id, project_id,
+         owner_id, media_relpath, media_sha256, media_bytes, media_mime_type, modality,
+         captured_at_ms, committed_at_ms, request_sha256)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(id, `att-${id}`, `mut-${id}`, 'p1', 'u1', `m/${id}.jpg`,
+          'e'.repeat(64), 20, 'image/jpeg', 'photo', now, now, 'f'.repeat(64));
+  }
+  raw.exec(`INSERT INTO capture_pair (pair_id, capture_id, role, at_ms)
+            VALUES ('w1','wV','voice',1), ('w1','wP1','photo',2), ('w1','wP2','photo',3)`);
+  assert.equal(rows(raw, `SELECT id FROM change_order`).length, 0, 'no extra exists');
+
+  const r = await discardCapture(db, 'wP1');
+
+  assert.equal(r.ok, true, `expected ok, got ${JSON.stringify(r)}`);
+  assert.equal(r.deleted, 3, 'the whole walkthrough goes, not just the frame tapped');
+  assert.equal(rows(raw, `SELECT capture_id FROM capture_discarded`).length, 3);
+});

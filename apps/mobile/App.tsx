@@ -317,7 +317,18 @@ const openRecord = async (changeOrderId: string) => {
   const r = await extraRecord(db, changeOrderId);
   if (r) { recordIdRef.current = changeOrderId; setRecord(r); }
   setRecordSummary(await decisionSummaryFor(db, changeOrderId));
-  if (!r) return;
+  // A SILENT NO-OP WAS THE BUG. extraRecord returns null when the change order
+  // row is gone — deleted on another device, swept by a cleanup, or never
+  // hydrated — and this simply returned. The tap did nothing at all, leaving the
+  // HOME screen on display, which is why hadar reported opening an extra and
+  // getting "a snap+talk button": he was looking at the screen he never left.
+  //
+  // Nothing that swallows a tap is acceptable. Say what happened.
+  if (!r) {
+    setFiled('That extra is no longer here — it may have been deleted.');
+    await refresh();
+    return;
+  }
   try {
     const w = await withEventLog(db, connector.client, r);
     setRecord(w); setApproval(w.approval);
@@ -1545,6 +1556,31 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <Text style={s.backT}>‹ {T('common.close')}</Text>
           </Pressable>
           <Text style={s.jobBarS}>{viewer.index + 1} / {saved.length}</Text>
+          {/* DELETE FROM THE GALLERY. A walkthrough that never became an extra
+              is not in the ledger, so it had no delete anywhere at all — hadar:
+              "i have walkthough that i cannt delete". This is the one screen
+              where every capture is reachable, extra or not.
+
+              It opens the same confirmation as everything else, and
+              discardCapture takes the whole pair group, so deleting one frame of
+              a walkthrough takes the recording and its photos together rather
+              than leaving orphans. */}
+          <Pressable
+            onPress={() => {
+              const cap = saved[viewer.index];
+              if (!cap) return;
+              setViewer(null);
+              setDiscard({
+                co: { id: `co-${cap.capture_id}`, scope: T('discard.thisRecording') } as any,
+                plan: { allowed: true, deleteCaptures: [cap.capture_id],
+                        keepCaptures: [], needsServer: [] },
+                captureId: cap.capture_id,
+              });
+            }}
+            hitSlop={10}
+            accessibilityLabel={T('discard.action')}>
+            <Text style={{ color: '#cf222e', fontSize: 15 }}>{T('discard.action')}</Text>
+          </Pressable>
         </View>
 
         {/* Swipe = paging. Photos pinch-zoom via a nested zoomable ScrollView
