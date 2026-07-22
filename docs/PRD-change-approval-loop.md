@@ -174,7 +174,7 @@ NOT BUILT, because nothing called it. It has since been wired.
 | R5  | PARTIAL | Link, three outcomes and the question path work. **The app never reads `confirmation_question`** — a client question is stored and then invisible forever |
 | R5b | BUILT | Thread, reply, revision lineage, "In Discussion". Push wired as a LOCAL notification: a client question fires a banner and the tap opens that extra with the reply box focused. Cold-start taps included |
 | R5c | BUILT | Type is contractor-set; inference from narration still needs real captures (open (a)) |
-| R6  | PARTIAL | **Open/view events are not tracked at all.** `src/timeline.ts` — the natural backbone — is 192 lines with zero callers |
+| R6  | BUILT, BLOCKED ON `366` | Open tracking is wired end to end — `confirm.html` calls `confirmation_opened`, `eventlog.ts:141` calls `change_order_timeline`, events merge into the record's history, and `RecordApproval` renders "opened 3 times · no answer yet". Nothing is logged in production only because `366` is unapplied; `hydrateEventLog` is best-effort and swallows the PGRST202. The old line here said "not tracked at all", which named the symptom and got the cause wrong |
 | R6b | BUILT | Actor facts are written at the moment of the act; Decisions render "No cost change". Needs `306` applied |
 | R6c | BUILT | Summary card renders above the history; loaded alongside the record so it can never block it |
 | R7  | BUILT | `discussing` derived, `superseded` reachable via Revise. Needs `307` applied |

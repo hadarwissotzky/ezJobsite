@@ -378,6 +378,19 @@ console.log('\nverifying…\n');
     ['R8  push tap opens extra',   'parseThreadLink',         'App.tsx'],
     ['R8  push permission ask',    'requestNotifyPermission', 'App.tsx'],
     ['R8  push plan',              'planNotifications',       'src/notifystore.ts'],
+    // R6's open tracking is a five-link chain and the middle links are the ones
+    // that rot silently: the fetch, the merge, and the panel that shows the
+    // "opened 3 times, no answer" signal the PRD calls actionable. The status
+    // table claimed for weeks that opens were "not tracked at all" while all
+    // three were present and only the migration was missing.
+    // NOT the RPC name: `change_order_timeline` is a STRING argument to
+    // supabase.rpc(), and this check matches CALLS (`sym(` or `<Sym`). Claiming
+    // it here failed against correct code — the fourth time in this repo a red
+    // check was the thing at fault. The RPC's existence is already covered by
+    // `rpc callers`; what belongs here is the function that performs the fetch.
+    ['R6  timeline fetched',       'hydrateEventLog',         'src/eventlog.ts'],
+    ['R6  open signal computed',   'openSignal',              'src/eventlog.ts'],
+    ['R6  open signal shown',      'RecordApproval',          'src/ui/recordscreen.tsx'],
   ];
   const broken = [];
   for (const [label, sym, where] of CLAIMS) {
