@@ -62,7 +62,8 @@ import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisio
 import { sendForConfirmation } from './src/confirmations';
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine,
-         money, parseMoney, validateLines, type LineItem, type LedgerRow } from './src/changeorder';
+         markLocalSent, money, parseMoney, validateLines,
+         type LineItem, type LedgerRow } from './src/changeorder';
 import { issueOtp, newOtpCode, renderApproval, signApproval, verifyOtp } from './src/signing';
 
 export const db = new PowerSyncDatabase({
@@ -2217,8 +2218,15 @@ export default function App() {
             amountCents: c.amount_cents, companyName: prof?.company || prof?.name || null,
             approvedRunningCents: approvedCents, changeOrderId: c.id,
           });
-          if (r.ok) setSentLink({ url: r.url, shown: r.shownContent });
-          else setUi({ k: 'refused', why: r.reason });
+          if (r.ok) {
+            // The link is out, so the row says so immediately. The server marks it
+            // sent as well (230_close_the_loop) and stays the authority; this is
+            // here so the ledger does not keep offering "Send for approval →" for
+            // the thing he just watched himself send.
+            await markLocalSent(db, c.id);
+            setSentLink({ url: r.url, shown: r.shownContent });
+            await refresh();
+          } else setUi({ k: 'refused', why: r.reason });
         };
         return (
         <>

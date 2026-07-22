@@ -420,6 +420,31 @@ export async function applyLocalApproval(
 }
 
 /**
+ * Mark a change order sent, locally, the moment its link goes out.
+ *
+ * The server does this too (`confirmation_request_marks_sent`, 230_close_the_loop),
+ * and that remains the authority. This exists because the contractor is holding the
+ * phone: without it the row he just sent still reads "Send for approval →" until the
+ * next hydrate, so the app looks like it dropped the thing he watched it do.
+ *
+ * `status = 'draft'` in the WHERE is the same rule the server trigger uses, for the
+ * same reason: never walk a terminal state backwards. If the client somehow answered
+ * before this ran, the answer wins and this is a no-op.
+ *
+ * Returns whether a row actually moved, so the caller never reports a transition
+ * that did not happen.
+ */
+export async function markLocalSent(
+  db: AbstractPowerSyncDatabase, coId: string
+): Promise<boolean> {
+  const r = await db.execute(
+    `UPDATE change_order SET status = 'sent' WHERE id = ? AND status = 'draft'`,
+    [coId]
+  );
+  return !!r.rowsAffected;
+}
+
+/**
  * Pull change orders the device does not have. Needed for three real cases, not
  * just migration: a reinstall, a second device, and change orders authored before
  * the device became the author.
