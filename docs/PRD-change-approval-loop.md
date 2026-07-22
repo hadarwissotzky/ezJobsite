@@ -757,3 +757,9 @@ contractor dashboard; the retention/marketing number.
   started at beta start.
 - **Phasing rule:** nothing from P1 starts until G1, G2, G5 are green with design partners.
   The loop must be boringly reliable before templates and decision approvals.
+- **How to tell:** `./scripts/gate-metrics.sh` (read-only) computes all three from
+  production data and prints GREEN / RED / INSUFFICIENT per gate. Until it existed the
+  rule could not be evaluated, which made it a wall rather than a gate — P1 could never
+  have started, not because the loop was unreliable but because nobody could say whether
+  it was. G5 additionally needs `366` applied; it reports UNMEASURABLE until then rather
+  than dividing by zero and claiming 100%.
