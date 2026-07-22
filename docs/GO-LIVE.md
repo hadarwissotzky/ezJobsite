@@ -253,6 +253,17 @@ detect it. I would not apply it without a microphone and someone listening to th
 result. Wiring it blind trades a known failure for an invisible one.
 *Needs: a device with a mic, ~1 hour, and a person who plays the audio back.*
 
+I TESTED THAT PREMISE RATHER THAN ASSERTING IT AGAIN, and it cost me. I added a probe
+to `loopcheck` calling `requestRecordingPermissionsAsync`, to find out whether a
+mic-less simulator could still record something bankable. It HUNG — iOS raises a
+permission dialog, nothing here can tap it, and the whole check stopped returning, so
+the probe silently broke the other eight steps instead of answering.
+
+So the answer is confirmed the expensive way: recording cannot be reached on this
+machine without someone touching the screen. The probe is removed and the reason is
+in `src/loopcheck.ts` where the next person will look. A check that can HANG is worse
+than one that is absent — absent is visible.
+
 **R2 — the price gate is VERIFIED ON DEVICE `[2026-07-22]`.** I had R2 down as
 "blocked, needs an STT key". The key fills the transcript cache; the PREFILL only
 reads it. Seeding one transcript row exercises the whole path, and `loopcheck` step 8

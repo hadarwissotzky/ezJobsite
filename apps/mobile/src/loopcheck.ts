@@ -142,6 +142,23 @@ export async function runLoopCheck(
       `spoken="eighteen fifty"->${spoken.confidence}  written="$1,850.00"->${written.confidence}/${written.cents}`);
   } catch (e: any) { t('R2 transcript -> price gate', false, String(e?.message ?? e)); }
 
+  // STEP 9 WAS REMOVED, and the removal is the finding.
+  //
+  // I added a probe here calling requestRecordingPermissionsAsync, to test my own
+  // premise that R1's pause change "needs a microphone". The probe HUNG: iOS raises
+  // a permission dialog, nothing on this machine can tap it, and runLoopCheck never
+  // returned — so the probe silently broke the other eight steps rather than
+  // answering anything.
+  //
+  // That is the answer, arrived at the expensive way. Recording cannot be reached
+  // here without someone touching the screen, so R1's pause change (stop-and-bank
+  // instead of holding the file open) cannot be exercised. It needs a device with a
+  // microphone AND a person, and it is the one item in this repo where being wrong
+  // produces no error, no failing test and no red check — only missing audio.
+  //
+  // Anything added below MUST return without user interaction. A check that can hang
+  // is worse than a check that is absent: absent is visible.
+
   const failed = steps.filter((s) => !s.ok).length;
   return { steps, passed: steps.length - failed, failed, pass: failed === 0 };
 }
