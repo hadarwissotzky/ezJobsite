@@ -23,7 +23,7 @@
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { isComplete, pendingSteps } from './steps.ts';
-import { transcribe, type Transcript } from './transcribe.ts';
+import { hasSttKey, transcribe, type Transcript } from './transcribe.ts';
 
 export type Job = {
   id: string; capture_id: string; owner_id: string; project_id: string;
@@ -45,7 +45,30 @@ export async function runStep(
   sb: SupabaseClient, job: Job, step: string
 ): Promise<StepOutcome> {
   if (step === 'transcribe') {
-    const t = await transcribe(job.capture_id);
+    if (!hasSttKey()) return { ok: false, reason: 'needs_api_key' };
+    // `capture.payload` holds the storage object key (060 inserts p_object_key
+    // into it). The bucket is 'captures', matching uploader.ts.
+    const { data: cap, error: capErr } = await sb
+      .from('capture').select('payload, media_mime_type').eq('id', job.capture_id).single();
+    if (capErr || !cap?.payload) {
+      return { ok: false, reason: 'needs_connection', error: capErr?.message ?? 'no payload key' };
+    }
+    const dl = await sb.storage.from('captures').download(cap.payload);
+    if (dl.error || !dl.data) {
+      return { ok: false, reason: 'needs_connection', error: dl.error?.message ?? 'no audio' };
+    }
+    // A provider failure PARKS the job, it does not throw. A 401 from a wrong
+    // key thrown out of here would leave the job 'running' until its lease
+    // expired, retry five times, and never once appear in processing_backlog as
+    // something a person could fix. needs_api_key with the provider's own words
+    // attached is REQ-PROC6 working: "what is waiting, and why".
+    let t: Transcript | null;
+    try {
+      t = await transcribe(await dl.data.arrayBuffer(),
+                           cap.media_mime_type ?? 'audio/m4a');
+    } catch (e: any) {
+      return { ok: false, reason: 'needs_api_key', error: String(e?.message ?? e).slice(0, 400) };
+    }
     if (t === null) return { ok: false, reason: 'needs_api_key' };
     return writeTranscript(sb, job, t);
   }

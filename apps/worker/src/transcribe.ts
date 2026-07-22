@@ -20,6 +20,8 @@
  * lives in a worker and not in the app.
  */
 
+import { readDeepgram } from './deepgram.ts';
+
 export type Transcript = {
   text: string;
   /** REQ-PROC5: the SOURCE language, detected rather than assumed. */
@@ -30,23 +32,50 @@ export type Transcript = {
 };
 
 /**
+ * @param audio raw bytes; the caller fetches them from storage, so this stays a
+ *              pure provider call and can be exercised with a fixture.
  * @returns the transcript, or `null` when no credential is configured — which
  *          the caller turns into `block_job(..., 'needs_api_key')`.
+ * @throws  on a provider error or an unrecognised response shape. Never returns
+ *          a partial or empty-by-accident transcript.
  */
-export async function transcribe(_captureId: string): Promise<Transcript | null> {
+/** Is a credential configured at all? Checked BEFORE any download: a keyless
+ *  worker that fetches the audio first burns bandwidth on every job, on every
+ *  attempt, to learn something it already knew. */
+export function hasSttKey(): boolean {
+  return !!process.env.DEEPGRAM_API_KEY;
+}
+
+export async function transcribe(
+  audio: ArrayBuffer, contentType = 'audio/m4a'
+): Promise<Transcript | null> {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) return null;
 
-  // NOT IMPLEMENTED, and left honest rather than sketched. Writing an untested
-  // HTTP call against an API whose response shape I cannot verify would produce
-  // exactly what this repo keeps generating: code that looks finished, passes a
-  // review, and has never once run. It needs the audio fetched from storage, the
-  // provider's response parsed, and both checked against a real response.
-  //
-  // What IS settled and encoded above: the return shape the rest of the pipeline
-  // consumes, where the key comes from, and that a missing key parks the job
-  // instead of crashing the worker.
-  throw new Error(
-    'DEEPGRAM_API_KEY is set but the provider call is not implemented. ' +
-    'Unset it to park jobs as needs_api_key, or implement transcribe().');
+  // detect_language is ON because REQ-PROC5 wants the source language detected
+  // rather than assumed, and this product's core ICP includes Spanish-speaking
+  // crews. punctuate because the transcript is read by a person in the preview
+  // card, not only parsed for a number.
+  const url = 'https://api.deepgram.com/v1/listen'
+    + '?model=nova-2&smart_format=true&punctuate=true&detect_language=true';
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Token ${key}`, 'Content-Type': contentType },
+    body: audio,
+  });
+
+  // A non-2xx is read for its body before throwing: Deepgram puts err_msg there,
+  // and that string is what ends up in `processing_job.last_error` where a
+  // person can act on it. "HTTP 401" alone sends them to the dashboard guessing.
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`deepgram HTTP ${res.status}: ${body.slice(0, 300)}`);
+  }
+
+  // readDeepgram THROWS on any shape it does not understand rather than
+  // returning an empty transcript. See deepgram.ts: a silent '' would insert
+  // cleanly, finish the job, mark the capture processed, and leave the
+  // contractor a blank preview card after the audio is gone.
+  return readDeepgram(await res.json());
 }

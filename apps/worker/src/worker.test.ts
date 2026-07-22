@@ -19,9 +19,20 @@ function fakeClient(job: Job | null) {
       if (fn === 'claim_job') return Promise.resolve({ data: job, error: null });
       return Promise.resolve({ data: null, error: null });
     },
-    from() {
-      return { insert: (row: any) => (calls.push({ fn: 'insert', args: row }),
-                                      Promise.resolve({ error: null })) };
+    from(table: string) {
+      return {
+        insert: (row: any) => (calls.push({ fn: 'insert', args: row }),
+                               Promise.resolve({ error: null })),
+        select: () => ({ eq: () => ({ single: () => (
+          calls.push({ fn: 'select', args: table }),
+          Promise.resolve({ data: { payload: 'k/a.m4a', media_mime_type: 'audio/m4a' },
+                            error: null })) }) }),
+      };
+    },
+    storage: {
+      from: () => ({ download: () => (calls.push({ fn: 'download', args: null }),
+        Promise.resolve({ data: { arrayBuffer: async () => new ArrayBuffer(8) },
+                          error: null })) }),
     },
   };
   return sb;
@@ -96,4 +107,68 @@ test('the lease is claimed under this worker\'s id', async () => {
   await runOnce(sb, 'worker-7');
   assert.equal(sb.calls[0].fn, 'claim_job');
   assert.equal(sb.calls[0].args.p_worker, 'worker-7');
+});
+
+// The happy path, with the provider stubbed at fetch. Everything up to and
+// including the insert is the worker's own code; only Deepgram is faked. This is
+// what proves the key-present branch is wired at all — without it the suite
+// covered only the parked case, which is how a signature break survived here
+// once already (--experimental-strip-types runs types, it does not check them).
+test('with a key it downloads, transcribes and writes the transcript', async () => {
+  process.env.DEEPGRAM_API_KEY = 'test-key';
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    json: async () => ({
+      metadata: { duration: 9 },
+      results: { channels: [{ detected_language: 'en',
+                              alternatives: [{ transcript: 'subfloor rot' }] }] },
+    }),
+  })) as any;
+  try {
+    const sb = fakeClient(job({ steps: ['transcribe'] }));
+    const r = await runOnce(sb, 'w1');
+
+    assert.equal(r.blocked, undefined);
+    assert.equal(r.done, true);
+    assert.equal(sb.calls.some((c: any) => c.fn === 'download'), true);
+
+    const ins = sb.calls.find((c: any) => c.fn === 'insert');
+    assert.equal(ins.args.text, 'subfloor rot');
+    assert.equal(ins.args.source_language, 'en');
+    assert.equal(ins.args.engine, 'deepgram');
+    assert.equal(ins.args.duration_sec, 9);
+
+    // After the step, not at the end of the job.
+    assert.equal(sb.calls.some((c: any) => c.fn === 'complete_step'), true);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.DEEPGRAM_API_KEY;
+  }
+});
+
+// A provider error must park the job WITH the reason attached, never write a
+// transcript. This is the case that would otherwise hand a contractor a blank
+// preview card after the audio is gone.
+test('a provider error parks the job and writes nothing', async () => {
+  process.env.DEEPGRAM_API_KEY = 'test-key';
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({
+    ok: false, status: 401, text: async () => '{"err_msg":"bad key"}',
+  })) as any;
+  try {
+    const sb = fakeClient(job({ steps: ['transcribe'] }));
+    const r = await runOnce(sb, 'w1');
+
+    assert.equal(r.blocked, 'needs_api_key');
+    assert.equal(sb.calls.some((c: any) => c.fn === 'insert'), false);
+    // The provider's own words reach processing_job.last_error, so the backlog
+    // says "401 bad key" rather than leaving someone guessing at the dashboard.
+    const block = sb.calls.find((c: any) => c.fn === 'block_job');
+    assert.match(block.args.p_error, /401/);
+    assert.match(block.args.p_error, /bad key/);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.DEEPGRAM_API_KEY;
+  }
 });

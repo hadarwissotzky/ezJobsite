@@ -70,6 +70,32 @@ console.log('\nverifying…\n');
   else record('unit tests', fail === 0 ? 'pass' : 'fail', `${pass} passed, ${fail} failed`);
 }
 
+// ── 2b. The worker ────────────────────────────────────────────────────────────
+// A SEPARATE PACKAGE, so it needs its own two checks or it silently rots outside
+// everything above. Its typecheck is not optional: the worker runs under
+// `--experimental-strip-types`, which STRIPS types without checking them, and a
+// changed `transcribe()` signature shipped through the test suite green because
+// of exactly that. tsc is the only thing that sees it.
+{
+  const WORKER = join(ROOT, 'apps/worker');
+  if (!existsSync(join(WORKER, 'package.json'))) {
+    record('worker', 'inconclusive', 'apps/worker not found — this check is looking in the wrong place');
+  } else {
+    const tc = run('npx', ['tsc', '--noEmit'], WORKER);
+    const t = run('npm', ['test', '--silent'], WORKER);
+    const pass = Number(t.out.match(/ℹ pass (\d+)/)?.[1] ?? 0);
+    const fail = Number(t.out.match(/ℹ fail (\d+)/)?.[1] ?? 0);
+    if (pass === 0 && fail === 0) {
+      record('worker', 'inconclusive', 'ran 0 worker tests — nothing was checked');
+    } else if (!tc.ok || fail > 0) {
+      record('worker', 'fail',
+        `${fail} test failure(s); typecheck ${tc.ok ? 'ok' : 'FAILED'}\n${tc.out.slice(0, 400)}`);
+    } else {
+      record('worker', 'pass', `${pass} tests, typecheck clean`);
+    }
+  }
+}
+
 // ── 3. One object, one file ───────────────────────────────────────────────────
 {
   const r = run('node', [join(ROOT, 'scripts/check-sql-duplicates.mjs'), join(MOBILE, 'sql')], ROOT);
