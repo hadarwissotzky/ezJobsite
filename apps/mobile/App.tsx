@@ -71,6 +71,8 @@ import { ensureDraftSchema, sweepDrafts, recoverableDrafts, readDraftArtifacts,
 // REQ-PROC4's acceptance test. Behind a flag because it writes 100 captures; see
 // the block in init for why it is wired here and not behind a button.
 import { runCycles } from './src/harness';
+// The wired loop, exercised against the real local database. Same flag discipline.
+import { runLoopCheck } from './src/loopcheck';
 import type { DraftSummary } from './src/capturesession';
 import { DraftRecoveryCard } from './src/ui/draftrecovery';
 // R6 AC2: the FROZEN instrument, on the contractor's side. The record screen was
@@ -854,6 +856,20 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           console.log('[REQ-PROC4]', JSON.stringify(hr));
         } catch (e: any) {
           console.log('[REQ-PROC4] harness threw:', String(e?.message ?? e));
+        }
+      }
+
+      // The wired loop, end to end, on the device's own SQLite. Separate flag from
+      // the durability harness because they answer different questions: that one
+      // asks "can a capture be lost", this one asks "do the pieces I wired actually
+      // reach each other". Unit tests cannot answer the second — they prove the
+      // decisions, not the plumbing, and plumbing is what broke eight times here.
+      if (process.env.EXPO_PUBLIC_RUN_LOOP_CHECK === '1') {
+        try {
+          const lr = await runLoopCheck(db, OWNER, 'p-alder');
+          console.log('[LOOPCHECK]', JSON.stringify(lr));
+        } catch (e: any) {
+          console.log('[LOOPCHECK] threw:', String(e?.message ?? e));
         }
       }
       // R6b: who captured / priced / sent, and who it was addressed to.

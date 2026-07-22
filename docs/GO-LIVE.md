@@ -173,6 +173,32 @@ phone's, and mandate #1's residual-loss boundaries are about devices.
 
 ---
 
+## 4c. The wired loop — ALREADY RUN ON A DEVICE, 7/7 `[2026-07-22]`
+
+```
+create -> ledger        Loop check lc-… $1,850.00 status=draft
+setExtraType -> ledger  extra_type=finish
+roster -> routing       roster=2 suggested=Dana
+untyped still routes    Dana                    (R5c's offline AC: never blocked)
+discussing is derived   draft -> discussing     (R7: never a stored status)
+activity + badge        rows=2 first=question unread=1
+remind rules hold       draft=r8.notSent  talking=r8.inDiscussion
+```
+
+`src/loopcheck.ts`, run on the simulator against the device's own SQLite.
+`EXPO_PUBLIC_RUN_LOOP_CHECK=1 npx expo start --dev-client --clear`, then launch.
+
+WHY IT IS NOT A UNIT TEST: the unit tests prove the DECISIONS are right, using
+hand-built inputs. They cannot prove that `createChangeOrder` writes a row `ledger()`
+can read, that `setExtraType` lands somewhere `suggestFor` sees, or that nine
+separate `ensureXSchema` calls produce tables these functions can use together.
+Those are WIRING facts, and wiring is what broke eight times in this codebase.
+
+WHERE IT STOPS, and why that boundary is honest: at the network. Sending needs
+Supabase and Supabase needs a session. So it ends at "the extra is ready to send and
+addressed to the right person" — the last state reachable without an account. It says
+so rather than skipping the step quietly.
+
 ## 5. What is deliberately not built, and what it would take
 
 **R1 draft recovery — a session paused and then killed still dies.**
