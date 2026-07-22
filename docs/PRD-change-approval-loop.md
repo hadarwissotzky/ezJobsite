@@ -231,10 +231,22 @@ the exact failure this table exists to stop reporting as progress.
    item's business-event log (sent, delivered, opened, reminded, revised, signed), and
    `src/record.ts` already builds that. Wiring one to the other would fuse two
    unrelated models.
-   The real finding is worse than dead code: **REQ-TL1/2/3 read as "traced to code" in
-   `scripts/trace-requirements.mjs` while being unreachable.** That script counts tags,
-   not callers — it says so itself — so a tagged, uncalled module scores as built. The
-   walkthrough structure feature does not work today.
+   **RESOLVED 2026-07-22 — do not wire it.** Not caution: R2's photo placement is now
+   wired and owns photo-to-narration alignment via transcript segments. timeline.ts
+   offers a SECOND mechanism for the same user-visible outcome, keyed on offsets and
+   section breaks instead. Two models for one thing is the drift already removed three
+   times in this repo (two `displayStatus`, two money formatters, two quick-adds), and
+   the PRD asks for neither mechanism by name — it asks for photos "beside the text
+   they evidence", which R2 delivers.
+   Deleting it is defensible; leaving it is defensible; wiring it is not. Whoever
+   decides should decide between the first two.
+
+   The tracer no longer lies about it: `scripts/trace-requirements.mjs` used to count
+   tags without asking whether the app could reach the file holding them, and reported
+   **42 of 43** while REQ-TL2/TL3 lived in a module nothing imports. It now walks
+   imports from App.tsx first and reports **40 traced, 1 untraced, 2 tagged-but-
+   unreachable**, naming the file. Walkthrough section-breaks do not work today, and
+   the report finally says so.
 
 **Blocked on something other than code:** Q1 legal e-sign review (blocking before
 launch), Q4 A2P/SMS registration (no provider, so `delivery_state` never leaves

@@ -4,7 +4,7 @@
 do from here — database credentials, a domain, a microphone, a phone. None of it is
 hard. All of it needs someone present.
 
-The state it hands over: **11 checks green** (`npm run verify`), 233 unit tests, and
+The state it hands over: **12 checks green** (`npm run verify`), 233 unit tests, and
 every client screen rendered in a browser. **Nothing has run on a device.** That is
 the gap this file closes.
 
@@ -140,17 +140,23 @@ real jobs. Building P1 now would be building against the plan.
 ## 6. Before believing any of this
 
 ```bash
-npm run verify          # 11 checks. Green means the code agrees with itself.
+npm run verify          # 12 checks. Green means the code agrees with itself.
 ```
 
 It does **not** mean the product works. It checks that types hold, tests pass, no
 SQL object has two owners, every referenced i18n key exists in both languages, no
 module is unreachable, no web asset is unloaded, and no granted RPC is uncalled.
 
-Those last three exist because the same failure happened five times: **correct code
-that nothing called.** R5c, 61 agent-written modules, `ui/recordapproval.tsx`,
-`apps/web/ewa.js`, and two RPCs. Every one was well written. Nothing connected them.
-If you add a module and `verify` goes red on reachability, that is the check doing
-its job — wire it, delete it, or record why not.
+Four of them exist because the same failure happened EIGHT times: **correct code that
+nothing called.** R5c, 61 agent-written modules, `ui/recordapproval.tsx`,
+`apps/web/ewa.js`, two granted RPCs, R2's photo placement, and the requirements
+tracer itself. Every one was well written. Nothing connected them.
+
+`module reachability`, `web assets wired`, `rpc callers` and `feature claims` now
+guard each surface it appeared on. The last of those is the strongest: it lists the
+nineteen features called BUILT and the function that must be CALLED for each claim to
+hold, so a refactor that removes the call fails the build instead of quietly making a
+status document false. Add a line when you claim something works; delete one when you
+remove it. That cost is deliberate.
 
 The one thing no check here covers is the one thing §4 does.
