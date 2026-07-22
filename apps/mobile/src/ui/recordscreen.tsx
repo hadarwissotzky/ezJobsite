@@ -19,6 +19,8 @@ import type { DecisionSummary } from '../decisionsummary';
 import { DecisionSummaryCard } from './decisionsummarycard';
 import type { ApprovalPanel } from '../eventlog';
 import { RecordApproval } from './recordapproval';
+import { NarratedScope, type ScopePhoto } from './narratedscope';
+import type { Alignment } from '../photonarration';
 import { t } from '../i18n';
 import { C, F, T, chipStyle, display, label } from './theme';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
@@ -45,6 +47,9 @@ export function RecordScreen(props: {
   /** R6 AC2: the FROZEN instrument + "opened 3 times · no answer yet". Null when
    *  the events have not reached this device; the record renders without it. */
   approval?: ApprovalPanel | null;
+  /** R2: photos grouped under the sentence spoken over them. Null, or an alignment
+   *  with nothing in it, renders nothing and the plain evidence grid below stands. */
+  narration?: Alignment<ScopePhoto> | null;
   onBack: () => void;
   onCapture?: () => void;
   /** R6 / R5b AC3 — write the approval document and open the share sheet. */
@@ -99,7 +104,12 @@ export function RecordScreen(props: {
 
         {/* Evidence. Mandate #1: a file the row promises but the device does not
             have is SHOWN as missing. A blank tile would be silent loss. */}
-        {rec.photos.length > 0 && (
+        {/* R2: when the transcript is here, the photos are grouped under what was
+            being said as each was taken. When it is not — offline, no STT key, not
+            processed yet — this renders nothing and the plain grid below stands.
+            Never both: the grid is the fallback, not a companion. */}
+        {props.narration && <NarratedScope alignment={props.narration} />}
+        {!props.narration && rec.photos.length > 0 && (
           <View style={T.card}>
             <Text style={label}>
               {t({ k: 'erec.evidence', p: { n: rec.photos.length } } as any)}

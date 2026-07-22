@@ -43,8 +43,13 @@ import { EwaScreen, UnpricedEwaBanner } from './src/ui/ewascreen';
 import { drainEwaOutbox, ensureEwaSchema, ewaIds, listEwa, linkPriceToEwa,
          markEwaApproved, markReminded, type EwaRow } from './src/ewastore';
 import { sendEwa } from './src/ewasend';
-import { ensureVoiceCacheSchema, voiceReadingForDecision,
+import { ensureVoiceCacheSchema, voiceReadingForDecision, narrationForExtra,
          type VoiceReading } from './src/voicesource';
+// R2: photos beside the sentence spoken over them. Degrades to a plain strip when
+// there is no transcript — the record screen's existing behaviour — so it is safe
+// to wire before an STT key exists and lights up the moment one does.
+import type { Alignment } from './src/photonarration';
+import type { ScopePhoto } from './src/ui/narratedscope';
 import type { PriceMode } from './src/voiceprice';
 import { VoicePriceCard } from './src/ui/voicepricecard';
 // R1: the Send-to prefill. GPS decides what to SUGGEST and never what to file --
@@ -221,6 +226,9 @@ export default function App() {
   // record. Held beside it, not inside it — the network only ever ADDS here, and a
   // fetch that fails must leave the record exactly as usable as it was.
   const [approval, setApproval] = React.useState<ApprovalPanel | null>(null);
+  // R2: the narration blocks for the open record. Null until derived; the screen
+  // falls back to its own photo grid, which is what it showed before.
+  const [narration, setNarration] = React.useState<Alignment<ScopePhoto> | null>(null);
   // The wedge home (prototype c1): extras awaiting a signature, and the money already
   // recovered. Both read from real change_order rows — never invented.
   const [homeTab, setHomeTab] = React.useState<'extras' | 'jobs'>('extras');
@@ -2057,10 +2065,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         db={db}
         summary={recordSummary}
         approval={approval}
+        narration={narration}
         // Mandate #2: this writes a file and opens the OS share sheet. It does not
         // transmit anything to a client, and must never be changed to.
         onShare={() => { void shareApprovalDoc(db, record.id); }}
-        onBack={() => { recordIdRef.current = null; setRecord(null); setRecordSummary(null); setApproval(null); }}
+        onBack={() => { recordIdRef.current = null; setRecord(null); setRecordSummary(null); setApproval(null); setNarration(null); }}
         // R1: capture stays one tap away on secondary screens. Leaving the record to
         // capture is the point — a new extra should never require going home first.
         onCapture={() => {
@@ -2847,6 +2856,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                         const w = await withEventLog(db, connector.client, r);
                         setRecord(w); setApproval(w.approval);
                       } catch { setApproval(null); }
+                      // R2: align the photos to what was said over them. A miss
+                      // returns the fallback strip, so this can only ever ADD
+                      // structure — never remove the photos.
+                      try {
+                        setNarration(await narrationForExtra(db, connector.client, r.id,
+                          r.photos.map((ph) => ({ captureId: ph.captureId, uri: ph.uri, present: ph.present }))));
+                      } catch { setNarration(null); }
                     }
                   }}>
                   <View style={s.coR1}>
@@ -2979,6 +2995,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   const w = await withEventLog(db, connector.client, r);
                   setRecord(w); setApproval(w.approval);
                 } catch { setApproval(null); }
+                // R2: align the photos to what was said over them. A miss returns the
+                // fallback strip, so this can only ever ADD structure.
+                try {
+                  setNarration(await narrationForExtra(db, connector.client, r.id,
+                    r.photos.map((ph) => ({ captureId: ph.captureId, uri: ph.uri, present: ph.present }))));
+                } catch { setNarration(null); }
               }
               setBell(false);
               await refresh();

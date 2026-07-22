@@ -110,9 +110,13 @@ detect it. I would not apply it without a microphone and someone listening to th
 result. Wiring it blind trades a known failure for an invisible one.
 *Needs: a device with a mic, ~1 hour, and a person who plays the audio back.*
 
-**R2 photo placement.** Aligning a photo to the sentence spoken over it needs
-transcript segments. No STT key ⇒ it renders an empty card on every record.
-*Needs: an OpenAI (or equivalent) key in the worker's environment.*
+**R2 photo placement — WIRED 2026-07-22, dormant until a key exists.** I had this
+recorded as "renders an empty card", which was asserted and wrong: `NarratedScope`
+returns null when there is nothing to align, and `narrationForExtra` degrades to a
+plain fallback strip. So it is wired and it renders exactly what the record screen
+showed before — until a transcript exists, at which point the photos group
+themselves under the sentence spoken over each one, with no further work.
+*Needs: an OpenAI (or equivalent) key in the worker's environment. Nothing else.*
 
 **R3's PDF.** The approval document generator exists, is wired, and works today —
 it writes HTML and shares it through `expo-sharing`. Only the PDF container is
