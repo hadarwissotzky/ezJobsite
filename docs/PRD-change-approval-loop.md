@@ -157,6 +157,45 @@ approved it—**before** the work happened.
 
 ## Requirements
 
+### Build status of P0 `[audited 2026-07-22]`
+
+Independent read-only audit against the code, one agent per requirement group, with
+file:line evidence for every claim. The rule applied throughout: **a module with no
+caller is NOT BUILT.** That rule is what makes this table worth reading — R5c had
+three commits, sixteen passing tests and two migrations behind it and still scored
+NOT BUILT, because nothing called it. It has since been wired.
+
+| Req | Status | The gap that matters most |
+|-----|--------|---------------------------|
+| R1  | PARTIAL | A paused session does **not** survive app kill — `recoverySweep` deletes the temp files it would need to recover from |
+| R2  | PARTIAL | Pipeline is built but **not configured** (no STT/LLM key), so it cannot be demonstrated end to end. Amount is never prefilled into the preview |
+| R3  | PARTIAL | Fixed price + NTE work. The **entire two-step EWA does not exist** |
+| R4  | PARTIAL | Capture and record are done. The approval page shows **no photos at all** |
+| R5  | PARTIAL | Link, three outcomes and the question path work. **The app never reads `confirmation_question`** — a client question is stored and then invisible forever |
+| R5b | PARTIAL | Server side exists (thread table, supersede). **No contractor-side thread, no reply, no "In Discussion" status** |
+| R5c | BUILT | Type is contractor-set; inference from narration still needs real captures (open (a)) |
+| R6  | PARTIAL | **Open/view events are not tracked at all.** `src/timeline.ts` — the natural backbone — is 192 lines with zero callers |
+| R6b | PARTIAL | People block cannot show captured-by / priced-by: those names are not stored anywhere |
+| R6c | NOT BUILT | Nothing generates a summary. The "never blocks the record" guardrail holds by construction |
+| R7  | BUILT | `discussing` is missing from the status vocabulary |
+| R8  | NOT BUILT | No push infrastructure, no scheduler, no notification centre. Only manual resend exists |
+
+**Cross-cutting gaps, each blocking several requirements at once:**
+
+1. **No PDF generator exists anywhere.** R3, R6 and R6c all reference one.
+2. **No push infrastructure and no scheduler.** R5, R5b and R8 all depend on it. R8
+   is roughly 90% this one subsystem.
+3. **`In Discussion` is not a status** the app can compute or display, so it is
+   missing from R5, R5b, R7 and R8 alike.
+4. **Two dead modules** need a decision rather than drift: `src/timeline.ts` (192
+   lines, zero callers, table never created) is the natural backbone for R6's event
+   timeline. Wire it or delete it.
+
+**Blocked on something other than code:** Q1 legal e-sign review (blocking before
+launch), Q4 A2P/SMS registration (no provider, so `delivery_state` never leaves
+`queued`), an STT/LLM key for R2, and REQ-CAP7 which needs a microphone this
+machine does not have.
+
 ### P0 — Must-have (cannot ship without)
 
 **R1. One-tap voice capture (capture before filing)**
@@ -283,8 +322,13 @@ terms before the price exists.
 
 **R5c. Classify the extra, and route it to the right approver `[hadar 2026-07-21]`**
 
-*Status: REQUIREMENT ONLY — specified here, not built. The build order in §Timeline is
-unchanged; this lands after the P0 loop is boringly reliable.*
+*Status: BUILT as of 2026-07-22, except the classifier. The taxonomy, the per-job
+roster, the routing suggestion and the send preview are reachable in the app. The
+type is CONTRACTOR-SET, not inferred: open (a) below requires the taxonomy be derived
+from real captures and there are none, and mandate #2 makes the contractor confirm it
+either way — so inference only ever saves a tap. Routing additionally respects
+whether an approver can commit money; see `can_bind_money` in 280_approver_roster.sql
+and the note on open (b).*
 
 - **The need.** Today the recipient is picked by hand at send (R5) and the only clue the
   system has is GPS. But a jobsite has more than one person who can say yes, and **which
