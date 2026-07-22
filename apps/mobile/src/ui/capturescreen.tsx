@@ -28,6 +28,8 @@ import { captureRef } from 'react-native-view-shot';
 
 import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, useAudioRecorderState } from '../recorder';
 import { stampNow, type Stamp } from '../stamp';
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import { useSessionDraft } from './sessiondraft';
 import { t as T } from '../i18n';
 
 export type FusedPhoto = { bytes: Uint8Array; mime: string; atMs: number; fromLibrary: boolean };
@@ -67,8 +69,11 @@ function StampBlock({ place, now }: { place: string | null; now: number }) {
 type Shot = { uri: string; atMs: number; fromLibrary: boolean };
 
 export function FusedCapture({
-  projectName, onCapture, onClose, resolveLabel,
+  projectName, onCapture, onClose, resolveLabel, db, ownerId,
 }: {
+  /** R1: the session becomes durable WHILE it happens, not at Done. */
+  db: AbstractPowerSyncDatabase;
+  ownerId: string;
   projectName: string;
   onCapture: (a: FusedArtifacts) => Promise<void>;
   onClose: () => void;
@@ -104,6 +109,20 @@ export function FusedCapture({
   // Has the mic heard actual speech yet? (metering peak, not just "is recording")
   const spokeRef = React.useRef(false);
   const [spoke, setSpoke] = React.useState(false);
+
+  // R1: the session becomes durable WHILE it happens, not at Done. Photos are banked
+  // at the shutter and audio wherever the recorder is ALREADY stopped, so a crash
+  // mid-walk loses nothing that had finished.
+  //
+  // WHAT IS DELIBERATELY NOT CHANGED HERE: togglePause still calls recorder.pause().
+  // The full R1 fix makes pause stop-and-bank instead, because a paused expo-audio
+  // recording is an incomplete file on disk and only a stopped one is recoverable.
+  // That is almost certainly right and it is the one part whose failure mode is
+  // SILENT AUDIO LOSS, which no check in this repo can detect and no machine without
+  // a microphone can test. So the additive half ships and the lifecycle change waits
+  // for a device. Killed-while-PAUSED still loses the session; killed while
+  // recording, or after an interruption, no longer does.
+  const draft = useSessionDraft({ db, ownerId, stamp, enabled: !!perm?.granted });
 
   React.useEffect(() => {
     if (!perm) return;
@@ -192,6 +211,11 @@ export function FusedCapture({
             mime: 'audio/m4a', startedAtMs: segmentStartedAt.current,
           });
           baseSecs.current += Math.floor(lastDurMs.current / 1000);
+          // R1: bank it too. This is where the recorder is ALREADY stopped and the
+          // bytes ALREADY read — no new lifecycle behaviour, just writing down what
+          // this path had until now kept only in memory.
+          await draft.segment({ srcUri: recorder.uri, startedAtMs: segmentStartedAt.current,
+                                durationMs: lastDurMs.current });
         } catch { /* an unreadable segment is lost audio we cannot invent */ }
       }
       await requestMic();
@@ -207,7 +231,14 @@ export function FusedCapture({
     try {
       const atMs = Date.now();
       const pic = await camRef.current?.takePictureAsync({ quality: 0.8 });
-      if (pic?.uri) { setShots((s) => [...s, { uri: pic.uri, atMs, fromLibrary: false }]); setWarnEmpty(false); }
+      if (pic?.uri) {
+        setShots((s) => [...s, { uri: pic.uri, atMs, fromLibrary: false }]);
+        setWarnEmpty(false);
+        // Durable within a second of the shutter. Fire-and-forget: banking must never
+        // delay the next shot (mandate #3's touch budget) and a failed bank leaves the
+        // photo exactly as safe as it was before — in React state, committed at Done.
+        void draft.photo({ srcUri: pic.uri, atMs, mime: 'image/jpeg', fromLibrary: false });
+      }
     } catch { /* a dropped frame must not end the walk */ }
   };
 
@@ -223,6 +254,9 @@ export function FusedCapture({
       if (r.canceled || !r.assets?.length) return;
       const atMs = Date.now();
       setShots((s) => [...s, ...r.assets.map((a) => ({ uri: a.uri, atMs, fromLibrary: true }))]);
+      for (const a of r.assets) {
+        void draft.photo({ srcUri: a.uri, atMs, mime: a.mimeType ?? 'image/jpeg', fromLibrary: true });
+      }
       setWarnEmpty(false);
     } catch { /* picker failure must not end the walk */ }
   };

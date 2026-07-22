@@ -61,6 +61,7 @@ import { ensureActivitySchema, activityFor, markRead,
 // the client's messages; a reminder must go via the SAME link (R8) or the nudge
 // breaks the thing it is nudging about.
 import { canRemind, reminderText } from './src/remind';
+import { ensureDraftSchema } from './src/capturedraft';
 // R6 AC2: the FROZEN instrument, on the contractor's side. The record screen was
 // rendering change_order.scope — the MUTABLE local row — while the client held
 // shown_content. In a dispute they would each be reading a different document and
@@ -799,6 +800,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       await ensureActivitySchema(db);
       await ensureEventLogSchema(db);
       await ensureRemindSchema(db);
+      // R1: the draft session store. A SEPARATE directory from capture-tmp, which
+      // recoverySweep empties unconditionally — draft media must survive that sweep,
+      // so it never lives there.
+      await ensureDraftSchema(db);
       // R6b: who captured / priced / sent, and who it was addressed to.
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
@@ -2059,6 +2064,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   if (showCapture) {
     return (
       <FusedCapture
+        db={db}
+        ownerId={OWNER}
         projectName={projects.find((p) => p.id === projectId)?.name ?? 'EZchangeorder'}
         onCapture={onFusedCapture}
         onClose={() => setShowCapture(false)}

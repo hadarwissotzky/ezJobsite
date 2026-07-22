@@ -82,7 +82,8 @@ Watch these in particular, because they are where I have the least evidence:
 | Step | What to check | Why this one |
 |---|---|---|
 | Record a walkthrough | Audio survives a phone call mid-recording | The interruption path rolls a new segment; never exercised with a real call |
-| Pause, then kill the app | **Expect to lose the session** | Known gap. R1's fix is written and deliberately unwired — see §5 |
+| Kill the app mid-recording | Photos and finished segments survive | Newly banked; never tested against a real crash |
+| Pause, **then** kill the app | **Expect to lose the session** | Remaining gap: pause still holds the file open. See §5 |
 | Price it | The amount does **not** prefill | Correct until an STT key exists; the read-back shows why |
 | Send | The preview names the approver **and the reason** | R5c routing. If it suggests the wrong person, the reason line tells you which rule fired |
 | Open the link on the client's phone | Photos load; price matches the frozen wording | `240` enforces the match server-side, but nobody has watched it |
@@ -95,11 +96,14 @@ Watch these in particular, because they are where I have the least evidence:
 
 ## 5. What is deliberately not built, and what it would take
 
-**R1 draft recovery — a paused session dies with the app.**
-The fix exists (`capturesession.ts`, unit-tested) and is **not wired**. It changes
-`pause` to stop-and-bank a segment instead of holding the file open, because a
-paused `expo-audio` recording is an incomplete file and only a stopped one is
-recoverable. Almost certainly correct. It is also surgery on the one path mandate #1
+**R1 draft recovery — a session paused and then killed still dies.**
+PARTIALLY WIRED as of 2026-07-22. Photos are banked at the shutter and audio is
+banked wherever the recorder was ALREADY stopped (the phone-interruption path), so a
+crash mid-walk no longer loses what had finished. What remains unwired is the pause
+change and the relaunch offer. The remaining change makes
+`pause` stop-and-bank a segment instead of holding the file open, because a paused
+`expo-audio` recording is an incomplete file and only a stopped one is recoverable.
+Almost certainly correct. It is also surgery on the one path mandate #1
 protects, its failure mode is **silent audio loss**, and no check in this repo can
 detect it. I would not apply it without a microphone and someone listening to the
 result. Wiring it blind trades a known failure for an invisible one.

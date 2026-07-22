@@ -176,10 +176,7 @@ console.log('\nverifying…\n');
   // Adding a line here is a deliberate act that costs a sentence. That is the point:
   // it is cheap to record a decision and impossible to forget one silently.
   const KNOWN_UNWIRED = {
-    'capturedraft.ts':      'R1 draft recovery — held: restructures the recorder lifecycle, failure mode is silent audio loss, no mic on this machine to test with',
-    'capturesession.ts':    'R1 draft recovery — held, see capturedraft.ts',
-    'ui/draftrecovery.tsx': 'R1 draft recovery — held, see capturedraft.ts',
-    'ui/sessiondraft.ts':   'R1 draft recovery — held, see capturedraft.ts',
+    'ui/draftrecovery.tsx': 'R1 relaunch recovery UI — the banking half is wired (photos at the shutter, segments where the recorder already stops), but nothing yet OFFERS a recovered draft on relaunch. Additive and safe to wire; left until the pause change lands so both are tested together on a device',
     'photonarration.ts':    'R2 photo placement — blocked: aligning a photo to the sentence spoken over it needs transcript segments, and there is no STT key, so it would render an empty card on every record',
     'ui/narratedscope.tsx': 'R2 photo placement — blocked, see photonarration.ts',
     'timeline.ts':          'REQ-TL1/2/3 walkthrough markers. Pre-existing dead code; the tracer counts its REQ tags as built while nothing imports it. Wire-or-delete is a product decision, not a wiring one',
