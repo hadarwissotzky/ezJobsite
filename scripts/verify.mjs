@@ -246,6 +246,64 @@ console.log('\nverifying…\n');
   }
 }
 
+// ── 4e. Is every granted RPC actually called by something? ───────────────────
+// THE THIRD SURFACE. 4c guards apps/mobile/src, 4d guards apps/web, and SQL was the
+// one place left where correct code could hide — the failure mode that has now
+// appeared five times in this repo.
+//
+// Asking it found two real gaps. `confirmation_opened` was never called, so every
+// open of an approval link went uncounted and R6's "opened 3 times · no answer yet"
+// was permanently blank. `confirmation_thread` was never called, so a contractor
+// could reply and the client would never see it.
+//
+// A function GRANTED to anon or authenticated is a promise that a client calls it.
+// One with no caller is either dead or a feature nobody can reach.
+//
+// KNOWN_UNCALLED carries the ones with a live equivalent, each with its reason —
+// same discipline as KNOWN_UNWIRED. Anything else fails.
+{
+  const KNOWN_UNCALLED = {
+    confirmation_current_link: 'superseded by live_token on confirmation_state (367)',
+    confirmation_questions: 'superseded by confirmation_thread (308), which returns both sides; kept because dropping a granted RPC breaks links already in the wild',
+    ingest_project_v1: 'projects.ts reaches project creation through a different path',
+  };
+  const dir = join(MOBILE, 'sql');
+  const files = run('ls', [dir], ROOT).out.split('\n').map((x) => x.trim()).filter((f) => f.endsWith('.sql'));
+  const sql = new Map();
+  for (const f of files) {
+    try { sql.set(f, readFileSync(join(dir, f), 'utf8').replace(/--[^\n]*/g, '')); } catch { /* */ }
+  }
+  const granted = new Map();
+  for (const [f, body] of sql) {
+    for (const m of body.matchAll(/grant\s+execute\s+on\s+function\s+public\.(\w+)/gi)) {
+      if (!granted.has(m[1])) granted.set(m[1], f);
+    }
+  }
+  // Every place a client could call one.
+  let client = '';
+  for (const p of run('sh', ['-c',
+    `find "${join(MOBILE, 'src')}" -name '*.ts' -o -name '*.tsx'; echo "${MOBILE}/App.tsx"; find "${join(ROOT, 'apps/web')}" -type f`],
+    ROOT).out.split('\n').map((x) => x.trim()).filter(Boolean)) {
+    try { client += readFileSync(p, 'utf8'); } catch { /* */ }
+  }
+  const uncalled = [];
+  for (const [fn, owner] of [...granted].sort()) {
+    if (client.includes(`'${fn}'`) || client.includes(`"${fn}"`)) continue;
+    // Called from another migration (a trigger body, a wrapper) counts too.
+    const bySql = [...sql].some(([g, body]) =>
+      g !== owner && new RegExp(`\\b(perform|select|from|=)\\s+public\\.${fn}\\s*\\(`, 'i').test(body));
+    if (bySql) continue;
+    if (fn in KNOWN_UNCALLED) continue;
+    uncalled.push(fn);
+  }
+  if (granted.size === 0) record('rpc callers', 'inconclusive', 'found 0 granted functions — the scan is wrong');
+  else record('rpc callers', uncalled.length === 0 ? 'pass' : 'fail',
+    uncalled.length === 0
+      ? `${granted.size} granted RPC(s); ${Object.keys(KNOWN_UNCALLED).length} known-uncalled, each with a reason`
+      : `${uncalled.length} granted RPC(s) nothing calls: ${uncalled.slice(0, 5).join(', ')}` +
+        ' — wire it, revoke it, or add it to KNOWN_UNCALLED with the reason');
+}
+
 // ── 5. Client vs server schema ────────────────────────────────────────────────
 {
   const r = run('node', [join(ROOT, 'scripts/check-schema-agreement.mjs')], ROOT);
