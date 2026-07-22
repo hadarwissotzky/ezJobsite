@@ -206,7 +206,7 @@ end-to-end" hides that most of it is.
 
 | Hop | Verified? | By what |
 |---|---|---|
-| app → local SQLite | YES | `loopcheck` 7/7 on the simulator, real database |
+| app → local SQLite | YES | `loopcheck` 8/8 on the simulator, real database — including mandate #6's price gate |
 | local durability | YES | REQ-PROC4: 100 cycles, 10 mid-sync kills, zero loss |
 | app → server (send) | YES | two halves. `./scripts/check-rpc-signatures.sh` proves PostgREST resolves `confirmation_create` with the app's exact 16 parameters (42501, never PGRST202). `verify-approval-loop.sql` CHECK 14 then CALLS it authenticated with those same 16 parameters against the live database: returns `created`, stamps `owner_id` from `auth.uid()`, and 230's trigger moves the change order to `sent`. |
 | server logic | YES | `verify-approval-loop.sql`, 13 checks against the LIVE database: send→sent, approve→approved + signed + grade, decline→declined, resend retires the old link, unsigned refused, price/hash mismatch refused, cross-tenant refused |
@@ -252,6 +252,19 @@ protects, its failure mode is **silent audio loss**, and no check in this repo c
 detect it. I would not apply it without a microphone and someone listening to the
 result. Wiring it blind trades a known failure for an invisible one.
 *Needs: a device with a mic, ~1 hour, and a person who plays the audio back.*
+
+**R2 — the price gate is VERIFIED ON DEVICE `[2026-07-22]`.** I had R2 down as
+"blocked, needs an STT key". The key fills the transcript cache; the PREFILL only
+reads it. Seeding one transcript row exercises the whole path, and `loopcheck` step 8
+now proves the part that can actually hurt someone:
+
+```
+spoken  "eighteen fifty"  -> confidence none  (does NOT prefill)
+written "$1,850.00"       -> high / 185000    (DOES prefill)
+```
+
+That is mandate #6 working: a number merely HEARD never reaches the price field, a
+number written does. What still needs a key is the cache being filled for real.
 
 **R2 photo placement — WIRED 2026-07-22, dormant until a key exists.** I had this
 recorded as "renders an empty card", which was asserted and wrong: `NarratedScope`

@@ -24,7 +24,7 @@
  * returns ok and leaves nothing behind is exactly the failure this hunts.
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
-import { createChangeOrder, ledger } from './changeorder';
+import { createChangeOrder, ledger, parseMoney } from './changeorder';
 import { addApprover, listRoster, setExtraType, suggestFor } from './approvers';
 import { displayStatus } from './extrastatus';
 import { canRemind } from './remind';
@@ -116,6 +116,31 @@ export async function runLoopCheck(
       !talking.ok && talking.reasonKey === 'r8.inDiscussion',
       `draft=${draft.ok ? 'allowed' : draft.reasonKey} talking=${talking.ok ? 'allowed' : talking.reasonKey}`);
   } catch (e: any) { t('remind rules hold', false, String(e?.message ?? e)); }
+
+  // 8 ── R2: the price is read from the TRANSCRIPT, with no STT key involved.
+  //
+  // I had this recorded as "blocked, needs a key". The KEY is what fills the cache;
+  // the PREFILL only reads it. Seeding one transcript exercises the whole path —
+  // parse, confidence gate, mode inference — which is the half that can be wrong.
+  try {
+    const capId = `${tag}-cap`;
+    await db.execute(
+      `INSERT OR REPLACE INTO voice_transcript_cache (capture_id, text, segments, cached_at_ms)
+       VALUES (?,?,?,?)`,
+      [capId,
+       'Found subfloor rot under the tub, needs replacement before tile. ' +
+       'About six hours plus materials, eighteen fifty.',
+       null, Date.now()]);
+    const row = (await db.getAll<{ text: string }>(
+      `SELECT text FROM voice_transcript_cache WHERE capture_id = ?`, [capId]))[0];
+    // parseMoney is the gate mandate #6 turns on: "eighteen fifty" spoken is NOT a
+    // confident $1,850 and must not prefill, but "$1,850.00" written is.
+    const spoken = parseMoney(row.text);
+    const written = parseMoney('Price: $1,850.00 for the subfloor');
+    t('R2 transcript -> price gate',
+      spoken.confidence !== 'high' && written.confidence === 'high' && written.cents === 185000,
+      `spoken="eighteen fifty"->${spoken.confidence}  written="$1,850.00"->${written.confidence}/${written.cents}`);
+  } catch (e: any) { t('R2 transcript -> price gate', false, String(e?.message ?? e)); }
 
   const failed = steps.filter((s) => !s.ok).length;
   return { steps, passed: steps.length - failed, failed, pass: failed === 0 };
