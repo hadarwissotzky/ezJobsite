@@ -778,7 +778,23 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
              FROM decision d
              LEFT JOIN change_order co ON co.decision_id = d.id
              LEFT JOIN project p ON p.id = d.project_id
-            WHERE co.id IS NULL ORDER BY d.created_at_ms DESC LIMIT 4`));
+            WHERE co.id IS NULL
+              -- PLUMBING NEVER RENDERS. startExtraFromCapture creates a decision
+              -- behind every extra with subject 'extra <captureId>' — it exists
+              -- for the joins (timeline, photo alignment, readiness), and hadar's
+              -- model has no user-facing decision step at all. Shown here it
+              -- reads as an extra that cannot be opened or deleted, because it
+              -- is not an extra: it is the floor under one. When its extra is
+              -- deleted, the plumbing row loses its co and would surface as an
+              -- undeletable ghost — which is exactly what happened.
+              AND d.subject NOT LIKE 'extra %'
+              -- And a decision whose backing capture was discarded is dead
+              -- regardless of how it was made: same reader-inventory rule as
+              -- the walkthrough card.
+              AND NOT EXISTS (SELECT 1 FROM decision_version dv
+                                JOIN capture_discarded cd ON cd.capture_id = dv.capture_id
+                               WHERE dv.decision_id = d.id)
+            ORDER BY d.created_at_ms DESC LIMIT 4`));
       } catch { /* CO schema not up yet */ }
       // The Projects-home cards: counts, last activity and a cover photo per job.
       setCards(await projectCards(db, ps));

@@ -393,7 +393,11 @@ export async function runLoopCheck(
     await db.execute(`DELETE FROM change_order_outbox WHERE change_order_id LIKE ?`, [`co-${tag}%`]);
     await db.execute(`DELETE FROM change_order WHERE id LIKE ? OR scope LIKE ?`,
                      [`co-${tag}%`, `Loop check ${tag}%`]);
-    await db.execute(`DELETE FROM decision WHERE id LIKE ?`, [`d-${tag}%`]);
+    // recordDecision mints its own `dec-…` ids, so matching `d-${tag}%` deleted
+    // NOTHING — four test decisions sat on hadar's home screen as undeletable
+    // cards. Match what the rows actually carry: the plumbing subject that
+    // startExtraFromCapture writes, scoped to this run's captures.
+    await db.execute(`DELETE FROM decision WHERE subject LIKE ?`, [`extra ${tag}%`]);
   } catch { /* cleanup must never fail the run it is tidying */ }
 
   const failed = steps.filter((s) => !s.ok).length;

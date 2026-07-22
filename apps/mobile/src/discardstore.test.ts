@@ -238,3 +238,34 @@ test('a pre-fix ghost — tombstoned captures with surviving pair rows — is hi
      GROUP BY cp.pair_id`;
   assert.equal(rows(raw, CARD_QUERY).length, 0, 'ghost card must not render');
 });
+
+// THE UNDELETABLE "EXTRAS" — hadar: "what are those extras on the list? and why
+// i cannot delete them". They were plumbing decisions (subject 'extra <capId>',
+// auto-created under every extra) surfacing through the legacy "decisions not
+// yet priced" card after their extras were deleted. Plumbing must never render:
+// shown, it reads as an extra that cannot be opened or deleted — because it is
+// not an extra, it is the floor under one. Mirrors the App.tsx Stage-2 query.
+test('plumbing and dead decisions never surface as cards', async () => {
+  const { raw, db } = fresh();
+  seed(raw, 'plumbA');                       // plumbing decision + draft extra
+  raw.prepare(`INSERT INTO decision (id, project_id, owner_id, subject, created_at_ms)
+               VALUES (?,?,?,?,?)`).run('dReal', 'p1', 'u1', 'oak trim choice', 1);
+
+  const CARD = `
+    SELECT d.id FROM decision d
+     LEFT JOIN change_order co ON co.decision_id = d.id
+    WHERE co.id IS NULL
+      AND d.subject NOT LIKE 'extra %'
+      AND NOT EXISTS (SELECT 1 FROM decision_version dv
+                        JOIN capture_discarded cd ON cd.capture_id = dv.capture_id
+                       WHERE dv.decision_id = d.id)`;
+
+  // A real, user-made decision with no extra still shows.
+  assert.deepEqual(rows(raw, CARD).map((r: any) => r.id), ['dReal']);
+
+  // Delete the extra: its plumbing decision loses its co, and must NOT appear.
+  const r = await discardCapture(db, 'plumbA');
+  assert.equal(r.ok, true);
+  assert.deepEqual(rows(raw, CARD).map((r: any) => r.id), ['dReal'],
+    'plumbing must not surface after its extra is deleted');
+});
