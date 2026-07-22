@@ -124,6 +124,45 @@ console.log('\nverifying…\n');
   }
 }
 
+// ── 4b2. Is the source greppable at all? ─────────────────────────────────────
+// THE CHECK THAT CAUGHT A CHECK. `src/eventlog.ts` held one raw NUL byte — a hash
+// separator written as a literal character instead of the escape `\0`. It is valid
+// UTF-8, so tsc compiled it, the tests passed, and every check in THIS file read it
+// correctly (Node's readFileSync does no binary sniffing).
+//
+// grep does. ugrep, GNU grep and ripgrep all classify a file containing NUL as
+// binary and skip it silently — no error, no warning, just no matches ever. So the
+// file was invisible to every shell-based audit, and it cost a false finding: I
+// searched for callers of `change_order_timeline`, got nothing, and was about to
+// record "defined in 366, zero callers" as the ninth instance of dead code in this
+// repo. It has a caller, on line 141 of the file grep would not read.
+//
+// A silent-skip is the exact failure mode this whole script exists to prevent, so
+// it is guarded rather than just fixed: one byte anywhere in the tree can switch
+// off an entire class of verification without anything turning red.
+{
+  const files = run('sh', ['-c',
+    `find "${join(MOBILE, 'src')}" "${MOBILE}/App.tsx" "${join(ROOT, 'scripts')}" ` +
+    `"${join(MOBILE, 'sql')}" -type f 2>/dev/null`], ROOT)
+    .out.split('\n').map((s) => s.trim()).filter(Boolean);
+  const binary = [];
+  let scanned = 0;
+  for (const f of files) {
+    let buf; try { buf = readFileSync(f); } catch { continue; }
+    scanned++;
+    if (buf.includes(0)) binary.push(`${f.replace(ROOT + '/', '')} (${buf.filter((b) => b === 0).length} NUL)`);
+  }
+  if (scanned === 0) {
+    record('source is greppable', 'inconclusive', 'scanned 0 files — the find is wrong');
+  } else {
+    record('source is greppable', binary.length === 0 ? 'pass' : 'fail',
+      binary.length === 0
+        ? `${scanned} files, no NUL bytes — grep reads all of them`
+        : `${binary.length} file(s) grep will SKIP SILENTLY: ${binary.join(', ')}. ` +
+          `Write the byte as an escape ('\\0'), not as a literal.`);
+  }
+}
+
 // ── 4c. Is every module actually reachable from the app? ──────────────────────
 // THE CHECK THAT WOULD HAVE CAUGHT THE BIG ONE. A 23-agent run added 61 files with
 // 209 passing tests, and App.tsx imported NONE of them. Everything was green on code
