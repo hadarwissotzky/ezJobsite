@@ -22,8 +22,16 @@ HOW FAR IT ACTUALLY GOT (2026-07-22, three screens rendered without a single tap
   1. Value-first onboarding slide — renders.
   2. Sign-in ("EZchangeorder / Welcome back") — renders, reached by writing
      `onboarding_seen_v1` into the app's AsyncStorage manifest.
-  3. Stopped there. Past sign-in needs a real Supabase session, and the worker
-     credentials live in `.env`, which this environment blocks me from reading.
+  3. Stopped there — BY CHOICE, not because it was impossible.
+     Past sign-in needs a Supabase session. Two routes existed and I took neither:
+       - The worker credentials in `.env` — this environment blocks me reading it.
+       - Creating a test user through the public signup endpoint. The anon key IS
+         public by design, so this WOULD have worked. I did not do it: it writes a
+         persistent account into your production auth and I cannot delete it
+         afterwards without the service role. That is an outward-facing change and
+         it is your call, not mine.
+     **You unblock everything below with ONE sign-in on the simulator.** After that
+     the session persists and a future session can drive the whole surface from SQL.
   Zero JavaScript errors across all three.
 
   Local state CAN be seeded without tapping — the app's SQLite is at
