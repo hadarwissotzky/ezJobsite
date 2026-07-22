@@ -61,7 +61,10 @@ import { ensureActivitySchema, activityFor, markRead,
 // the client's messages; a reminder must go via the SAME link (R8) or the nudge
 // breaks the thing it is nudging about.
 import { canRemind, reminderText } from './src/remind';
-import { ensureDraftSchema } from './src/capturedraft';
+import { ensureDraftSchema, sweepDrafts, recoverableDrafts, readDraftArtifacts,
+         closeDraft } from './src/capturedraft';
+import type { DraftSummary } from './src/capturesession';
+import { DraftRecoveryCard } from './src/ui/draftrecovery';
 // R6 AC2: the FROZEN instrument, on the contractor's side. The record screen was
 // rendering change_order.scope — the MUTABLE local row — while the client held
 // shown_content. In a dispute they would each be reading a different document and
@@ -210,6 +213,10 @@ export default function App() {
   // R8: the bell. `activity` is the list; `bell` is whether the sheet is open.
   const [activity, setActivity] = React.useState<ActivityRow[]>([]);
   const [bell, setBell] = React.useState(false);
+  // R1: partial sessions found on disk at launch. Every one is offered — see
+  // capturesession.ts on why recovery is not "the most recent draft".
+  const [drafts, setDrafts] = React.useState<DraftSummary[]>([]);
+  const [draftBusy, setDraftBusy] = React.useState<string | null>(null);
   // R6: sent/opened/asked/answered timestamps + the frozen snapshot for the open
   // record. Held beside it, not inside it — the network only ever ADDS here, and a
   // fetch that fails must leave the record exactly as usable as it was.
@@ -804,6 +811,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // recoverySweep empties unconditionally — draft media must survive that sweep,
       // so it never lives there.
       await ensureDraftSchema(db);
+      // A SEPARATE sweep over a SEPARATE directory. recoverySweep empties capture-tmp
+      // unconditionally, so draft media never lives there. Everything this sweep does
+      // is in the direction of KEEPING bytes: adopt a file with no row, adopt a
+      // directory with no draft.
+      try {
+        await sweepDrafts(db, OWNER);
+        setDrafts(await recoverableDrafts(db, OWNER));
+      } catch (e) { console.log('[draft] sweep skipped:', String(e)); }
       // R6b: who captured / priced / sent, and who it was addressed to.
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
@@ -2989,6 +3004,42 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
         </View>
+      )}
+      {/* R1: a walk this phone still holds and never filed. Offered BEFORE anything
+          else on the screen, because it is the only thing here that can be lost —
+          everything below it is already committed. */}
+      {drafts.length > 0 && (
+        <DraftRecoveryCard
+          drafts={drafts}
+          busyId={draftBusy}
+          onKeep={async (d) => {
+            setDraftBusy(d.draftId);
+            try {
+              const a = await readDraftArtifacts(db, d.draftId);
+              // Straight into the SAME commit path a live capture uses. A second
+              // path would be a second set of bugs, and this one is proven.
+              await onFusedCapture({
+                photos: a.photos, audioSegments: a.audioSegments, stamp: a.stamp,
+                previewUris: a.previewUris, durationSecs: a.durationSecs,
+              });
+              // Closed only AFTER the commit returns. A crash between them leaves the
+              // draft recoverable again — offering a walk twice is recoverable, and
+              // closing a draft whose commit failed is not.
+              await closeDraft(db, d.draftId, 'committed');
+            } catch (e: any) {
+              setUi({ k: 'refused', why: String(e?.message ?? e) });
+            } finally {
+              setDraftBusy(null);
+              setDrafts(await recoverableDrafts(db, OWNER));
+            }
+          }}
+          onDiscard={async (d) => {
+            setDraftBusy(d.draftId);
+            await closeDraft(db, d.draftId, 'discarded');
+            setDraftBusy(null);
+            setDrafts(await recoverableDrafts(db, OWNER));
+          }}
+        />
       )}
       {sendPrep && (() => {
         const sp = sendPrep;
