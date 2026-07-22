@@ -43,6 +43,10 @@ import { EwaScreen, UnpricedEwaBanner } from './src/ui/ewascreen';
 import { drainEwaOutbox, ensureEwaSchema, ewaIds, listEwa, linkPriceToEwa,
          markEwaApproved, markReminded, type EwaRow } from './src/ewastore';
 import { sendEwa } from './src/ewasend';
+import { ensureVoiceCacheSchema, voiceReadingForDecision,
+         type VoiceReading } from './src/voicesource';
+import type { PriceMode } from './src/voiceprice';
+import { VoicePriceCard } from './src/ui/voicepricecard';
 import { decisionSummaryFor } from './src/decisionsummarydata';
 import type { DecisionSummary } from './src/decisionsummary';
 import { shareApprovalDoc } from './src/approvalrecordshare';
@@ -387,7 +391,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // looking at it. `confidence` decides whether we dare prefill.
   const [priced, setPriced] = React.useState<null | {
     decisionId: string; scope: string; whoDirected: string;
-    amountText: string; confidence: 'high'|'low'|'none'; nteText: string;
+    amountText: string; nteText: string;
+    /** R3's one-step modes. */
+    mode: PriceMode;
+    /** R2: what the RECORDING said. null while it is being read, or when this device
+     *  has no transcript for it (offline, or not processed yet). */
+    voice: VoiceReading | null;
     /** R7: the extra this new price replaces. Retired when the price is confirmed. */
     supersedes?: string | null;
   }>(null);
@@ -741,6 +750,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
       await ensurePairSchema(db);
+      // R2: the device's own copy of transcripts, so the price read-back keeps
+      // working in a basement (mandate #7). Fetching is opportunistic; a miss is an
+      // empty, flagged price field, never a blocked screen.
+      await ensureVoiceCacheSchema(db);
       const sl = await savedLang(db);
       // Restore the display language a returning user already chose. Language is now
       // part of the profile form, not a gate, so there's no separate "picked" flag.
@@ -1925,7 +1938,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             decisionId: c.decision_id, scope: c.scope, whoDirected: c.who_directed,
             amountText: (c.amount_cents / 100).toFixed(2),
             nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
-            confidence: 'high', supersedes: c.id,
+            mode: c.nte_cents == null ? 'fixed' : 'nte', voice: null, supersedes: c.id,
           });
           setLines([]);
         }}
@@ -2397,16 +2410,27 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               }}>
                 <Text style={s.askT}>Ask {d.directed_by ?? 'them'} to confirm →</Text>
               </Pressable>
-              <Pressable style={s.ask} onPress={() => {
-                const pm = parseMoney(d.current_value);
+              <Pressable style={s.ask} onPress={async () => {
+                // R2: the price is read from the TRANSCRIPT, not from the decision
+                // text. parseMoney(d.current_value) could never find one — the
+                // structuring prompt forbids the model from putting a figure in that
+                // field at all — so it returned 'none' every time and the amount never
+                // prefilled. That was the failing half of R2's first AC.
                 setPriced({
                   decisionId: d.id, scope: d.current_value,
                   whoDirected: d.directed_by ?? 'Owner',
-                  // A low-confidence guess is NOT prefilled. Make them type it
-                  // rather than nudge them into agreeing with a wrong number.
-                  amountText: pm.confidence === 'high' && pm.cents !== null
-                    ? (pm.cents / 100).toFixed(2) : '',
-                  confidence: pm.confidence, nteText: '',
+                  amountText: '', nteText: '', mode: 'fixed', voice: null,
+                });
+                const v = await voiceReadingForDecision(db, connector.client, d.id, parseMoney);
+                setPriced((p) => {
+                  // The card may have been closed, or a DIFFERENT decision priced,
+                  // while this was in flight. Never write a price onto another extra.
+                  if (!p || p.decisionId !== d.id) return p;
+                  const amount = v.price?.prefill && v.price.amountCents !== null
+                    ? (v.price.amountCents / 100).toFixed(2) : '';
+                  // MANDATE #6: a single unambiguous figure prefills; two figures, a
+                  // bare spoken number, and silence all leave it EMPTY and flagged.
+                  return { ...p, voice: v, mode: v.price?.mode ?? 'fixed', amountText: amount };
                 });
               }}>
                 <Text style={s.askT}>Price it (change order) →</Text>
@@ -2444,12 +2468,19 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             {priced.supersedes && <Text style={s.cardNote}>{T('co.revisingNote')}</Text>}
             <Text style={s.moneyScope}>{priced.scope}</Text>
 
-            {priced.confidence === 'low' && (
-              <Text style={s.warn}>{T('co.unsure')}</Text>
-            )}
-            {priced.confidence === 'none' && (
-              <Text style={s.warn}>{T('co.noPriceHeard')}</Text>
-            )}
+            {/* R2: what the recording actually said, beside the field it filled.
+                Mandate #6's read-back is not a warning string — it is showing the
+                contractor the sentence the number came from. */}
+            <VoicePriceCard
+              reading={priced.voice?.price ?? null}
+              multi={priced.voice?.multi ?? null}
+              mode={priced.mode}
+              onModeChange={(m) => setPriced((p) => p && { ...p, mode: m })}
+              amountDisplay={
+                centsFromInput(priced.amountText) == null
+                  ? '' : money(centsFromInput(priced.amountText)!)
+              }
+            />
 
             {/* §7.2 line items. OPTIONAL: "add 3 outlets for $450" is a complete,
                 honest change order, and forcing a breakdown out of someone on a
@@ -2616,7 +2647,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             markReminded(db, e.id);
             setSettling(e.id);
             setPriced({ decisionId: e.decisionId, scope: e.scope, whoDirected: 'Owner',
-                        amountText: '', confidence: 'none', nteText: '' });
+                        amountText: '', nteText: '', mode: 'fixed', voice: null });
           }} />
           <Text style={s.ledgerHead}>Extras</Text>
 
@@ -2754,7 +2785,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                       whoDirected: c.who_directed,
                       amountText: (c.amount_cents / 100).toFixed(2),
                       nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
-                      confidence: 'high', supersedes: c.id,
+                      mode: c.nte_cents == null ? 'fixed' : 'nte', voice: null,
+                      supersedes: c.id,
                     });
                     setLines([]);
                   }}>
