@@ -38,6 +38,18 @@ jobs:
               apps/web/confirm.html > _site/confirm.html
           # index.html so the bare Pages URL isn't a 404 while testing.
           cp _site/confirm.html _site/index.html
+          # CUSTOM DOMAIN, AND THE REASON IS HTTPS, NOT VANITY [2026-07-21].
+          #
+          # Without this file the repo inherits the user-level Pages domain and serves
+          # at http://www.capimpact.com/ezJobsite/ -- plain HTTP, https_enforced false
+          # (verified via the Pages API, not assumed). This page shows a price and
+          # collects a typed signature against it. 240_shown_content_integrity.sql
+          # exists so the number rendered here is provably the number in the signed
+          # document; over HTTP anyone on the same wifi can rewrite that number in
+          # transit, and the signature would be genuine on a document nobody wrote.
+          # A custom domain on THIS repo overrides the inherited one and GitHub
+          # provisions a Let's Encrypt certificate for it automatically.
+          echo 'approve.ezchangeorder.com' > _site/CNAME
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
