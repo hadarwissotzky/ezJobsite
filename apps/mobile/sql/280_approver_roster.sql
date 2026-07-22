@@ -52,6 +52,14 @@ create table if not exists public.project_approver (
   -- record has to keep resolving. Same active/removed shape as project_party.
   status        text not null default 'active' check (status in ('active','removed')),
 
+  -- Can this person commit the client's money? NULL = never asked; the role default
+  -- applies (owner and general_contractor bind money, nobody else does by default).
+  -- NULL is kept distinct from false on purpose: "we did not ask" earns a visible
+  -- caveat on the suggestion, "we asked and they cannot" earns a skip. Collapsing
+  -- them would silently route a priced commitment to someone who cannot authorise
+  -- it, which is an approval that does not bind.
+  can_bind_money boolean,
+
   last_used_ms  bigint not null default 0,
   created_at_ms bigint not null
 );

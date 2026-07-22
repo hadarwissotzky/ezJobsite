@@ -48,7 +48,40 @@ export type Approver = {
   role: ApproverRole;
   /** Most recently sent-to wins ties. 0 = never used. */
   lastUsedMs: number;
+  /**
+   * Can this person commit the client's money? `undefined` = not asked, fall back
+   * to the role default. See BINDS_MONEY_BY_DEFAULT.
+   */
+  canBindMoney?: boolean;
 };
+
+/**
+ * Roles that can commit the client's money without being asked.
+ *
+ * ADDED AFTER REVIEW (codex, 2026-07-21), and it was a real bug, not a nit. The
+ * first version routed a `finish` extra to the designer even when the owner was
+ * also on the roster, because R5c says "a finish or fixture choice goes to the
+ * designer". A designer can CHOOSE a finish. A designer usually cannot bind the
+ * homeowner to $1,850. Sending a priced commitment to someone without that
+ * authority produces an approval that does not bind -- which is the exact failure
+ * R5c opens by naming, and my own test had locked the wrong behaviour in.
+ *
+ * R5c's open (b) asks this directly: "whether an approver's authority is modelled
+ * (can a designer approve money, or only selections?) ... v1 likely records the
+ * role without enforcing a limit". I read that as permission to ignore authority.
+ * It is not -- "does not ENFORCE a limit" is not "assumes there is none".
+ *
+ * So authority is recorded, not enforced: an unconfirmed approver is still
+ * suggested (R5c's AC explicitly wants the designer pre-filled for a finish), but
+ * the reason SAYS the authority is unconfirmed. Suggest, never decide -- and never
+ * suggest silently when the thing being suggested might not hold.
+ */
+const BINDS_MONEY_BY_DEFAULT: ApproverRole[] = ['owner', 'general_contractor'];
+
+/** Explicit answer wins; otherwise the role's default. */
+export function bindsMoney(a: Approver): boolean {
+  return a.canBindMoney ?? BINDS_MONEY_BY_DEFAULT.includes(a.role);
+}
 
 /**
  * Type -> the role that usually owns that call. From R5c: "A structural surprise
@@ -87,8 +120,20 @@ export type Suggestion =
       kind: 'suggested';
       approver: Approver;
       /** Why THIS person. Rendered to the contractor verbatim; never hidden. */
-      reasonKey: 'r5c.becauseRole' | 'r5c.becauseFallback' | 'r5c.becauseRecent';
+      reasonKey:
+        | 'r5c.becauseRole'
+        /** Right role for the job, but that role does not bind money by default. */
+        | 'r5c.becauseRoleUnconfirmed'
+        | 'r5c.becauseFallback'
+        | 'r5c.becauseRecent';
       reasonParams: { role?: string; type?: string; name: string };
+      /**
+       * False when this person's authority to commit money is unconfirmed. The UI
+       * must show the caveat; it must NOT silently block, because on plenty of jobs
+       * a designer genuinely does hold signing authority and only the contractor
+       * knows that.
+       */
+      bindsMoney: boolean;
     }
   /** The roster has nobody who fits and nobody at all to fall back to. */
   | { kind: 'needs_approver'; wantedRole: ApproverRole | null };
@@ -123,10 +168,13 @@ export function suggestApprover(
   if (type) {
     const wanted = PREFERRED_ROLE[type];
     const match = ofRole(active, wanted);
-    if (match) {
+
+    // The subject-matter match is preferred ONLY when they can also commit money.
+    // When they cannot, someone who can is preferred over them -- the extra still
+    // carries a price, and the price is what has to be authorised.
+    if (match && bindsMoney(match)) {
       return {
-        kind: 'suggested',
-        approver: match,
+        kind: 'suggested', approver: match, bindsMoney: true,
         reasonKey: 'r5c.becauseRole',
         reasonParams: { role: wanted, type, name: match.name },
       };
@@ -134,22 +182,28 @@ export function suggestApprover(
     for (const role of FALLBACK_ROLES) {
       if (role === wanted) continue;
       const alt = ofRole(active, role);
-      if (alt) {
+      if (alt && bindsMoney(alt)) {
         return {
-          kind: 'suggested',
-          approver: alt,
+          kind: 'suggested', approver: alt, bindsMoney: true,
           reasonKey: 'r5c.becauseFallback',
           reasonParams: { role, type, name: alt.name },
         };
       }
     }
-    // Somebody is on the roster, just nobody who fits. Still better than nothing,
-    // and the reason will say it is only "who you last sent to".
+    // Nobody on this job is known to hold the money authority. Fall back to the
+    // subject-matter match -- R5c's AC wants the designer pre-filled for a finish --
+    // but say plainly that the authority is unconfirmed.
+    if (match) {
+      return {
+        kind: 'suggested', approver: match, bindsMoney: false,
+        reasonKey: 'r5c.becauseRoleUnconfirmed',
+        reasonParams: { role: wanted, type, name: match.name },
+      };
+    }
     const recent = mostRecent(active);
     if (recent) {
       return {
-        kind: 'suggested',
-        approver: recent,
+        kind: 'suggested', approver: recent, bindsMoney: bindsMoney(recent),
         reasonKey: 'r5c.becauseRecent',
         reasonParams: { name: recent.name },
       };
@@ -157,11 +211,12 @@ export function suggestApprover(
     return { kind: 'needs_approver', wantedRole: wanted };
   }
 
-  const recent = mostRecent(active);
+  // Untyped. Prefer someone who can bind money; fall back to plain recents rather
+  // than blocking, because R5c's last AC says an untyped extra must not be blocked.
+  const recent = mostRecent(active.filter(bindsMoney)) ?? mostRecent(active);
   if (recent) {
     return {
-      kind: 'suggested',
-      approver: recent,
+      kind: 'suggested', approver: recent, bindsMoney: bindsMoney(recent),
       reasonKey: 'r5c.becauseRecent',
       reasonParams: { name: recent.name },
     };

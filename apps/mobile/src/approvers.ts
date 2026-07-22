@@ -55,6 +55,11 @@ export const APPROVER_DDL = [
       email         TEXT,
       status        TEXT NOT NULL DEFAULT 'active'
                       CHECK (status IN ('active','removed')),
+      -- NULL = never asked, fall back to the role default (owner + GC bind money).
+      -- Not a boolean default, because "we did not ask" and "we asked and they
+      -- cannot" must stay distinguishable -- the routing shows a caveat for the
+      -- first and simply skips them for the second.
+      can_bind_money INTEGER CHECK (can_bind_money IN (0,1)),
       -- Drives the recents fallback in suggestApprover. 0 = never sent to.
       last_used_ms  INTEGER NOT NULL DEFAULT 0,
       created_at_ms INTEGER NOT NULL
@@ -107,8 +112,9 @@ export async function listRoster(
   const rows = await db.getAll<{
     id: string; name: string; role: string;
     phone_e164: string | null; email: string | null; last_used_ms: number;
+    can_bind_money: number | null;
   }>(
-    `SELECT id, name, role, phone_e164, email, last_used_ms
+    `SELECT id, name, role, phone_e164, email, last_used_ms, can_bind_money
        FROM project_approver
       WHERE project_id = ? AND status = 'active'
       ORDER BY last_used_ms DESC, name`,
@@ -120,13 +126,18 @@ export async function listRoster(
   return rows.filter((r) => isApproverRole(r.role)).map((r) => ({
     id: r.id, name: r.name, role: r.role as ApproverRole,
     lastUsedMs: r.last_used_ms, phone: r.phone_e164, email: r.email,
+    // undefined (not false) when unset: bindsMoney() must fall through to the role
+    // default, and `0 ?? x` would not.
+    canBindMoney: r.can_bind_money == null ? undefined : r.can_bind_money === 1,
   }));
 }
 
 export async function addApprover(
   db: AbstractPowerSyncDatabase,
   o: { projectId: string; name: string; role: ApproverRole;
-       phone?: string | null; email?: string | null }
+       phone?: string | null; email?: string | null;
+       /** Leave undefined when not asked; the role default then applies. */
+       canBindMoney?: boolean }
 ): Promise<string> {
   const name = o.name.trim();
   if (!name) throw new Error('an approver needs a name');
@@ -137,14 +148,17 @@ export async function addApprover(
   const payload = {
     id, project_id: o.projectId, name, role: o.role,
     phone_e164: o.phone?.trim() || null, email: o.email?.trim() || null,
+    can_bind_money: o.canBindMoney == null ? null : (o.canBindMoney ? 1 : 0),
     created_at_ms: now,
   };
   await db.writeTransaction(async (tx) => {
     await tx.execute(
       `INSERT INTO project_approver
-         (id, project_id, name, role, phone_e164, email, last_used_ms, created_at_ms)
-       VALUES (?,?,?,?,?,?,0,?)`,
-      [id, o.projectId, name, o.role, payload.phone_e164, payload.email, now]
+         (id, project_id, name, role, phone_e164, email, can_bind_money,
+          last_used_ms, created_at_ms)
+       VALUES (?,?,?,?,?,?,?,0,?)`,
+      [id, o.projectId, name, o.role, payload.phone_e164, payload.email,
+       payload.can_bind_money, now]
     );
     // Atomic with the row, same reason as addParty: a crash between them leaves an
     // approver only this phone knows about, and the next device would re-add them.

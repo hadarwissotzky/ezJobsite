@@ -383,6 +383,8 @@ const EN: Record<string, string> = {
   'r5c.becauseRole': '{type} → {name}, your {role}',
   'r5c.becauseFallback': 'No {type} approver on this job → {name}, your {role}',
   'r5c.becauseRecent': '{name} — who you last sent to on this job',
+  'r5c.becauseRoleUnconfirmed':
+    '{type} → {name}, your {role}. Check they can approve costs on this job.',
   'r5c.sendTo': 'Send to',
   'r5c.change': 'Change',
   'r5c.whatKind': 'What kind of extra is this?',
@@ -745,6 +747,8 @@ const ES: Record<string, string> = {
   'r5c.becauseRole': '{type} → {name}, su {role}',
   'r5c.becauseFallback': 'No hay aprobador de {type} en esta obra → {name}, su {role}',
   'r5c.becauseRecent': '{name} — a quien envió por última vez en esta obra',
+  'r5c.becauseRoleUnconfirmed':
+    '{type} → {name}, su {role}. Confirme que puede aprobar costos en esta obra.',
   'r5c.sendTo': 'Enviar a',
   'r5c.change': 'Cambiar',
   'r5c.whatKind': '¿Qué tipo de extra es este?',

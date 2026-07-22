@@ -31,8 +31,9 @@ const SPEC = p('a4', 'Priya', 'internal_specialist', 50);
 
 // ── the acceptance criteria, as written in the PRD ────────────────────────────
 
-test('AC: a finish selection is pre-filled to the designer, with the reason', () => {
-  const s = suggestApprover('finish', [DANA, GC, SARAH]);
+test('AC: a finish selection is pre-filled to the designer WHEN she can approve costs', () => {
+  const danaSigns = { ...DANA, canBindMoney: true };
+  const s = suggestApprover('finish', [danaSigns, GC, SARAH]);
   assert.equal(s.kind, 'suggested');
   if (s.kind !== 'suggested') return;
   assert.equal(s.approver.name, 'Dana');
@@ -40,6 +41,53 @@ test('AC: a finish selection is pre-filled to the designer, with the reason', ()
   // The reason must carry BOTH halves or the sender cannot check the logic.
   assert.equal(s.reasonParams.role, 'designer');
   assert.equal(s.reasonParams.type, 'finish');
+  assert.equal(s.bindsMoney, true);
+});
+
+/**
+ * This test replaces one that asserted the OPPOSITE and was wrong.
+ *
+ * The original locked in "finish -> the designer" unconditionally, straight from
+ * R5c's wording. Codex caught it (2026-07-21): every extra in this app carries a
+ * price, a designer can choose a finish but usually cannot bind the homeowner to
+ * $1,850, and an approval from someone without that authority does not bind --
+ * the precise failure R5c opens by naming. The test had made the bug permanent.
+ */
+test('a finish extra does NOT go to the designer over an owner who can approve costs', () => {
+  const s = suggestApprover('finish', [DANA, SARAH]); // Dana's authority unconfirmed
+  assert.equal(s.kind, 'suggested');
+  if (s.kind !== 'suggested') return;
+  assert.equal(s.approver.name, 'Sarah', 'money authority outranks subject-matter fit');
+  assert.equal(s.reasonKey, 'r5c.becauseFallback');
+  assert.equal(s.bindsMoney, true);
+});
+
+test('AC still holds when NOBODY can approve costs: designer suggested, flagged unconfirmed', () => {
+  // R5c's AC wants the designer pre-filled. It must still happen -- with the caveat,
+  // because on plenty of jobs the designer really does hold signing authority and
+  // only the contractor knows it. Suggest, never decide; never suggest silently.
+  const s = suggestApprover('finish', [DANA, SPEC]);
+  assert.equal(s.kind, 'suggested');
+  if (s.kind !== 'suggested') return;
+  assert.equal(s.approver.name, 'Dana');
+  assert.equal(s.reasonKey, 'r5c.becauseRoleUnconfirmed');
+  assert.equal(s.bindsMoney, false, 'the caveat must be machine-readable, not just prose');
+});
+
+test('an explicit no overrides the role default', () => {
+  const gcNoAuthority = { ...GC, canBindMoney: false };
+  const s = suggestApprover('structural', [gcNoAuthority, SARAH]);
+  assert.equal(s.kind, 'suggested');
+  if (s.kind !== 'suggested') return;
+  assert.equal(s.approver.name, 'Sarah');
+});
+
+test('untyped prefers someone who can approve costs over a more recent one who cannot', () => {
+  const recentDesigner = { ...DANA, lastUsedMs: 9999 };
+  const s = suggestApprover(null, [recentDesigner, SARAH]);
+  assert.equal(s.kind, 'suggested');
+  if (s.kind !== 'suggested') return;
+  assert.equal(s.approver.name, 'Sarah');
 });
 
 test('AC: no roster member for the wanted role -> asks who approves', () => {

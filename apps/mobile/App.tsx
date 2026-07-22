@@ -60,6 +60,7 @@ import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
 import { sendForConfirmation } from './src/confirmations';
+import { ensureApproverSchema } from './src/approvers';
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine,
          markLocalSent, money, parseMoney, validateLines,
@@ -465,6 +466,9 @@ export default function App() {
       await ensureAnnotationSchema(db);
       await ensureTagSchema(db);
       await ensurePartySchema(db);
+      // AFTER ensureChangeOrderSchema, and that order is load-bearing: this one
+      // ALTERs change_order to add extra_type (R5c), so the table has to exist first.
+      await ensureApproverSchema(db);
       await ensureConsentSchema(db);
       await ensurePairSchema(db);
       const sl = await savedLang(db);
