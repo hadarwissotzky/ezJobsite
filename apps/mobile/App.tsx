@@ -48,6 +48,7 @@ import { sendEwa } from './src/ewasend';
 // cloud and supersedes this under 150's newest-wins.
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
 import { discardCapture, discardExtra, ensureDiscardSchema, previewDiscard } from './src/discardstore';
+import { startExtraFromCapture, titleExtraIfUntitled } from './src/startextra';
 // The send gate. hadar: "only then it can be sent to the owner for approval —
 // until then we keep the raw data on the device and waiting for processing."
 // Nothing enforced that; openSendPrep had no check of any kind.
@@ -776,14 +777,6 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         } catch { /* schema not up yet; the gate closes rather than opens */ }
       }
       setReadiness(ready);
-      // TEMPORARY DIAGNOSTIC. Two copies of the phone's database came back with
-      // different sizes and an mtime hours old, so a file copy is not telling me
-      // what the app sees. This reads the live database in-process, which is the
-      // only thing that can settle it.
-      console.log('[ledger]', JSON.stringify({
-        project: pid, rows: ledgerRows.length,
-        statuses: ledgerRows.map((r) => r.status),
-      }));
       setCoRows(ledgerRows); coRowsRef.current = ledgerRows;
       try { setQuestions(await openQuestions(db, pid)); } catch { /* schema not up yet */ }
       try { setThreads(await threadsForProject(db, pid)); } catch { /* schema not up yet */ }
@@ -1211,8 +1204,36 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // the instant it is saved — recognition takes seconds and mandate #3's
         // touch budget does not have seconds to spare. The transcript lands when
         // it lands, and refresh() picks it up.
+        // THE RECORDING IS THE EXTRA. hadar: "the user records a change order (a
+        // message) and snap some pictures that become a extra". It exists in the
+        // ledger from this moment — priceless, untitled, unsendable — rather than
+        // waiting for a review screen he never asked for and a Price-it step that
+        // asks him to do what R2 promises the app will do.
+        //
+        // AFTER durability and NOT awaited, same rule as noteCapturedBy above:
+        // if this fails he has lost a ledger row, never his evidence.
+        void startExtraFromCapture(db, {
+          captureId: r.captureId, projectId: res.projectId, ownerId: OWNER,
+        }).then(async (x) => {
+          if (!x.ok) { console.log('startExtra failed:', x.reason); return; }
+          await refresh();
+        }).catch(() => { /* the capture is safe; the ledger row is not owed */ });
+
         void transcribeOnDevice(db, r.captureId, uri)
-          .then((t) => { if (t.ok) void refresh(); })
+          .then(async (t) => {
+            if (!t.ok) return;
+            // A TITLE FROM HIS OWN WORDS, never invented. The first sentence of
+            // what he said is the closest thing to a title that exists before
+            // the LLM step runs, and it is his language rather than the app's.
+            // titleExtraIfUntitled writes only over the placeholder and only on
+            // a draft, so it can never overwrite something he typed or something
+            // a client has already been shown.
+            const said = await db.getAll<{ text: string }>(
+              `SELECT text FROM voice_transcript_cache WHERE capture_id = ?`, [r.captureId]);
+            const first = (said[0]?.text ?? '').split(/(?<=[.!?])\s/)[0]?.trim();
+            if (first) await titleExtraIfUntitled(db, `co-${r.captureId}`, first);
+            await refresh();
+          })
           .catch(() => { /* the worker's cloud path still covers this capture */ });
         if (res.confidence !== 'high') setFiled(res.why);
       } else setUi({ k: 'refused', why: r.reason });
@@ -2700,12 +2721,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         </View>
       )}
 
-      {/* REQ-PROC8: the pipeline structures what was said; this is where a human
-          checks it. Offered right after a save, when the moment is still in mind. */}
+      {/* REVIEW IS OFF THE PRIMARY PATH. hadar: "there is no review! the user
+          doesn't know all this" — the recording IS the extra, and it now appears
+          in the ledger the moment it is saved (startExtraFromCapture above).
+          REQ-PROC8's "a human checks what the pipeline structured" still holds;
+          it just is not a gate standing between recording and having an extra.
+          The screen is reached from a capture in the gallery instead, which is
+          where someone goes when they want to look at one thing closely.
+
+          NOT DELETED: it is the only surface that shows the structured proposal
+          and its confidence, and R10's decision approvals (P1) will need it. */}
       {ui.k === 'saved' && (
-        <Pressable style={s.reviewBtn} onPress={() => setReview(ui.id)}>
-          <Text style={s.reviewT}>{T('rev.open')}</Text>
-        </Pressable>
+        <Text style={s.state}>{T('rev.extraCreated')}</Text>
       )}
 
       {/* Consolidated capture: Snap + Talk (above) is the one screen for photo + voice.

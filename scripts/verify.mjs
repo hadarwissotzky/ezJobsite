@@ -442,6 +442,11 @@ console.log('\nverifying…\n');
     ['R2  on-device upload',       'drainSttOutbox',          'App.tsx'],
     ['R2  on-device schema',       'ensureSttSchema',         'App.tsx'],
     ['R2  live while recording',   'startLive',               'App.tsx'],
+    // The corrected path: a recording becomes an extra with no review step. If
+    // this ever stops being called the app silently returns to capture-only and
+    // the ledger stays empty, which is exactly what hadar was looking at.
+    ['Recording becomes an extra',  'startExtraFromCapture',   'App.tsx'],
+    ['Title from his own words',    'titleExtraIfUntitled',    'App.tsx'],
     // Delete is three wires and the confirmation is the one that must not rot:
     // previewDiscard without discardExtra deletes nothing, but discardExtra
     // reachable without previewDiscard would delete without asking.

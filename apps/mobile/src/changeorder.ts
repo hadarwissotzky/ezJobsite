@@ -277,7 +277,10 @@ export async function createChangeOrder(
   db: AbstractPowerSyncDatabase,
   o: {
     id: string; decisionId: string; projectId: string; ownerId: string;
-    scope: string; amountCents: number; nteCents?: number | null;
+    scope: string;
+    /** null = he never said a price (370). NOT zero, which says it is free. */
+    amountCents: number | null;
+    nteCents?: number | null;
     whoDirected: string; refEstimate?: string | null; isMini?: boolean;
     lineItems?: LineItem[];
     numbersConfirmedAt: Date;
@@ -290,8 +293,18 @@ export async function createChangeOrder(
   // Refuse here too. The DB would refuse anyway, but a CO that fails on upload is
   // a CO the contractor believed was saved -- and mandate #1 says never say
   // "saved" for something that is not.
-  const bad = validateLines(lineItems, o.amountCents);
-  if (bad) return { ok: false, reason: bad };
+  // Line items are checked against the amount only when there IS an amount.
+  // With no price given there is nothing for them to add up TO — and an extra
+  // with line items but no total is a contradiction the caller should not be
+  // able to construct, so it is refused rather than quietly allowed.
+  if (o.amountCents === null) {
+    if (lineItems.length) {
+      return { ok: false, reason: 'line items need a total; this extra has no price yet' };
+    }
+  } else {
+    const bad = validateLines(lineItems, o.amountCents);
+    if (bad) return { ok: false, reason: bad };
+  }
 
   const payload = {
     mutation_id: mutationId, id: o.id, decision_id: o.decisionId,
