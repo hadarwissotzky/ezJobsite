@@ -1465,6 +1465,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <Text style={s.backT}>‹ {T('common.close')}</Text>
           </Pressable>
         </View>
+        {/* SCROLLVIEW, and its absence was the bug. This was a plain View, so on
+            a small screen — hadar is on a 13 mini — the title, the scope line and
+            a two-sentence confirmation pushed the confirm button past the bottom
+            edge. It rendered, it was enabled, and it could not be reached by a
+            thumb or scrolled to. "The modal shows up but the secondary delete
+            button cannot be clicked" is exactly what that looks like.
+
+            contentContainerStyle carries the padding so the button keeps a
+            comfortable margin above the home indicator. */}
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 48 }}>
         <View style={s.card}>
           <Text style={s.cardH}>{T('discard.title')}</Text>
           <Text style={s.frozen}>{discard.co.scope}</Text>
@@ -1481,13 +1491,23 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               <Pressable style={s.confirmWide} onPress={async () => {
                 // discardExtra re-plans from scratch: the extra can be sent
                 // between this sheet opening and the thumb landing.
-                const r = discard.captureId
-                  ? await discardCapture(db, discard.captureId)
-                  : await discardExtra(db, discard.co.id, connector.client);
-                setDiscard(null);
-                if (!r.ok) setFiled(T('discard.alreadySent'));
-                // refresh() reloads the ledger AND the captures list; both change.
-                await refresh();
+                // WRAPPED, because it was not. discardCapture threw on a bad
+                // column name and this handler had no catch: the exception went
+                // nowhere, nothing was deleted, and the sheet simply sat there.
+                // A destructive action that fails MUST say so — silence is what
+                // made this take five builds to find.
+                try {
+                  const r = discard.captureId
+                    ? await discardCapture(db, discard.captureId)
+                    : await discardExtra(db, discard.co.id, connector.client);
+                  setDiscard(null);
+                  if (!r.ok) setFiled(T('discard.alreadySent'));
+                  // refresh() reloads the ledger AND the captures list.
+                  await refresh();
+                } catch (e: any) {
+                  setDiscard(null);
+                  setFiled(`Delete failed: ${String(e?.message ?? e).slice(0, 90)}`);
+                }
               }}>
                 <Text style={s.confirmT}>{T('discard.yes')}</Text>
               </Pressable>
@@ -1497,6 +1517,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <Text style={s.dmeta}>{T('common.close')}</Text>
           </Pressable>
         </View>
+        </ScrollView>
       </View>
     );
   }

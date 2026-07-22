@@ -16,9 +16,12 @@
  * returned and why 'low' forces the field open.
  */
 import { SupabaseClient } from '@supabase/supabase-js';
-import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+// TYPE-ONLY, and it must stay that way. A value import pulls in React
+// Native's Flow-typed source, which Node cannot parse, and the tests that
+// exercise this file's SQL stop running.
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { sha256 } from 'js-sha256';
-import { getLang } from './i18n';
+import { getLang } from './i18n.ts';
 
 /**
  * The device authors change orders. The cloud gets a copy.

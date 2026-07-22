@@ -32,6 +32,8 @@ import { canRemind } from './remind';
 import { buildActivity, unreadCount } from './activity';
 import { notifyPermissionStatus, runNotifications } from './notifystore';
 import { markNotified } from './discussionstore';
+import { discardCapture } from './discardstore';
+import { startExtraFromCapture } from './startextra';
 import { recognizeFile } from './ondevicestt';
 
 export type Step = { name: string; ok: boolean; detail: string };
@@ -307,6 +309,73 @@ export async function runLoopCheck(
     }
   } catch (e: any) {
     t('R2 on-device recognises', false, String(e?.message ?? e).slice(0, 70));
+  }
+
+  // 14 ── DELETE, END TO END, on the device's own database.
+  //
+  // WHY IT EXISTS: hadar tapped this button four times across three builds and it
+  // did not work, and every static check I had said it was fine — it typechecks,
+  // the guard is unit-tested, `feature claims` proves every function is called.
+  // All true, and all beside the point. This runs the exact calls the button
+  // makes, against real SQLite, and asserts the row is GONE — which is the only
+  // claim that matters and the one nothing was checking.
+  try {
+    const capId = `${tag}-del`;
+    const relpath = `del/${capId}.m4a`;
+    const dir = `${FS.documentDirectory}del`;
+    await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+    const mediaPath = `${FS.documentDirectory}${relpath}`;
+    await FS.writeAsStringAsync(mediaPath, 'not real audio, but a real file');
+
+    // A capture exactly as performCapture leaves one.
+    await db.execute(
+      `INSERT INTO capture_commit (capture_id, attachment_id, mutation_id, project_id,
+         owner_id, media_relpath, media_sha256, media_bytes, media_mime_type,
+         modality, captured_at_ms, committed_at_ms, request_sha256)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [capId, `att-${capId}`, `mut-${capId}`, projectId, ownerId, relpath,
+       'a'.repeat(64), 31, 'audio/m4a', 'voice', Date.now(), Date.now(), 'c'.repeat(64)]);
+
+    // The extra the app now creates for every recording.
+    const started = await startExtraFromCapture(db, { captureId: capId, projectId, ownerId });
+    const inLedgerBefore = (await ledger(db, projectId)).some((r) => r.id === `co-${capId}`);
+
+    // THE EXACT CALL THE CONFIRM BUTTON MAKES.
+    const del = await discardCapture(db, capId);
+
+    const inLedgerAfter = (await ledger(db, projectId)).some((r) => r.id === `co-${capId}`);
+    const fileGone = !(await FS.getInfoAsync(mediaPath)).exists;
+    const tomb = await db.getAll<{ n: number }>(
+      `SELECT count(*) AS n FROM capture_discarded WHERE capture_id = ?`, [capId]);
+
+    const ok = started.ok && inLedgerBefore && del.ok
+      && !inLedgerAfter && fileGone && (tomb[0]?.n ?? 0) === 1;
+    t('delete removes the extra', ok,
+      `created=${started.ok} inLedgerBefore=${inLedgerBefore} deleted=${del.ok} ` +
+      `inLedgerAfter=${inLedgerAfter} fileGone=${fileGone} tombstone=${tomb[0]?.n ?? 0}`);
+  } catch (e: any) {
+    t('delete removes the extra', false, String(e?.message ?? e).slice(0, 200));
+  }
+
+  // 15 ── and a SENT extra must still refuse.
+  try {
+    const capId = `${tag}-sent`;
+    await db.execute(
+      `INSERT INTO capture_commit (capture_id, attachment_id, mutation_id, project_id,
+         owner_id, media_relpath, media_sha256, media_bytes, media_mime_type,
+         modality, captured_at_ms, committed_at_ms, request_sha256)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [capId, `att-${capId}`, `mut-${capId}`, projectId, ownerId, `del/${capId}.m4a`,
+       'b'.repeat(64), 17, 'audio/m4a', 'voice', Date.now(), Date.now(), 'd'.repeat(64)]);
+    await startExtraFromCapture(db, { captureId: capId, projectId, ownerId });
+    await db.execute(`UPDATE change_order SET status = 'sent' WHERE id = ?`, [`co-${capId}`]);
+
+    const del = await discardCapture(db, capId);
+    const stillThere = (await ledger(db, projectId)).some((r) => r.id === `co-${capId}`);
+    t('sent extra refuses delete', !del.ok && stillThere,
+      `refused=${!del.ok} reason=${del.reason ?? '-'} stillInLedger=${stillThere}`);
+  } catch (e: any) {
+    t('sent extra refuses delete', false, String(e?.message ?? e).slice(0, 200));
   }
 
   const failed = steps.filter((s) => !s.ok).length;

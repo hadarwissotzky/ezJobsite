@@ -27,7 +27,10 @@
  * reason about classification belongs inside that card as a tap-to-change
  * default, not as a question.
  */
-import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+// TYPE-ONLY, and it must stay that way. A value import pulls in React
+// Native's Flow-typed source, which Node cannot parse, and the tests that
+// exercise this file's SQL stop running.
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { sha256 } from 'js-sha256';
 import { SupabaseClient } from '@supabase/supabase-js';
 

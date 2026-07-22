@@ -23,10 +23,23 @@
  * the orphan later. The order that loses least is rows-then-bytes, never the
  * reverse.
  */
-import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+// TYPE-ONLY, and it must stay that way. A value import pulls in React
+// Native's Flow-typed source, which Node cannot parse, and the tests that
+// exercise this file's SQL stop running.
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import * as FS from 'expo-file-system/legacy';
 import { planDiscard, type CaptureRef, type DiscardPlan } from './discard.ts';
+
+/**
+ * expo-file-system is loaded ON DEMAND. A static import makes this module
+ * unloadable under `node --test` — Node cannot resolve the native package — and
+ * a module the tests cannot import is a module the tests do not cover. That is
+ * not hypothetical: delete shipped broken twice while every check passed,
+ * because nothing executed its SQL.
+ */
+async function fs(): Promise<any | null> {
+  try { return await import('expo-file-system/legacy'); } catch { return null; }
+}
 
 export const DISCARD_DDL = [
   // Append-only itself: discarding is an act, and an act that can be un-recorded
@@ -142,16 +155,18 @@ export async function discardExtra(
     // The outbox FIRST: an entry that outlived its change order would try to
     // upload a row that no longer exists and park forever with a reason nobody
     // can act on.
-    await tx.execute(`DELETE FROM change_order_outbox WHERE row_id = ?`, [changeOrderId]);
+    await tx.execute(`DELETE FROM change_order_outbox WHERE change_order_id = ?`, [changeOrderId]);
     await tx.execute(`DELETE FROM change_order WHERE id = ?`, [changeOrderId]);
   });
 
   // Bytes last, and each failure is survivable: the tombstone already says
   // discarded, and recoverySweep collects an orphan whose row is gone.
+  const F = await fs();
   let freedBytes = 0;
   for (const [, p] of paths) {
+    if (!F) break;
     try {
-      await FS.deleteAsync(`${FS.documentDirectory}${p.relpath}`, { idempotent: true });
+      await F.deleteAsync(`${F.documentDirectory}${p.relpath}`, { idempotent: true });
       freedBytes += p.bytes;
     } catch { /* orphan; the sweep gets it */ }
   }
@@ -263,7 +278,7 @@ export async function discardCapture(
   await db.writeTransaction(async (tx) => {
     for (const id of ids) {
       await tx.execute(
-        `DELETE FROM change_order_outbox WHERE row_id IN
+        `DELETE FROM change_order_outbox WHERE change_order_id IN
            (SELECT co.id FROM change_order co
               JOIN decision_version dv ON dv.decision_id = co.decision_id
              WHERE dv.capture_id = ? AND co.status = 'draft')`, [id]);
@@ -275,10 +290,12 @@ export async function discardCapture(
     }
   });
 
+  const F = await fs();
   let freedBytes = 0;
   for (const r of rows) {
+    if (!F) break;
     try {
-      await FS.deleteAsync(`${FS.documentDirectory}${r.media_relpath}`, { idempotent: true });
+      await F.deleteAsync(`${F.documentDirectory}${r.media_relpath}`, { idempotent: true });
       freedBytes += r.media_bytes;
     } catch { /* orphan; recoverySweep collects it */ }
   }
