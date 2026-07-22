@@ -47,6 +47,11 @@ import { ensureVoiceCacheSchema, voiceReadingForDecision,
          type VoiceReading } from './src/voicesource';
 import type { PriceMode } from './src/voiceprice';
 import { VoicePriceCard } from './src/ui/voicepricecard';
+// R1: the Send-to prefill. GPS decides what to SUGGEST and never what to file --
+// prepareSendTo returns candidates and an opinion, the human commits it.
+import { SendToCard } from './src/ui/sendtocard';
+import { prepareSendTo, quickAddDestination } from './src/sendtoprep';
+import type { SendToPrefill, SendToProject } from './src/sendto';
 import { decisionSummaryFor } from './src/decisionsummarydata';
 import type { DecisionSummary } from './src/decisionsummary';
 import { shareApprovalDoc } from './src/approvalrecordshare';
@@ -182,6 +187,10 @@ export default function App() {
     uris: string[]; secs: number;
   }>(null);
   const [assignQ, setAssignQ] = React.useState('');
+  // R1: the Send-to prefill for the walk being filed. Null until prepareSendTo has
+  // read the fix; the card renders nothing rather than guessing meanwhile.
+  const [sendTo, setSendTo] = React.useState<SendToPrefill | null>(null);
+  const [sendToId, setSendToId] = React.useState<string | null>(null);
   // The wedge home (prototype c1): extras awaiting a signature, and the money already
   // recovered. Both read from real change_order rows — never invented.
   const [homeTab, setHomeTab] = React.useState<'extras' | 'jobs'>('extras');
@@ -1830,6 +1839,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // (Inbox) before this renders; this sheet only files them. Options, per the spec:
   // nearby jobs first, search by name/address, or create a new job right here.
   if (assign) {
+    // R1 AC: one job in range prefills with a Detected marker; two in range offer a
+    // picker and NEVER auto-select. Both live in prepareSendTo, which returns an
+    // opinion plus its reason -- the same suggest-never-decide split as R5c's
+    // approver routing, applied to places instead of people.
+    if (!sendTo) {
+      void prepareSendTo(db, { lat: assign.lat, lng: assign.lng })
+        .then((pf) => { setSendTo(pf); setSendToId(pf.selectedId ?? null); });
+    }
     const q = assignQ.trim().toLowerCase();
     const candidates = projects
       .filter((p) => p.id !== INBOX_ID)
@@ -1882,6 +1899,28 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         </View>
         <View style={{ paddingHorizontal: 18, flex: 1 }}>
           <Text style={s.assignH}>{T('assign.title')}</Text>
+          {/* R1: the prefill sits ABOVE the search box, because on the common path
+              (one job in range) the answer is already there and searching is the
+              exception. It states WHY it picked — "📍 Detected" — and changing it is
+              one tap. Two in range never auto-selects: GPS decides what to SUGGEST,
+              never what to file (mandate #8, suggest-never-decide). */}
+          {sendTo && (
+            <SendToCard
+              prefill={sendTo}
+              value={sendToId}
+              onChange={(pr: SendToProject) => { setSendToId(pr.id); void fileAll(pr.id); }}
+              onQuickAdd={async (o) => {
+                // Name + phone, created implicitly at first send (R7). The walk files
+                // to it immediately — that is the whole point of quick-add.
+                const r = await quickAddDestination(db, {
+                  ownerId: OWNER, name: o.name, phone: o.phone,
+                  lat: assign.lat, lng: assign.lng,
+                });
+                if (r.ok) { setProjects(await listProjects(db)); void fileAll(r.projectId); }
+                return { ok: r.ok, problemKey: r.ok ? undefined : r.problemKey };
+              }}
+            />
+          )}
           <TextInput style={s.assignSearch} value={assignQ} onChangeText={setAssignQ}
             placeholder={T('assign.search')} placeholderTextColor="#7d848d" />
           <Pressable style={s.assignNew} onPress={newJobHere}>
