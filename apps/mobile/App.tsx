@@ -31,6 +31,9 @@ import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { RecordScreen } from './src/ui/recordscreen';
 import { extraRecord, type ExtraRecord } from './src/record';
+import { decisionSummaryFor } from './src/decisionsummarydata';
+import type { DecisionSummary } from './src/decisionsummary';
+import { shareApprovalDoc } from './src/approvalrecordshare';
 import { useFonts } from 'expo-font';
 import { Barlow_400Regular, Barlow_500Medium, Barlow_600SemiBold, Barlow_700Bold } from '@expo-google-fonts/barlow';
 import { BarlowCondensed_600SemiBold, BarlowCondensed_700Bold } from '@expo-google-fonts/barlow-condensed';
@@ -320,6 +323,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // kept alongside it so refresh() can re-derive the record while it is open — a
   // record that cannot change is a record that can lie about what is owed.
   const [record, setRecord] = React.useState<ExtraRecord | null>(null);
+  // R6c is loaded ALONGSIDE the record, never inside it: a summary that failed to
+  // assemble must not be able to stop the record from opening (R6c AC2).
+  const [recordSummary, setRecordSummary] = React.useState<DecisionSummary | null>(null);
   const recordIdRef = React.useRef<string | null>(null);
   const [dsync, setDsync] = React.useState<any>(null);
   const [bundling, setBundling] = React.useState<string | null>(null);
@@ -554,6 +560,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       if (openId) {
         const fresh = await extraRecord(db, openId);
         if (fresh) setRecord(fresh);
+        // R6c: "regenerates, never rewrites" — the narrative is re-derived on the
+        // same cycle as the record, so a question that just landed changes the owed
+        // line without touching a single stored event.
+        setRecordSummary(await decisionSummaryFor(db, openId));
       }
     } catch { /* pre-init */ }
   }, []);
@@ -1729,13 +1739,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     return (
       <RecordScreen
         rec={record}
-        onBack={() => { recordIdRef.current = null; setRecord(null); }}
+        summary={recordSummary}
+        // Mandate #2: this writes a file and opens the OS share sheet. It does not
+        // transmit anything to a client, and must never be changed to.
+        onShare={() => { void shareApprovalDoc(db, record.id); }}
+        onBack={() => { recordIdRef.current = null; setRecord(null); setRecordSummary(null); }}
         // R1: capture stays one tap away on secondary screens. Leaving the record to
         // capture is the point — a new extra should never require going home first.
         onCapture={() => {
           if (!terms) { openTerms(); return; }
           recordIdRef.current = null;
           setRecord(null);
+          setRecordSummary(null);
           setShowCapture(true);
         }}
       />
@@ -2417,6 +2432,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   onPress={async () => {
                     const r = await extraRecord(db, c.id);
                     if (r) { recordIdRef.current = c.id; setRecord(r); }
+                    setRecordSummary(await decisionSummaryFor(db, c.id));
                   }}>
                   <View style={s.coR1}>
                     <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>

@@ -124,6 +124,58 @@ console.log('\nverifying…\n');
   }
 }
 
+// ── 4c. Is every module actually reachable from the app? ──────────────────────
+// THE CHECK THAT WOULD HAVE CAUGHT THE BIG ONE. A 23-agent run added 61 files with
+// 209 passing tests, and App.tsx imported NONE of them. Everything was green on code
+// no user could reach. The same thing had already happened to R5c on a smaller scale:
+// three commits, sixteen tests, two migrations, zero callers.
+//
+// Tests prove a module does what it says. Only reachability proves anyone can get to
+// it. "A module with no caller is NOT BUILT" is the rule this repo settled on; this
+// makes the rule executable instead of remembered.
+//
+// It walks real import edges from App.tsx, transitively — not a grep for the name,
+// which would count a mention in a comment as wiring.
+{
+  const walk = (entry) => {
+    const seen = new Set(); const stack = [entry];
+    const resolve = (from, rel) => {
+      const base = join(dirname(from), rel);
+      for (const ext of ['.ts', '.tsx', '/index.ts', '/index.tsx', '']) {
+        if (existsSync(base + ext) && !base.endsWith('/')) {
+          try { if (readFileSync(base + ext)) return base + ext; } catch { /* dir */ }
+        }
+      }
+      return null;
+    };
+    while (stack.length) {
+      const f = stack.pop();
+      if (seen.has(f)) continue;
+      seen.add(f);
+      let t; try { t = readFileSync(f, 'utf8'); } catch { continue; }
+      for (const m of t.matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+        const r = resolve(f, m[1]);
+        if (r && !seen.has(r)) stack.push(r);
+      }
+    }
+    return seen;
+  };
+  const reachable = walk(join(MOBILE, 'App.tsx'));
+  const all = run('sh', ['-c',
+    `find "${join(MOBILE, 'src')}" -name '*.ts' -o -name '*.tsx'`], ROOT).out
+    .split('\n').map((s) => s.trim())
+    .filter((f) => f && !f.endsWith('.test.ts') && !f.endsWith('/i18n.ts'));
+  const orphans = all.filter((f) => !reachable.has(f))
+    .map((f) => f.replace(join(MOBILE, 'src') + '/', '')).sort();
+
+  if (all.length === 0) record('module reachability', 'inconclusive', 'found 0 modules — the scan is wrong');
+  else record('module reachability', orphans.length === 0 ? 'pass' : 'fail',
+    orphans.length === 0
+      ? `all ${all.length} modules reachable from App.tsx`
+      : `${orphans.length} of ${all.length} unreachable from App.tsx (written, not wired): ` +
+        orphans.slice(0, 6).join(', ') + (orphans.length > 6 ? ` … +${orphans.length - 6}` : ''));
+}
+
 // ── 5. Client vs server schema ────────────────────────────────────────────────
 {
   const r = run('node', [join(ROOT, 'scripts/check-schema-agreement.mjs')], ROOT);

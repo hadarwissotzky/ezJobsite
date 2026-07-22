@@ -2,18 +2,21 @@
  * The extra record screen — PRD R6b, the prototype's c5.
  *
  * Order is the requirement: identity/state → plain-language state line → people →
- * description → evidence → [summary: R6c, unbuilt] → full history.
+ * description → evidence → decision summary (R6c) → full history.
  *
  * Every string comes from i18n (mandate #5). The first version baked English into
  * the component, which put an English legal-record screen in front of a reader who
  * had chosen Spanish.
  *
- * R6c (the derived decision summary) is NOT here. R6c itself requires the record to
- * render complete without it, so its absence is a specified state, not a hole.
+ * R6c (the derived decision summary) is a CARD, not a section of this file: it is
+ * passed in already assembled and renders nothing when null, which is R6c's second
+ * AC made structural rather than remembered. See ui/decisionsummarycard.tsx.
  */
 import React from 'react';
 import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import type { ExtraRecord, RecordPerson } from '../record';
+import type { DecisionSummary } from '../decisionsummary';
+import { DecisionSummaryCard } from './decisionsummarycard';
 import { t } from '../i18n';
 import { C, F, T, chipStyle, display, label, money as moneyStyle } from './theme';
 
@@ -37,8 +40,12 @@ function avatarColor(kind: RecordPerson['kind']) {
 
 export function RecordScreen(props: {
   rec: ExtraRecord;
+  /** R6c. Null renders nothing — the record is complete without it (R6c AC2). */
+  summary?: DecisionSummary | null;
   onBack: () => void;
   onCapture?: () => void;
+  /** R6 / R5b AC3 — write the approval document and open the share sheet. */
+  onShare?: () => void;
 }) {
   const { rec } = props;
   const chip = chipStyle(chipKind(rec.status));
@@ -160,6 +167,10 @@ export function RecordScreen(props: {
 
         {/* Full history — chronological; events with no recorded time sit last and
             say so, rather than being given an invented position. */}
+        {/* R6b position 6. The summary and the history are never alternatives: the
+            summary is the fast read, the history is the evidence, and both are
+            always on this screen. */}
+        <DecisionSummaryCard summary={props.summary ?? null} />
         <Text style={{ ...label, marginTop: 16, marginBottom: 8 }}>{t('erec.history')}</Text>
         <View style={{ borderLeftWidth: 2, borderLeftColor: C.line, paddingLeft: 14 }}>
           {rec.history.map((h, i) => (
