@@ -124,8 +124,14 @@ alter table public.approval     enable row level security;
 drop policy if exists co_own on public.change_order;
 create policy co_own on public.change_order for all to authenticated
   using (owner_id = auth.uid()) with check (owner_id = auth.uid());
-drop policy if exists appr_read on public.approval;
-create policy appr_read on public.approval for select to authenticated using (true);
+-- `appr_read` is NOT defined here [2026-07-21]. It lives in
+-- 260_approval_visibility.sql, its single owner, because it must reference
+-- public.project -- created in 100_projects.sql, 70 files after this one.
+--
+-- It used to be `using (true)`, which let any authenticated user read every approval
+-- in the database: the full frozen document, the price, and the client's typed
+-- signature, across every tenant. See 260 for why that went from nearly harmless to
+-- serious the moment 230 started writing a row per client answer.
 
 -- ---------------------------------------------------------------------------
 -- OTP: identity binding for a signature. Deliberately NOT Supabase Auth --

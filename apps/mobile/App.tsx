@@ -2233,7 +2233,18 @@ export default function App() {
             // sent as well (230_close_the_loop) and stays the authority; this is
             // here so the ledger does not keep offering "Send for approval →" for
             // the thing he just watched himself send.
-            await markLocalSent(db, c.id);
+            //
+            // The return value is READ, which is the whole reason it exists.
+            // markLocalSent only moves a row OUT of 'draft', so false means the
+            // change order was already past draft -- the client answered between
+            // this screen rendering and this tap, or a hydrate landed first. The
+            // link did go out, so nothing is undone and nothing is refused; but the
+            // local row is not the one this code just moved, and refresh() below is
+            // what makes the screen honest about that.
+            const moved = await markLocalSent(db, c.id);
+            if (!moved) {
+              console.log('[send] %s was already past draft; server state wins', c.id);
+            }
             setSentLink({ url: r.url, shown: r.shownContent });
             await refresh();
           } else setUi({ k: 'refused', why: r.reason });

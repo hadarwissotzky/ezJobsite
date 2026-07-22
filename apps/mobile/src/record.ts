@@ -228,9 +228,25 @@ export async function extraRecord(
   stamped.sort((a, b) => (a.atMs ?? 0) - (b.atMs ?? 0));
 
   // Events we know happened but hold no time for. Marked, never given a fake slot.
+  //
+  // These are derived from STATUS, and status is a current state, not a history. That
+  // distinction cost the record its most important line: `co.status === 'sent'` was
+  // the only thing emitting "sent", so the moment a client approved, status became
+  // 'approved' and the send DISAPPEARED from the timeline. Every successfully approved
+  // extra -- the ones that end up in a dispute -- showed created, priced, captured and
+  // signed, with no record that it was ever put in front of the client at all.
+  //
+  // A terminal status is proof the thing was sent: nothing can be approved or declined
+  // that was never delivered. So sent is inferred from the whole set, not from being
+  // the current state. This is inference, which this file otherwise refuses to do, so
+  // it is bounded to what the status ACTUALLY entails and no further: that it happened,
+  // never when, never by whom. The real timestamp lives on confirmation_request
+  // server-side and is not on this device (see KNOWN GAP in the header).
   const unstamped: RecordEvent[] = [];
   const noTime = t('erec.noTime');
-  if (co.status === 'sent') unstamped.push({ atMs: null, at: noTime, what: t('erec.evSent'), hot: true });
+  const wasSent = co.status === 'sent' || co.status === 'approved'
+    || co.status === 'declined' || co.status === 'superseded';
+  if (wasSent) unstamped.push({ atMs: null, at: noTime, what: t('erec.evSent'), hot: true });
   if (co.signed_by) {
     unstamped.push({
       atMs: null, at: noTime,

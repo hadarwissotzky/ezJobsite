@@ -17,16 +17,27 @@
  */
 import { SupabaseClient } from '@supabase/supabase-js';
 import { sha256 } from 'js-sha256';
+import { money } from './changeorder';
 
 export type SendKind = 'confirm' | 'acknowledge';
 
-/** Integer cents → "$1,850". Same shape as changeorder.money; kept local so this
- *  file has no import cycle with the CO module. */
-function usd(cents: number): string {
-  const s = Math.abs(cents).toString().padStart(3, '0');
-  const whole = s.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `$${whole}.${s.slice(-2)}`;
-}
+// Money is formatted by `money()` in changeorder.ts. There is ONE formatter.
+//
+// There used to be a local copy here called usd(), justified as avoiding "an import
+// cycle with the CO module". There is no cycle: changeorder.ts imports supabase,
+// powersync, js-sha256 and ./i18n, and never confirmations.ts. Checked, not assumed.
+//
+// The copy had already drifted. money() renders -5000 as "-$50.00"; the copy used
+// Math.abs and no sign, so it rendered "$50.00" -- a credit shown as a charge, baked
+// into shown_content, which mandate #5 makes THE binding instrument. Nothing in the
+// schema forbade a negative amount_cents on a confirmation_request.
+//
+// The drift also had a second edge. 240_shown_content_integrity.sql requires the
+// displayed figure to appear LITERALLY in the frozen wording, comparing against
+// postgres `to_char`. So the JS formatter and the SQL formatter must agree forever.
+// Two JS copies meant a fix applied to one and not the other would reject every send,
+// or worse, quietly pass with the wrong number. One copy is hard enough to keep in
+// step with postgres; two was a coin flip.
 
 /**
  * The exact words the counterparty will see. Rendered once, here, and never
@@ -58,10 +69,10 @@ export function renderCard(o: {
     // decoration; it is the term that stops the cap being read as the final price.
     const nte = typeof o.nteCents === 'number' ? o.nteCents : null;
     const priceBlock = nte === null
-      ? `Price: ${usd(o.amountCents as number)}\n`
-      : `Price: ${usd(o.amountCents as number)} (time & materials)\n` +
-        `Not to exceed: ${usd(nte)}\n` +
-        `Work will not exceed ${usd(nte)} without a new approval.\n`;
+      ? `Price: ${money(o.amountCents as number)}\n`
+      : `Price: ${money(o.amountCents as number)} (time & materials)\n` +
+        `Not to exceed: ${money(nte)}\n` +
+        `Work will not exceed ${money(nte)} without a new approval.\n`;
     return `${asker}Approval requested — an extra outside the original scope.\n\n` +
       `${o.value}\n\n` +
       priceBlock +

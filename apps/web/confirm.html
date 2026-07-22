@@ -152,15 +152,22 @@ function done(mark, title, sub) {
 async function load() {
   if (!token) { done('⚠️', 'This link is incomplete', 'Ask for the link again.'); return; }
 
-  const { data, error } = await supabase.rpc('confirmation_fetch', { p_token: token });
-  if (error) { done('⚠️', 'Could not load this', 'Check your connection and open the link again.'); return; }
-
+  // Both reads go out together. They share only the token and neither needs the
+  // other's answer, so awaiting them in series just made the client wait two round
+  // trips before seeing anything — on the bad-signal phone this page is built for,
+  // that is the whole perceived load time, doubled, for no reason.
+  //
   // A link is retired the moment a newer one is issued for the same change order
   // (250_one_live_link), so an old text message can no longer be signed at a stale
   // price. Say that here rather than letting the client read, type their name and
   // only THEN hit a refusal. Checked separately because confirmation_fetch is one of
   // the four already-duplicated functions and extending it would add a fifth.
-  const { data: st } = await supabase.rpc('confirmation_state', { p_token: token });
+  const [{ data, error }, { data: st }] = await Promise.all([
+    supabase.rpc('confirmation_fetch', { p_token: token }),
+    supabase.rpc('confirmation_state', { p_token: token }),
+  ]);
+  if (error) { done('⚠️', 'Could not load this', 'Check your connection and open the link again.'); return; }
+
   if (st && st.found && st.superseded && !st.answered) {
     done('🔄', 'This version was replaced',
       'The contractor sent an updated version of this request. Please open the most recent link they texted you — nothing here was recorded.');
@@ -327,7 +334,12 @@ function renderPlain(d) {
   // A Decision is signed like any other item (PRD R10). It carries no money, but a
   // confirmed spec — "the vanity is 34 inches" — is exactly what a rework argument
   // turns on months later, so it is worth the same signature as a priced extra.
-  // Saying NO still needs no name: identity is not the price of declining.
+  //
+  // Saying NO is signed too. This line used to read "Saying NO still needs no name:
+  // identity is not the price of declining" — true once, and left behind when declines
+  // became signed (declineFlow below, enforced by 210_approval_signature.sql). It
+  // described a path that no longer exists, in the one file where a maintainer might
+  // believe it and take the signature back off a decline.
   const plainName = document.getElementById('name');
   const yesEl = document.getElementById('yes');
   plainName.addEventListener('input', () => { yesEl.disabled = plainName.value.trim().length < 2; });

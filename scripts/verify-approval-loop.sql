@@ -174,4 +174,50 @@ exception when foreign_key_violation then
   raise notice 'CHECK 9 bad co_id -> refused   PASS';
 end $$;
 
+-- 10 ── one contractor cannot read another's signatures (260_approval_visibility)
+--
+-- This is here rather than in a comment because the thing it checks is invisible from
+-- the app: `appr_read` was `using (true)` for months and nothing looked wrong. Every
+-- screen kept working, because a policy that is too permissive never breaks a feature
+-- -- it only breaks the tenant boundary, silently, in a direction no user reports.
+--
+-- The test was written against the OLD policy first and confirmed to FAIL (Alice read
+-- the string 'Bob Client' out of Bob's approval). A test that passes before the fix
+-- proves nothing about the fix.
+do $$
+declare
+  alice uuid := '11111111-1111-1111-1111-111111111111';
+  bob   uuid := '22222222-2222-2222-2222-222222222222';
+  seen_alice int; leaked text;
+begin
+  insert into public.project (id, owner_id, name) values
+    ('vp_alice', alice, 'Alice job'), ('vp_bob', bob, 'Bob job');
+  insert into public.change_order
+    (id, decision_id, project_id, owner_id, scope, amount_cents, who_directed,
+     numbers_confirmed_at)
+  values
+    ('vco_alice','vd_a','vp_alice',alice,'Alice extra',185000,'Owner',now()),
+    ('vco_bob',  'vd_b','vp_bob',  bob,  'Bob extra',  250000,'Owner',now());
+  insert into public.approval
+    (id, change_order_id, decision_id, project_id, grade, shown_content,
+     shown_sha256, signer_label, legal_name, action)
+  values
+    ('va_alice','vco_alice','vd_a','vp_alice','typed_link','Alice $1,850.00','x','Owner','Alice Client','approved'),
+    ('va_bob',  'vco_bob',  'vd_b','vp_bob',  'typed_link','Bob $2,500.00',  'y','Owner','Bob Client',  'approved');
+
+  -- Alice, presented the way PostgREST presents her.
+  perform set_config('request.jwt.claims', json_build_object('sub', alice)::text, true);
+  perform set_config('role','authenticated', true);
+  execute 'select count(*) from public.approval' into seen_alice;
+  execute $q$select string_agg(legal_name,',') from public.approval where project_id='vp_bob'$q$
+    into leaked;
+  perform set_config('role','postgres', true);
+
+  raise notice 'CHECK 10a own      -> alice sees % of 2   %', seen_alice,
+    case when seen_alice = 1 then 'PASS' else 'FAIL' end;
+  raise notice 'CHECK 10b isolation-> alice reads bob''s signature: %   %',
+    coalesce(leaked,'(nothing)'),
+    case when leaked is null then 'PASS' else 'FAIL -- TENANT LEAK' end;
+end $$;
+
 rollback;
