@@ -56,6 +56,11 @@ import type { SendToPrefill, SendToProject } from './src/sendto';
 // nothing but the rows already on the device, and without it there is no path at
 // all from "a client asked something" to the contractor noticing.
 import { ensureActivitySchema, activityFor, markRead } from './src/activitystore';
+// R6 AC2: the FROZEN instrument, on the contractor's side. The record screen was
+// rendering change_order.scope — the MUTABLE local row — while the client held
+// shown_content. In a dispute they would each be reading a different document and
+// neither would know it.
+import { ensureEventLogSchema, withEventLog, type ApprovalPanel } from './src/eventlog';
 import { unreadCount, unreadIds, type ActivityRow } from './src/activity';
 import { decisionSummaryFor } from './src/decisionsummarydata';
 import type { DecisionSummary } from './src/decisionsummary';
@@ -199,6 +204,10 @@ export default function App() {
   // R8: the bell. `activity` is the list; `bell` is whether the sheet is open.
   const [activity, setActivity] = React.useState<ActivityRow[]>([]);
   const [bell, setBell] = React.useState(false);
+  // R6: sent/opened/asked/answered timestamps + the frozen snapshot for the open
+  // record. Held beside it, not inside it — the network only ever ADDS here, and a
+  // fetch that fails must leave the record exactly as usable as it was.
+  const [approval, setApproval] = React.useState<ApprovalPanel | null>(null);
   // The wedge home (prototype c1): extras awaiting a signature, and the money already
   // recovered. Both read from real change_order rows — never invented.
   const [homeTab, setHomeTab] = React.useState<'extras' | 'jobs'>('extras');
@@ -768,6 +777,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // ALTERs change_order to add parent_ewa_id, so the table has to exist first.
       await ensureEwaSchema(db);
       await ensureActivitySchema(db);
+      await ensureEventLogSchema(db);
       // R6b: who captured / priced / sent, and who it was addressed to.
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
@@ -2005,10 +2015,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         rec={record}
         db={db}
         summary={recordSummary}
+        approval={approval}
         // Mandate #2: this writes a file and opens the OS share sheet. It does not
         // transmit anything to a client, and must never be changed to.
         onShare={() => { void shareApprovalDoc(db, record.id); }}
-        onBack={() => { recordIdRef.current = null; setRecord(null); setRecordSummary(null); }}
+        onBack={() => { recordIdRef.current = null; setRecord(null); setRecordSummary(null); setApproval(null); }}
         // R1: capture stays one tap away on secondary screens. Leaving the record to
         // capture is the point — a new extra should never require going home first.
         onCapture={() => {
@@ -2016,6 +2027,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           recordIdRef.current = null;
           setRecord(null);
           setRecordSummary(null);
+          setApproval(null);
           setShowCapture(true);
         }}
       />
@@ -2784,6 +2796,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     const r = await extraRecord(db, c.id);
                     if (r) { recordIdRef.current = c.id; setRecord(r); }
                     setRecordSummary(await decisionSummaryFor(db, c.id));
+                    // R6: real sent/opened/asked/answered times, and the frozen
+                    // snapshot. Wrapped because it reaches the network: offline it
+                    // must leave the record exactly as usable as it already was.
+                    if (r) {
+                      try {
+                        const w = await withEventLog(db, connector.client, r);
+                        setRecord(w); setApproval(w.approval);
+                      } catch { setApproval(null); }
+                    }
                   }}>
                   <View style={s.coR1}>
                     <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>
@@ -2882,6 +2903,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               const r = await extraRecord(db, a.changeOrderId);
               if (r) { recordIdRef.current = a.changeOrderId; setRecord(r); }
               setRecordSummary(await decisionSummaryFor(db, a.changeOrderId));
+              if (r) {
+                try {
+                  const w = await withEventLog(db, connector.client, r);
+                  setRecord(w); setApproval(w.approval);
+                } catch { setApproval(null); }
+              }
               setBell(false);
               await refresh();
             }}>

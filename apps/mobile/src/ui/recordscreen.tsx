@@ -17,6 +17,8 @@ import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import type { ExtraRecord, RecordPerson } from '../record';
 import type { DecisionSummary } from '../decisionsummary';
 import { DecisionSummaryCard } from './decisionsummarycard';
+import type { ApprovalPanel } from '../eventlog';
+import { RecordApproval } from './recordapproval';
 import { t } from '../i18n';
 import { C, F, T, chipStyle, display, label } from './theme';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
@@ -40,6 +42,9 @@ export function RecordScreen(props: {
   db: AbstractPowerSyncDatabase;
   /** R6c. Null renders nothing — the record is complete without it (R6c AC2). */
   summary?: DecisionSummary | null;
+  /** R6 AC2: the FROZEN instrument + "opened 3 times · no answer yet". Null when
+   *  the events have not reached this device; the record renders without it. */
+  approval?: ApprovalPanel | null;
   onBack: () => void;
   onCapture?: () => void;
   /** R6 / R5b AC3 — write the approval document and open the share sheet. */
@@ -143,6 +148,10 @@ export function RecordScreen(props: {
         {/* R6b position 6. The summary and the history are never alternatives: the
             summary is the fast read, the history is the evidence, and both are
             always on this screen. */}
+        {/* R6 AC2 BEFORE the summary: the exact wording the client signed outranks
+            any derived narrative about it. The summary is a reading aid; this is
+            the instrument. */}
+        <RecordApproval approval={props.approval ?? null} />
         <DecisionSummaryCard summary={props.summary ?? null} />
         <Text style={{ ...label, marginTop: 16, marginBottom: 8 }}>{t('erec.history')}</Text>
         <View style={{ borderLeftWidth: 2, borderLeftColor: C.line, paddingLeft: 14 }}>
