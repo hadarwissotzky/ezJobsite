@@ -249,6 +249,19 @@ async function load() {
     return;
   }
 
+  // R6 AC: "opened twice and questioned once -> the timeline shows each event."
+  // Logged HERE, after the fetch succeeded and BEFORE any branch, so an open counts
+  // whether they approve, ask, decline, or just read it and put the phone down —
+  // "she opened it three times and has not answered" is the signal that tells a
+  // contractor whether to chase, and it is only true if every open is counted.
+  //
+  // Fire-and-forget on purpose. This is bookkeeping about the page, and it must
+  // never delay or block what the client came here to do. The RPC no-ops on an
+  // unknown token rather than erroring, so a bad link still shows "not valid"
+  // instead of a network failure.
+  supabase.rpc('confirmation_opened', { p_token: token, p_user_agent: navigator.userAgent })
+    .catch(() => { /* 366 not applied yet, or offline. The page is unaffected. */ });
+
   if (data.status === 'not_found') { done('⚠️', 'This link is not valid', 'It may have been mistyped. Ask for a new one.'); return; }
   if (data.status === 'expired') { done('⏰', 'This link has expired', 'Ask for a new one — nothing is lost.'); return; }
   if (data.status === 'already_answered') {
@@ -315,6 +328,17 @@ async function load() {
                                     askQuestion, declineFlow });
     return;
   }
+  // R5b: the conversation so far, BOTH SIDES. Without this the loop is one-way — a
+  // contractor could reply and the client would never see it, which is the exact
+  // mirror of the bug where a client's question was invisible to the contractor.
+  // confirmation_thread (308) supersedes confirmation_questions (220): it returns
+  // the contractor's replies too and walks the revision lineage, so a conversation
+  // survives a Revise & Resend instead of restarting at the new link.
+  try {
+    const { data: th } = await supabase.rpc('confirmation_thread', { p_token: token });
+    data.__thread = Array.isArray(th) ? th : [];
+  } catch { data.__thread = []; }
+
   // A price present means this is a priced approval; otherwise the legacy confirm.
   (data.amount_cents != null) ? renderPriced(data) : renderPlain(data);
 }
@@ -352,6 +376,31 @@ function photoStrip(photos) {
       </a>`;
   }).join('');
   return `<div class="card shots">${tiles}</div>`;
+}
+
+/**
+ * The conversation, rendered on the client's own page.
+ *
+ * Shown ABOVE the actions, not below: a reply that answers their question is the
+ * thing most likely to change the answer they give, and putting it under the
+ * Approve button means they decide before they read it.
+ *
+ * Renders nothing when the thread is empty — a "Discussion" heading with no
+ * messages under it reads like something failed to load.
+ */
+function threadHtml(d) {
+  const t = d.__thread || [];
+  if (!t.length) return '';
+  return `<div class="card">
+    <div class="kicker">Discussion</div>
+    ${t.map((m) => `<div class="clause" style="margin-top:10px">
+        <b>${m.side === 'client' ? 'You asked' : esc(d.company_name || 'The contractor')}</b>
+        · ${esc(m.at ? new Date(m.at).toLocaleString() : '')}
+        <div style="margin-top:3px;color:#26292e">${esc(m.body)}</div>
+      </div>`).join('')}
+    <p class="recordnote" style="margin-top:12px">This discussion is part of the
+      project record.</p>
+  </div>`;
 }
 
 function renderPriced(d) {
@@ -399,6 +448,7 @@ function renderPriced(d) {
 
       ${photoStrip(d.photos)}
 
+      ${threadHtml(d)}
       <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
       <button class="approve" id="approve" disabled>✓ Approve${isNte ? ` — up to ${esc(usd(d.nte_cents))}` : ` — ${esc(priced)}`}</button>
       <button class="ghost" id="ask">Ask a question instead</button>

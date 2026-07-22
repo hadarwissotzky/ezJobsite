@@ -98,6 +98,12 @@ revoke all on function public.confirmation_ask from public;
 grant execute on function public.confirmation_ask to anon, authenticated;
 
 -- ── read the thread back with the request ───────────────────────────────────
+-- SUPERSEDED by `confirmation_thread` in 308_r5b_discussion.sql [2026-07-22].
+-- This returns the CLIENT's questions only. 308's returns both sides and walks the
+-- revision lineage, so a conversation survives a Revise & Resend instead of
+-- restarting at the new link. The page calls 308's; this one is kept because
+-- dropping a granted RPC is a breaking change for anything already holding a link,
+-- and it costs nothing to leave a narrower read in place.
 -- The client's page shows what it already asked, so the page reads as a thread
 -- rather than a form that forgot them.
 create or replace function public.confirmation_questions(p_token text)
