@@ -80,6 +80,9 @@ import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrder
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine,
          markLocalSent, money, parseMoney, validateLines,
          type LineItem, type LedgerRow } from './src/changeorder';
+import { displayStatus, canSupersede, type LedgerStatus } from './src/extrastatus';
+import { ensureLedgerStatusSchema, hydrateQuestions, openQuestions,
+         supersedeExtra, drainSupersessions, reassertSupersessions } from './src/ledgerstatus';
 import { issueOtp, newOtpCode, renderApproval, signApproval, verifyOtp } from './src/signing';
 
 export const db = new PowerSyncDatabase({
@@ -333,8 +336,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const [priced, setPriced] = React.useState<null | {
     decisionId: string; scope: string; whoDirected: string;
     amountText: string; confidence: 'high'|'low'|'none'; nteText: string;
+    /** R7: the extra this new price replaces. Retired when the price is confirmed. */
+    supersedes?: string | null;
   }>(null);
   const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
+  // R7: open client questions per extra, keyed by change-order id. Read from the
+  // LOCAL mirror, so the "discussing" chip renders in a basement like the rest of
+  // this screen (mandate #7).
+  const [questions, setQuestions] = React.useState<Record<string, number>>({});
   // PRD R6b: the extra record. The assembled data drives the screen, and the id is
   // kept alongside it so refresh() can re-derive the record while it is open — a
   // record that cannot change is a record that can lie about what is owed.
@@ -567,6 +576,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       setDelivery({ pending: (s?.pending ?? 0) + ds.pending, parked: (s?.parked ?? 0) + ds.parked });
       setDecisions(await listDecisions(db, pid));
       setCoRows(await ledger(db, pid));
+      try { setQuestions(await openQuestions(db, pid)); } catch { /* schema not up yet */ }
       // An open extra record re-derives on the SAME cycle as everything else.
       // It used to be a snapshot taken once on tap, which meant a contractor could
       // still be reading "waiting on approval" minutes after the client signed --
@@ -625,6 +635,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // AFTER ensureChangeOrderSchema, and that order is load-bearing: this one
       // ALTERs change_order to add extra_type (R5c), so the table has to exist first.
       await ensureApproverSchema(db);
+      await ensureLedgerStatusSchema(db);
       // R6b: who captured / priced / sent, and who it was addressed to.
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
@@ -715,6 +726,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // queue that looks like sync.
           const ar = await drainR5cOutbox(db, connector.client, data.user.id);
           if (ar.attempted) console.log('drain r5c:', JSON.stringify(ar));
+          // BEFORE the hydrate below, deliberately: a supersession the server has not
+          // accepted yet is a local intent hydrateChangeOrders cannot see.
+          const sx = await drainSupersessions(db, connector.client);
+          if (sx.attempted) console.log('drain supersessions:', JSON.stringify(sx));
           // R6b actor facts. Same reason as the roster: a fact that only ever lives
           // on the phone that wrote it is lost with that phone, and "who recorded
           // this" is exactly what gets asked once the phone is gone.
@@ -726,7 +741,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // transcript (with segments) has landed server-side. Idempotent per pair.
           try { await runAutoTags(db, connector.client); } catch { /* offline is normal */ }
           const hy = await hydrateChangeOrders(db, connector.client, projectId, data.user.id);
-          if (hy.pulled || hy.statusUpdated) { console.log('hydrate:', JSON.stringify(hy)); await refresh(); }
+          // MUST follow the hydrate. hydrateChangeOrders adopts the server's status for
+          // any row with no change_order_outbox entry; a supersession queues in
+          // co_supersession, a DIFFERENT table, so an un-uploaded revision would be
+          // walked back to 'sent' and the retired extra would reappear as live.
+          await reassertSupersessions(db);
+          const qz = await hydrateQuestions(db, connector.client, projectId);
+          if (hy.pulled || hy.statusUpdated || qz.pulled) {
+            console.log('hydrate:', JSON.stringify({ ...hy, questions: qz.pulled }));
+            await refresh();
+          }
           if (r.uploaded || r.alreadyApplied || r.parked ||
               dr.uploaded || dr.alreadyApplied || dr.parked ||
               cr.uploaded || cr.alreadyApplied || cr.parked) await refresh();
@@ -2252,6 +2276,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         return (
           <View style={s.money}>
             <Text style={s.cardH}>{T('co.check')}</Text>
+            {priced.supersedes && <Text style={s.cardNote}>{T('co.revisingNote')}</Text>}
             <Text style={s.moneyScope}>{priced.scope}</Text>
 
             {priced.confidence === 'low' && (
@@ -2365,6 +2390,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     // difference from the bug record.ts documents.
                     await noteActorNow(db, { subjectKind: 'change_order',
                                              subjectId: r.id, act: 'priced' });
+                    // R7: retired at PRICE-CONFIRM, not at send. Two answerable prices
+                    // for one piece of work is the contradiction 250_one_live_link
+                    // exists to prevent, and the client could sign the retired one
+                    // while the revision sits unsent in the ledger.
+                    if (priced.supersedes) {
+                      const sup = await supersedeExtra(db,
+                        { changeOrderId: priced.supersedes, supersededBy: r.id });
+                      // Refused only when the client answered first. Her answer stands;
+                      // the new extra is still saved, and saying so is the honest
+                      // outcome rather than a silent no-op.
+                      if (!sup.ok) setUi({ k: 'refused', why: T('co.supersedeRefused') });
+                    }
                     setPriced(null); setLines([]); await refresh();
                   } else setUi({ k: 'refused', why: r.reason });
                 }}>
@@ -2455,7 +2492,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
           {/* Each extra as a c4 card, its status the angled-ish chip = notation status. */}
           {coRows.map((c) => {
-            const chip = coChip(c.status);
+            // R7: the chip is DERIVED, not read straight off the row. `discussing` is
+            // not a stored status (220_question_path: it is derivable, and a status two
+            // writers can move is a status nobody can rely on).
+            const disp = displayStatus(c.status, { openQuestions: questions[c.id] ?? 0 });
+            const chip = coChip(disp);
             return (
               // The card is a View, NOT a Pressable wrapping everything. R6b wants the
               // row to open the record, but nesting the Send control inside a
@@ -2487,6 +2528,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                       This is when the change order was created (the price-confirm
                       moment), not the capture moment; the record shows both. */}
                   <Text style={s.coCreated}>Created {c.created}</Text>
+                  {/* The chip is a label; this is the instruction. A client's question
+                      means the ball is in HIS court, and "Discussing" does not say that. */}
+                  {disp === 'discussing' && (
+                    <Text style={s.coNudge}>{T('co.answerOwed')}</Text>
+                  )}
                   {!c.synced && <Text style={s.coOnPhone}>On this phone · not backed up yet</Text>}
                 </Pressable>
                 {/* Gate on STATUS, not on signed_by. A declined row has no signer,
@@ -2499,6 +2545,25 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     <Text style={s.coNudge}>
                       {c.status === 'sent' ? 'Resend link →' : 'Send for approval →'}
                     </Text>
+                  </Pressable>
+                )}
+                {/* A sent extra is frozen — the local trigger says so in its own error
+                    ("a sent change order is frozen: supersede it"). So the move is a NEW
+                    priced version that retires this one. The price still goes through the
+                    read-back composer: a revision carries a number, and mandate #6 has no
+                    shortcut for the second one. */}
+                {canSupersede(c.status) && (
+                  <Pressable style={s.coSendRow} onPress={() => {
+                    setPriced({
+                      decisionId: c.decision_id, scope: c.scope,
+                      whoDirected: c.who_directed,
+                      amountText: (c.amount_cents / 100).toFixed(2),
+                      nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
+                      confidence: 'high', supersedes: c.id,
+                    });
+                    setLines([]);
+                  }}>
+                    <Text style={s.coNudge}>{T('co.revise')}</Text>
                   </Pressable>
                 )}
               </View>
@@ -2787,13 +2852,22 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
 /** Change-order status → its notation chip (prototype c4). Caution-yellow needs
     dark text to stay legible; everything else is white-on-colour. */
-function coChip(status: string): { label: string; bg: any; dark: boolean } {
+/** Change-order status → its notation chip (prototype c4). Caution-yellow needs dark
+ *  text to stay legible; everything else is white-on-colour.
+ *  Takes a DERIVED status (extrastatus.ts), never the stored one — `discussing` does
+ *  not appear in change_order.status and never should: a status two writers can move
+ *  is a status nobody can rely on (220_question_path). */
+function coChip(status: LedgerStatus): { label: string; bg: any; dark: boolean } {
   switch (status) {
-    case 'approved':   return { label: 'Approved', bg: s.chipApproved, dark: false };
-    case 'sent':       return { label: 'Sent',     bg: s.chipPending,  dark: true  };
-    case 'declined':   return { label: 'Declined', bg: s.chipDeclined, dark: false };
-    case 'superseded': return { label: 'Revised',  bg: s.chipRevised,  dark: false };
-    default:           return { label: 'Draft',    bg: s.chipDraft,    dark: false };
+    case 'approved':   return { label: T('co.chip.approved'),   bg: s.chipApproved, dark: false };
+    case 'sent':       return { label: T('co.chip.sent'),       bg: s.chipPending,  dark: true  };
+    // Its own colour, not ink: 'superseded' already owns ink, and two statuses that
+    // look identical is the failure a status chip exists to prevent. Orange is this
+    // app's "act on this", which is exactly true here.
+    case 'discussing': return { label: T('co.chip.discussing'), bg: s.chipDiscussing, dark: false };
+    case 'declined':   return { label: T('co.chip.declined'),   bg: s.chipDeclined, dark: false };
+    case 'superseded': return { label: T('co.chip.superseded'), bg: s.chipRevised,  dark: false };
+    default:           return { label: T('co.chip.draft'),      bg: s.chipDraft,    dark: false };
   }
 }
 
@@ -2898,6 +2972,10 @@ const s = StyleSheet.create({
   chipPending: { backgroundColor: '#F5B000' },
   chipDeclined: { backgroundColor: '#C6281C' },
   chipRevised: { backgroundColor: '#0D0F12' },
+  // R7 'discussing'. Orange = "this is the one to act on", which is exactly what an
+  // unanswered client question is. NOT ink — chipRevised already owns ink, and two
+  // statuses that look identical defeat the point of a chip.
+  chipDiscussing: { backgroundColor: '#FF5A00' },
   chipDraft: { backgroundColor: '#5C6570' },
 
   hNow: { color: '#0E8A4C', fontSize: 14, marginBottom: 4 },
