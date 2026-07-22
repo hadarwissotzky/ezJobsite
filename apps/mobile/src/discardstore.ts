@@ -24,6 +24,7 @@
  * reverse.
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import * as FS from 'expo-file-system/legacy';
 import { planDiscard, type CaptureRef, type DiscardPlan } from './discard.ts';
 
@@ -92,11 +93,34 @@ export async function previewDiscard(
  * landing, and sending is exactly the event that must stop this.
  */
 export async function discardExtra(
-  db: AbstractPowerSyncDatabase, changeOrderId: string
-): Promise<{ ok: boolean; reason?: string; deleted: number; freedBytes: number; serverPending: number }> {
+  db: AbstractPowerSyncDatabase, changeOrderId: string, client?: SupabaseClient
+): Promise<{ ok: boolean; reason?: string; deleted: number; freedBytes: number;
+             serverPending: number; serverDone: boolean }> {
   const plan = await previewDiscard(db, changeOrderId);
   if (!plan.allowed) {
-    return { ok: false, reason: plan.reason, deleted: 0, freedBytes: 0, serverPending: 0 };
+    return { ok: false, reason: plan.reason, deleted: 0, freedBytes: 0,
+             serverPending: 0, serverDone: false };
+  }
+
+  // THE SERVER FIRST, and only then the phone. 369 re-checks everything from the
+  // server's own data -- ownership, ever-sent, shared captures -- and refuses on
+  // its own terms. If it refuses, this device must NOT delete either: the phone
+  // agreeing to something the server rejected is how the two stop describing the
+  // same world. Offline is different from refused, and only refusal stops us.
+  let serverDone = false;
+  if (client) {
+    const { error } = await client.rpc('discard_extra_own', {
+      p_change_order_id: changeOrderId,
+    });
+    if (error) {
+      // 42501 is the server saying no on the merits. Anything else -- no signal,
+      // a timeout -- is this device being unable to ask, which is not a no.
+      const refused = /not your extra|was sent/i.test(error.message ?? '');
+      if (refused) {
+        return { ok: false, reason: 'already_sent', deleted: 0, freedBytes: 0,
+                 serverPending: 0, serverDone: false };
+      }
+    } else serverDone = true;
   }
 
   // Paths read BEFORE the rows go, because capture_commit is where they live.
@@ -134,12 +158,12 @@ export async function discardExtra(
 
   return {
     ok: true,
+    serverDone,
     deleted: plan.deleteCaptures.length,
     freedBytes,
-    // Honest, not hidden: these exist on the server and this device cannot
-    // reach in and remove them. Until that RPC exists, "deleted" means "deleted
-    // from this phone" for these, and the caller says so.
-    serverPending: plan.needsServer.length,
+    // Only still pending if the server was never reached. When 369 ran, the
+    // objects are gone and there is nothing to warn about.
+    serverPending: serverDone ? 0 : plan.needsServer.length,
   };
 }
 

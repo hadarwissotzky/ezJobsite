@@ -3422,7 +3422,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 // Re-plans inside discardExtra rather than trusting what this
                 // sheet was opened with: the extra can be sent between the
                 // dialog appearing and the thumb landing.
-                const r = await discardExtra(db, discard.co.id);
+                const r = await discardExtra(db, discard.co.id, connector.client);
                 setDiscard(null);
                 if (!r.ok) setFiled(T('discard.alreadySent'));
                 await refresh();

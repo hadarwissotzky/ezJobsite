@@ -116,10 +116,11 @@ cd apps/../                       # repo root
 ./scripts/check-migration-order.sh \
   260_approval_visibility 270_ask_live_only 280_approver_roster 290_r5c_transport \
   302_structure_timing 303_ewa 304_approval_photos 306_extra_actor \
-  307_extras_ledger 308_r5b_discussion 366_event_timeline 367_supersede_forward_link
+  307_extras_ledger 308_r5b_discussion 366_event_timeline 367_supersede_forward_link \
+  368_ondevice_transcript 369_discard_unsent
 ```
 
-Expect: `ALL 12 APPLIED CLEANLY IN SEQUENCE`. It runs them in ONE transaction with
+Expect: `ALL 14 APPLIED CLEANLY IN SEQUENCE`. It runs them in ONE transaction with
 `ON_ERROR_STOP` and rolls back, so it proves the sequence without changing anything.
 
 Then apply them for real, in that same order.
