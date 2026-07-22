@@ -208,13 +208,21 @@ end-to-end" hides that most of it is.
 |---|---|---|
 | app → local SQLite | YES | `loopcheck` 7/7 on the simulator, real database |
 | local durability | YES | REQ-PROC4: 100 cycles, 10 mid-sync kills, zero loss |
-| **app → server (send)** | **NO** | needs an authenticated session — the only gap |
+| **app → server (send)** | **PARTLY** | the SIGNATURE resolves against the live database (`./scripts/check-rpc-signatures.sh`) — PostgREST finds `confirmation_create` with the app's exact 16 parameters and refuses only on the grant (42501, not PGRST202). What is unproven is that an AUTHENTICATED call succeeds. |
 | server logic | YES | `verify-approval-loop.sql`, 13 checks against the LIVE database: send→sent, approve→approved + signed + grade, decline→declined, resend retires the old link, unsigned refused, price/hash mismatch refused, cross-tenant refused |
 | server → client page | YES | a real production token loaded in a browser; the page rendered real frozen data, priced card, NTE clause, running total |
 
-So the send's SERVER EFFECT is proven and the page's READ is proven. What is not
-proven is `sendForConfirmation` itself — the app calling `confirmation_create` with a
-real session. That one call is the whole gap, and one sign-in closes it.
+So: the send's SERVER EFFECT is proven (CHECK 1), the page's READ is proven (a real
+token rendered in a browser), and the CALL SHAPE is proven (the signature resolves).
+What remains unproven is one thing only — that `confirmation_create` SUCCEEDS when
+called with a session. One sign-in closes it.
+
+`./scripts/check-rpc-signatures.sh` is worth running whenever a migration changes a
+function. PostgREST resolves an RPC by EXACT PARAMETER NAME SET, so renaming one
+parameter breaks every call at runtime while tsc stays green and every unit test
+passes. The script distinguishes a genuine mismatch (PGRST202) from a function that
+is merely unapplied (checked against the database, reported PENDING) and from an
+auth or argument refusal (42501 — the function was found, which is a PASS).
 
 The client's ANSWER (`confirmation_respond`) is proven server-side by CHECK 2 —
 approve moves the change order, writes the signature and stamps grade `typed_link`.
