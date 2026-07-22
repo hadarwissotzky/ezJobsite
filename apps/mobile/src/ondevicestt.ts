@@ -162,23 +162,41 @@ export async function startLive(
   let M: any;
   try { M = await import('expo-speech-recognition'); } catch { return null; }
   const mod = M.ExpoSpeechRecognitionModule;
-  if (!mod?.supportsOnDeviceRecognition?.()) return null;
+  const supports = !!mod?.supportsOnDeviceRecognition?.();
   // Read only. Requesting here would raise a dialog in the middle of the
   // contractor pressing record, which is the worst possible moment.
-  const perm = await mod.getPermissionsAsync?.();
+  const perm = await mod?.getPermissionsAsync?.();
+  // Logged because this returns null on three different conditions and a silent
+  // null is indistinguishable from "the feature is not there". The live view is
+  // meant to be invisible when it fails, but it must not be invisible to whoever
+  // is trying to find out WHY it failed.
+  console.log('[live]', JSON.stringify({ supports, permission: perm?.status ?? 'unknown' }));
+  if (!supports) return null;
   if (perm && perm.status !== 'granted') return null;
 
+  let heard = 0;
   const subs = [
     M.addSpeechRecognitionListener('result', (e: any) => {
       const t = e?.results?.[0]?.transcript;
-      if (typeof t === 'string' && t.length) onText(t);
+      if (typeof t === 'string' && t.length) {
+        heard++;
+        // First words only. Logging every interim result would bury the console
+        // under a partial transcript revised ten times a second.
+        if (heard === 1) console.log('[live] first words:', JSON.stringify(t.slice(0, 60)));
+        onText(t);
+      }
     }),
     // Errors are swallowed on purpose: the recording is still running and the
     // contractor must not be told that anything failed, because nothing that
     // matters did.
-    M.addSpeechRecognitionListener('error', () => { /* indicator only */ }),
+    M.addSpeechRecognitionListener('error', (e: any) => {
+      // Swallowed for the contractor, surfaced for the log. The recording is
+      // still running and nothing that matters has failed.
+      console.log('[live] error:', JSON.stringify(e?.error ?? e?.message ?? 'unknown'));
+    }),
   ];
   const stop = () => {
+    console.log('[live] stop, results seen:', heard);
     try { mod.stop?.(); } catch { /* already stopped */ }
     try { subs.forEach((x) => x.remove()); } catch { /* already gone */ }
   };
@@ -191,7 +209,11 @@ export async function startLive(
       requiresOnDeviceRecognition: true,
       addsPunctuation: true,
     });
-  } catch { stop(); return null; }
+    console.log('[live] started, lang:', LOCALE[currentLang()] ?? 'en-US');
+  } catch (e: any) {
+    console.log('[live] start threw:', String(e?.message ?? e).slice(0, 80));
+    stop(); return null;
+  }
   return { stop };
 }
 

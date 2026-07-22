@@ -47,6 +47,8 @@ import { sendEwa } from './src/ewasend';
 // filled preview before he stands up. The worker still re-transcribes via the
 // cloud and supersedes this under 150's newest-wins.
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
+import { discardExtra, ensureDiscardSchema, previewDiscard } from './src/discardstore';
+import { discardSummary } from './src/discard';
 import { ensureVoiceCacheSchema, voiceReadingForDecision, narrationForExtra,
          type VoiceReading } from './src/voicesource';
 // R2: photos beside the sentence spoken over them. Degrades to a plain strip when
@@ -235,6 +237,10 @@ export default function App() {
   // transcript comes from the file after the recording stops. This exists so the
   // contractor can see that something is happening.
   const [live, setLive] = React.useState<string>('');
+  // The discard confirmation. Holds the PLAN it was opened with, so the sentence
+  // on screen and the act are computed from one set of numbers.
+  const [discard, setDiscard] = React.useState<
+    { co: LedgerRow; plan: Awaited<ReturnType<typeof previewDiscard>> } | null>(null);
   const liveRef = React.useRef<{ stop: () => void } | null>(null);
   // null until the bell has been opened once; 'granted' hides the ask.
   const [notifyPerm, setNotifyPerm] = React.useState<string | null>(null);
@@ -961,6 +967,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // empty, flagged price field, never a blocked screen.
       await ensureVoiceCacheSchema(db);
       await ensureSttSchema(db);
+      // BEFORE the first refresh(): listCaptures now excludes discarded captures
+      // by subquery, and a missing table there would fail the whole gallery.
+      await ensureDiscardSchema(db);
       const sl = await savedLang(db);
       // Restore the display language a returning user already chose. Language is now
       // part of the profile form, not a gate, so there's no separate "picked" flag.
@@ -3089,6 +3098,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     </Text>
                   </Pressable>
                 )}
+                {/* Delete, offered ONLY on a draft. The moment a link exists a
+                    client may have opened it and read a frozen price, and that is
+                    theirs too — Revise retires those, this does not touch them.
+                    The tap opens a confirmation; it never deletes. */}
+                {c.status === 'draft' && (
+                  <Pressable style={s.coSendRow} onPress={async () => {
+                    const plan = await previewDiscard(db, c.id);
+                    setDiscard({ co: c, plan });
+                  }}>
+                    <Text style={s.dmeta}>{T('discard.action')}</Text>
+                  </Pressable>
+                )}
                 {/* R8: REMIND, not resend. Resend mints a new token and retires the
                     one already in the client's messages, so scrolling back to the
                     original text would give them "This version was replaced" because
@@ -3376,6 +3397,45 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           </View>
         );
       })()}
+
+      {/* The confirmation. Mandate #2: this is the only thing that deletes, and it
+          says what it will destroy before it does. The refusals get their own
+          sentence naming the alternative — "no" without a way forward is a dead
+          end, and Revise IS the way to retire something already out there. */}
+      {discard && (
+        <View style={s.card}>
+          <Text style={s.cardH}>{T('discard.title')}</Text>
+          <Text style={s.frozen}>{discard.co.scope}</Text>
+          {!discard.plan.allowed ? (
+            <Text style={s.warn}>
+              {T(discard.plan.reason === 'has_link' ? 'discard.hasLink'
+                 : discard.plan.reason === 'already_sent' ? 'discard.alreadySent'
+                 : 'common.close')}
+            </Text>
+          ) : (
+            <>
+              <Text style={s.cardNote}>{T(discardSummary(discard.plan)!)}</Text>
+              {discard.plan.needsServer.length > 0 && (
+                <Text style={s.dmeta}>{T('discard.serverNote')}</Text>
+              )}
+              <Pressable style={s.coSendRow} onPress={async () => {
+                // Re-plans inside discardExtra rather than trusting what this
+                // sheet was opened with: the extra can be sent between the
+                // dialog appearing and the thumb landing.
+                const r = await discardExtra(db, discard.co.id);
+                setDiscard(null);
+                if (!r.ok) setFiled(T('discard.alreadySent'));
+                await refresh();
+              }}>
+                <Text style={s.warn}>{T('discard.yes')}</Text>
+              </Pressable>
+            </>
+          )}
+          <Pressable style={s.coSendRow} onPress={() => setDiscard(null)}>
+            <Text style={s.dmeta}>{T('common.close')}</Text>
+          </Pressable>
+        </View>
+      )}
 
       {sentLink && (
         <View style={s.card}>

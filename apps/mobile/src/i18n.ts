@@ -377,6 +377,17 @@ const EN: Record<string, string> = {
   // R2 live view. "Rough" is in the string on purpose: the contractor must not
   // read this as the transcript, because it is not the one that gets stored.
   'r2.liveRough': 'Hearing you… (rough, not saved yet)',
+  // Discard. The counts are in the sentence because a confirmation that does not
+  // name what it destroys is a speed bump, not a confirmation (mandate #2).
+  'discard.action': 'Delete this extra',
+  'discard.title': 'Delete this extra?',
+  'discard.confirm': 'This deletes the extra and its {n} recording(s) and photo(s) from this phone. It cannot be undone.',
+  'discard.confirmShared': 'This deletes the extra and {n} of its file(s). {kept} are used by another extra and will be kept. It cannot be undone.',
+  'discard.yes': 'Delete it',
+  'discard.alreadySent': 'This was already sent. Retire it with Revise instead — the client may have read it.',
+  'discard.hasLink': 'A link for this extra is already out there. Retire it with Revise instead.',
+  'discard.serverNote': 'Files already uploaded stay on the server until the next release.',
+  'discard.done': 'Deleted.',
   'r8.pushApproved': 'Approved: {scope}',
   'r8.pushAsk': 'Turn on alerts',
   'r8.pushWhy': 'A client question or an approval reaches you while the phone is in your pocket. With alerts off you find out the next time you open the app.',
@@ -904,6 +915,15 @@ const ES: Record<string, string> = {
   'r8.markAllRead': 'Marcar todo como leído',
   // R8 / R5b avisos. Notificaciones locales: sin proveedor, sin servidor.
   'r2.liveRough': 'Escuchando… (aproximado, todavía no se guarda)',
+  'discard.action': 'Eliminar este extra',
+  'discard.title': '¿Eliminar este extra?',
+  'discard.confirm': 'Esto elimina el extra y sus {n} grabación(es) y foto(s) de este teléfono. No se puede deshacer.',
+  'discard.confirmShared': 'Esto elimina el extra y {n} de sus archivo(s). {kept} se usan en otro extra y se conservarán. No se puede deshacer.',
+  'discard.yes': 'Eliminarlo',
+  'discard.alreadySent': 'Esto ya se envió. Retírelo con Revisar — el cliente pudo haberlo leído.',
+  'discard.hasLink': 'Ya hay un enlace de este extra afuera. Retírelo con Revisar.',
+  'discard.serverNote': 'Los archivos ya subidos permanecen en el servidor hasta la próxima versión.',
+  'discard.done': 'Eliminado.',
   'r8.pushApproved': 'Aprobado: {scope}',
   'r8.pushAsk': 'Activar avisos',
   'r8.pushWhy': 'Una pregunta del cliente o una aprobación le llega con el teléfono en el bolsillo. Sin avisos se entera la próxima vez que abra la app.',

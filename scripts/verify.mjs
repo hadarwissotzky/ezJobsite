@@ -424,6 +424,12 @@ console.log('\nverifying…\n');
     ['R2  on-device upload',       'drainSttOutbox',          'App.tsx'],
     ['R2  on-device schema',       'ensureSttSchema',         'App.tsx'],
     ['R2  live while recording',   'startLive',               'App.tsx'],
+    // Delete is three wires and the confirmation is the one that must not rot:
+    // previewDiscard without discardExtra deletes nothing, but discardExtra
+    // reachable without previewDiscard would delete without asking.
+    ['Discard preview',            'previewDiscard',          'App.tsx'],
+    ['Discard executes',           'discardExtra',            'App.tsx'],
+    ['Discard names the cost',     'discardSummary',          'App.tsx'],
   ];
   const broken = [];
   for (const [label, sym, where] of CLAIMS) {

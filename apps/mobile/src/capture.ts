@@ -472,9 +472,14 @@ export async function listCommittedCaptures(db: AbstractPowerSyncDatabase, proje
                    WHEN c.media_mime_type LIKE 'video/%' THEN 'video'
                    ELSE 'unknown' END) AS modality
      FROM capture_commit c
-     WHERE ? IS NULL OR COALESCE(
+     -- Discarded captures leave the gallery. The row survives (capture_commit is
+     -- append-only and that is not negotiable for a convenience feature), but
+     -- its bytes are gone, so showing it would offer the contractor a photo that
+     -- cannot open. The tombstone is the record; this is the consequence.
+     WHERE c.capture_id NOT IN (SELECT capture_id FROM capture_discarded)
+       AND (? IS NULL OR COALESCE(
              (SELECT r.project_id FROM capture_resolution r WHERE r.capture_id = c.capture_id),
-             c.project_id) = ?
+             c.project_id) = ?)
      ORDER BY committed_at_ms DESC`,
     [projectId ?? null, projectId ?? null]
   );
