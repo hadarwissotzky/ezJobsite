@@ -264,6 +264,21 @@ async function answer(action, note, name) {
   });
 
   if (error) {
+    // The database refuses an unsigned priced approval (210_approval_signature.sql).
+    // A normal reader cannot reach this — the button stays disabled until a name is
+    // typed — so this is a direct RPC call or a broken client. Say what is missing
+    // rather than "that didn't send", which would be the wrong reason.
+    const needsSignature =
+      (error.message || '').includes('requires a typed signature') ||
+      error.hint === 'signature_required';
+    if (needsSignature) {
+      screen(`<div class="done"><div class="mark err">✋</div>
+        <h2>A name is required</h2>
+        <p>Approving a priced change is a signature, so it has to be signed.
+           Nothing was recorded. Open the link again and type your full name.</p>
+        <div class="btns"><button class="yes" onclick="location.reload()">Open it again</button></div></div>`);
+      return;
+    }
     screen(`<div class="done"><div class="mark err">⚠️</div>
       <h2>That didn't send</h2>
       <p>Nothing was recorded. Please tap again.</p>

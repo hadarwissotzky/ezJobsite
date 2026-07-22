@@ -187,10 +187,11 @@ export default function App() {
     amountText: string; confidence: 'high'|'low'|'none'; nteText: string;
   }>(null);
   const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
-  // PRD R6b: the extra record. Held as assembled data, not an id, so the screen is a
-  // pure render of a snapshot read once — re-reading mid-scroll is how a record starts
-  // disagreeing with itself.
+  // PRD R6b: the extra record. The assembled data drives the screen, and the id is
+  // kept alongside it so refresh() can re-derive the record while it is open — a
+  // record that cannot change is a record that can lie about what is owed.
   const [record, setRecord] = React.useState<ExtraRecord | null>(null);
+  const recordIdRef = React.useRef<string | null>(null);
   const [dsync, setDsync] = React.useState<any>(null);
   const [bundling, setBundling] = React.useState<string | null>(null);
   const [cellOn, setCellOn] = React.useState(false);
@@ -412,6 +413,16 @@ export default function App() {
       setDelivery({ pending: (s?.pending ?? 0) + ds.pending, parked: (s?.parked ?? 0) + ds.parked });
       setDecisions(await listDecisions(db, pid));
       setCoRows(await ledger(db, pid));
+      // An open extra record re-derives on the SAME cycle as everything else.
+      // It used to be a snapshot taken once on tap, which meant a contractor could
+      // still be reading "waiting on approval" minutes after the client signed --
+      // and the state line tells him what to DO, so a stale one gives a stale
+      // instruction. Reading a ref (not state) keeps refresh's identity stable.
+      const openId = recordIdRef.current;
+      if (openId) {
+        const fresh = await extraRecord(db, openId);
+        if (fresh) setRecord(fresh);
+      }
     } catch { /* pre-init */ }
   }, []);
 
@@ -1576,11 +1587,12 @@ export default function App() {
     return (
       <RecordScreen
         rec={record}
-        onBack={() => setRecord(null)}
+        onBack={() => { recordIdRef.current = null; setRecord(null); }}
         // R1: capture stays one tap away on secondary screens. Leaving the record to
         // capture is the point — a new extra should never require going home first.
         onCapture={() => {
           if (!terms) { openTerms(); return; }
+          recordIdRef.current = null;
           setRecord(null);
           setShowCapture(true);
         }}
@@ -2278,7 +2290,7 @@ export default function App() {
                   accessibilityLabel={`Open record: ${c.scope}`}
                   onPress={async () => {
                     const r = await extraRecord(db, c.id);
-                    if (r) setRecord(r);
+                    if (r) { recordIdRef.current = c.id; setRecord(r); }
                   }}>
                   <View style={s.coR1}>
                     <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>
