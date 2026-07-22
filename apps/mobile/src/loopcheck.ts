@@ -30,6 +30,8 @@ import { addApprover, listRoster, setExtraType, suggestFor } from './approvers';
 import { displayStatus } from './extrastatus';
 import { canRemind } from './remind';
 import { buildActivity, unreadCount } from './activity';
+import { notifyPermissionStatus, runNotifications } from './notifystore';
+import { markNotified } from './discussionstore';
 
 export type Step = { name: string; ok: boolean; detail: string };
 export type LoopResult = { steps: Step[]; passed: number; failed: number; pass: boolean };
@@ -180,6 +182,84 @@ export async function runLoopCheck(
       info.exists && (info as any).size > 500 && isPdf,
       `exists=${info.exists} bytes=${(info as any).size ?? 0} magic=${isPdf ? '%PDF-' : head.slice(0, 8)}`);
   } catch (e: any) { t('R3 PDF generated', false, String(e?.message ?? e).slice(0, 70)); }
+
+  // 10 ── R8: a LOCAL notification, with no push provider anywhere.
+  //
+  // "R8 needs a provider and a device token" was true of REMOTE push and I applied it
+  // to all of R8. scheduleNotificationAsync with trigger:null fires immediately, on
+  // device, with no server involved — which covers the green-light moment and a
+  // client's question whenever the app is running or backgrounded. That is most of
+  // R8's value and none of its infrastructure.
+  //
+  // It schedules and then CANCELS: this is a check, not a notification anyone asked
+  // for. Permission is NOT requested — that would raise the dialog that hung this
+  // whole check once already. getPermissionsAsync only reads.
+  try {
+    const N = await import('expo-notifications');
+    const perm = await N.getPermissionsAsync();
+    const id = await N.scheduleNotificationAsync({
+      content: { title: 'loopcheck', body: 'local delivery probe' }, trigger: null,
+    });
+    const scheduled = await N.getAllScheduledNotificationsAsync();
+    await N.cancelScheduledNotificationAsync(id).catch(() => {});
+    t('R8 local notification', !!id,
+      `scheduled id=${String(id).slice(0, 8)} queue=${scheduled.length} permission=${perm.status}`);
+  } catch (e: any) { t('R8 local notification', false, String(e?.message ?? e).slice(0, 70)); }
+
+  // 11 ── R8/R5b: a question is announced, or it is kept. Never neither.
+  //
+  // THE INVARIANT, not the outcome. Whether this simulator has granted
+  // notification permission is not something the check controls, and asserting
+  // "a banner appeared" would fail on a clean device for a reason that is not a
+  // bug. What must hold either way is the one rule that can silently lose a
+  // client's question: `notified_at_ms` is stamped IF AND ONLY IF the
+  // notification was actually presented. Stamp without presenting and the
+  // question is gone — the app believes it told him and it never did.
+  //
+  // The unit test proves `planNotifications` decides this correctly. This
+  // proves the wiring through the real database honours the decision.
+  try {
+    const mid = `${tag}-q`;
+    await db.execute(`UPDATE change_order SET status = 'sent' WHERE id = ?`, [coId]);
+    await db.execute(
+      `INSERT INTO thread_message (id, change_order_id, side, body, at_ms, notified_at_ms)
+       VALUES (?, ?, 'client', ?, ?, NULL)`,
+      [mid, coId, 'Can you start Thursday?', Date.now()]
+    );
+    const perm = await notifyPermissionStatus();
+    const res = await runNotifications(db, projectId);
+    const row = await db.getAll<{ notified_at_ms: number | null }>(
+      `SELECT notified_at_ms FROM thread_message WHERE id = ?`, [mid]
+    );
+    const stamped = row[0]?.notified_at_ms != null;
+    const presented = res.presented > 0;
+    t('R8 stamped iff presented', stamped === presented,
+      `permission=${perm} presented=${res.presented} blocked=${res.blocked} stamped=${stamped}`);
+
+    // NO CLEANUP, deliberately. The first version of this step deleted the row and
+    // the delete was ABORTED by `thread_message_no_delete` -- the check was wrong,
+    // the code was right, and that is the third time in this codebase a failing
+    // check turned out to be the thing at fault. The message stays, attached to
+    // this run's own synthetic `lc-` change order, exactly like every other row
+    // the loop check leaves behind.
+
+    // 12 ── the stamp is not itself blocked by the append-only rule.
+    //
+    // `thread_message_append_only` fires BEFORE UPDATE OF body, side, at_ms,
+    // change_order_id -- notified_at_ms is outside that list, on purpose. Widen
+    // that trigger to the whole row and nothing breaks loudly: markNotified starts
+    // aborting, every question re-notifies on every 15s tick forever, and the only
+    // symptom is a contractor whose phone will not stop buzzing. Asserted here
+    // because the cost of finding out in the field is that high.
+    await markNotified(db, [mid]);
+    const after = await db.getAll<{ notified_at_ms: number | null }>(
+      `SELECT notified_at_ms FROM thread_message WHERE id = ?`, [mid]
+    );
+    t('R8 stamp survives append-only', after[0]?.notified_at_ms != null,
+      `notified_at_ms=${after[0]?.notified_at_ms ?? 'null'} (trigger excludes this column)`);
+  } catch (e: any) {
+    t('R8 stamped iff presented', false, String(e?.message ?? e).slice(0, 70));
+  }
 
   const failed = steps.filter((s) => !s.ok).length;
   return { steps, passed: steps.length - failed, failed, pass: failed === 0 };

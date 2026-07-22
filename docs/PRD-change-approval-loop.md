@@ -172,13 +172,13 @@ NOT BUILT, because nothing called it. It has since been wired.
 | R3  | PARTIAL | Fixed price + NTE work. The **entire two-step EWA does not exist** |
 | R4  | BUILT | Photos publish after send and render on the approval page. Needs `304` applied |
 | R5  | PARTIAL | Link, three outcomes and the question path work. **The app never reads `confirmation_question`** — a client question is stored and then invisible forever |
-| R5b | PARTIAL | Thread, reply, revision lineage and "In Discussion" are wired. **Push half not built** — needs a native dependency |
+| R5b | BUILT | Thread, reply, revision lineage, "In Discussion". Push wired as a LOCAL notification: a client question fires a banner and the tap opens that extra with the reply box focused. Cold-start taps included |
 | R5c | BUILT | Type is contractor-set; inference from narration still needs real captures (open (a)) |
 | R6  | PARTIAL | **Open/view events are not tracked at all.** `src/timeline.ts` — the natural backbone — is 192 lines with zero callers |
 | R6b | BUILT | Actor facts are written at the moment of the act; Decisions render "No cost change". Needs `306` applied |
 | R6c | BUILT | Summary card renders above the history; loaded alongside the record so it can never block it |
 | R7  | BUILT | `discussing` derived, `superseded` reachable via Revise. Needs `307` applied |
-| R8  | PARTIAL | In-app activity centre BUILT (bell, unread count, deep-link to record). Push + 24h reminders still need a provider and a scheduler |
+| R8  | PARTIAL | Activity centre BUILT (bell, unread count, deep-link). Green-light push BUILT as a local notification — no provider. Manual Remind BUILT. Still missing: delivery while the app is fully killed (that one does need remote push) and the automated 24h cadence |
 
 **Three integration specs are written, unit-tested, and DELIBERATELY NOT WIRED
 `[2026-07-22]`.** Six of nine were applied. These three were not, and the reason is
@@ -219,8 +219,16 @@ the exact failure this table exists to stop reporting as progress.
    takes exactly the HTML this produces, and installing that one dependency is the
    whole remaining step. The original audit finding is stale and was repeated after
    it stopped being true.
-2. **No push infrastructure and no scheduler.** R5, R5b and R8 all depend on it. R8
-   is roughly 90% this one subsystem.
+2. ~~**No push infrastructure and no scheduler.** R5, R5b and R8 all depend on it. R8
+   is roughly 90% this one subsystem.~~
+   **WRONG, and wrong in the expensive direction — it held back three requirements
+   for nothing.** "Push needs a provider" is true of REMOTE push and I applied it to
+   all push. Both notifications the PRD actually names fire on the contractor's own
+   handset about rows the app just pulled, and `scheduleNotificationAsync` delivers
+   those with no provider, no device token and no server. Measured on device before
+   any of it was wired: the call returned a notification id with the app signed out
+   of everything. The real remainder is much smaller and is stated in R8's row:
+   delivery while the app is FULLY KILLED, and the automated 24h cadence.
 3. **`In Discussion` is not a status** the app can compute or display, so it is
    missing from R5, R5b, R7 and R8 alike.
 4. **`src/timeline.ts` is dead code — 192 lines, zero callers, table never created.**

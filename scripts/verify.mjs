@@ -330,6 +330,15 @@ console.log('\nverifying…\n');
     ['R7  supersede',              'supersedeExtra',          'App.tsx'],
     ['R8  activity centre',        'activityFor',             'App.tsx'],
     ['R8  manual remind',          'canRemind',               'App.tsx'],
+    // The push claim is four separate wires and every one of them has been the
+    // thing that was missing before: the tick that presents, the tap that
+    // navigates, the dialog that makes any of it deliverable, and the parser
+    // that turns a link back into an extra. Claiming R8 push with any one of
+    // these unwired is the exact failure this check exists to catch.
+    ['R8  push presented',         'runNotifications',        'App.tsx'],
+    ['R8  push tap opens extra',   'parseThreadLink',         'App.tsx'],
+    ['R8  push permission ask',    'requestNotifyPermission', 'App.tsx'],
+    ['R8  push plan',              'planNotifications',       'src/notifystore.ts'],
   ];
   const broken = [];
   for (const [label, sym, where] of CLAIMS) {

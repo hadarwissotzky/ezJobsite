@@ -32,7 +32,7 @@ import { ReviewScreen } from './src/ui/reviewscreen';
 import { RecordScreen } from './src/ui/recordscreen';
 import { extraRecord, type ExtraRecord } from './src/record';
 import { DiscussionLog, ThreadScreen } from './src/ui/threadscreen';
-import { threadState, type ThreadMessage } from './src/discussion';
+import { parseThreadLink, threadState, type ThreadMessage } from './src/discussion';
 import { drainR5bOutbox, ensureDiscussionSchema, postReply, pullThreads,
          threadFor, threadsForProject, undeliveredReplyIds } from './src/discussionstore';
 import { revisionOf } from './src/revision';
@@ -62,6 +62,10 @@ import type { SendToPrefill, SendToProject } from './src/sendto';
 // all from "a client asked something" to the contractor noticing.
 import { ensureActivitySchema, activityFor, markRead,
          ensureRemindSchema, noteLinkSent, liveLinkFor, noteReminded } from './src/activitystore';
+// R8 / R5b push. Local notifications: the green light and a client question
+// reach the contractor with the phone in his pocket, with no provider behind it.
+import { ensureNotifySchema, notifyPermissionStatus, requestNotifyPermission,
+         runNotifications } from './src/notifystore';
 // R8: Remind is not Resend. Resend mints a NEW token and retires the one already in
 // the client's messages; a reminder must go via the SAME link (R8) or the nudge
 // breaks the thing it is nudging about.
@@ -223,6 +227,8 @@ export default function App() {
   // R8: the bell. `activity` is the list; `bell` is whether the sheet is open.
   const [activity, setActivity] = React.useState<ActivityRow[]>([]);
   const [bell, setBell] = React.useState(false);
+  // null until the bell has been opened once; 'granted' hides the ask.
+  const [notifyPerm, setNotifyPerm] = React.useState<string | null>(null);
   // R1: partial sessions found on disk at launch. Every one is offered — see
   // capturesession.ts on why recovery is not "the most recent draft".
   const [drafts, setDrafts] = React.useState<DraftSummary[]>([]);
@@ -277,6 +283,26 @@ const openThread = async (c: LedgerRow, focusReply = false) => {
     revision: rev ? { priorAmount: money(rev.priorAmountCents), newAmount: c.amount } : null,
     undelivered: await undeliveredReplyIds(db), focusReply,
   });
+};
+
+// The one destination R8 names: an item's record (R6b). The bell row and the
+// push tap MUST land in the same place -- the AC says "the same destination as
+// the push deep-link", and two code paths drifting is how that stops being true.
+const openRecord = async (changeOrderId: string) => {
+  const r = await extraRecord(db, changeOrderId);
+  if (r) { recordIdRef.current = changeOrderId; setRecord(r); }
+  setRecordSummary(await decisionSummaryFor(db, changeOrderId));
+  if (!r) return;
+  try {
+    const w = await withEventLog(db, connector.client, r);
+    setRecord(w); setApproval(w.approval);
+  } catch { setApproval(null); }
+  // R2: align the photos to what was said over them. A miss returns the
+  // fallback strip, so this can only ever ADD structure.
+  try {
+    setNarration(await narrationForExtra(db, connector.client, r.id,
+      r.photos.map((ph) => ({ captureId: ph.captureId, uri: ph.uri, present: ph.present }))));
+  } catch { setNarration(null); }
 };
 
 const openSendPrep = async (c: LedgerRow) => {
@@ -480,6 +506,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     undelivered: ReadonlySet<string>; focusReply: boolean;
   }>(null);
   const threadIdRef = React.useRef<string | null>(null);
+  // The notification tap listener is registered once and outlives every render,
+  // so it cannot read `coRows` directly — it would close over whatever was
+  // loaded at registration, which on a cold start is the empty array.
+  const coRowsRef = React.useRef<LedgerRow[]>([]);
   // PRD R6b: the extra record. The assembled data drives the screen, and the id is
   // kept alongside it so refresh() can re-derive the record while it is open — a
   // record that cannot change is a record that can lie about what is owed.
@@ -711,7 +741,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       setCellOn(await getCellularConsent(db));
       setDelivery({ pending: (s?.pending ?? 0) + ds.pending, parked: (s?.parked ?? 0) + ds.parked });
       setDecisions(await listDecisions(db, pid));
-      setCoRows(await ledger(db, pid));
+      const ledgerRows = await ledger(db, pid);
+      setCoRows(ledgerRows); coRowsRef.current = ledgerRows;
       try { setQuestions(await openQuestions(db, pid)); } catch { /* schema not up yet */ }
       try { setThreads(await threadsForProject(db, pid)); } catch { /* schema not up yet */ }
       try {
@@ -772,6 +803,43 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // the Projects home, or the auto-select above, both land the right captures.
   React.useEffect(() => { if (ready) void refresh(); }, [projectId, ready, refresh]);
 
+  // R5b AC1 / R8: tapping the notification opens THAT extra, not the app's last
+  // screen. Registered once and kept for the app's life — a listener torn down
+  // between renders would drop the tap that arrives while the app is waking.
+  //
+  // getLastNotificationResponseAsync is checked too: a tap on a COLD start
+  // delivers through that call, not through the listener, so without it the
+  // lock-screen case (the one R5b actually describes) opens to the ledger.
+  React.useEffect(() => {
+    if (!ready) return;
+    let live = true;
+    const open = async (url: unknown) => {
+      const link = typeof url === 'string' ? parseThreadLink(url) : null;
+      if (!link || !live) return;
+      // The record opens by id and does not care which job is selected, so this
+      // half always works. The thread overlay is built from the LOADED ledger,
+      // so a question on a job that is not the one on screen lands on the record
+      // without the reply box. That is a real gap, not a silent one: switching
+      // the selected job from a tap is a bigger move than this change should
+      // make, and the record is the destination R8's AC names either way.
+      await openRecord(link.changeOrderId);
+      const row = coRowsRef.current.find((c) => c.id === link.changeOrderId);
+      if (row && live) await openThread(row, link.focusReply);
+    };
+    let sub: { remove: () => void } | null = null;
+    (async () => {
+      try {
+        const N = await import('expo-notifications');
+        const last = await N.getLastNotificationResponseAsync();
+        if (last) await open(last.notification.request.content.data?.url);
+        sub = N.addNotificationResponseReceivedListener((r) => {
+          void open(r.notification.request.content.data?.url);
+        });
+      } catch { /* no notifications module on this build; the bell still works */ }
+    })();
+    return () => { live = false; sub?.remove(); };
+  }, [ready]);
+
   // REQ-GAL2: load the current page's evidence (verified hash + notes) whenever the
   // pager lands on a new capture. readCapture re-hashes from disk, so the
   // intact/tampered verdict is real, per-page. Playback is stopped on a page change.
@@ -818,6 +886,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // ALTERs change_order to add parent_ewa_id, so the table has to exist first.
       await ensureEwaSchema(db);
       await ensureActivitySchema(db);
+      // AFTER ensureChangeOrderSchema: it seeds its watermark by selecting the
+      // already-approved rows, so change_order has to exist and be populated.
+      await ensureNotifySchema(db);
       await ensureEventLogSchema(db);
       await ensureRemindSchema(db);
       // R1: the draft session store. A SEPARATE directory from capture-tmp, which
@@ -1003,6 +1074,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           if (r.uploaded || r.alreadyApplied || r.parked ||
               dr.uploaded || dr.alreadyApplied || dr.parked ||
               cr.uploaded || cr.alreadyApplied || cr.parked) await refresh();
+          // LAST, and after both the thread pull and the status hydrate: there is
+          // nothing to announce until the question and the green light are local.
+          // Reads permission, never requests it — the request dialog blocks.
+          const nt = await runNotifications(db, projectId);
+          if (nt.presented || nt.blocked) console.log('notify:', JSON.stringify(nt));
         } catch (e: any) { /* offline is normal; backoff already recorded */ }
       };
       drain();
@@ -2164,7 +2240,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 that also counted approvals would sit at 12 on a healthy job and stop
                 meaning anything, and a count nobody can clear is a count nobody
                 reads. */}
-            <Pressable onPress={() => setBell(true)}>
+            <Pressable onPress={async () => {
+              setBell(true);
+              // Read on open, not on mount: the answer changes in Settings while
+              // the app is backgrounded, and a stale "off" would keep offering a
+              // button that does nothing.
+              setNotifyPerm(await notifyPermissionStatus());
+            }}>
               <Text style={unreadCount(activity) > 0 ? s.bellOn : s.bell}>
                 {unreadCount(activity) > 0 ? `🔔 ${unreadCount(activity)}` : '🔔'}
               </Text>
@@ -3026,27 +3108,29 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       {bell && (
         <View style={s.card}>
           <Text style={s.cardH}>{T('r8.activity')}</Text>
+          {/* The only place the OS dialog is raised, and it is behind a tap on
+              purpose: requesting from a tick blocks until a human answers, and
+              once that once hung a whole automated run with nothing to see.
+              'denied' offers no button — iOS will not ask twice, so a button
+              that silently does nothing is worse than the sentence telling you
+              where to go. */}
+          {notifyPerm && notifyPerm !== 'granted' && (
+            <View style={s.coSendRow}>
+              <Text style={s.cardNote}>{T('r8.pushWhy')}</Text>
+              {notifyPerm === 'denied'
+                ? <Text style={s.dmeta}>{T('r8.pushDenied')}</Text>
+                : <Pressable onPress={async () => setNotifyPerm(await requestNotifyPermission())}>
+                    <Text style={s.coNudge}>{T('r8.pushAsk')}</Text>
+                  </Pressable>}
+            </View>
+          )}
           {!activity.length && <Text style={s.cardNote}>{T('r8.nothingYet')}</Text>}
           {activity.slice(0, 40).map((a) => (
             <Pressable key={a.id} style={s.coSendRow} onPress={async () => {
               // Reading it marks THIS row read, never the whole list: a badge that
               // clears because you opened the sheet has told you nothing.
               await markRead(db, [a.id]);
-              const r = await extraRecord(db, a.changeOrderId);
-              if (r) { recordIdRef.current = a.changeOrderId; setRecord(r); }
-              setRecordSummary(await decisionSummaryFor(db, a.changeOrderId));
-              if (r) {
-                try {
-                  const w = await withEventLog(db, connector.client, r);
-                  setRecord(w); setApproval(w.approval);
-                } catch { setApproval(null); }
-                // R2: align the photos to what was said over them. A miss returns the
-                // fallback strip, so this can only ever ADD structure.
-                try {
-                  setNarration(await narrationForExtra(db, connector.client, r.id,
-                    r.photos.map((ph) => ({ captureId: ph.captureId, uri: ph.uri, present: ph.present }))));
-                } catch { setNarration(null); }
-              }
+              await openRecord(a.changeOrderId);
               setBell(false);
               await refresh();
             }}>

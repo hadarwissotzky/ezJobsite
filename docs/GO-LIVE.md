@@ -295,12 +295,26 @@ The HTML is still written first and is still returned if PDF generation fails fo
 reason. Losing an export because the wrapper failed would be the wrong trade for a
 document whose whole purpose is to survive a dispute.
 
-**R8 push + the 24h automated cadence.** The in-app half is built: bell, unread
-count, activity list, manual Remind with its rate rules. Push needs a provider and a
-device token; the automated cadence needs a scheduler. Both should call `canRemind`
-in `src/remind.ts` rather than restating the rules.
-*Needs: `expo-notifications`, an `app.json` scheme, a native rebuild, and somewhere
-to run a job.*
+**R8 remote push (app fully killed) + the 24h automated cadence.** Scoped down
+`[2026-07-22]` after the premise behind it turned out to be wrong.
+
+What is now BUILT and running on device: the green light and a client question both
+fire a LOCAL notification from the sync tick, and the tap opens that extra — cold
+starts included, via `getLastNotificationResponseAsync`. No provider, no device
+token, no server. "Push needs a provider" was true of remote push only, and applying
+it to all of R8 held back three requirements for nothing.
+
+What is genuinely left, and it is smaller than it looked:
+- **App fully killed.** Nothing ticks, so nothing pulls, so nothing fires. This one
+  really does need a provider and a device token.
+- **The automated 24h cadence.** A local trigger can carry a delay, but cancelling
+  it when the client replies needs the app awake. Whatever runs it must call
+  `canRemind` in `src/remind.ts` rather than restating the rules.
+- **A person must tap Allow once.** Until then iOS accepts every schedule and shows
+  nothing. The ask lives at the top of the activity sheet; `planNotifications`
+  refuses to mark anything notified while permission is not `granted`, so a question
+  that arrives first is announced later rather than lost.
+*Needs: somewhere to run a job, and a push provider for the killed-app case only.*
 
 **Everything in P1 (R9–R15).** Gated by the PRD itself: *"nothing from P1 starts
 until G1, G2, G5 are green with design partners."* Those are speed, approval

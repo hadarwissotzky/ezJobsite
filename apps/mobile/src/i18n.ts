@@ -373,6 +373,11 @@ const EN: Record<string, string> = {
   'r8.activity': 'Activity',
   'r8.nothingYet': 'Nothing yet. Questions and answers from your clients land here.',
   'r8.markAllRead': 'Mark all as read',
+  // R8 / R5b push. Local notifications: no provider, no server.
+  'r8.pushApproved': 'Approved: {scope}',
+  'r8.pushAsk': 'Turn on alerts',
+  'r8.pushWhy': 'A client question or an approval reaches you while the phone is in your pocket. With alerts off you find out the next time you open the app.',
+  'r8.pushDenied': 'Alerts are off for this app. Turn them on in Settings › Notifications.',
   'ewa.entry': 'No price yet — authorize the work',
   'co.answerOwed': 'Waiting on your answer',
   'co.chip.approved': 'Approved',
@@ -894,6 +899,11 @@ const ES: Record<string, string> = {
   'r8.activity': 'Actividad',
   'r8.nothingYet': 'Todavía nada. Las preguntas y respuestas de sus clientes aparecen aquí.',
   'r8.markAllRead': 'Marcar todo como leído',
+  // R8 / R5b avisos. Notificaciones locales: sin proveedor, sin servidor.
+  'r8.pushApproved': 'Aprobado: {scope}',
+  'r8.pushAsk': 'Activar avisos',
+  'r8.pushWhy': 'Una pregunta del cliente o una aprobación le llega con el teléfono en el bolsillo. Sin avisos se entera la próxima vez que abra la app.',
+  'r8.pushDenied': 'Los avisos están apagados para esta app. Actívelos en Ajustes › Notificaciones.',
   'ewa.entry': 'Sin precio todavía — autoriza el trabajo',
   'co.answerOwed': 'Te toca contestar',
   'co.chip.approved': 'Aprobado',
