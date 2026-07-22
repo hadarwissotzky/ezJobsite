@@ -24,6 +24,7 @@
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { currentLang } from './i18n.ts';
+import { logDiag } from './diaglog.ts';
 
 /** What the recogniser produced. Mirrors `capture_transcript`'s columns. */
 export type OnDeviceTranscript = {
@@ -68,13 +69,19 @@ export async function ensureSttSchema(db: AbstractPowerSyncDatabase) {
  * no-third-party feature into a network round trip that also ships a
  * contractor's jobsite audio somewhere he was never told about.
  */
-export async function recognizeFile(uri: string): Promise<OnDeviceTranscript | null> {
+export async function recognizeFile(
+  db: AbstractPowerSyncDatabase, uri: string
+): Promise<OnDeviceTranscript | null> {
   let M: any;
-  try { M = await import('expo-speech-recognition'); } catch { return null; }
+  try { M = await import('expo-speech-recognition'); }
+  catch (e: any) { void logDiag(db, 'file.import', String(e?.message ?? e)); return null; }
   const mod = M.ExpoSpeechRecognitionModule;
-  if (!mod?.supportsOnDeviceRecognition?.()) return null;
+  if (!mod?.supportsOnDeviceRecognition?.()) {
+    void logDiag(db, 'file.state', 'onDevice unsupported'); return null;
+  }
 
   const perm = await mod.getPermissionsAsync?.();
+  void logDiag(db, 'file.state', `permission=${perm?.status ?? 'unknown'}`);
   // Read, never request. A request raises a dialog that blocks until a human
   // answers, and one such probe hung an entire automated run in this repo
   // already. The caller asks at a moment when a person is looking at the screen.
@@ -157,20 +164,22 @@ export type LiveHandle = { stop: () => void };
  * @param onText called with the running text, rough and frequently revised.
  */
 export async function startLive(
+  db: AbstractPowerSyncDatabase,
   onText: (text: string) => void
 ): Promise<LiveHandle | null> {
   let M: any;
-  try { M = await import('expo-speech-recognition'); } catch { return null; }
+  try { M = await import('expo-speech-recognition'); }
+  catch (e: any) { void logDiag(db, 'live.import', String(e?.message ?? e)); return null; }
   const mod = M.ExpoSpeechRecognitionModule;
   const supports = !!mod?.supportsOnDeviceRecognition?.();
   // Read only. Requesting here would raise a dialog in the middle of the
   // contractor pressing record, which is the worst possible moment.
   const perm = await mod?.getPermissionsAsync?.();
-  // Logged because this returns null on three different conditions and a silent
-  // null is indistinguishable from "the feature is not there". The live view is
-  // meant to be invisible when it fails, but it must not be invisible to whoever
-  // is trying to find out WHY it failed.
-  console.log('[live]', JSON.stringify({ supports, permission: perm?.status ?? 'unknown' }));
+  // Every early return is WRITTEN DOWN. This function failed invisibly on a
+  // real phone and console.log turned out not to exist in Release builds — the
+  // one place the bug lives is the one place the log went dark. The database
+  // is the channel that survives.
+  void logDiag(db, 'live.state', JSON.stringify({ supports, permission: perm?.status ?? 'unknown' }));
   if (!supports) return null;
   if (perm && perm.status !== 'granted') return null;
 
@@ -182,7 +191,7 @@ export async function startLive(
         heard++;
         // First words only. Logging every interim result would bury the console
         // under a partial transcript revised ten times a second.
-        if (heard === 1) console.log('[live] first words:', JSON.stringify(t.slice(0, 60)));
+        if (heard === 1) void logDiag(db, 'live.words', t.slice(0, 60));
         onText(t);
       }
     }),
@@ -196,7 +205,7 @@ export async function startLive(
     }),
   ];
   const stop = () => {
-    console.log('[live] stop, results seen:', heard);
+    void logDiag(db, 'live.stop', `results=${heard}`);
     try { mod.stop?.(); } catch { /* already stopped */ }
     try { subs.forEach((x) => x.remove()); } catch { /* already gone */ }
   };
@@ -209,9 +218,9 @@ export async function startLive(
       requiresOnDeviceRecognition: true,
       addsPunctuation: true,
     });
-    console.log('[live] started, lang:', LOCALE[currentLang()] ?? 'en-US');
+    void logDiag(db, 'live.started', LOCALE[currentLang()] ?? 'en-US');
   } catch (e: any) {
-    console.log('[live] start threw:', String(e?.message ?? e).slice(0, 80));
+    void logDiag(db, 'live.threw', String(e?.message ?? e).slice(0, 120));
     stop(); return null;
   }
   return { stop };
@@ -258,9 +267,12 @@ export async function transcribeOnDevice(
   // he is holding the phone and looking at it, and the sentence he sees explains
   // the thing he just did. The capture is already durable by now and the caller
   // does not await this, so the dialog cannot delay or endanger it.
-  if (await needsPermissionAsk()) await requestSpeechPermission();
+  if (await needsPermissionAsk()) {
+    const got = await requestSpeechPermission();
+    void logDiag(db, 'file.asked', `-> ${got}`);
+  }
 
-  const t = await recognizeFile(uri);
+  const t = await recognizeFile(db, uri);
   if (!t) return { ok: false, reason: 'unsupported' };
   // Silence is a real result and must not become a stored transcript: an empty
   // row would win `capture_transcript_current`'s newest-wins and blank out a

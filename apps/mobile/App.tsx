@@ -1214,7 +1214,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // refuses a second listener on the input, startLive returns null, the
       // contractor sees no moving text, and the capture is entirely unaffected.
       setLive('');
-      startLive((t) => setLive(t))
+      startLive(db, (t) => setLive(t))
         .then((h) => { liveRef.current = h; })
         .catch(() => { /* indicator only */ });
       return;

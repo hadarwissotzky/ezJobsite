@@ -30,6 +30,7 @@ import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, use
 // R2 live view: words appear over the camera while he talks. An indicator, not
 // evidence — the recording stays owned by expo-audio; this only listens along.
 import { needsPermissionAsk, requestSpeechPermission, startLive, type LiveHandle } from '../ondevicestt';
+import { logDiag } from '../diaglog';
 import { stampNow, type Stamp } from '../stamp';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { useSessionDraft } from './sessiondraft';
@@ -152,8 +153,13 @@ export function FusedCapture({
           // because they just granted the microphone. Then the live view
           // starts. Every failure is silent and costs only the moving text:
           // the recording is already running and nothing may touch it.
-          if (await needsPermissionAsk()) await requestSpeechPermission();
-          startLive((t) => { if (live) setLiveText(t); })
+          const wantsAsk = await needsPermissionAsk();
+          void logDiag(db, 'stt.ask', `needed=${wantsAsk}`);
+          if (wantsAsk) {
+            const got = await requestSpeechPermission();
+            void logDiag(db, 'stt.ask', `-> ${got}`);
+          }
+          startLive(db, (t) => { if (live) setLiveText(t); })
             .then((h) => { liveRef.current = h; })
             .catch(() => { /* indicator only */ });
         } catch { /* mic optional: photos-only is still a capture */ }

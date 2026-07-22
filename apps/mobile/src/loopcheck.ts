@@ -298,7 +298,7 @@ export async function runLoopCheck(
       const supports = !!M.ExpoSpeechRecognitionModule?.supportsOnDeviceRecognition?.();
       const sperm = await M.ExpoSpeechRecognitionModule?.getPermissionsAsync?.();
       const why = `onDevice=${supports} permission=${sperm?.status ?? 'unknown'}`;
-      const r = supports && sperm?.status === 'granted' ? await recognizeFile(probe) : null;
+      const r = supports && sperm?.status === 'granted' ? await recognizeFile(db, probe) : null;
       const text = (r?.text ?? '').toLowerCase();
       // "subfloor" is the word that matters: it is domain vocabulary, not a
       // stock phrase, so hearing it means the recogniser read THIS audio.
