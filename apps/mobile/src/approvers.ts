@@ -29,9 +29,10 @@
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { sha256 } from 'js-sha256';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { t as t2 } from './i18n';
 import {
-  suggestApprover, isApproverRole,
+  suggestApprover, isApproverRole, isExtraType,
   type Approver, type ApproverRole, type ExtraType, type Suggestion,
 } from './approverrouting';
 
@@ -68,11 +69,26 @@ export const APPROVER_DDL = [
   `CREATE INDEX IF NOT EXISTS approver_by_project
      ON project_approver (project_id, status)`,
 
-  // Same shape as change_order_outbox and scope_outbox. Deleting an outbox row must
-  // never be able to destroy the roster entry it was carrying.
-  `CREATE TABLE IF NOT EXISTS approver_outbox (
+  // Carries every R5c mutation, not just roster additions. Same (kind, row_id)
+  // shape as scope_outbox, for the same reason: retiring someone, recording that a
+  // link actually went to them, and typing an extra are all changes a SECOND DEVICE
+  // has to learn about. The first cut enqueued only additions, so phone B kept
+  // suggesting someone phone A had retired (codex #5) and the contractor's chosen
+  // type never left the phone at all (codex #4).
+  //
+  // extra_type gets its own mutation rather than riding the change_order creation
+  // payload, because the type is chosen AFTER the extra exists -- on the preview
+  // card. Folding it into the creation payload would only ever sync a type that
+  // happened to be set before the outbox drained, which is a race, not a design.
+  //
+  // NOTE: an `approver_outbox` table may exist on a dev database from the version
+  // committed in ff12cff/e245e0c. Nothing ever shipped it to a device and nothing
+  // reads it now; it is inert. Named differently rather than altered so a stale
+  // local copy cannot half-match a new INSERT.
+  `CREATE TABLE IF NOT EXISTS r5c_outbox (
       mutation_id   TEXT NOT NULL PRIMARY KEY,
-      approver_id   TEXT NOT NULL,
+      kind          TEXT NOT NULL CHECK (kind IN ('add','retire','used','type')),
+      row_id        TEXT NOT NULL,
       payload_json  TEXT NOT NULL,
       payload_sha256 TEXT NOT NULL,
       queued_at_ms  INTEGER NOT NULL,
@@ -99,6 +115,31 @@ export async function ensureApproverSchema(db: AbstractPowerSyncDatabase) {
 
 const newId = () =>
   `apr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+/**
+ * Queue one R5c change for upload. Always called INSIDE the caller's write
+ * transaction so the row and the intent to send it commit together -- a crash
+ * between them would leave a change only this phone knows about.
+ */
+async function enqueue(
+  tx: { execute: (sql: string, args: any[]) => Promise<any> },
+  kind: 'add' | 'retire' | 'used' | 'type',
+  rowId: string,
+  payload: Record<string, unknown>,
+  whenMs: number
+) {
+  const json = JSON.stringify(payload);
+  await tx.execute(
+    `INSERT INTO r5c_outbox
+       (mutation_id, kind, row_id, payload_json, payload_sha256, queued_at_ms)
+     VALUES (?,?,?,?,?,?)`,
+    // The mutation id carries the timestamp: retiring and re-adding the same person,
+    // or retyping the same extra, must be DIFFERENT mutations. Keying on row id
+    // alone would make the second one a replay of the first and it would be dropped
+    // as already_applied.
+    [`m-${kind}-${rowId}-${whenMs}`, kind, rowId, json, sha256(json), whenMs]
+  );
+}
 
 /** Roster row as the app uses it. `lastUsedMs` matches the pure module's shape. */
 export type RosterMember = Approver & {
@@ -162,13 +203,7 @@ export async function addApprover(
     );
     // Atomic with the row, same reason as addParty: a crash between them leaves an
     // approver only this phone knows about, and the next device would re-add them.
-    const json = JSON.stringify(payload);
-    await tx.execute(
-      `INSERT INTO approver_outbox
-         (mutation_id, approver_id, payload_json, payload_sha256, queued_at_ms)
-       VALUES (?,?,?,?,?)`,
-      [`m-${id}`, id, json, sha256(json), now]
-    );
+    await enqueue(tx, 'add', id, payload, now);
   });
   return id;
 }
@@ -180,11 +215,20 @@ export async function addApprover(
 export async function retireApprover(
   db: AbstractPowerSyncDatabase, approverId: string
 ): Promise<boolean> {
-  const r = await db.execute(
-    `UPDATE project_approver SET status = 'removed' WHERE id = ? AND status = 'active'`,
-    [approverId]
-  );
-  return !!r.rowsAffected;
+  const now = Date.now();
+  let moved = false;
+  await db.writeTransaction(async (tx) => {
+    const r = await tx.execute(
+      `UPDATE project_approver SET status = 'removed' WHERE id = ? AND status = 'active'`,
+      [approverId]
+    );
+    moved = !!r.rowsAffected;
+    // Only enqueue when a row actually moved. Queueing a no-op would upload a
+    // retirement for somebody who was already retired, and the server would record
+    // a second one -- noise that looks like a real event in an audit trail.
+    if (moved) await enqueue(tx, 'retire', approverId, { id: approverId, at_ms: now }, now);
+  });
+  return moved;
 }
 
 /**
@@ -195,20 +239,43 @@ export async function retireApprover(
 export async function markApproverUsed(
   db: AbstractPowerSyncDatabase, approverId: string, whenMs = Date.now()
 ): Promise<boolean> {
-  const r = await db.execute(
-    `UPDATE project_approver SET last_used_ms = ? WHERE id = ?`, [whenMs, approverId]
-  );
-  return !!r.rowsAffected;
+  let moved = false;
+  await db.writeTransaction(async (tx) => {
+    // Never walk recency BACKWARDS. Two devices drain out of order all the time, and
+    // an older send arriving second must not make someone look more recent than the
+    // newer one did -- last_used_ms drives who gets suggested next.
+    const r = await tx.execute(
+      `UPDATE project_approver SET last_used_ms = ?
+        WHERE id = ? AND last_used_ms < ?`,
+      [whenMs, approverId, whenMs]
+    );
+    moved = !!r.rowsAffected;
+    if (moved) await enqueue(tx, 'used', approverId, { id: approverId, at_ms: whenMs }, whenMs);
+  });
+  return moved;
 }
 
 /** Store the contractor's chosen type on the extra. */
 export async function setExtraType(
   db: AbstractPowerSyncDatabase, changeOrderId: string, type: ExtraType | null
 ): Promise<boolean> {
-  const r = await db.execute(
-    `UPDATE change_order SET extra_type = ? WHERE id = ?`, [type, changeOrderId]
-  );
-  return !!r.rowsAffected;
+  if (type !== null && !isExtraType(type)) throw new Error(`unknown extra type: ${type}`);
+  const now = Date.now();
+  let moved = false;
+  await db.writeTransaction(async (tx) => {
+    const r = await tx.execute(
+      `UPDATE change_order SET extra_type = ? WHERE id = ?`, [type, changeOrderId]
+    );
+    moved = !!r.rowsAffected;
+    // The type is NOT part of the frozen instrument -- it is a label for routing and
+    // for "what keeps recurring on this job" (R5c). So it stays editable after send,
+    // unlike scope and price, and each edit is its own mutation.
+    if (moved) {
+      await enqueue(tx, 'type', changeOrderId,
+        { id: changeOrderId, extra_type: type, at_ms: now }, now);
+    }
+  });
+  return moved;
 }
 
 /**
@@ -252,4 +319,62 @@ export function reasonText(s: Suggestion): string {
       ...(p.role ? { role: roleLabel(p.role as ApproverRole) } : {}),
     },
   } as any);
+}
+
+/**
+ * Push queued R5c changes to the server.
+ *
+ * Mirrors drainScopeOutbox (parties.ts) deliberately, down to the backoff: this is
+ * the fourth outbox in the app and a fourth retry policy would be a fourth thing to
+ * get subtly wrong. Idempotent server-side via r5c_mutation, so a reply lost on the
+ * wire replays safely.
+ *
+ * Failures are RECORDED AND RETRIED, never dropped. A roster that silently fails to
+ * upload is how phone B keeps suggesting a retired approver.
+ */
+export async function drainR5cOutbox(
+  db: AbstractPowerSyncDatabase, supabase: SupabaseClient, ownerId: string
+) {
+  const r = { attempted: 0, uploaded: 0, alreadyApplied: 0, retryable: 0 };
+  const rows = await db.getAll<{
+    mutation_id: string; kind: string; row_id: string;
+    payload_json: string; payload_sha256: string; attempt_count: number;
+  }>(
+    `SELECT mutation_id, kind, row_id, payload_json, payload_sha256, attempt_count
+       FROM r5c_outbox WHERE next_attempt_at_ms <= ?
+      ORDER BY queued_at_ms LIMIT 20`,
+    [Date.now()]
+  );
+  for (const row of rows) {
+    r.attempted++;
+    try {
+      const p = JSON.parse(row.payload_json);
+      const { data, error } = await supabase.rpc('ingest_r5c_v1', {
+        p_mutation_id: row.mutation_id, p_kind: row.kind, p_id: row.row_id,
+        p_owner_id: ownerId,
+        p_project_id: p.project_id ?? null,
+        p_name: p.name ?? null, p_role: p.role ?? null,
+        p_phone_e164: p.phone_e164 ?? null, p_email: p.email ?? null,
+        p_can_bind_money: p.can_bind_money == null ? null : p.can_bind_money === 1,
+        p_extra_type: p.extra_type ?? null,
+        p_at_ms: p.at_ms ?? p.created_at_ms ?? null,
+        p_created_at_ms: p.created_at_ms ?? null,
+        p_request_sha256: row.payload_sha256,
+      });
+      if (error) throw error;
+      await db.execute(`DELETE FROM r5c_outbox WHERE mutation_id = ?`, [row.mutation_id]);
+      if (data?.status === 'already_applied') r.alreadyApplied++; else r.uploaded++;
+    } catch (e: any) {
+      const n = row.attempt_count + 1;
+      await db.execute(
+        `UPDATE r5c_outbox SET attempt_count = ?, next_attempt_at_ms = ?,
+           last_error_code = ?, last_error_text = ? WHERE mutation_id = ?`,
+        [n, Date.now() + Math.min(60_000 * 2 ** Math.min(n, 6), 30 * 60_000),
+         String(e?.code ?? 'unknown'), String(e?.message ?? e).slice(0, 500),
+         row.mutation_id]
+      );
+      r.retryable++;
+    }
+  }
+  return r;
 }
