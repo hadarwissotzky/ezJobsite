@@ -57,6 +57,12 @@ export function RecordScreen(props: {
   /** Offered ONLY while the extra is a draft — App.tsx passes undefined once it
    *  has been sent, because a client may have read it by then. */
   onDelete?: () => void;
+  /** Where the extra's evidence is on its way to the cloud — an i18n key from
+   *  canSendExtra, undefined once everything behind it is processed. hadar,
+   *  from the device: "no indication even if it takes time that it was in the
+   *  process of doing it". This is that indication, on the screen where he
+   *  went looking for it. */
+  readinessKey?: string;
 }) {
   const { rec } = props;
   const chip = chipStyle(chipKind(rec.status));
@@ -88,6 +94,7 @@ export function RecordScreen(props: {
         }}>
           <Text style={{ fontFamily: F.bodyMed, fontSize: 14, color: '#7A3A12', lineHeight: 20 }}>
             {t({ k: rec.stateLineKey, p: rec.stateLineParams } as any)}
+            {props.readinessKey ? `\n${t(props.readinessKey as any)}` : ''}
           </Text>
         </View>
 

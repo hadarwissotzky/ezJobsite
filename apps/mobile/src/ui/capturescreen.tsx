@@ -27,6 +27,9 @@ import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View
 import { captureRef } from 'react-native-view-shot';
 
 import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, useAudioRecorderState } from '../recorder';
+// R2 live view: words appear over the camera while he talks. An indicator, not
+// evidence — the recording stays owned by expo-audio; this only listens along.
+import { needsPermissionAsk, requestSpeechPermission, startLive, type LiveHandle } from '../ondevicestt';
 import { stampNow, type Stamp } from '../stamp';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { useSessionDraft } from './sessiondraft';
@@ -123,6 +126,10 @@ export function FusedCapture({
   // for a device. Killed-while-PAUSED still loses the session; killed while
   // recording, or after an interruption, no longer does.
   const draft = useSessionDraft({ db, ownerId, stamp, enabled: !!perm?.granted });
+  // The rough live transcript shown over the camera. Never stored; the real
+  // transcript is made from the FILE after the session commits.
+  const [liveText, setLiveText] = React.useState('');
+  const liveRef = React.useRef<LiveHandle | null>(null);
 
   React.useEffect(() => {
     if (!perm) return;
@@ -140,10 +147,25 @@ export function FusedCapture({
           segmentStartedAt.current = Date.now();
           recorder.record();
           if (live) setMicOn(true);
+          // Speech permission is asked HERE, once, right after the mic grant —
+          // the one moment a dialog about listening cannot surprise anyone,
+          // because they just granted the microphone. Then the live view
+          // starts. Every failure is silent and costs only the moving text:
+          // the recording is already running and nothing may touch it.
+          if (await needsPermissionAsk()) await requestSpeechPermission();
+          startLive((t) => { if (live) setLiveText(t); })
+            .then((h) => { liveRef.current = h; })
+            .catch(() => { /* indicator only */ });
         } catch { /* mic optional: photos-only is still a capture */ }
       }
     })();
-    return () => { live = false; try { recorder.stop(); } catch { /* noop */ } };
+    return () => {
+      live = false;
+      // The recogniser lets go of the input BEFORE the recorder finalises.
+      try { liveRef.current?.stop(); } catch { /* already stopped */ }
+      liveRef.current = null;
+      try { recorder.stop(); } catch { /* noop */ }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [perm?.granted]);
 
@@ -383,6 +405,15 @@ export function FusedCapture({
       )}
 
       <StampBlock place={place} now={now} />
+      {/* The live words, over the camera, while he talks. Rough by design and
+          labelled so — it is never the stored transcript. Rendered above the
+          stamp so the two do not fight for the same corner. */}
+      {liveText.length > 0 && (
+        <View style={st.liveBox} pointerEvents="none">
+          <Text style={st.liveLabel}>{T('r2.liveRough')}</Text>
+          <Text style={st.liveText} numberOfLines={3}>{liveText}</Text>
+        </View>
+      )}
 
       {micOn && (
         <View style={st.meterRow}>
@@ -494,6 +525,10 @@ const st = StyleSheet.create({
   warnBox: { backgroundColor: 'rgba(245,176,0,0.95)' },
   warnT: { color: '#0D0F12', fontFamily: 'Barlow_700Bold', fontSize: 15, lineHeight: 21 },
 
+  liveBox: { position: 'absolute', left: 16, right: 16, bottom: 360,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10, padding: 10 },
+  liveLabel: { color: '#ffffff99', fontSize: 11, marginBottom: 2 },
+  liveText: { color: '#fff', fontSize: 15, lineHeight: 20 },
   stamp: { position: 'absolute', left: 16, bottom: 300, backgroundColor: 'rgba(0,0,0,0.45)',
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
   stampTime: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 22 },

@@ -1384,6 +1384,43 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       }
       if (!ids.length) { setUi({ k: 'refused', why: 'nothing to save' }); return; }
       setUi({ k: 'saved', id: ids[0] });
+
+      // THE RECORDING IS THE EXTRA — on THIS path too. All of this was wired
+      // into the legacy voice-only button while Snap+Talk, the screen people
+      // actually record with, committed captures and stopped. hadar's list from
+      // using the real device: no transcription, no processing indication, no
+      // photos on the record. One cause: the fused path never entered the new
+      // model. Keyed on the FIRST VOICE capture so the pair walk reaches every
+      // photo; a photos-only session keys on the first photo and simply has no
+      // transcript to wait for.
+      //
+      // AFTER durability, never awaited into the UI path — the same two rules
+      // as the voice-only path, for the same reasons.
+      const anchorId = a.audioSegments.length ? ids[a.photos.length] : ids[0];
+      void startExtraFromCapture(db, {
+        captureId: anchorId, projectId: res.projectId, ownerId: OWNER,
+      }).then(async (x) => {
+        if (!x.ok) { console.log('startExtra (fused) failed:', x.reason); return; }
+        await refresh();
+      }).catch(() => { /* capture is safe; the ledger row is not owed */ });
+
+      if (a.audioSegments.length) {
+        void (async () => {
+          // transcribeOnDevice wants the stored file, not the in-memory bytes:
+          // the committed copy is the evidence, so it is the thing transcribed.
+          const row = await db.getAll<{ media_relpath: string }>(
+            `SELECT media_relpath FROM capture_commit WHERE capture_id = ?`, [anchorId]);
+          if (!row.length) return;
+          const t = await transcribeOnDevice(db, anchorId,
+            `${FS.documentDirectory}${row[0].media_relpath}`);
+          if (!t.ok) return;
+          const said = await db.getAll<{ text: string }>(
+            `SELECT text FROM voice_transcript_cache WHERE capture_id = ?`, [anchorId]);
+          const first = (said[0]?.text ?? '').split(/(?<=[.!?])\s/)[0]?.trim();
+          if (first) await titleExtraIfUntitled(db, `co-${anchorId}`, first);
+          await refresh();
+        })().catch(() => { /* the worker's cloud path still covers it */ });
+      }
       if (res.projectId === INBOX_ID) {
         // Saved safe — now the ONE question a change order cannot skip: which job?
         setAssign({ ids, lat: a.stamp.lat, lng: a.stamp.lng,
@@ -2446,6 +2483,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // Mandate #2: this writes a file and opens the OS share sheet. It does not
         // transmit anything to a client, and must never be changed to.
         onShare={() => { void shareApprovalDoc(db, record.id); }}
+        readinessKey={(() => {
+          if (record.status !== 'draft') return undefined;
+          const gate = canSendExtra((readiness.get(record.id) ?? 'captured') as any);
+          return gate.ok ? undefined : gate.whyKey;
+        })()}
         // Only for a draft. Undefined once sent hides the control entirely
         // rather than showing something that refuses — an action you can press
         // and be told no is worse than one that was never offered.
