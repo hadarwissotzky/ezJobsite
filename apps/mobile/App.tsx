@@ -69,6 +69,10 @@ import {
   markApproverUsed, setExtraType, reasonText, typeLabel, roleLabel,
   type RosterMember,
 } from './src/approvers';
+// R6b item 3. Actor facts are written at the moment they happen; nothing on the
+// record screen may infer an actor at render time (see record.ts's header).
+import { drainExtraActorOutbox, ensureExtraActorSchema, noteActorNow, noteApprover,
+         noteCapturedBy } from './src/recordactors';
 import {
   EXTRA_TYPES, APPROVER_ROLES, type ExtraType, type ApproverRole, type Suggestion,
 } from './src/approverrouting';
@@ -284,6 +288,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     // AFTER a successful send, never before: last_used_ms drives who gets
     // suggested next, and an attempt that failed is not evidence of anything.
     if (to) await markApproverUsed(db, to.id);
+    // R6b item 3 + R5c's AC: "who was entitled to approve this is part of the record,
+    // not just who did". AFTER a successful send only — an attempt that failed is not
+    // evidence anyone was asked. The role is COPIED onto the record, never joined
+    // live: retiring this approver later must not rewrite what an already-signed
+    // record says about their authority.
+    const sentAtMs = Date.now();
+    await noteActorNow(db, { subjectKind: 'change_order', subjectId: c.id,
+                             act: 'sent', atMs: sentAtMs });
+    if (to) {
+      await noteApprover(db, { changeOrderId: c.id, approverId: to.id,
+                               name: to.name, role: to.role, atMs: sentAtMs });
+    }
     setSendPrep(null);
     setSentLink({ url: r.url, shown: r.shownContent });
     await refresh();
@@ -609,6 +625,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // AFTER ensureChangeOrderSchema, and that order is load-bearing: this one
       // ALTERs change_order to add extra_type (R5c), so the table has to exist first.
       await ensureApproverSchema(db);
+      // R6b: who captured / priced / sent, and who it was addressed to.
+      await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
       await ensurePairSchema(db);
       const sl = await savedLang(db);
@@ -697,6 +715,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // queue that looks like sync.
           const ar = await drainR5cOutbox(db, connector.client, data.user.id);
           if (ar.attempted) console.log('drain r5c:', JSON.stringify(ar));
+          // R6b actor facts. Same reason as the roster: a fact that only ever lives
+          // on the phone that wrote it is lost with that phone, and "who recorded
+          // this" is exactly what gets asked once the phone is gone.
+          const aa = await drainExtraActorOutbox(db, connector.client, data.user.id);
+          if (aa.attempted) console.log('drain actors:', JSON.stringify(aa));
           // Pull anything this device does not have: a reinstall, a second phone,
           // or a CO authored before the device became the author.
           // Tie walkthrough photos to the sentences spoken over them, once the
@@ -766,6 +789,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       });
       if (r.ok) {
         setUi({ k: 'saved', id: r.captureId });
+        // AFTER the capture is durable, never before, and it cannot throw: mandate #1
+        // — bookkeeping never delays or endangers a capture.
+        await noteCapturedBy(db, r.captureId);
         if (res.confidence !== 'high') setFiled(res.why);
       } else setUi({ k: 'refused', why: r.reason });
       await refresh();
@@ -847,6 +873,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         });
         if (!pr.ok) { setUi({ k: 'refused', why: pr.reason }); return; }
         await linkPair(db, pairId, pr.captureId, 'photo', ph.atMs);
+        await noteCapturedBy(db, pr.captureId);
         ids.push(pr.captureId);
       }
       // The narration, possibly split by a phone call: every segment commits, in order.
@@ -859,6 +886,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         });
         if (!vr.ok) { setUi({ k: 'refused', why: `some saved; audio did not: ${vr.reason}` }); return; }
         await linkPair(db, pairId, vr.captureId, 'voice', seg.startedAtMs);
+        await noteCapturedBy(db, vr.captureId);
         ids.push(vr.captureId);
       }
       if (!ids.length) { setUi({ k: 'refused', why: 'nothing to save' }); return; }
@@ -906,7 +934,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // capture ends up somewhere nobody looks.
         setFiled(res.why);
       }
-      if (r.ok) setUi({ k: 'saved', id: r.captureId });
+      if (r.ok) { setUi({ k: 'saved', id: r.captureId }); await noteCapturedBy(db, r.captureId); }
       else setUi({ k: 'refused', why: r.reason });
     } catch (e: any) {
       setUi({ k: 'refused', why: e?.message ?? String(e) });
@@ -927,6 +955,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       if (r.ok && res.confidence !== 'high') setFiled(res.why);
       if (r.ok) {
         setUi({ k: 'saved', id: r.captureId });
+        await noteCapturedBy(db, r.captureId);
         // Capture is SAVED already. The card is about what it MEANS, and it can
         // be dismissed without losing anything -- the evidence is committed.
         const inf = inferDecision(note);
@@ -1739,6 +1768,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     return (
       <RecordScreen
         rec={record}
+        db={db}
         summary={recordSummary}
         // Mandate #2: this writes a file and opens the OS share sheet. It does not
         // transmit anything to a client, and must never be changed to.
@@ -2329,8 +2359,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     // and the DB refuses the row without it.
                     numbersConfirmedAt: new Date(),
                   });
-                  if (r.ok) { setPriced(null); setLines([]); await refresh(); }
-                  else setUi({ k: 'refused', why: r.reason });
+                  if (r.ok) {
+                    // R6b item 3: who priced it, recorded at the read-back moment
+                    // itself. Reading the profile HERE and not at render is the whole
+                    // difference from the bug record.ts documents.
+                    await noteActorNow(db, { subjectKind: 'change_order',
+                                             subjectId: r.id, act: 'priced' });
+                    setPriced(null); setLines([]); await refresh();
+                  } else setUi({ k: 'refused', why: r.reason });
                 }}>
                 <Text style={s.confirmT}>
                   {cents === null ? T('co.enterPrice') : T({ k: 'co.yes', p: { amount: money(cents) } })}

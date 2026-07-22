@@ -18,7 +18,9 @@ import type { ExtraRecord, RecordPerson } from '../record';
 import type { DecisionSummary } from '../decisionsummary';
 import { DecisionSummaryCard } from './decisionsummarycard';
 import { t } from '../i18n';
-import { C, F, T, chipStyle, display, label, money as moneyStyle } from './theme';
+import { C, F, T, chipStyle, display, label } from './theme';
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import { MoneyLine, PeopleCard, TypeLine, useRecordFacts } from './recordfacts';
 
 function chipKind(status: string) {
   if (status === 'approved') return 'approved' as const;
@@ -27,19 +29,15 @@ function chipKind(status: string) {
   return 'discuss' as const;
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
 function avatarColor(kind: RecordPerson['kind']) {
   return kind === 'approver' ? C.approve : kind === 'crew' ? C.orange : C.ink;
 }
 
 export function RecordScreen(props: {
   rec: ExtraRecord;
+  /** R6b item 3 reads stored actor facts. Local SQLite only — see recordfacts.tsx
+   *  for why the read lives in a hook here and not in the caller. */
+  db: AbstractPowerSyncDatabase;
   /** R6c. Null renders nothing — the record is complete without it (R6c AC2). */
   summary?: DecisionSummary | null;
   onBack: () => void;
@@ -49,6 +47,7 @@ export function RecordScreen(props: {
 }) {
   const { rec } = props;
   const chip = chipStyle(chipKind(rec.status));
+  const facts = useRecordFacts(props.db, rec.id, rec.status);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.paper }}>
@@ -64,14 +63,11 @@ export function RecordScreen(props: {
           </View>
         </View>
 
-        {/* Mandate #6: the price is the contractor's, confirmed by a human. */}
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 9, marginTop: 8 }}>
-          <Text style={{ ...moneyStyle, fontSize: 30, color: C.ink }}>{rec.amount}</Text>
-          <Text style={T.bodySteel}>
-            {rec.nte ? t({ k: 'erec.nte', p: { amount: rec.nte } } as any) : t('erec.fixed')}
-            {rec.isMini ? ` · ${t('erec.mini')}` : ''} · {t('erec.yourPrice')}
-          </Text>
-        </View>
+        {/* R6b item 1: type (Extra/Decision), then the money block. Mandate #6: the
+            price is the CONTRACTOR'S, read back and confirmed by a human. A Decision
+            renders "No cost change" and no figure anywhere (R6b AC2 / R10). */}
+        <TypeLine facts={facts} />
+        <MoneyLine rec={rec} facts={facts} />
 
         <View style={{
           marginTop: 12, borderRadius: 12, padding: 12,
@@ -86,33 +82,10 @@ export function RecordScreen(props: {
           <Text style={{ ...T.bodySteel, fontSize: 12, marginTop: 8 }}>{t('erec.onPhone')}</Text>
         )}
 
-        {/* People — only roles actually stored. Where no name exists, the row states
-            the EVENT and its real time and attributes it to nobody. */}
-        {rec.people.length > 0 && (
-          <View style={T.card}>
-            <Text style={label}>{t('erec.people')}</Text>
-            <View style={{ marginTop: 8, gap: 11 }}>
-              {rec.people.map((p, i) => (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <View style={{
-                    width: 34, height: 34, borderRadius: 17, alignItems: 'center',
-                    justifyContent: 'center', backgroundColor: avatarColor(p.kind),
-                  }}>
-                    <Text style={{ fontFamily: F.disp, fontSize: 13, color: '#fff' }}>
-                      {initials(p.name)}
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink }}>{p.name}</Text>
-                    <Text style={{ ...T.bodySteel, fontSize: 12.5 }}>
-                      {t(p.roleKey)}{p.when ? ` · ${p.when}` : ''}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
+        {/* R6b item 3: the approver (name + role label, R5c), captured-by and
+            priced/sent-by, each with its timestamp. Rows come only from stored
+            facts — where nothing was recorded, nothing is shown. */}
+        <PeopleCard facts={facts} />
 
         <View style={T.card}>
           <Text style={label}>{t('erec.description')}</Text>
