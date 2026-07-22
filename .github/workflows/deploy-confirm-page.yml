@@ -10,6 +10,7 @@ on:
     branches: [main]
     paths:
       - 'apps/web/confirm.html'
+      - 'apps/web/ewa.js'
       - '.github/workflows/deploy-confirm-page.yml'
   workflow_dispatch:
 
@@ -36,6 +37,11 @@ jobs:
           sed -e "s|__SUPABASE_URL__|${{ vars.SUPABASE_URL }}|g" \
               -e "s|__ANON_KEY__|${{ vars.SUPABASE_ANON_KEY }}|g" \
               apps/web/confirm.html > _site/confirm.html
+          # PRD R3 AC2's renderer. confirm.html loads it with a plain <script src>,
+          # so a deploy that copies only confirm.html ships a page that refuses every
+          # Extra Work Authorization with "could not load". No substitution here: it
+          # holds no keys, only rendering.
+          cp apps/web/ewa.js _site/ewa.js
           # index.html so the bare Pages URL isn't a 404 while testing.
           cp _site/confirm.html _site/index.html
           # CUSTOM DOMAIN, AND THE REASON IS HTTPS, NOT VANITY [2026-07-21].

@@ -96,7 +96,11 @@
     var termLabel = terms.proceed_term === 'hold' ? 'Work on hold' : 'Time &amp; materials, capped';
     var termValue = terms.proceed_term === 'hold'
       ? 'No price yet'
-      : h.esc(h.usd(terms.cap_cents)) + ' max';
+      // "max" is a MODIFIER, not part of the number, and at .pv's 40px the two
+      // together overflow a 390px phone and drop "max" onto its own line — seen in a
+      // browser, 2026-07-22. A cap whose qualifier is orphaned reads for a moment as
+      // a fixed price, which is the one thing this instrument must never look like.
+      : h.esc(h.usd(terms.cap_cents)) + '<span class="pvq">max</span>';
 
     h.screen(
       '<div class="brand">' +

@@ -70,6 +70,11 @@
   .price { display: flex; justify-content: space-between; align-items: baseline; }
   .pl { font-family: var(--disp); font-weight: 600; font-size: 13px; letter-spacing: .13em; text-transform: uppercase; color: var(--steel); }
   .pv { font-family: var(--disp); font-weight: 700; font-size: 40px; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
+  /* The qualifier on an EWA cap ("max"). Sized down and kept on the same line as the
+     figure: at .pv's 40px it wrapped, and a cap whose qualifier is orphaned reads for
+     a moment as a fixed price. */
+  .pvq { font-family: var(--disp); font-weight: 600; font-size: 17px; letter-spacing: .06em;
+         text-transform: uppercase; color: var(--steel); margin-left: 6px; white-space: nowrap; }
   .clause { font-size: 13.5px; color: var(--steel); margin-top: 8px; line-height: 1.5; }
   .totals { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
   .trow { display: flex; justify-content: space-between; font-size: 14.5px; padding: 3px 0; color: var(--steel); }
@@ -144,6 +149,13 @@
 <body>
 <div id="root"><div class="done"><div class="mark">·</div><p>Loading…</p></div></div>
 
+<!-- PRD R3 AC2. A SEPARATE FILE on purpose: this page renders a PRICED approval —
+     a big number, a running total, and "Nothing proceeds until you approve." All
+     three are wrong for an Extra Work Authorization, which has no price, and on a
+     T&M-capped term work proceeds precisely BECAUSE it was approved. A classic
+     script runs before any module, so window.renderEwa is set by the time the
+     dispatch below needs it. -->
+<script src="ewa.js"></script>
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -278,6 +290,31 @@ async function load() {
   // same empty list rather than to a failure screen.
   data.photos = (ph && ph.data && Array.isArray(ph.data.photos)) ? ph.data.photos : [];
 
+  // R3 AC2: an EWA is a DIFFERENT INSTRUMENT and gets a different page. Dispatch on
+  // `kind`, which confirmation_fetch already returns, NOT on the absence of a price:
+  // "no amount_cents" is also true of a legacy decision-confirm, and rendering an
+  // authorization as one of those would drop the proceed term and the settlement
+  // window — the two clauses that decide whether work starts today.
+  if (data.kind === 'ewa') {
+    if (typeof window.renderEwa !== 'function') {
+      // ewa.js failed to load. Refuse rather than fall through to a renderer that
+      // would silently omit the terms this document turns on.
+      done('⚠️', 'This authorization could not load',
+        'Please open the link again. Nothing here was recorded.');
+      return;
+    }
+    // Terms live in their own table (303) and are frozen alongside shown_content.
+    // A fetch failure passes null, and renderEwa refuses to render an incomplete
+    // authorization rather than showing a signable page with clauses missing.
+    let terms = null;
+    try {
+      const { data: t } = await supabase.rpc('ewa_terms_fetch', { p_token: token });
+      terms = t ?? null;
+    } catch { terms = null; }
+    window.renderEwa(data, terms, { screen, done, esc, usd, initials, answer,
+                                    askQuestion, declineFlow });
+    return;
+  }
   // A price present means this is a priced approval; otherwise the legacy confirm.
   (data.amount_cents != null) ? renderPriced(data) : renderPlain(data);
 }
