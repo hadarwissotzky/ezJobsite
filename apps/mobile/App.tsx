@@ -31,6 +31,11 @@ import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { RecordScreen } from './src/ui/recordscreen';
 import { extraRecord, type ExtraRecord } from './src/record';
+import { DiscussionLog, ThreadScreen } from './src/ui/threadscreen';
+import { threadState, type ThreadMessage } from './src/discussion';
+import { drainR5bOutbox, ensureDiscussionSchema, postReply, pullThreads,
+         threadFor, threadsForProject, undeliveredReplyIds } from './src/discussionstore';
+import { revisionOf } from './src/revision';
 import { decisionSummaryFor } from './src/decisionsummarydata';
 import type { DecisionSummary } from './src/decisionsummary';
 import { shareApprovalDoc } from './src/approvalrecordshare';
@@ -78,7 +83,7 @@ import {
 } from './src/approverrouting';
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine,
-         markLocalSent, money, parseMoney, validateLines,
+         createdLabel, markLocalSent, money, parseMoney, validateLines,
          type LineItem, type LedgerRow } from './src/changeorder';
 import { displayStatus, canSupersede, type LedgerStatus } from './src/extrastatus';
 import { ensureLedgerStatusSchema, hydrateQuestions, openQuestions,
@@ -198,6 +203,19 @@ export default function App() {
 
 // Open the preview instead of sending. R5c + mandate #2: the recipient is a
 // SUGGESTION until a human has looked at it.
+// R5b. Every message on this extra AND on every version it replaced, plus the price
+// it replaced — a question only makes sense against the number they were shown.
+const openThread = async (c: LedgerRow, focusReply = false) => {
+  const messages = await threadFor(db, c.id);
+  const rev = await revisionOf(db, c.id);
+  threadIdRef.current = c.id;
+  setThread({
+    co: c, messages,
+    revision: rev ? { priorAmount: money(rev.priorAmountCents), newAmount: c.amount } : null,
+    undelivered: await undeliveredReplyIds(db), focusReply,
+  });
+};
+
 const openSendPrep = async (c: LedgerRow) => {
   const t = (c.extra_type ?? null) as ExtraType | null;
   const { suggestion, roster } = await suggestFor(db, projectId, t);
@@ -344,6 +362,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // LOCAL mirror, so the "discussing" chip renders in a basement like the rest of
   // this screen (mandate #7).
   const [questions, setQuestions] = React.useState<Record<string, number>>({});
+  // R5b. `threads` is every thread on the job, for the ledger's flags; `thread` is
+  // the one open on screen. The ref keeps refresh()'s identity stable, exactly as
+  // recordIdRef does for the record.
+  const [threads, setThreads] = React.useState<Map<string, ThreadMessage[]>>(new Map());
+  const [thread, setThread] = React.useState<null | {
+    co: LedgerRow; messages: ThreadMessage[];
+    revision: { priorAmount: string; newAmount: string } | null;
+    undelivered: ReadonlySet<string>; focusReply: boolean;
+  }>(null);
+  const threadIdRef = React.useRef<string | null>(null);
   // PRD R6b: the extra record. The assembled data drives the screen, and the id is
   // kept alongside it so refresh() can re-derive the record while it is open — a
   // record that cannot change is a record that can lie about what is owed.
@@ -577,6 +605,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       setDecisions(await listDecisions(db, pid));
       setCoRows(await ledger(db, pid));
       try { setQuestions(await openQuestions(db, pid)); } catch { /* schema not up yet */ }
+      try { setThreads(await threadsForProject(db, pid)); } catch { /* schema not up yet */ }
+      // An open thread re-derives on the SAME cycle as everything else, for the same
+      // reason the record does: a client can answer while he is reading it.
+      const openThreadId = threadIdRef.current;
+      if (openThreadId) {
+        const msgs = await threadFor(db, openThreadId);
+        const und = await undeliveredReplyIds(db);
+        setThread((p) => (p && p.co.id === openThreadId ? { ...p, messages: msgs, undelivered: und } : p));
+      }
       // An open extra record re-derives on the SAME cycle as everything else.
       // It used to be a snapshot taken once on tap, which meant a contractor could
       // still be reading "waiting on approval" minutes after the client signed --
@@ -636,6 +673,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // ALTERs change_order to add extra_type (R5c), so the table has to exist first.
       await ensureApproverSchema(db);
       await ensureLedgerStatusSchema(db);
+      // AFTER ensureChangeOrderSchema for the same reason as the lines above: this
+      // ALTERs change_order to add superseded_by, the lineage the thread walks to
+      // carry a conversation across a revision (R5b AC2).
+      await ensureDiscussionSchema(db);
       // R6b: who captured / priced / sent, and who it was addressed to.
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
@@ -730,6 +771,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // accepted yet is a local intent hydrateChangeOrders cannot see.
           const sx = await drainSupersessions(db, connector.client);
           if (sx.attempted) console.log('drain supersessions:', JSON.stringify(sx));
+          // R5b. The PULL is the half that did not exist: without it a question the
+          // client asked is stored server-side and invisible to the contractor
+          // forever. The drain carries his replies back out.
+          const br = await drainR5bOutbox(db, connector.client, data.user.id);
+          if (br.attempted) console.log('drain r5b:', JSON.stringify(br));
+          const pt = await pullThreads(db, connector.client, projectId);
+          if (pt.pulled || pt.revisions) { console.log('threads:', JSON.stringify(pt)); await refresh(); }
           // R6b actor facts. Same reason as the roster: a fact that only ever lives
           // on the phone that wrote it is lost with that phone, and "who recorded
           // this" is exactly what gets asked once the phone is gone.
@@ -1788,6 +1836,42 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   }
 
   // PRD R6b: the extra record. Overlays everything, like review and capture.
+  // R5b: the discussion thread. Overlays everything, same as the record.
+  if (thread) {
+    return (
+      <ThreadScreen
+        extra={{ id: thread.co.id, scope: thread.co.scope,
+                 amount: thread.co.amount, status: thread.co.status }}
+        messages={thread.messages}
+        revision={thread.revision}
+        undelivered={thread.undelivered}
+        focusReply={thread.focusReply}
+        formatAt={createdLabel}
+        onReply={async (text: string) => {
+          // Mandate #2: a reply is a MESSAGE. It commits nothing and prices nothing,
+          // which is exactly why it needs no confirmation step — and exactly why it
+          // must never be allowed to move the extra's status. A new PRICE goes
+          // through the read-back composer (R7's Revise), never through a chat box.
+          await postReply(db, { changeOrderId: thread.co.id, body: text, ownerId: OWNER });
+          await refresh();
+        }}
+        onRevise={() => {
+          // Hand off to the SAME priced composer R7 wired. One place issues a price.
+          const c = thread.co;
+          threadIdRef.current = null; setThread(null);
+          setPriced({
+            decisionId: c.decision_id, scope: c.scope, whoDirected: c.who_directed,
+            amountText: (c.amount_cents / 100).toFixed(2),
+            nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
+            confidence: 'high', supersedes: c.id,
+          });
+          setLines([]);
+        }}
+        onBack={() => { threadIdRef.current = null; setThread(null); }}
+      />
+    );
+  }
+
   if (record) {
     return (
       <RecordScreen
@@ -2530,8 +2614,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   <Text style={s.coCreated}>Created {c.created}</Text>
                   {/* The chip is a label; this is the instruction. A client's question
                       means the ball is in HIS court, and "Discussing" does not say that. */}
-                  {disp === 'discussing' && (
-                    <Text style={s.coNudge}>{T('co.answerOwed')}</Text>
+                  {/* R5b: the way in. A question that is visible but unanswerable is
+                      not much better than one that is invisible — the whole finding
+                      was that the app never read confirmation_question at all. */}
+                  {(disp === 'discussing' || (threads.get(c.id)?.length ?? 0) > 0) && (
+                    <Pressable style={s.coSendRow} onPress={() => openThread(c, disp === 'discussing')}>
+                      <Text style={s.coNudge}>
+                        {disp === 'discussing' ? T('co.answerOwed') : T('r5b.openThread')}
+                      </Text>
+                    </Pressable>
                   )}
                   {!c.synced && <Text style={s.coOnPhone}>On this phone · not backed up yet</Text>}
                 </Pressable>
