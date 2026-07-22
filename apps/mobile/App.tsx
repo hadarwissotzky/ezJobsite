@@ -2031,9 +2031,9 @@ export default function App() {
                   channel: 'link', whenMs: d.last_changed_ms,
                   // Was hardcoded to https://ezjobsite.app -- A DOMAIN THAT DOES
                   // NOT EXIST. Every confirmation link ever generated pointed at
-                  // nothing. Now env-driven, and CONFIRM_BASE is checked before
-                  // anything is sent (below) rather than discovered by a
-                  // homeowner tapping a dead link.
+                  // nothing. Now env-driven; sendForConfirmation refuses an empty
+                  // base before it writes anything, so a missing CONFIRM_BASE can no
+                  // longer be discovered by a homeowner tapping a dead link.
                   linkBase: CONFIRM_BASE,
                 });
                 if (r.ok) setSentLink({ url: r.url, shown: r.shownContent });
@@ -2206,7 +2206,12 @@ export default function App() {
         // already approved on this job, all frozen together (mandate #5/#6). The
         // share sheet delivers it from a number the client already recognises.
         const sendPricedApproval = async (c: LedgerRow) => {
-          if (!CONFIRM_BASE) { setUi({ k: 'refused', why: 'no approval link base configured' }); return; }
+          // The CONFIRM_BASE check that used to sit here moved INTO
+          // sendForConfirmation, which now refuses before it writes. It was here and
+          // not on the decision-confirm path, so one of the two send paths could mint
+          // a request for a link that goes nowhere. The refusal surfaces through the
+          // same `r.ok === false` branch below, so the user-visible behaviour on this
+          // path is unchanged.
           const prof = await getProfile(db);
           const r = await sendForConfirmation(connector.client, {
             kind: 'confirm', decisionId: c.decision_id, projectId,

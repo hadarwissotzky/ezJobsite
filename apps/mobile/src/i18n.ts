@@ -350,8 +350,11 @@ const EN: Record<string, string> = {
   // Actors — only roles actually stored. See record.ts.
   'erec.directedBy': 'Directed this extra',
   'erec.signedBy': 'Signed the approval',
+  // `erec.capturedAt` is a HISTORY event label, not an actor role — it sits with the
+  // actor keys only because both used to feed the People card. `erec.pricedAt` lived
+  // here too and is gone: the price-confirmed moment is an event, and the history
+  // already says it with `erec.evPriced`, which carries the amount.
   'erec.capturedAt': 'Captured on site',
-  'erec.pricedAt': 'Price confirmed',
   // History
   'erec.evCreated': 'Extra created',
   'erec.evPriced': 'Price confirmed — {amount}',
@@ -690,7 +693,6 @@ const ES: Record<string, string> = {
   'erec.directedBy': 'Pidió este extra',
   'erec.signedBy': 'Firmó la aprobación',
   'erec.capturedAt': 'Grabado en la obra',
-  'erec.pricedAt': 'Precio confirmado',
   'erec.evCreated': 'Se creó el extra',
   'erec.evPriced': 'Precio confirmado — {amount}',
   'erec.evSent': 'Enviado para aprobación',

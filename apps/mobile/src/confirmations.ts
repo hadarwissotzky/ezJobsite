@@ -108,6 +108,23 @@ export async function sendForConfirmation(
     changeOrderId?: string | null;
   }
 ): Promise<SendResult> {
+  // REFUSE BEFORE WRITING. Without a link base the url below comes out as the
+  // relative "/confirm.html?t=..." — not a link anyone can open. `shareLink` already
+  // rejects that shape, so nothing dead ever reached a homeowner, but the refusal
+  // came AFTER confirmation_create had inserted a real row: a token minted, and (for
+  // a priced send) 230's confirmation_request_marks_sent had already moved the change
+  // order to `sent`. The contractor got a "created" card showing a URL that could not
+  // work, for a request that could not be delivered.
+  //
+  // The check lives HERE, not at the call sites, because there are two of them and
+  // only one had it: the priced path guarded CONFIRM_BASE while the decision-confirm
+  // path did not — and carried a comment claiming it did. A precondition every caller
+  // must satisfy belongs to the function that has the precondition. Same reasoning as
+  // the SQL one-object-one-owner pass: a rule you can forget to apply is not a rule.
+  if (!o.linkBase) {
+    return { ok: false, reason: 'No confirmation page is configured (EXPO_PUBLIC_CONFIRM_BASE)' };
+  }
+
   const shownContent = renderCard(o);
   const token = newToken();
 

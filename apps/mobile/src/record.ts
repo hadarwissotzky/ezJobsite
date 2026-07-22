@@ -190,16 +190,18 @@ export async function extraRecord(
   if (co.signed_by) {
     people.push({ roleKey: 'erec.signedBy', name: co.signed_by, when: null, kind: 'approver' });
   }
-  // No name is stored for who captured or who priced. So we state the EVENTS with
-  // their real timestamps and attribute them to nobody.
+  // No name is stored for who captured or who priced, so NOTHING is added to `people`
+  // for them. Both events already appear in `history` below with their real
+  // timestamps, which is where an event belongs.
+  //
+  // They used to be pushed here with the formatted timestamp in the `name` field
+  // (2026-07-21, caught in review). The screen renders `people` as a roster: a bold
+  // name line over an initials avatar. So an extra captured on the 20th listed, under
+  // the heading "People", a person named "Jul 20 · 2:14 pm" with the initials "J2".
+  // That is this file's own rule broken by the render — the header says these events
+  // are attributed to nobody, and the roster put a nobody-shaped person on screen.
+  // A field named `name` holding a date is the tell.
   const capturedLabel = at(capturedAtMs);
-  if (capturedLabel) {
-    people.push({ roleKey: 'erec.capturedAt', name: capturedLabel, when: null, kind: 'crew' });
-  }
-  const pricedLabel = at(co.numbers_confirmed_at_ms);
-  if (pricedLabel) {
-    people.push({ roleKey: 'erec.pricedAt', name: pricedLabel, when: null, kind: 'me' });
-  }
 
   // ---- History: chronological, with unstamped events last ------------------
   const stamped: RecordEvent[] = [];
