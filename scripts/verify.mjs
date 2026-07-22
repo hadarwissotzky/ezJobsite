@@ -197,6 +197,55 @@ console.log('\nverifying…\n');
         ' — wire it, delete it, or add it to KNOWN_UNWIRED with the reason');
 }
 
+// ── 4d. Is every web asset actually loaded by the page? ──────────────────────
+// 4c walks imports from App.tsx and knows nothing about apps/web. apps/web/ewa.js
+// was written, complete, and loaded by NOTHING: confirm.html never referenced it and
+// the deploy copied only confirm.html, so an Extra Work Authorization would have
+// fallen through to the priced-approval renderer and dropped the two clauses that
+// decide whether work starts today.
+//
+// Same failure as 4c, six feet to the left of where 4c was looking. Two surfaces
+// need the same question asked, so it gets asked twice.
+//
+// It also checks the DEPLOY copies it. A file referenced by the page and absent from
+// _site is worse than an unreferenced one: it looks correct in the repo and 404s in
+// production.
+{
+  const webDir = join(ROOT, 'apps/web');
+  const page = join(webDir, 'confirm.html');
+  const wf = join(ROOT, '.github/workflows/deploy-confirm-page.yml');
+  if (!existsSync(page)) record('web assets wired', 'inconclusive', 'confirm.html not found');
+  else {
+    const html = readFileSync(page, 'utf8');
+    const deploy = existsSync(wf) ? readFileSync(wf, 'utf8') : '';
+    const assets = run('ls', [webDir], ROOT).out.split('\n').map((s) => s.trim())
+      .filter((f) => f.endsWith('.js') || f.endsWith('.css'));
+
+    // MATCH THE TAG, NOT THE FILENAME. The first version used html.includes(f) and
+    // passed while the <script src> was deleted, because a COMMENT in the dispatch
+    // still said "ewa.js failed to load". That is precisely the failure 4c warns
+    // about one screen up — "not a grep for the name, which would count a mention in
+    // a comment as wiring" — reproduced inside the check written to prevent it.
+    // Comments are stripped and only a real src=/href= counts.
+    const markup = html.replace(/<!--[\s\S]*?-->/g, '');
+    const loaded = new Set(
+      [...markup.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/g)]
+        .map((m) => m[1].split('/').pop())
+    );
+    const unreferenced = assets.filter((f) => !loaded.has(f));
+    const undeployed = assets.filter((f) => loaded.has(f) && !deploy.includes(f));
+    const problems = [
+      ...unreferenced.map((f) => `${f} is never referenced by confirm.html`),
+      ...undeployed.map((f) => `${f} is referenced but the deploy never copies it — it will 404`),
+    ];
+    if (assets.length === 0) record('web assets wired', 'inconclusive', 'found 0 web assets — the scan is wrong');
+    else record('web assets wired', problems.length === 0 ? 'pass' : 'fail',
+      problems.length === 0
+        ? `${assets.length} asset(s), all referenced and deployed`
+        : problems.join('; '));
+  }
+}
+
 // ── 5. Client vs server schema ────────────────────────────────────────────────
 {
   const r = run('node', [join(ROOT, 'scripts/check-schema-agreement.mjs')], ROOT);
