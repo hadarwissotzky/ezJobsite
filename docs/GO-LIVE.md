@@ -18,6 +18,21 @@ What that proved, which nothing static could:
     PRESENT, and `change_order.extra_type` PRESENT — which means the ALTER with the
     duplicate-column catch works against a real database, not just in my head.
 
+HOW FAR IT ACTUALLY GOT (2026-07-22, three screens rendered without a single tap):
+  1. Value-first onboarding slide — renders.
+  2. Sign-in ("EZchangeorder / Welcome back") — renders, reached by writing
+     `onboarding_seen_v1` into the app's AsyncStorage manifest.
+  3. Stopped there. Past sign-in needs a real Supabase session, and the worker
+     credentials live in `.env`, which this environment blocks me from reading.
+  Zero JavaScript errors across all three.
+
+  Local state CAN be seeded without tapping — the app's SQLite is at
+  `$(xcrun simctl get_app_container <udid> com.hilo.ezjobsite data)/Library/ezjobsite.db`
+  and I seeded a profile, a job, two extras and a client question into it directly.
+  So once someone signs in ONCE on the simulator, the home screen, ledger, chips and
+  bell can all be driven from SQL and screenshotted — no tapping required for most of
+  it.
+
 What it did NOT prove, and how to unblock it in two minutes:
   * Anything past the first screen. I could launch and screenshot but not TAP. Two
     mechanisms exist and both are closed HERE, each for a fixable reason:
