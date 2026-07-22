@@ -245,13 +245,21 @@ function renderPlain(d) {
       <div class="who">For ${esc(d.counterparty)}</div>
       <h1 class="plain">Please read this and ${verb} it.</h1>
       <div class="plaincard">${esc(d.shown_content)}</div>
+      <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
       <div class="btns">
-        <button class="yes" id="yes">Yes — that's right</button>
+        <button class="yes" id="yes" disabled>Yes — that's right</button>
         <button class="no" id="no">No — that's not right</button>
       </div>
-      <p class="recordnote">Your answer is recorded with the date and time, and the contractor is told. No account needed.</p>
+      <p class="recordnote">Your answer, your name, and the date &amp; time become part of the project record. No account needed.</p>
     </div>`);
-  document.getElementById('yes').onclick = () => answer('confirmed', null, null);
+  // A Decision is signed like any other item (PRD R10). It carries no money, but a
+  // confirmed spec — "the vanity is 34 inches" — is exactly what a rework argument
+  // turns on months later, so it is worth the same signature as a priced extra.
+  // Saying NO still needs no name: identity is not the price of declining.
+  const plainName = document.getElementById('name');
+  const yesEl = document.getElementById('yes');
+  plainName.addEventListener('input', () => { yesEl.disabled = plainName.value.trim().length < 2; });
+  yesEl.onclick = () => answer('confirmed', null, plainName.value.trim());
   document.getElementById('no').onclick = () => askQuestion(d, false);
 }
 
@@ -274,7 +282,7 @@ async function answer(action, note, name) {
     if (needsSignature) {
       screen(`<div class="done"><div class="mark err">✋</div>
         <h2>A name is required</h2>
-        <p>Approving a priced change is a signature, so it has to be signed.
+        <p>Saying yes is a signature, so it has to be signed.
            Nothing was recorded. Open the link again and type your full name.</p>
         <div class="btns"><button class="yes" onclick="location.reload()">Open it again</button></div></div>`);
       return;

@@ -534,3 +534,31 @@ ESIGN/UETA enforceability bar is still **Fable Q1, BLOCKING before launch**
 (`PRD-RECONCILIATION` §5/§6). It also does not verify the typed name belongs to the
 person typing it, and it does not close Codex #1 — a correctly signed approval still
 does not move the change order out of Draft.
+
+**AMENDED 2026-07-21 — the rule is now unconditional.** The version above scoped the
+signature requirement to PRICED requests, to avoid breaking the legacy no-price path.
+hadar: *"yes decisions should also be signed."* That was the right call and it closed a
+second hole the first fix left open: a **Decision** — "confirm the vanity height at 34
+inches", the thing that exists to prevent a rework argument — could still be confirmed
+by anyone holding the link, unsigned. It also contradicted the product spec, which was
+correct all along: `PRD-change-approval-loop` R10 says a Decision "records signature +
+timestamp **like any item**". The spec was right; the implementation was wrong.
+
+The trigger no longer reads the request row at all — every `confirmed` response is
+signed. `confirm.html` `renderPlain` gained the matching name field in the same change,
+because a server rule with no client field is just a wall. Declines still need no name:
+identity is not the price of saying no.
+
+Re-verified against the live database, rolled back, 0 rows left:
+
+| Test | Expected | Result |
+|---|---|---|
+| priced + `confirmed` + no name | refused | **REFUSED** ✓ |
+| **Decision** + `confirmed` + no name | refused | **REFUSED** ✓ |
+| Decision + `confirmed` + name | allowed | **ALLOWED** ✓ |
+| decline + no name | allowed | **ALLOWED** ✓ |
+| name of `"  x  "` (1 char trimmed) | refused | **REFUSED** ✓ |
+
+Pre-flight: **0** existing confirmed rows were unsigned, so no historical evidence sits
+on the wrong side of the new rule. Existing rows are never re-validated (BEFORE INSERT)
+— they are evidence of what happened, and rewriting them would be its own dishonesty.
