@@ -43,7 +43,9 @@
     "web": "expo start --web",
     "check:schema": "node ../../scripts/check-schema-agreement.mjs",
     "check:sql": "node ../../scripts/check-sql-duplicates.mjs apps/mobile/sql",
-    "check:i18n": "node ../../scripts/check-i18n-coverage.mjs src/i18n.ts"
+    "check:i18n": "node ../../scripts/check-i18n-coverage.mjs src/i18n.ts",
+    "test": "node --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "private": true
 }

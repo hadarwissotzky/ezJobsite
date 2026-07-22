@@ -1,6 +1,20 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+
+    // `node --test` runs the .ts test files directly (Node 24 strips types), and
+    // Node's resolver needs the real filename, so the test imports './x.ts'. tsc
+    // rejects that extension unless this is on.
+    //
+    // Safe here because tsc NEVER emits in this project -- Metro/Babel builds the
+    // app, and tsc is only ever run as `tsc --noEmit` (see `npm run typecheck`).
+    // "noEmit" is set below because allowImportingTsExtensions requires it in the
+    // config, not just on the command line.
+    //
+    // The alternative was excluding *.test.ts from typechecking, which would have
+    // left the only tests in the repo as the only unchecked code in the repo.
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   }
 }
