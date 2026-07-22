@@ -142,6 +142,27 @@ Watch these in particular, because they are where I have the least evidence:
 
 ---
 
+## 4b. Run the durability harness — 5 minutes, and it is the most important test here
+
+`apps/mobile/src/harness.ts` is REQ-PROC4's acceptance test, written and NEVER RUN:
+
+> "100 offline/online cycles incl. a mid-sync kill -> NO LOSS/DUP; every item shows
+> correct state."
+
+It exercises the REAL path — the same `performCapture`, the same outbox, the same
+drain, the same SQLite under the same pragmas — because a harness that reimplements
+the path proves only that the harness works. Its own header lists the three ways it
+could produce a false pass and how each is prevented.
+
+Mandate #1 says never losing a capture is "the single unforgivable sin". Everything
+in this repo asserts that guarantee. THIS is the only thing that measures it, and it
+has zero callers: `runCycles` is exported and nothing imports it.
+
+Wire a dev-only button to `runCycles` and run it once on the simulator after signing
+in. If it passes, mandate #1 has evidence instead of confidence. If it fails, you
+have found the most important bug in the product. Either outcome is worth five
+minutes, and no other test in this repo can tell you.
+
 ## 5. What is deliberately not built, and what it would take
 
 **R1 draft recovery — a session paused and then killed still dies.**
