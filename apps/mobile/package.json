@@ -45,7 +45,8 @@
     "check:sql": "node ../../scripts/check-sql-duplicates.mjs apps/mobile/sql",
     "check:i18n": "node ../../scripts/check-i18n-coverage.mjs src/i18n.ts",
     "test": "node --test src/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bundle:check": "expo export --platform ios --output-dir /tmp/ezjs-bundle-check"
   },
   "private": true
 }

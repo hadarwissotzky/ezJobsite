@@ -4,6 +4,19 @@
 do from here — database credentials, a domain, a microphone, a phone. None of it is
 hard. All of it needs someone present.
 
+**One correction to my own claim.** I said repeatedly that device verification was
+"the one form of evidence I cannot manufacture", and never checked. This machine has
+Xcode 26.6 and iOS simulators installed. What I did verify: the app BUNDLES —
+`npm run bundle:check` in `apps/mobile` produces 4.66 MB of Hermes bytecode, which
+proves every import across the whole graph resolves and there are no circular-
+dependency failures. `tsc` does not prove that.
+What I did NOT do: boot a simulator and drive the app. A simulator run WOULD verify
+launch, navigation, and that the ~200 wiring edits execute rather than merely
+compile. It would NOT verify capture — the simulator borrows the host microphone and
+this Mac mini has none — so R1 still needs real hardware. If you have ten minutes
+before §1, `npx expo run:ios` is the cheapest real evidence available and it was
+available to me the whole time.
+
 The state it hands over: **12 checks green** (`npm run verify`), 233 unit tests, and
 every client screen rendered in a browser. **Nothing has run on a device.** That is
 the gap this file closes.
