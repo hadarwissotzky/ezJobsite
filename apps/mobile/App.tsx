@@ -1400,6 +1400,53 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
    */
   // REQ-GAL2 — full-screen swipe viewer. A horizontal pager across this project's
   // captures; the current page's evidence (verified hash, notes) loads beneath it.
+  // THE CONFIRMATION TAKES THE SCREEN, like every other overlay here (viewer,
+  // thread, record). It was first written as a card further down the page, which
+  // meant tapping Delete set state and put the confirmation somewhere below the
+  // fold — the user saw nothing happen. A destructive confirmation that can be
+  // scrolled past is not a confirmation.
+  if (discard) {
+    const plan = discard.plan;
+    return (
+      <View style={{ flex: 1, backgroundColor: '#f6f8fa' }}>
+        <View style={[s.detailHead, { paddingTop: 60, paddingHorizontal: 20 }]}>
+          <Pressable style={s.backBtn} onPress={() => setDiscard(null)}>
+            <Text style={s.backT}>‹ {T('common.close')}</Text>
+          </Pressable>
+        </View>
+        <View style={s.card}>
+          <Text style={s.cardH}>{T('discard.title')}</Text>
+          <Text style={s.frozen}>{discard.co.scope}</Text>
+          {!plan.allowed ? (
+            <Text style={s.warn}>
+              {T(plan.reason === 'has_link' ? 'discard.hasLink' : 'discard.alreadySent')}
+            </Text>
+          ) : (
+            <>
+              <Text style={s.cardNote}>{T(discardSummary(plan)!)}</Text>
+              {plan.needsServer.length > 0 && (
+                <Text style={s.dmeta}>{T('discard.serverNote')}</Text>
+              )}
+              <Pressable style={s.confirmWide} onPress={async () => {
+                // discardExtra re-plans from scratch: the extra can be sent
+                // between this sheet opening and the thumb landing.
+                const r = await discardExtra(db, discard.co.id, connector.client);
+                setDiscard(null);
+                if (!r.ok) setFiled(T('discard.alreadySent'));
+                await refresh();
+              }}>
+                <Text style={s.confirmT}>{T('discard.yes')}</Text>
+              </Pressable>
+            </>
+          )}
+          <Pressable style={s.coSendRow} onPress={() => setDiscard(null)}>
+            <Text style={s.dmeta}>{T('common.close')}</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   if (viewer) {
     const W = Dimensions.get('window').width;
     const v = viewing;                 // evidence for the current page
@@ -3107,7 +3154,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     const plan = await previewDiscard(db, c.id);
                     setDiscard({ co: c, plan });
                   }}>
-                    <Text style={s.dmeta}>{T('discard.action')}</Text>
+                    <Text style={s.coNudge}>{T('discard.action')}</Text>
                   </Pressable>
                 )}
                 {/* R8: REMIND, not resend. Resend mints a new token and retires the
@@ -3397,45 +3444,6 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           </View>
         );
       })()}
-
-      {/* The confirmation. Mandate #2: this is the only thing that deletes, and it
-          says what it will destroy before it does. The refusals get their own
-          sentence naming the alternative — "no" without a way forward is a dead
-          end, and Revise IS the way to retire something already out there. */}
-      {discard && (
-        <View style={s.card}>
-          <Text style={s.cardH}>{T('discard.title')}</Text>
-          <Text style={s.frozen}>{discard.co.scope}</Text>
-          {!discard.plan.allowed ? (
-            <Text style={s.warn}>
-              {T(discard.plan.reason === 'has_link' ? 'discard.hasLink'
-                 : discard.plan.reason === 'already_sent' ? 'discard.alreadySent'
-                 : 'common.close')}
-            </Text>
-          ) : (
-            <>
-              <Text style={s.cardNote}>{T(discardSummary(discard.plan)!)}</Text>
-              {discard.plan.needsServer.length > 0 && (
-                <Text style={s.dmeta}>{T('discard.serverNote')}</Text>
-              )}
-              <Pressable style={s.coSendRow} onPress={async () => {
-                // Re-plans inside discardExtra rather than trusting what this
-                // sheet was opened with: the extra can be sent between the
-                // dialog appearing and the thumb landing.
-                const r = await discardExtra(db, discard.co.id, connector.client);
-                setDiscard(null);
-                if (!r.ok) setFiled(T('discard.alreadySent'));
-                await refresh();
-              }}>
-                <Text style={s.warn}>{T('discard.yes')}</Text>
-              </Pressable>
-            </>
-          )}
-          <Pressable style={s.coSendRow} onPress={() => setDiscard(null)}>
-            <Text style={s.dmeta}>{T('common.close')}</Text>
-          </Pressable>
-        </View>
-      )}
 
       {sentLink && (
         <View style={s.card}>
