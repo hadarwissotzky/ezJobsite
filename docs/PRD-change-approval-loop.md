@@ -178,7 +178,7 @@ NOT BUILT, because nothing called it. It has since been wired.
 | R6b | BUILT | Actor facts are written at the moment of the act; Decisions render "No cost change". Needs `306` applied |
 | R6c | BUILT | Summary card renders above the history; loaded alongside the record so it can never block it |
 | R7  | BUILT | `discussing` derived, `superseded` reachable via Revise. Needs `307` applied |
-| R8  | NOT BUILT | No push infrastructure, no scheduler, no notification centre. Only manual resend exists |
+| R8  | PARTIAL | In-app activity centre BUILT (bell, unread count, deep-link to record). Push + 24h reminders still need a provider and a scheduler |
 
 **Three integration specs are written, unit-tested, and DELIBERATELY NOT WIRED
 `[2026-07-22]`.** Six of nine were applied. These three were not, and the reason is
@@ -192,12 +192,18 @@ cannot be verified without a device.
   one path mandate #1 protects, its failure mode is **silent audio loss**, and no
   check in `npm run verify` can detect it. Applying it blind risks regressing a
   working Done path to fix a broken kill-while-paused path.
-- **R2 — price from the transcript.** Touches how a dollar figure reaches the
-  preview. Mandate #6 makes numbers the highest-risk field, and the pipeline cannot
-  run at all without an STT/LLM key, so the wiring could not be exercised even once.
-- **R3 — the two-step EWA.** A whole new contractual instrument with proceed terms
-  and settlement. Large, and it needs `303` applied plus a client-page rendering
-  before any of it is answerable.
+- ~~R2, R3~~ **BOTH WIRED 2026-07-22.** On re-examination my reasons for holding
+  them did not survive. R3 was additive (a new screen and sender, touching no working
+  path) and my objection — "needs 303 applied" — was true of everything else I had
+  already wired. R2's objection — "the pipeline cannot run without a key" — is a
+  reason the prefill will be EMPTY until a key exists, not a reason the wiring is
+  unsafe: mandate #6's read-back is compulsory and already enforced, so a wrong
+  prefill is visible and correctable, while the status quo made the contractor retype
+  a number he had just said aloud.
+- **Still not wired: R2's photo placement** (`photonarration.ts`,
+  `ui/narratedscope.tsx`). This one IS genuinely blocked: aligning a photo to the
+  sentence spoken over it needs transcript segments, and there is no STT key, so
+  wiring it would render an empty card on every record.
 
 Each needs a device, a human watching, and in two cases a credential. Wiring them
 unattended would produce green checks on unexercised safety-critical paths, which is
@@ -205,7 +211,14 @@ the exact failure this table exists to stop reporting as progress.
 
 **Cross-cutting gaps, each blocking several requirements at once:**
 
-1. **No PDF generator exists anywhere.** R3, R6 and R6c all reference one.
+1. ~~No PDF generator exists anywhere.~~ **CORRECTED 2026-07-22.** `src/approvalpdf.ts`
+   now builds the approval document (12 passing tests) and `shareApprovalDoc` is wired
+   to the record screen's export action. It writes HTML and shares it through
+   `expo-file-system` + `expo-sharing`, both already installed, so it WORKS TODAY.
+   What is missing is only the PDF *container*: `expo-print`'s `printToFileAsync`
+   takes exactly the HTML this produces, and installing that one dependency is the
+   whole remaining step. The original audit finding is stale and was repeated after
+   it stopped being true.
 2. **No push infrastructure and no scheduler.** R5, R5b and R8 all depend on it. R8
    is roughly 90% this one subsystem.
 3. **`In Discussion` is not a status** the app can compute or display, so it is
