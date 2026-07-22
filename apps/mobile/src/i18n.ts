@@ -362,6 +362,12 @@ const EN: Record<string, string> = {
   'erec.evSigned': 'Signed by {name}',
   'erec.evDeclined': 'Declined',
   'erec.noTime': 'time not recorded',
+  // R8 remind
+  'r8.remind': 'Remind',
+  'r8.tooSoon': 'You reminded them today already. One reminder a day per extra.',
+  'r8.inDiscussion': 'They asked a question and are waiting on you. Answer it first.',
+  'r8.notSent': 'This has not been sent yet.',
+  'r8.noLink': 'No link on this phone for that extra. Send it again to create one.',
   // R8 in-app activity centre.
   'r8.activity': 'Activity',
   'r8.nothingYet': 'Nothing yet. Questions and answers from your clients land here.',
@@ -876,6 +882,12 @@ const ES: Record<string, string> = {
   'erec.evSigned': 'Firmado por {name}',
   'erec.evDeclined': 'Rechazado',
   'erec.noTime': 'sin hora registrada',
+  // R8 recordatorio
+  'r8.remind': 'Recordar',
+  'r8.tooSoon': 'Ya le recordó hoy. Un recordatorio por día por cada extra.',
+  'r8.inDiscussion': 'Hizo una pregunta y está esperando su respuesta. Respóndala primero.',
+  'r8.notSent': 'Esto todavía no se ha enviado.',
+  'r8.noLink': 'No hay enlace en este teléfono para ese extra. Envíelo de nuevo para crear uno.',
   // R8 centro de actividad.
   'r8.activity': 'Actividad',
   'r8.nothingYet': 'Todavía nada. Las preguntas y respuestas de sus clientes aparecen aquí.',

@@ -55,7 +55,12 @@ import type { SendToPrefill, SendToProject } from './src/sendto';
 // R8 in-app activity centre. The push half needs a provider; this half needs
 // nothing but the rows already on the device, and without it there is no path at
 // all from "a client asked something" to the contractor noticing.
-import { ensureActivitySchema, activityFor, markRead } from './src/activitystore';
+import { ensureActivitySchema, activityFor, markRead,
+         ensureRemindSchema, noteLinkSent, liveLinkFor, noteReminded } from './src/activitystore';
+// R8: Remind is not Resend. Resend mints a NEW token and retires the one already in
+// the client's messages; a reminder must go via the SAME link (R8) or the nudge
+// breaks the thing it is nudging about.
+import { canRemind, reminderText } from './src/remind';
 // R6 AC2: the FROZEN instrument, on the contractor's side. The record screen was
 // rendering change_order.scope — the MUTABLE local row — while the client held
 // shown_content. In a dispute they would each be reading a different document and
@@ -358,6 +363,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     // its price is frozen, so a photo that would not upload is REPORTED, not raised.
     // `data.user.id` and not OWNER: the Storage object key was built from the auth uid
     // by the outbox drainer, and OWNER falls back to 'owner-local' before sign-in.
+    // R8: keep the link so a reminder can reuse it. Overwrites — one live link per
+    // extra (250), and a new link resets the reminder budget, because nobody has been
+    // nagged about the new instrument yet.
+    await noteLinkSent(db, { changeOrderId: c.id, token: r.token, url: r.url });
+
     const { data: who } = await connector.client.auth.getUser();
     const pr = who?.user
       ? await publishApprovalPhotos(db, connector.client,
@@ -778,6 +788,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       await ensureEwaSchema(db);
       await ensureActivitySchema(db);
       await ensureEventLogSchema(db);
+      await ensureRemindSchema(db);
       // R6b: who captured / priced / sent, and who it was addressed to.
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
@@ -2853,6 +2864,34 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     <Text style={s.coNudge}>
                       {c.status === 'sent' ? 'Resend link →' : 'Send for approval →'}
                     </Text>
+                  </Pressable>
+                )}
+                {/* R8: REMIND, not resend. Resend mints a new token and retires the
+                    one already in the client's messages, so scrolling back to the
+                    original text would give them "This version was replaced" because
+                    they were reminded. This re-shares the SAME link. */}
+                {c.status === 'sent' && (
+                  <Pressable style={s.coSendRow} onPress={async () => {
+                    const link = await liveLinkFor(db, c.id);
+                    if (!link) { setUi({ k: 'refused', why: T('r8.noLink') }); return; }
+                    const verdict = canRemind(c.status, {
+                      count: link.remindCount, lastAtMs: link.lastRemindMs,
+                      inDiscussion: (questions[c.id] ?? 0) > 0,
+                    }, Date.now());
+                    if (!verdict.ok) { setUi({ k: 'refused', why: T(verdict.reasonKey) }); return; }
+                    const prof = await getProfile(db);
+                    const text = reminderText({
+                      contractorName: prof?.company || prof?.name || 'Your contractor',
+                      scope: c.scope, amount: c.amount, url: link.url,
+                    });
+                    const sh = await shareLink(link.url, text);
+                    // Counted only AFTER the sheet returns. A contractor who opens it
+                    // and backs out has not reminded anyone, and burning his one-a-day
+                    // on a cancelled share would be the app lying about what it did.
+                    if (sh.ok) { await noteReminded(db, c.id); await refresh(); }
+                    else setUi({ k: 'refused', why: sh.reason ?? 'could not share' });
+                  }}>
+                    <Text style={s.coNudge}>{T('r8.remind')} →</Text>
                   </Pressable>
                 )}
                 {/* A sent extra is frozen — the local trigger says so in its own error

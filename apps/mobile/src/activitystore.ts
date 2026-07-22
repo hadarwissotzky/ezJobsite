@@ -92,3 +92,83 @@ export async function markRead(
   });
   return n;
 }
+
+// ── R8: the live link, and the reminders sent against it ─────────────────────
+//
+// WHY THE LINK IS STORED AT ALL. A reminder must go "via the same link" (R8). The
+// url is returned by sendForConfirmation and then thrown away — only the server
+// knows it afterwards, in confirmation_request. Reminding therefore had to either
+// hit the network (so no reminder in a basement, mandate #7) or mint a NEW link,
+// which is what "Resend link" did and is actively harmful: it retires the token
+// already sitting in the client's messages, so scrolling back to the original text
+// gives them "This version was replaced" BECAUSE they were reminded.
+//
+// So the device keeps its own copy of the last link it issued. Local, never synced:
+// the server has the authoritative record in confirmation_request, and this is a
+// convenience for the phone that sent it.
+
+export const REMIND_DDL = [
+  `CREATE TABLE IF NOT EXISTS co_live_link (
+      change_order_id TEXT NOT NULL PRIMARY KEY,
+      token           TEXT NOT NULL,
+      url             TEXT NOT NULL,
+      sent_at_ms      INTEGER NOT NULL,
+      -- Reminders sent against THIS link. Reset implicitly by a revision, because a
+      -- revision writes a new row for a new token: a fresh instrument has a fresh
+      -- reminder budget, which is correct — nobody has been nagged about it yet.
+      remind_count    INTEGER NOT NULL DEFAULT 0,
+      last_remind_ms  INTEGER
+   ) STRICT`,
+];
+
+export async function ensureRemindSchema(db: AbstractPowerSyncDatabase) {
+  for (const s of REMIND_DDL) await db.execute(s);
+}
+
+/** Remember the link that just went out. Overwrites: one live link per extra (250). */
+export async function noteLinkSent(
+  db: AbstractPowerSyncDatabase,
+  o: { changeOrderId: string; token: string; url: string; atMs?: number }
+): Promise<void> {
+  const now = o.atMs ?? Date.now();
+  await db.execute(
+    `INSERT INTO co_live_link (change_order_id, token, url, sent_at_ms, remind_count, last_remind_ms)
+     VALUES (?,?,?,?,0,NULL)
+     ON CONFLICT(change_order_id) DO UPDATE SET
+       token = excluded.token, url = excluded.url, sent_at_ms = excluded.sent_at_ms,
+       remind_count = 0, last_remind_ms = NULL`,
+    [o.changeOrderId, o.token, o.url, now]
+  );
+}
+
+export type LiveLink = {
+  url: string; token: string; remindCount: number; lastRemindMs: number | null;
+};
+
+export async function liveLinkFor(
+  db: AbstractPowerSyncDatabase, changeOrderId: string
+): Promise<LiveLink | null> {
+  const r = await db.getAll<{
+    url: string; token: string; remind_count: number; last_remind_ms: number | null;
+  }>(
+    `SELECT url, token, remind_count, last_remind_ms
+       FROM co_live_link WHERE change_order_id = ?`, [changeOrderId]);
+  if (!r.length) return null;
+  return { url: r[0].url, token: r[0].token,
+           remindCount: r[0].remind_count, lastRemindMs: r[0].last_remind_ms };
+}
+
+/**
+ * Record that a reminder went out. Called AFTER the share sheet returns, never
+ * before: a contractor who opens the sheet and backs out has not reminded anyone,
+ * and burning his 1-per-day on a cancelled share would be the app lying about what
+ * it did.
+ */
+export async function noteReminded(
+  db: AbstractPowerSyncDatabase, changeOrderId: string, atMs = Date.now()
+): Promise<void> {
+  await db.execute(
+    `UPDATE co_live_link
+        SET remind_count = remind_count + 1, last_remind_ms = ?
+      WHERE change_order_id = ?`, [atMs, changeOrderId]);
+}
