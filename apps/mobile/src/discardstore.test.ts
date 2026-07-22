@@ -179,3 +179,62 @@ test('a walkthrough with no extra is deletable', async () => {
   assert.equal(r.deleted, 3, 'the whole walkthrough goes, not just the frame tapped');
   assert.equal(rows(raw, `SELECT capture_id FROM capture_discarded`).length, 3);
 });
+
+// THE GHOST CARD — hadar's exact report, reproduced end to end. He deleted a
+// walkthrough; the bytes went and the commits tombstoned, but capture_pair rows
+// survived, and the home card is built from capture_pair alone — so the
+// walkthrough kept rendering, and tapping delete again "did nothing" because
+// everything deletable was already gone. Two assertions, matching the two-part
+// fix: delete now removes the pair rows, AND the card query refuses any group
+// with a tombstoned member, which clears residue from deletes made before this
+// fix existed.
+test('deleting a walkthrough removes its pair rows and its home card', async () => {
+  const { raw, db } = fresh();
+  const now = Date.now();
+  for (const [id, mod, ext] of [['gV','voice','m4a'], ['gP1','photo','jpg'], ['gP2','photo','jpg']]) {
+    raw.prepare(
+      `INSERT INTO capture_commit (capture_id, attachment_id, mutation_id, project_id,
+         owner_id, media_relpath, media_sha256, media_bytes, media_mime_type, modality,
+         captured_at_ms, committed_at_ms, request_sha256)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(id, `att-${id}`, `mut-${id}`, 'p1', 'u1', `m/${id}.${ext}`,
+          'a'.repeat(64), 20, mod === 'voice' ? 'audio/m4a' : 'image/jpeg', mod,
+          now, now, 'b'.repeat(64));
+  }
+  raw.exec(`INSERT INTO capture_pair (pair_id, capture_id, role, at_ms)
+            VALUES ('g1','gV','voice',1), ('g1','gP1','photo',2), ('g1','gP2','photo',3)`);
+
+  // The EXACT query the home screen runs (App.tsx "Stage 1"), with the fix.
+  const CARD_QUERY = `
+    SELECT cp.pair_id,
+           SUM(CASE WHEN cp.role = 'photo' THEN 1 ELSE 0 END) AS photos
+      FROM capture_pair cp
+     WHERE cp.pair_id NOT IN
+           (SELECT p2.pair_id FROM capture_pair p2
+              JOIN capture_discarded cd ON cd.capture_id = p2.capture_id)
+     GROUP BY cp.pair_id`;
+  assert.equal(rows(raw, CARD_QUERY).length, 1, 'card shows before delete');
+
+  const r = await discardCapture(db, 'gP1');
+  assert.equal(r.ok, true);
+
+  assert.equal(rows(raw, `SELECT * FROM capture_pair`).length, 0, 'pair rows gone');
+  assert.equal(rows(raw, CARD_QUERY).length, 0, 'card gone');
+});
+
+// Residue from BEFORE the fix: pair rows exist, captures already tombstoned,
+// as on hadar's phone right now. The query alone must hide the card.
+test('a pre-fix ghost — tombstoned captures with surviving pair rows — is hidden', async () => {
+  const { raw } = fresh();
+  raw.exec(`INSERT INTO capture_pair (pair_id, capture_id, role, at_ms)
+            VALUES ('old1','oV','voice',1), ('old1','oP','photo',2)`);
+  raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms)
+            VALUES ('oV','unsent',1), ('oP','unsent',1)`);
+  const CARD_QUERY = `
+    SELECT cp.pair_id FROM capture_pair cp
+     WHERE cp.pair_id NOT IN
+           (SELECT p2.pair_id FROM capture_pair p2
+              JOIN capture_discarded cd ON cd.capture_id = p2.capture_id)
+     GROUP BY cp.pair_id`;
+  assert.equal(rows(raw, CARD_QUERY).length, 0, 'ghost card must not render');
+});

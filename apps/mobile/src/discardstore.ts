@@ -287,6 +287,15 @@ export async function discardCapture(
            (SELECT co.id FROM change_order co
               JOIN decision_version dv ON dv.decision_id = co.decision_id
              WHERE dv.capture_id = ? AND co.status = 'draft')`, [id]);
+      // THE PAIR ROWS GO TOO, and their survival was a live bug: the home
+      // screen's "captured walkthroughs" card is built from capture_pair ALONE,
+      // so a fully deleted walkthrough — bytes gone, commits tombstoned, extra
+      // removed — kept rendering as "walkthrough · 2 photos" forever. hadar
+      // deleted one, watched it come back, and was right both times: the delete
+      // worked and the card lied. Pair rows are grouping metadata, not
+      // evidence; there is no append-only trigger here, and a group whose every
+      // member is discarded has nothing left to group.
+      await tx.execute(`DELETE FROM capture_pair WHERE capture_id = ?`, [id]);
     }
   });
 

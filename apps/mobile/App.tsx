@@ -758,7 +758,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   (SELECT v.capture_id FROM capture_pair v
                     WHERE v.pair_id = cp.pair_id AND v.role = 'voice'
                     ORDER BY v.at_ms LIMIT 1) AS voice_id
-             FROM capture_pair cp GROUP BY cp.pair_id
+             FROM capture_pair cp
+            -- A group with a discarded member is a deleted walkthrough. Without
+            -- this, pair rows left behind by older deletes resurrect the card
+            -- for captures whose bytes are gone — the tap opens nothing and
+            -- delete "does not work" because there is nothing left to delete.
+            WHERE cp.pair_id NOT IN
+                  (SELECT p2.pair_id FROM capture_pair p2
+                     JOIN capture_discarded cd ON cd.capture_id = p2.capture_id)
+            GROUP BY cp.pair_id
             ORDER BY start_ms DESC LIMIT 6`);
         const reviewedIds = new Set((await db.getAll<{ capture_id: string }>(
           `SELECT DISTINCT capture_id FROM decision_version WHERE capture_id IS NOT NULL`))
