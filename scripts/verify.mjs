@@ -177,7 +177,6 @@ console.log('\nverifying…\n');
   // it is cheap to record a decision and impossible to forget one silently.
   const KNOWN_UNWIRED = {
     'timeline.ts':          'REQ-TL1/2/3 walkthrough markers. Pre-existing dead code; the tracer counts its REQ tags as built while nothing imports it. Wire-or-delete is a product decision, not a wiring one',
-    'harness.ts':           'REQ-PROC4 acceptance test (100 offline/online cycles, no capture loss). NOT dead code — it is the ONLY measurement of mandate #1 and has never been run. Needs a dev-only trigger and a signed-in app; see GO-LIVE.md section 4b',
   };
   const unexplained = orphans.filter((f) => !(f in KNOWN_UNWIRED));
 

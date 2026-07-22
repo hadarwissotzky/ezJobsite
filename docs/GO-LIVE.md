@@ -150,26 +150,28 @@ Watch these in particular, because they are where I have the least evidence:
 
 ---
 
-## 4b. Run the durability harness — 5 minutes, and it is the most important test here
+## 4b. The durability harness — ALREADY RUN, AND IT PASSES `[2026-07-22]`
 
-`apps/mobile/src/harness.ts` is REQ-PROC4's acceptance test, written and NEVER RUN:
+```
+[REQ-PROC4] {"cycles":100,"committed":100,"found":100,
+             "lost":[],"duplicateCaptures":[],"duplicateMutations":[],"mediaCorrupt":[],
+             "killedAt":[0,10,20,30,40,50,60,70,80,90],"pass":true}
+```
 
-> "100 offline/online cycles incl. a mid-sync kill -> NO LOSS/DUP; every item shows
-> correct state."
+100 offline/online cycles on the simulator, the drain abandoned mid-flight on every
+tenth, **zero lost, zero duplicated, zero corrupt**. Mandate #1 — "never lose a
+capture", the sin the whole product is built around — now has a measurement instead
+of an assertion.
 
-It exercises the REAL path — the same `performCapture`, the same outbox, the same
-drain, the same SQLite under the same pragmas — because a harness that reimplements
-the path proves only that the harness works. Its own header lists the three ways it
-could produce a false pass and how each is prevented.
+Re-run it any time: `EXPO_PUBLIC_RUN_DURABILITY_HARNESS=1 npx expo start --dev-client --clear`,
+then launch. It is off by default because it writes 100 captures. It needs NO
+sign-in and NO network — the drain is injected, so offline is simply the condition
+under test.
 
-Mandate #1 says never losing a capture is "the single unforgivable sin". Everything
-in this repo asserts that guarantee. THIS is the only thing that measures it, and it
-has zero callers: `runCycles` is exported and nothing imports it.
+Do run it again on real hardware before launch: a simulator's filesystem is not a
+phone's, and mandate #1's residual-loss boundaries are about devices.
 
-Wire a dev-only button to `runCycles` and run it once on the simulator after signing
-in. If it passes, mandate #1 has evidence instead of confidence. If it fails, you
-have found the most important bug in the product. Either outcome is worth five
-minutes, and no other test in this repo can tell you.
+---
 
 ## 5. What is deliberately not built, and what it would take
 

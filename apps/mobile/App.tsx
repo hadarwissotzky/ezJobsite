@@ -68,6 +68,9 @@ import { ensureActivitySchema, activityFor, markRead,
 import { canRemind, reminderText } from './src/remind';
 import { ensureDraftSchema, sweepDrafts, recoverableDrafts, readDraftArtifacts,
          closeDraft } from './src/capturedraft';
+// REQ-PROC4's acceptance test. Behind a flag because it writes 100 captures; see
+// the block in init for why it is wired here and not behind a button.
+import { runCycles } from './src/harness';
 import type { DraftSummary } from './src/capturesession';
 import { DraftRecoveryCard } from './src/ui/draftrecovery';
 // R6 AC2: the FROZEN instrument, on the contractor's side. The record screen was
@@ -827,6 +830,32 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         await sweepDrafts(db, OWNER);
         setDrafts(await recoverableDrafts(db, OWNER));
       } catch (e) { console.log('[draft] sweep skipped:', String(e)); }
+
+      // REQ-PROC4: "100 offline/online cycles incl. a mid-sync kill -> NO LOSS/DUP."
+      //
+      // WIRED HERE, BEFORE THE AUTH GATE, AND BEHIND A FLAG. src/harness.ts is the
+      // only thing in this repo that MEASURES mandate #1 — "never lose a capture" —
+      // and it had zero callers, so the product's central promise had never been
+      // tested. A button would have put it behind sign-in; the durability of local
+      // capture has nothing to do with being signed in, and requiring an account to
+      // test it would be testing the wrong thing.
+      //
+      // It writes 100 captures, so it is OFF unless explicitly asked for. The drain
+      // it is given is the REAL one: offline it fails and the outbox retries, which
+      // is exactly the condition under test.
+      if (process.env.EXPO_PUBLIC_RUN_DURABILITY_HARNESS === '1') {
+        try {
+          const hr = await runCycles(db, {
+            ownerId: OWNER, projectId: 'p-alder', cycles: 100,
+            drain: async () => { await drainOutbox(db, connector.client, OWNER); },
+            // Every tenth cycle abandons the drain mid-flight — the mid-sync kill.
+            killOn: (i) => i % 10 === 0,
+          });
+          console.log('[REQ-PROC4]', JSON.stringify(hr));
+        } catch (e: any) {
+          console.log('[REQ-PROC4] harness threw:', String(e?.message ?? e));
+        }
+      }
       // R6b: who captured / priced / sent, and who it was addressed to.
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
