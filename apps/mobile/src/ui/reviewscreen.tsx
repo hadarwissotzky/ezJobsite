@@ -211,7 +211,7 @@ export function ReviewScreen({
                 style={[T.btn, T.btnGhost, { marginTop: 4 }]}
                 onPress={() => (armed ? onDiscard() : setArmed(true))}>
                 <Text style={[T.btnGhostText, armed && { color: C.danger }]}>
-                  {armed ? 'Tap again to delete it' : 'Delete this recording'}
+                  {armed ? 'Tap again — this deletes the recording and its photos' : 'Delete this'}
                 </Text>
               </Pressable>
             )}

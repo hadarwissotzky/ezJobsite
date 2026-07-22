@@ -197,25 +197,54 @@ export async function discardedCaptureIds(
  */
 export async function discardCapture(
   db: AbstractPowerSyncDatabase, captureId: string
-): Promise<{ ok: boolean; reason?: 'confirmed' | 'not_found'; freedBytes: number }> {
+): Promise<{ ok: boolean; reason?: 'confirmed' | 'not_found'; freedBytes: number; deleted: number }> {
   const used = await db.getAll<{ n: number }>(
     `SELECT count(*) AS n FROM decision_version WHERE capture_id = ?`, [captureId]);
-  if ((used[0]?.n ?? 0) > 0) return { ok: false, reason: 'confirmed', freedBytes: 0 };
+  if ((used[0]?.n ?? 0) > 0) return { ok: false, reason: 'confirmed', freedBytes: 0, deleted: 0 };
 
-  const row = await db.getAll<{ media_relpath: string; media_bytes: number }>(
-    `SELECT media_relpath, media_bytes FROM capture_commit WHERE capture_id = ?`, [captureId]);
-  if (!row.length) return { ok: false, reason: 'not_found', freedBytes: 0 };
+  // THE WHOLE GROUP, NOT ONE ROW. What a contractor made is one thing — he
+  // talked and took three photos of the same rot — and `capture_pair` is what
+  // records that they belong together. Deleting only the row he happened to be
+  // looking at would leave the photos behind as orphans he never asked to keep,
+  // with no recording to explain them. hadar: "once it is deleted all of the
+  // items (recordings, and images) are being deleted with it".
+  const group = await db.getAll<{ capture_id: string }>(
+    `SELECT capture_id FROM capture_pair
+      WHERE pair_id IN (SELECT pair_id FROM capture_pair WHERE capture_id = ?)`,
+    [captureId]);
+  const ids = group.length ? group.map((g) => g.capture_id) : [captureId];
 
-  await db.execute(
-    `INSERT OR IGNORE INTO capture_discarded
-       (capture_id, change_order_id, at_ms, bytes_freed) VALUES (?, ?, ?, ?)`,
-    // No change order exists yet; the column records what it was discarded FROM.
-    [captureId, 'review', Date.now(), row[0].media_bytes]);
+  // A sibling already confirmed makes the whole group evidence. Refuse rather
+  // than delete around it and leave the group half gone.
+  const confirmed = await db.getAll<{ n: number }>(
+    `SELECT count(*) AS n FROM decision_version
+      WHERE capture_id IN (${ids.map(() => '?').join(',')})`, ids);
+  if ((confirmed[0]?.n ?? 0) > 0) {
+    return { ok: false, reason: 'confirmed', freedBytes: 0, deleted: 0 };
+  }
+
+  const rows = await db.getAll<{ capture_id: string; media_relpath: string; media_bytes: number }>(
+    `SELECT capture_id, media_relpath, media_bytes FROM capture_commit
+      WHERE capture_id IN (${ids.map(() => '?').join(',')})`, ids);
+  if (!rows.length) return { ok: false, reason: 'not_found', freedBytes: 0, deleted: 0 };
+
+  const now = Date.now();
+  await db.writeTransaction(async (tx) => {
+    for (const r of rows) {
+      await tx.execute(
+        `INSERT OR IGNORE INTO capture_discarded
+           (capture_id, change_order_id, at_ms, bytes_freed) VALUES (?, ?, ?, ?)`,
+        // No change order exists yet; the column records what it was discarded FROM.
+        [r.capture_id, 'unsent', now, r.media_bytes]);
+    }
+  });
 
   let freedBytes = 0;
-  try {
-    await FS.deleteAsync(`${FS.documentDirectory}${row[0].media_relpath}`, { idempotent: true });
-    freedBytes = row[0].media_bytes;
-  } catch { /* orphan; recoverySweep collects it */ }
-  return { ok: true, freedBytes };
+  for (const r of rows) {
+    try {
+      await FS.deleteAsync(`${FS.documentDirectory}${r.media_relpath}`, { idempotent: true });
+      freedBytes += r.media_bytes;
+    } catch { /* orphan; recoverySweep collects it */ }
+  }
+  return { ok: true, freedBytes, deleted: rows.length };
 }

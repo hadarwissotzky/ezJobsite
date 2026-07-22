@@ -2133,6 +2133,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           const r = await discardCapture(db, review);
           setReview(null);
           if (!r.ok && r.reason === 'confirmed') setFiled('Already confirmed — delete the extra instead.');
+          else if (r.ok) setFiled(`Deleted — ${r.deleted} file(s) removed.`);
           await refresh();
         }}
       />
