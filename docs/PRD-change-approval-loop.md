@@ -187,9 +187,18 @@ NOT BUILT, because nothing called it. It has since been wired.
    is roughly 90% this one subsystem.
 3. **`In Discussion` is not a status** the app can compute or display, so it is
    missing from R5, R5b, R7 and R8 alike.
-4. **Two dead modules** need a decision rather than drift: `src/timeline.ts` (192
-   lines, zero callers, table never created) is the natural backbone for R6's event
-   timeline. Wire it or delete it.
+4. **`src/timeline.ts` is dead code — 192 lines, zero callers, table never created.**
+   The audit called it "the natural backbone for R6's event timeline". Checked, and
+   that is wrong: it implements REQ-TL1/2/3, which is a *different* timeline — markers
+   anchored by offset inside a continuous recording, with a section break forced on
+   pause, so a photo can be tied to the sentence spoken over it. R6's timeline is the
+   item's business-event log (sent, delivered, opened, reminded, revised, signed), and
+   `src/record.ts` already builds that. Wiring one to the other would fuse two
+   unrelated models.
+   The real finding is worse than dead code: **REQ-TL1/2/3 read as "traced to code" in
+   `scripts/trace-requirements.mjs` while being unreachable.** That script counts tags,
+   not callers — it says so itself — so a tagged, uncalled module scores as built. The
+   walkthrough structure feature does not work today.
 
 **Blocked on something other than code:** Q1 legal e-sign review (blocking before
 launch), Q4 A2P/SMS registration (no provider, so `delivery_state` never leaves
