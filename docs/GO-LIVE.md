@@ -66,6 +66,43 @@ the gap this file closes.
 
 ---
 
+## 0. The three credentials, and exactly what each one unblocks
+
+Everything else in this document can be done today. These cannot, and no amount
+of further work on the repo will produce them. Listed first because two of them
+have lead time and one is a live security fix that does not need them at all.
+
+| Credential | Unblocks | Without it |
+|---|---|---|
+| **Deepgram API key** | R2 transcription | `capture_transcript` is never written, so the preview card has no scope and no price to prefill. Jobs park as `needs_api_key` — visible, counted, and drainable the moment a key exists |
+| **An LLM key** (PRD names Claude) | R2's `structure` step | Scope is not cleaned up. Note: R2's two ACs are already satisfied client-side without this — see §4c step 8 — so this is polish, not the AC |
+| **A push provider** | R8 delivery while the app is fully killed | Local notifications already cover the green light and client questions whenever the app is running or backgrounded |
+| **An SMS sender** | R8's 24h auto-reminder | Manual Remind works today; it goes out through the native share sheet, tapped by a person. Nothing automated can reach a homeowner |
+
+**Do §1 before any of this.** The cross-tenant read is live and closing it needs
+no credential at all.
+
+### Running the worker
+
+New in this build. It implements `140_processing_jobs` and it is worth starting
+**before** you have a Deepgram key, because that is how the backlog becomes
+readable:
+
+```bash
+cd apps/worker && npm install
+npm start                 # claims jobs; parks them as needs_api_key
+npm run backlog           # what is waiting, and why — 140's processing_backlog
+```
+
+With `DEEPGRAM_API_KEY` set it transcribes and the same parked jobs drain on
+their own: `claim_job` re-claims a blocked job whose reason may have cleared,
+which was verified against a real Postgres rather than assumed. It needs
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` — the anon key cannot advance a
+job, because `140` revokes `claim_job` from `anon`.
+
+Run more than one for throughput. `claim_job` uses `for update skip locked`, so
+concurrency belongs in how many you start, not in the code.
+
 ## 1. Apply the migrations — 10 minutes
 
 **Order matters and the numeric order was wrong once already.** `305` read a column
@@ -173,17 +210,32 @@ phone's, and mandate #1's residual-loss boundaries are about devices.
 
 ---
 
-## 4c. The wired loop — ALREADY RUN ON A DEVICE, 7/7 `[2026-07-22]`
+## 4c. The wired loop — ALREADY RUN ON A DEVICE, 12/12 `[2026-07-22]`
 
 ```
-create -> ledger        Loop check lc-… $1,850.00 status=draft
-setExtraType -> ledger  extra_type=finish
-roster -> routing       roster=2 suggested=Dana
-untyped still routes    Dana                    (R5c's offline AC: never blocked)
-discussing is derived   draft -> discussing     (R7: never a stored status)
-activity + badge        rows=2 first=question unread=1
-remind rules hold       draft=r8.notSent  talking=r8.inDiscussion
+create -> ledger              Loop check lc-… $1,850.00 status=draft
+setExtraType -> ledger        extra_type=finish
+roster -> routing             roster=72 suggested=Dana
+untyped still routes          Dana                  (R5c's offline AC: never blocked)
+discussing is derived         draft -> discussing   (R7: never a stored status)
+activity + badge              rows=2 first=question unread=1
+remind rules hold             draft=r8.notSent  talking=r8.inDiscussion
+R2 transcript -> price gate   spoken "eighteen fifty"->none  written "$1,850.00"->185000
+R3 PDF generated              exists=true bytes=24527 magic=%PDF-
+R8 local notification         scheduled id=46b3e059 permission=undetermined
+R8 stamped iff presented      presented=0 blocked=permission stamped=false
+R8 stamp survives append-only notified_at_ms set (trigger excludes this column)
 ```
+
+The last three are the ones worth reading. Step 10 is why R8's push exists at
+all without a provider: `scheduleNotificationAsync` returned an id with the app
+signed out of everything. Step 11 asserts the INVARIANT rather than the outcome —
+`notified_at_ms` is stamped if and only if a notification was actually presented,
+so a question is announced or kept, never neither. Step 12 exists because
+`thread_message_append_only` fires `BEFORE UPDATE OF body, side, at_ms,
+change_order_id` and `notified_at_ms` sits outside that list on purpose: widen
+the trigger and `markNotified` starts aborting, every question re-notifies every
+15 seconds forever, and the only symptom is a phone that will not stop buzzing.
 
 `src/loopcheck.ts`, run on the simulator against the device's own SQLite.
 `EXPO_PUBLIC_RUN_LOOP_CHECK=1 npx expo start --dev-client --clear`, then launch.
