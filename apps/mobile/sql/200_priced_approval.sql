@@ -49,7 +49,16 @@ create or replace function public.confirmation_request_guard() returns trigger
     end if;
     return new;
   end $$;
--- trigger definition unchanged (already bound in 020); replacing the function is enough.
+-- The trigger is created HERE now, not in 020 [2026-07-21]. It used to be bound in
+-- 020 while this file replaced only the function body -- which works on an existing
+-- database but made 020 and 200 CO-OWN the guard, so re-running 020 restored the
+-- narrow version and quietly unfroze price/scope/company/job/change-order on sent
+-- requests. 020 now owns the tables; this file owns the confirmation functions and
+-- the trigger that binds this one. Fresh-install ordering still holds: 020 creates
+-- the table, 200 creates the function and its trigger.
+drop trigger if exists confirmation_request_no_tamper on public.confirmation_request;
+create trigger confirmation_request_no_tamper before update
+  on public.confirmation_request for each row execute function public.confirmation_request_guard();
 
 -- Fetch now returns the priced fields + the signature (on an answered request), so the
 -- page can render the full report and the confirmed screen can say who signed.
@@ -79,6 +88,14 @@ begin
     'signed_name', resp.signed_name
   );
 end $$;
+
+-- The grant is stated HERE now [2026-07-21]. It used to live only in 020, and this
+-- file's `create or replace` inherited it -- fine on the existing database, but on a
+-- FRESH install (020 no longer defines the function) anon would have had no execute
+-- privilege and every approval link would open to a permission error. anon needs it:
+-- the whole point is a counterparty with no account reading the link.
+revoke all on function public.confirmation_fetch(text) from public;
+grant execute on function public.confirmation_fetch(text) to anon, authenticated;
 
 -- Recreate create/respond with the new parameters. DROP first: adding parameters
 -- changes the signature, and an overload alongside the old one invites ambiguity.

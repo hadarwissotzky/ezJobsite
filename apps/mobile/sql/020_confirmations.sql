@@ -57,19 +57,20 @@ drop trigger if exists confirmation_response_no_update on public.confirmation_re
 create trigger confirmation_response_no_update before update or delete
   on public.confirmation_response for each row execute function public.confirmation_no_change();
 
-drop trigger if exists confirmation_request_no_tamper on public.confirmation_request;
--- shown_content must never change after send; that is the whole point.
-create or replace function public.confirmation_request_guard() returns trigger
-  language plpgsql as $$ begin
-    if new.shown_content is distinct from old.shown_content
-       or new.shown_sha256 is distinct from old.shown_sha256
-       or new.decision_id is distinct from old.decision_id then
-      raise exception 'shown_content is frozen: it is the binding instrument';
-    end if;
-    return new;
-  end $$;
-create trigger confirmation_request_no_tamper before update
-  on public.confirmation_request for each row execute function public.confirmation_request_guard();
+-- The freeze guard (`confirmation_request_guard`) and its trigger are NOT defined
+-- here. They live in `200_priced_approval.sql`, which is their single owner.
+--
+-- Why they moved [2026-07-21]: 200 adds the priced columns (amount_cents, nte_cents,
+-- scope_title, company_name, job_label, approved_running_cents, change_order_id) and
+-- has to widen the guard to freeze them too. That left the SAME function defined in
+-- two files, which `scripts/check-sql-duplicates.mjs` reports as FATAL for a real
+-- reason: re-running THIS file after 200 silently restored the narrow guard, and
+-- price/scope/company/job/change-order became mutable after send again. The freeze
+-- is the whole point of this schema, so a rule that can be undone by running an old
+-- file in the wrong order is not a rule.
+--
+-- This file now owns the TABLES. 200 owns the confirmation FUNCTIONS. One object,
+-- one file.
 
 alter table public.confirmation_request  enable row level security;
 alter table public.confirmation_response enable row level security;
@@ -80,71 +81,24 @@ create policy cr_own on public.confirmation_request for select to authenticated
   using (owner_id = auth.uid());
 
 -- ---------------------------------------------------------------------------
--- The no-login door. anon may ONLY reach these two functions, never the tables.
+-- The no-login door: confirmation_fetch / confirmation_respond / confirmation_create
+--
+-- NOT DEFINED HERE ANY MORE [2026-07-21]. All three live in
+-- `200_priced_approval.sql`, together with their revoke/grant, which is their single
+-- owner. 200 had to redefine every one of them to carry the priced columns and the
+-- signed_name parameter, so keeping the older bodies here meant the same four
+-- objects were defined twice and the checker flagged 4 FATAL duplicates.
+--
+-- The danger was not tidiness. Re-running this file after 200 would have:
+--   * restored the narrow freeze guard (see above),
+--   * restored confirmation_respond WITHOUT p_signed_name -- so the web page's RPC
+--     call would stop matching the function signature, and
+--   * restored confirmation_create without the priced columns, silently dropping
+--     the frozen price out of every new request.
+-- All three are the kind of failure that looks like the app "just broke" while every
+-- file in the repo still reads correct on its own.
+--
+-- Applied in numeric order (010, 011, 020, ... 200, ...) a fresh database still ends
+-- up with exactly these functions; they are simply created later, and nothing
+-- between 020 and 200 calls them (verified).
 -- ---------------------------------------------------------------------------
-
--- Fetch the frozen card by token. Returns exactly what was shown at send time.
-create or replace function public.confirmation_fetch(p_token text)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare r public.confirmation_request%rowtype; resp public.confirmation_response%rowtype;
-begin
-  select * into r from public.confirmation_request where token = p_token;
-  if not found then return jsonb_build_object('status','not_found'); end if;
-  if now() > r.expires_at then return jsonb_build_object('status','expired'); end if;
-
-  select * into resp from public.confirmation_response where token = p_token;
-  return jsonb_build_object(
-    'status', case when found then 'already_answered' else 'open' end,
-    'kind', r.kind,
-    'shown_content', r.shown_content,       -- FROZEN. not re-rendered.
-    'counterparty', r.counterparty_label,
-    'answered_action', resp.action,
-    'answered_at', resp.responded_at
-  );
-end $$;
-
--- Record the act. Single-use: a second call cannot overwrite the first.
-create or replace function public.confirmation_respond(
-  p_token text, p_action text, p_note text default null, p_user_agent text default null
-) returns jsonb language plpgsql security definer set search_path = public as $$
-declare r public.confirmation_request%rowtype;
-begin
-  if p_action not in ('confirmed','declined') then
-    raise exception 'invalid action %', p_action using errcode = '23514';
-  end if;
-  select * into r from public.confirmation_request where token = p_token;
-  if not found then raise exception 'unknown token' using errcode = '42501'; end if;
-  if now() > r.expires_at then raise exception 'link expired' using errcode = '23514'; end if;
-
-  begin
-    insert into public.confirmation_response (token, action, note, user_agent)
-    values (p_token, p_action, p_note, p_user_agent);
-  exception when unique_violation then
-    -- Single-use. The first answer stands; a replay is not an error to the
-    -- counterparty, but it MUST NOT change the record.
-    return jsonb_build_object('status','already_answered');
-  end;
-  return jsonb_build_object('status','recorded','action',p_action);
-end $$;
-
-revoke all on function public.confirmation_fetch   from public;
-revoke all on function public.confirmation_respond from public;
-grant execute on function public.confirmation_fetch   to anon, authenticated;
-grant execute on function public.confirmation_respond to anon, authenticated;
-
--- The sender creates requests through an RPC too, so shown_content is always
--- frozen server-side rather than trusted from a client that could re-render it.
-create or replace function public.confirmation_create(
-  p_token text, p_decision_id text, p_project_id text, p_kind text,
-  p_shown_content text, p_shown_sha256 text, p_counterparty text,
-  p_channel text, p_destination text
-) returns jsonb language plpgsql security definer set search_path = public as $$
-begin
-  insert into public.confirmation_request (token, decision_id, project_id, owner_id, kind,
-    shown_content, shown_sha256, counterparty_label, channel, destination)
-  values (p_token, p_decision_id, p_project_id, auth.uid(), p_kind,
-          p_shown_content, p_shown_sha256, p_counterparty, p_channel, p_destination);
-  return jsonb_build_object('status','created','token',p_token);
-end $$;
-revoke all on function public.confirmation_create from public, anon;
-grant execute on function public.confirmation_create to authenticated;
