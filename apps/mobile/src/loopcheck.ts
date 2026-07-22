@@ -24,6 +24,7 @@
  * returns ok and leaves nothing behind is exactly the failure this hunts.
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import * as FS from 'expo-file-system/legacy';
 import { createChangeOrder, ledger, parseMoney } from './changeorder';
 import { addApprover, listRoster, setExtraType, suggestFor } from './approvers';
 import { displayStatus } from './extrastatus';
@@ -158,6 +159,27 @@ export async function runLoopCheck(
   //
   // Anything added below MUST return without user interaction. A check that can hang
   // is worse than a check that is absent: absent is visible.
+
+  // 9 ── R3/R6: a real PDF, from the real document generator.
+  //
+  // I had this recorded as "blocked: needs expo-print and a native rebuild". Both were
+  // true and neither was a blocker — the dependency installs and the rebuild is the
+  // same ten minutes I had already spent once. This asserts BYTES, not a return value:
+  // printToFileAsync can hand back a uri for a file that is empty or is not a PDF, and
+  // "it returned a path" is exactly the kind of evidence that is worth nothing.
+  try {
+    const Print = await import('expo-print');
+    const { uri } = await Print.printToFileAsync({
+      html: '<html><body><h1>Approval</h1><p>Price: $1,850.00</p></body></html>',
+    });
+    const info = await FS.getInfoAsync(uri);
+    const head = await FS.readAsStringAsync(uri, { encoding: 'base64', length: 8, position: 0 });
+    // "JVBERi0" is base64 for "%PDF-", the magic number every PDF starts with.
+    const isPdf = head.startsWith('JVBERi0');
+    t('R3 PDF generated',
+      info.exists && (info as any).size > 500 && isPdf,
+      `exists=${info.exists} bytes=${(info as any).size ?? 0} magic=${isPdf ? '%PDF-' : head.slice(0, 8)}`);
+  } catch (e: any) { t('R3 PDF generated', false, String(e?.message ?? e).slice(0, 70)); }
 
   const failed = steps.filter((s) => !s.ok).length;
   return { steps, passed: steps.length - failed, failed, pass: failed === 0 };

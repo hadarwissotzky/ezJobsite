@@ -206,7 +206,7 @@ end-to-end" hides that most of it is.
 
 | Hop | Verified? | By what |
 |---|---|---|
-| app → local SQLite | YES | `loopcheck` 8/8 on the simulator, real database — including mandate #6's price gate |
+| app → local SQLite | YES | `loopcheck` 9/9 on the simulator, real database — including mandate #6's price gate |
 | local durability | YES | REQ-PROC4: 100 cycles, 10 mid-sync kills, zero loss |
 | app → server (send) | YES | two halves. `./scripts/check-rpc-signatures.sh` proves PostgREST resolves `confirmation_create` with the app's exact 16 parameters (42501, never PGRST202). `verify-approval-loop.sql` CHECK 14 then CALLS it authenticated with those same 16 parameters against the live database: returns `created`, stamps `owner_id` from `auth.uid()`, and 230's trigger moves the change order to `sent`. |
 | server logic | YES | `verify-approval-loop.sql`, 13 checks against the LIVE database: send→sent, approve→approved + signed + grade, decline→declined, resend retires the old link, unsigned refused, price/hash mismatch refused, cross-tenant refused |
@@ -285,10 +285,15 @@ showed before — until a transcript exists, at which point the photos group
 themselves under the sentence spoken over each one, with no further work.
 *Needs: an OpenAI (or equivalent) key in the worker's environment. Nothing else.*
 
-**R3's PDF.** The approval document generator exists, is wired, and works today —
-it writes HTML and shares it through `expo-sharing`. Only the PDF container is
-missing: `expo-print`'s `printToFileAsync` takes exactly the HTML this produces.
-*Needs: `npx expo install expo-print` and a dev-client rebuild.*
+**R3's PDF — DONE `[2026-07-22]`.** `expo-print` installed, native rebuilt, and
+`shareApprovalDoc` now produces a PDF. Verified on the device by BYTES, not by a
+return value: `exists=true bytes=24527 magic=%PDF-`. printToFileAsync can hand back a
+uri for an empty file, so the check reads the first eight bytes and requires the
+`%PDF-` magic number.
+
+The HTML is still written first and is still returned if PDF generation fails for any
+reason. Losing an export because the wrapper failed would be the wrong trade for a
+document whose whole purpose is to survive a dispute.
 
 **R8 push + the 24h automated cadence.** The in-app half is built: bell, unread
 count, activity list, manual Remind with its rate rules. Push needs a provider and a

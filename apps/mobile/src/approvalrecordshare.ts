@@ -31,6 +31,7 @@
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
 import { sha256 } from 'js-sha256';
 import { createdLabel } from './changeorder';
 import { snapshotVerifies } from './eventtimeline';
@@ -140,13 +141,28 @@ export async function writeApprovalDoc(
 export async function shareApprovalDoc(
   db: AbstractPowerSyncDatabase, changeOrderId: string
 ): Promise<{ ok: boolean; path?: string; reasonKey?: string }> {
-  const path = await writeApprovalDoc(db, changeOrderId);
-  if (!path) return { ok: false, reasonKey: 'r6c.pdfNoRecord' };
+  const htmlPath = await writeApprovalDoc(db, changeOrderId);
+  if (!htmlPath) return { ok: false, reasonKey: 'r6c.pdfNoRecord' };
+
+  // R3 AC1 / R6: a PDF, because that is what a client forwards to a lawyer and what
+  // an office files. printToFileAsync takes exactly the HTML renderApprovalHtml
+  // already produces, so nothing about the DOCUMENT changes here — only its
+  // container.
+  //
+  // The HTML is still written first and still returned on failure. If PDF generation
+  // is unavailable for any reason, the record is already on disk in a readable form
+  // and the caller is told where. Losing the export because the wrapper failed would
+  // be the wrong trade for a document whose whole purpose is to survive a dispute.
+  let path = htmlPath;
+  let mimeType = 'text/html';
+  try {
+    const { uri } = await Print.printToFileAsync({ html: await FS.readAsStringAsync(htmlPath) });
+    if (uri) { path = uri; mimeType = 'application/pdf'; }
+  } catch { /* keep the HTML; it is the same document in a plainer wrapper */ }
+
   if (!(await Sharing.isAvailableAsync())) {
     return { ok: false, path, reasonKey: 'r6c.pdfNoShare' };
   }
-  await Sharing.shareAsync(path, {
-    mimeType: 'text/html', dialogTitle: t('r6c.pdfDialog'),
-  });
+  await Sharing.shareAsync(path, { mimeType, dialogTitle: t('r6c.pdfDialog') });
   return { ok: true, path };
 }

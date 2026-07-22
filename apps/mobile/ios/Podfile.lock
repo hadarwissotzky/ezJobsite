@@ -76,6 +76,8 @@ PODS:
     - Yoga
   - ExpoNetwork (8.0.8):
     - ExpoModulesCore
+  - ExpoPrint (15.0.8):
+    - ExpoModulesCore
   - ExpoSharing (14.0.8):
     - ExpoModulesCore
   - FBLazyVector (0.81.5)
@@ -1828,6 +1830,7 @@ DEPENDENCIES:
   - ExpoLocation (from `../node_modules/expo-location/ios`)
   - ExpoModulesCore (from `../node_modules/expo-modules-core`)
   - ExpoNetwork (from `../node_modules/expo-network/ios`)
+  - ExpoPrint (from `../node_modules/expo-print/ios`)
   - ExpoSharing (from `../node_modules/expo-sharing/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
@@ -1939,6 +1942,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-modules-core"
   ExpoNetwork:
     :path: "../node_modules/expo-network/ios"
+  ExpoPrint:
+    :path: "../node_modules/expo-print/ios"
   ExpoSharing:
     :path: "../node_modules/expo-sharing/ios"
   FBLazyVector:
@@ -2103,6 +2108,7 @@ SPEC CHECKSUMS:
   ExpoLocation: d5b61cb4970fa982e39ca94246a206a0c3b812ca
   ExpoModulesCore: 9e6a5514828e7dd5ded9e99d33557be2d284e660
   ExpoNetwork: ee1fb67b0de59ab7f36794caf8242955dd8ae046
+  ExpoPrint: 813bfa965eda2ecc4b1cdc61612c820e239c382a
   ExpoSharing: 0d983394ed4a80334bab5a0d5384f75710feb7e8
   FBLazyVector: e95a291ad2dadb88e42b06e0c5fb8262de53ec12
   hermes-engine: 9f4dfe93326146a1c99eb535b1cb0b857a3cd172
