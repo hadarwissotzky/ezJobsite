@@ -2268,42 +2268,45 @@ export default function App() {
           {coRows.map((c) => {
             const chip = coChip(c.status);
             return (
-              // R6b: the row is the way into the record. The whole card is the target —
-              // a gloved thumb does not find a chevron.
-              <Pressable
-                key={c.id}
-                style={s.coCard}
-                accessibilityLabel={`Open record: ${c.scope}`}
-                onPress={async () => {
-                  const prof = await getProfile(db);
-                  const r = await extraRecord(db, c.id, prof?.name ?? null);
-                  if (r) setRecord(r);
-                }}>
-                <View style={s.coR1}>
-                  <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>
-                  <View style={[s.chipBase, chip.bg]}>
-                    <Text style={[s.chipText, chip.dark && s.chipTextDark]}>{chip.label}</Text>
+              // The card is a View, NOT a Pressable wrapping everything. R6b wants the
+              // row to open the record, but nesting the Send control inside a
+              // full-card Pressable means one tap can fire both: the record opens,
+              // the ledger unmounts, and the async send finishes with its link
+              // nowhere to show. So the open-record target and Send are SIBLINGS.
+              <View key={c.id} style={s.coCard}>
+                <Pressable
+                  accessibilityLabel={`Open record: ${c.scope}`}
+                  onPress={async () => {
+                    const r = await extraRecord(db, c.id);
+                    if (r) setRecord(r);
+                  }}>
+                  <View style={s.coR1}>
+                    <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>
+                    <View style={[s.chipBase, chip.bg]}>
+                      <Text style={[s.chipText, chip.dark && s.chipTextDark]}>{chip.label}</Text>
+                    </View>
                   </View>
-                </View>
-                <View style={s.coR2}>
-                  <Text style={s.coAmt}>
-                    {c.amount}{c.is_mini ? ' · mini' : ''}{c.nte ? ` · NTE ${c.nte}` : ''}
-                  </Text>
-                  {c.signed_by ? (
-                    <Text style={s.coSub}>Signed by {c.signed_by}</Text>
-                  ) : (
-                    <Pressable onPress={() => sendPricedApproval(c)}>
-                      <Text style={s.coNudge}>
-                        {c.status === 'sent' ? 'Resend link →' : 'Send for approval →'}
-                      </Text>
-                    </Pressable>
-                  )}
-                </View>
-                {/* PRD R7: the list is ordered by create date, so the row states it —
-                    an order you can't see is an order the user has to take on faith. */}
-                <Text style={s.coCreated}>Created {c.created}</Text>
-                {!c.synced && <Text style={s.coOnPhone}>On this phone · not backed up yet</Text>}
-              </Pressable>
+                  <View style={s.coR2}>
+                    <Text style={s.coAmt}>
+                      {c.amount}{c.is_mini ? ' · mini' : ''}{c.nte ? ` · NTE ${c.nte}` : ''}
+                    </Text>
+                    {c.signed_by && <Text style={s.coSub}>Signed by {c.signed_by}</Text>}
+                  </View>
+                  {/* PRD R7: the list is ordered by create date, so the row states it —
+                      an order you can't see is an order the user has to take on faith.
+                      This is when the change order was created (the price-confirm
+                      moment), not the capture moment; the record shows both. */}
+                  <Text style={s.coCreated}>Created {c.created}</Text>
+                  {!c.synced && <Text style={s.coOnPhone}>On this phone · not backed up yet</Text>}
+                </Pressable>
+                {!c.signed_by && (
+                  <Pressable style={s.coSendRow} onPress={() => sendPricedApproval(c)}>
+                    <Text style={s.coNudge}>
+                      {c.status === 'sent' ? 'Resend link →' : 'Send for approval →'}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
             );
           })}
         </>
@@ -2542,6 +2545,9 @@ const s = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 1, marginTop: 6, paddingTop: 6,
     borderTopWidth: 1, borderTopColor: '#E4E5E1',
   },
+  // Send sits OUTSIDE the open-record Pressable (see the card above). Its own row,
+  // with a real tap target rather than a text hitbox.
+  coSendRow: { marginTop: 8, paddingTop: 8, minHeight: 44, justifyContent: 'center' },
   // Chips = the notation status. Rounded (not clip-path angled): a clean pill reads
   // better in gloves/sunlight than a cosmetic skew (FIELD-UX). Colour carries meaning.
   chipBase: { borderRadius: 6, paddingVertical: 3, paddingHorizontal: 10 },

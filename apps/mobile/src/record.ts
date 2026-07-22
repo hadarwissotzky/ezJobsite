@@ -2,111 +2,108 @@
  * The extra record — PRD R6b.
  *
  * One screen that answers "what is this, who touched it, and where does it stand".
- * R6 already made the event timeline first-class; R6b is everything else the record
- * has to carry, because a timeline alone never answered *who recorded this* or
- * *what is owed next*.
  *
- * THE RULE THIS FILE OBEYS: every field here is read from a stored row. Nothing is
- * inferred, nothing is guessed, and where a fact is not stored we return null and the
- * screen omits the line — an empty slot is honest, an invented timestamp is not.
- * (Mandate #1's evidence chain is only worth anything if the reader can trust that
- * what is displayed is what was recorded.)
+ * THE RULE THIS FILE OBEYS: every actor and every timestamp here is read from a
+ * stored column. Nothing is inferred. Where a fact is not stored, the line is
+ * OMITTED — never filled in with a plausible substitute.
  *
- * KNOWN GAP, stated rather than papered over: `sent`, `delivered`, `opened` and the
- * signature *time* are not in local SQLite — they are produced server-side and today
- * only reach the device through the evidence bundle (`bundle.ts`, remote). So the
- * local history below covers capture → price-confirm → version chain → signed-by
- * (name, no time). Merging the remote delivery events into this history is the next
- * slice of R6, not something to fake here.
+ * That rule is written twice because the first version of this file broke it while
+ * claiming to follow it (Codex challenge, 2026-07-21): it labelled `who_directed`
+ * as "the approver", fell back to the signed-in user's profile name for "captured
+ * by", and always attributed pricing to whoever is logged in now — so editing your
+ * profile silently rewrote who priced a two-week-old record. None of those actor
+ * facts are stored on the change order. They are gone; only real columns remain.
+ *
+ * TIME SEMANTICS, stated exactly because the first version got this wrong too:
+ *   change_order.created_at_ms       = when the CHANGE ORDER was created, which is
+ *                                      the moment the price was confirmed. It is
+ *                                      NOT the capture moment.
+ *   capture_commit.captured_at_ms    = the actual capture moment.
+ * The record shows both, separately labelled. The ledger sorts by the former and
+ * says "Created", which is now true.
+ *
+ * KNOWN GAP: `sent`, `delivered` and the signature TIME are not columns on the
+ * local change_order — the confirmation row carries channel/delivery_state
+ * server-side. Events we hold without a timestamp are rendered with an explicit
+ * "time not recorded" marker and sorted last, never with an invented position.
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import { createdLabel, money } from './changeorder';
+import { getLang, t } from './i18n';
+
+/** Hard caps. A ten-year job must not be able to hang the screen or blow SQLite's
+ *  variable limit (SQLITE_MAX_VARIABLE_NUMBER, commonly 999). */
+const MAX_CAPTURE_IDS = 200;
+const MAX_PHOTOS_RENDERED = 24;
 
 export type RecordPerson = {
-  /** "Approver", "Captured by", "Priced by" — the role, not the name. */
-  role: string;
+  /** i18n key for the role. The role is what we stored, never a guess. */
+  roleKey: string;
   name: string;
-  /** Rendered timestamp, or null when we do not store one for this role. */
   when: string | null;
-  /** Colour intent for the avatar: who the person is to this record. */
   kind: 'approver' | 'crew' | 'me';
 };
 
-export type RecordEvent = { at: string; what: string; hot?: boolean };
+/** `atMs` is null when the event is real but its time was never recorded. */
+export type RecordEvent = { atMs: number | null; at: string; what: string; hot?: boolean };
 
 export type RecordPhoto = {
   captureId: string;
   modality: string;
   at: string;
-  /** On-device file URI, ready for <Image source={{uri}}>. */
   uri: string;
+  /** False when the file the row promises is not on this device. Never hidden. */
+  present: boolean;
 };
 
 export type ExtraRecord = {
   id: string;
   title: string;
   status: string;
-  /**
-   * Always present: `change_order.amount_cents` is NOT NULL by schema, so every row
-   * that reaches this screen is a priced Extra.
-   *
-   * NOT to be confused with R10's price-less **Decision** — that is a different
-   * entity (the `decision` table) and never arrives through `ledger()`. `is_mini`
-   * below is a *small* change order, and it still carries money; treating it as a
-   * Decision would hide a real price from the person owed it.
-   */
+  /** Always present: change_order.amount_cents is NOT NULL. A `mini` change order
+   *  is a SMALL one and still carries money — it is not R10's price-less Decision,
+   *  which is a different entity that never arrives through ledger(). */
   amount: string;
   nte: string | null;
   isMini: boolean;
+  /** When the change order was created = when the price was confirmed. */
   created: string;
   createdAtMs: number;
-  /** R6b item 2 — plain language: what is true now AND what is owed next. */
-  stateLine: string;
+  /** The real capture moment, when a capture is linked. Null otherwise. */
+  capturedAt: string | null;
+  stateLineKey: string;
+  stateLineParams?: Record<string, string>;
   people: RecordPerson[];
   description: string;
   photos: RecordPhoto[];
+  /** True when photos were dropped by the render cap. */
+  photosTruncated: number;
   history: RecordEvent[];
   synced: boolean;
 };
 
-/**
- * R6b item 2. A chip is a label; this is the instruction. Every branch names the
- * next owed action, because "Sent" alone does not tell a contractor to go nudge.
- */
-function stateLine(status: string, signedBy: string | null, synced: boolean): string {
+function stateLine(status: string, signedBy: string | null, synced: boolean):
+  { key: string; params?: Record<string, string> } {
   switch (status) {
-    case 'draft':
-      return synced
-        ? 'Draft — not sent yet. Send it for approval.'
-        : 'Draft, on this phone only — not sent yet. Send it for approval.';
-    case 'sent':
-      return 'Sent — waiting on approval. Remind them if it goes quiet.';
+    case 'draft':   return { key: synced ? 'erec.stDraft' : 'erec.stDraftLocal' };
+    case 'sent':    return { key: 'erec.stSent' };
     case 'approved':
       return signedBy
-        ? `Approved and signed by ${signedBy}. Nothing owed — you can bill it.`
-        : 'Approved. Nothing owed — you can bill it.';
-    case 'declined':
-      return 'Declined — do not proceed with this work.';
-    case 'superseded':
-      return 'Superseded by a newer version. This one is history.';
-    default:
-      return status;
+        ? { key: 'erec.stApprovedBy', params: { name: signedBy } }
+        : { key: 'erec.stApproved' };
+    case 'declined':    return { key: 'erec.stDeclined' };
+    case 'superseded':  return { key: 'erec.stSuperseded' };
+    default:            return { key: 'erec.stSent' };
   }
 }
 
-/** A stored ms timestamp → the record's rendering, or null when absent. */
 function at(ms: number | null | undefined): string | null {
   return ms == null || ms <= 0 ? null : createdLabel(ms);
 }
 
-/**
- * Assemble the record for one change order. `meName` is the signed-in user's own
- * name (profile) so "priced by" reads as a person rather than a UUID; when we have
- * no profile it degrades to "You", which is still true.
- */
 export async function extraRecord(
-  db: AbstractPowerSyncDatabase, changeOrderId: string, meName?: string | null
+  db: AbstractPowerSyncDatabase, changeOrderId: string
 ): Promise<ExtraRecord | null> {
   const co = (await db.getAll<{
     id: string; decision_id: string; scope: string; amount_cents: number;
@@ -123,23 +120,24 @@ export async function extraRecord(
 
   const synced = !co.pending;
 
-  // The append-only decision chain: the value history and who directed each change.
   const versions = await db.getAll<{
     value: string; capture_id: string | null; directed_by: string | null; created_at_ms: number;
   }>(
     `SELECT value, capture_id, directed_by, created_at_ms
-       FROM decision_version WHERE decision_id = ? ORDER BY created_at_ms`,
-    [co.decision_id]);
+       FROM decision_version WHERE decision_id = ? ORDER BY created_at_ms LIMIT ?`,
+    [co.decision_id, MAX_CAPTURE_IDS]);
 
-  // Evidence attached to this item.
-  //
-  // The linkage is NOT decision_version.capture_id alone. A fused capture session
-  // writes each photo as its OWN capture_commit row and ties them to the narration
-  // through `capture_pair` (pair_id, role='photo'|'voice'). So the chain's capture is
-  // typically the VOICE one, and querying only it returns no pictures — which is
-  // exactly why the record showed none. Walk the pair to reach the siblings.
-  const captureIds = versions.map((v) => v.capture_id).filter((x): x is string => !!x);
+  // Evidence. The linkage is NOT decision_version.capture_id alone: a fused session
+  // writes each photo as its own capture_commit row and ties them to the narration
+  // through capture_pair. Walk the pair to reach the siblings.
+  const captureIds = Array.from(
+    new Set(versions.map((v) => v.capture_id).filter((x): x is string => !!x))
+  ).slice(0, MAX_CAPTURE_IDS);
+
   let photos: RecordPhoto[] = [];
+  let photosTruncated = 0;
+  let capturedAtMs: number | null = null;
+
   if (captureIds.length) {
     const marks = captureIds.map(() => '?').join(',');
     const caps = await db.getAll<{
@@ -156,67 +154,90 @@ export async function extraRecord(
               )
         ORDER BY cc.captured_at_ms`,
       [...captureIds, ...captureIds]);
-    photos = caps
-      .filter((c) => c.modality === 'photo' || c.modality === 'video')
-      .map((c) => ({
-        captureId: c.capture_id, modality: c.modality ?? 'photo',
-        at: createdLabel(c.captured_at_ms),
-        // The same path readCapture() resolves. We deliberately do NOT call
-        // readCapture() here: it reads the whole file to recompute a sha256, which is
-        // an integrity check, not a render path — doing it per tile would stall the
-        // screen on a job with a dozen photos.
-        uri: FS.documentDirectory + c.media_relpath,
-      }));
+
+    // The real capture moment — the earliest committed capture behind this extra.
+    if (caps.length) capturedAtMs = caps[0].captured_at_ms;
+
+    const visual = caps.filter((c) => c.modality === 'photo' || c.modality === 'video');
+    photosTruncated = Math.max(0, visual.length - MAX_PHOTOS_RENDERED);
+
+    photos = await Promise.all(
+      visual.slice(0, MAX_PHOTOS_RENDERED).map(async (c) => {
+        const uri = FS.documentDirectory + c.media_relpath;
+        // Mandate #1: evidence that is gone must SAY it is gone. A blank tile is
+        // silent loss. We check existence only (not the sha256) — integrity is
+        // readCapture()'s job and reading every file here would stall the screen.
+        let present = false;
+        try {
+          const info = await FS.getInfoAsync(uri);
+          present = !!info.exists;
+        } catch { present = false; }
+        return {
+          captureId: c.capture_id, modality: c.modality ?? 'photo',
+          at: createdLabel(c.captured_at_ms), uri, present,
+        };
+      })
+    );
   }
 
-  // ---- People (R6b item 3) -------------------------------------------------
-  // Only roles we actually store. `who_directed` is REQ-VAL4: recorded explicitly at
-  // capture, never inferred from the audio — which is exactly why it is safe to name
-  // someone here.
+  // ---- People: only roles we actually store -------------------------------
   const people: RecordPerson[] = [];
+  // who_directed is REQ-VAL4 — recorded explicitly at capture, never inferred from
+  // audio. It is who ASKED for the extra; calling them "the approver" was a guess.
   if (co.who_directed) {
-    people.push({ role: 'Approver — directed this extra', name: co.who_directed, when: null, kind: 'approver' });
+    people.push({ roleKey: 'erec.directedBy', name: co.who_directed, when: null, kind: 'approver' });
   }
-  if (co.signed_by && co.signed_by !== co.who_directed) {
-    // Signature time is not stored locally (see the header note) — name only.
-    people.push({ role: 'Signed by', name: co.signed_by, when: null, kind: 'approver' });
+  if (co.signed_by) {
+    people.push({ roleKey: 'erec.signedBy', name: co.signed_by, when: null, kind: 'approver' });
   }
-  const firstDirected = versions.find((v) => v.directed_by)?.directed_by ?? null;
-  const firstCapture = versions.find((v) => v.capture_id);
-  if (firstCapture) {
-    people.push({
-      role: 'Captured on site',
-      name: firstDirected && firstDirected !== co.who_directed ? firstDirected : (meName || 'You'),
-      when: at(firstCapture.created_at_ms), kind: 'crew',
-    });
+  // No name is stored for who captured or who priced. So we state the EVENTS with
+  // their real timestamps and attribute them to nobody.
+  const capturedLabel = at(capturedAtMs);
+  if (capturedLabel) {
+    people.push({ roleKey: 'erec.capturedAt', name: capturedLabel, when: null, kind: 'crew' });
   }
-  people.push({
-    role: 'Reviewed & priced',
-    name: meName || 'You',
-    // Mandate #6: the price was confirmed by a human at a known moment. That moment
-    // is stored (numbers_confirmed_at_ms is NOT NULL by schema), so it is shown.
-    when: at(co.numbers_confirmed_at_ms), kind: 'me',
-  });
+  const pricedLabel = at(co.numbers_confirmed_at_ms);
+  if (pricedLabel) {
+    people.push({ roleKey: 'erec.pricedAt', name: pricedLabel, when: null, kind: 'me' });
+  }
 
-  // ---- History (R6b item 7) ------------------------------------------------
-  const history: RecordEvent[] = [];
-  const created = at(co.created_at_ms);
-  if (created) history.push({ at: created, what: 'Extra created from the capture' });
+  // ---- History: chronological, with unstamped events last ------------------
+  const stamped: RecordEvent[] = [];
   for (const v of versions) {
     const when = at(v.created_at_ms);
     if (!when) continue;
-    history.push({
-      at: when,
-      what: v.directed_by ? `“${v.value}” — directed by ${v.directed_by}` : `“${v.value}”`,
+    stamped.push({
+      atMs: v.created_at_ms, at: when,
+      what: v.directed_by ? `“${v.value}” — ${v.directed_by}` : `“${v.value}”`,
     });
   }
-  const confirmed = at(co.numbers_confirmed_at_ms);
-  if (confirmed) {
-    history.push({ at: confirmed, what: `Price confirmed by ${meName || 'you'} — ${money(co.amount_cents)}` });
+  if (capturedAtMs) {
+    stamped.push({ atMs: capturedAtMs, at: createdLabel(capturedAtMs), what: t('erec.capturedAt') });
   }
-  if (co.status === 'sent') history.push({ at: '—', what: 'Sent for approval', hot: true });
-  if (co.signed_by) history.push({ at: '—', what: `Signed by ${co.signed_by}`, hot: true });
-  if (co.status === 'declined') history.push({ at: '—', what: 'Declined', hot: true });
+  if (co.created_at_ms > 0) {
+    stamped.push({ atMs: co.created_at_ms, at: createdLabel(co.created_at_ms), what: t('erec.evCreated') });
+  }
+  if (co.numbers_confirmed_at_ms > 0) {
+    stamped.push({
+      atMs: co.numbers_confirmed_at_ms, at: createdLabel(co.numbers_confirmed_at_ms),
+      what: t({ k: 'erec.evPriced', p: { amount: money(co.amount_cents) } } as any),
+    });
+  }
+  stamped.sort((a, b) => (a.atMs ?? 0) - (b.atMs ?? 0));
+
+  // Events we know happened but hold no time for. Marked, never given a fake slot.
+  const unstamped: RecordEvent[] = [];
+  const noTime = t('erec.noTime');
+  if (co.status === 'sent') unstamped.push({ atMs: null, at: noTime, what: t('erec.evSent'), hot: true });
+  if (co.signed_by) {
+    unstamped.push({
+      atMs: null, at: noTime,
+      what: t({ k: 'erec.evSigned', p: { name: co.signed_by } } as any), hot: true,
+    });
+  }
+  if (co.status === 'declined') unstamped.push({ atMs: null, at: noTime, what: t('erec.evDeclined'), hot: true });
+
+  const line = stateLine(co.status, co.signed_by, synced);
 
   return {
     id: co.id,
@@ -227,11 +248,18 @@ export async function extraRecord(
     isMini: co.is_mini === 1,
     created: createdLabel(co.created_at_ms),
     createdAtMs: co.created_at_ms,
-    stateLine: stateLine(co.status, co.signed_by, synced),
+    capturedAt: capturedLabel,
+    stateLineKey: line.key,
+    stateLineParams: line.params,
     people,
     description: co.scope,
     photos,
-    history,
+    photosTruncated,
+    history: [...stamped, ...unstamped],
     synced,
   };
 }
+
+/** Re-export so the screen renders in the reader's language without importing i18n
+ *  twice. Mandate #5. */
+export { getLang };

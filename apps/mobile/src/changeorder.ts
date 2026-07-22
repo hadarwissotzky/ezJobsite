@@ -18,6 +18,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { sha256 } from 'js-sha256';
+import { getLang } from './i18n';
 
 /**
  * The device authors change orders. The cloud gets a copy.
@@ -343,21 +344,29 @@ export type LedgerRow = {
   // Needed to send a priced approval: the confirmation is keyed to the decision,
   // and the report names who directed the extra.
   decision_id: string; who_directed: string;
-  // The CAPTURE moment (not sent, not approved). PRD R7: the ledger is ordered by
-  // this, newest first, and every row shows it. Raw ms alongside the rendered label
-  // for the same reason as amount_cents -- never re-parse a formatted string.
+  // When the CHANGE ORDER was created, which is the moment the price was confirmed
+  // (see createChangeOrder: created_at_ms = Date.now() at insert). It is NOT the
+  // capture moment -- an earlier version of this comment claimed it was, and the
+  // PRD repeated the claim. The real capture time lives on capture_commit and the
+  // record screen shows it separately. PRD R7 orders the ledger by this field and
+  // labels it "Created", which is now true. Raw ms alongside the rendered label for
+  // the same reason as amount_cents -- never re-parse a formatted string.
   created_at_ms: number; created: string;
 };
 
 /**
- * "Jul 20 · 2:14 pm" — the create moment as the ledger row shows it (PRD R7).
+ * "Jul 20 · 2:14 pm" — a stored moment as a row or record shows it.
  * Deliberately no year: a job's extras live inside weeks, and the year is noise on a
- * phone row. The full timestamp stays in the record's history (R6).
+ * phone row.
+ *
+ * Locale follows the reader (mandate #5). Forcing 'en-US' put an English date on a
+ * Spanish-language legal record.
  */
 export function createdLabel(ms: number): string {
   const d = new Date(ms);
-  const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const locale = getLang() === 'es' ? 'es-419' : 'en-US';
+  const date = d.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
   return `${date} · ${time.toLowerCase()}`;
 }
 

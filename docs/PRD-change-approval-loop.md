@@ -404,12 +404,20 @@ terms before the price exists.
   approved extras + pending extras = extras total. Visible to contractor always; to
   homeowner via any approval link ("Extras you've approved on this job").
 - **Ledger order = create date, newest first `[design prototype 2026-07-21]`.** The job's
-  extras are ordered by when the extra was **created** (the capture moment), most recent at
-  top, and **each row shows its create date**. Rationale: the items needing action are almost
-  always the newest, and ordering by status would reshuffle the list under the contractor as
-  states change — a list that moves is a list you stop trusting. The decision log (R10) uses
-  the same order. Create date is the *capture* time, not the send or approval time; those
-  remain visible on the row and in the record's history (R6).
+  extras are ordered by when the extra record was **created**, most recent at top, and **each
+  row shows that date**. Rationale: the items needing action are almost always the newest, and
+  ordering by status would reshuffle the list under the contractor as states change — a list
+  that moves is a list you stop trusting. The decision log (R10) uses the same order.
+  - **What "created" means, exactly `[corrected 2026-07-21 after Codex challenge]`.** It is
+    when the change order row was created, which in the current build is **the moment the
+    price was confirmed** (`createChangeOrder` stamps `created_at_ms` at insert). An earlier
+    draft of this requirement asserted it was the *capture* moment. That was wrong, and the
+    code comments repeated the error. The real capture time lives on `capture_commit`
+    (`captured_at_ms`); the record screen (R6b) shows both, separately labelled, so a capture
+    priced days later is not silently redated.
+  - **Open:** whether the ledger should sort by capture time rather than price-confirm time.
+    Sorting by capture is arguably truer to "when did this happen on the job", but it needs
+    the capture time denormalized onto the change order or a join. Deferred, not assumed.
 - AC: Given a project with extras created on different days, when the ledger renders, then
   rows appear newest-created first and each row displays its create date.
 - AC: Given an extra changes status (sent → discussing → approved), when the ledger re-renders,
