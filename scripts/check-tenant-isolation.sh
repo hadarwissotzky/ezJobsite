@@ -14,7 +14,31 @@
 #
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-set -a; . "$ROOT/.env"; set +a
+# Read ONLY the keys we need, and never `source` the file: .env holds values
+# with characters that break shell parsing (line 16 does exactly that), and
+# sourcing it executes whatever is in there. Values are exported, never echoed.
+# tr, not sed: a sed class written as ["\x27] is the literal set " \ x 2 7 —
+# sed does not read \x escapes — so it stripped the trailing 2 from port 5432
+# and every connection went to port 543. Quotes are removed by name instead.
+# tr, not sed: a sed class written as ["\x27] is the literal set " \ x 2 7 —
+# sed does not read \x escapes — so it stripped the trailing 2 from port 5432
+# and every connection went to port 543.
+envget() { /usr/bin/grep -m1 "^$1=" "$ROOT/.env" | cut -d= -f2- | tr -d "\"\r" | tr -d "'"; }
+SUPABASE_DB_HOST=$(envget SUPABASE_DB_HOST)
+SUPABASE_DB_PORT=$(envget SUPABASE_DB_PORT)
+SUPABASE_DB_NAME=$(envget SUPABASE_DB_NAME)
+SUPABASE_DB_USER=$(envget SUPABASE_DB_USER)
+SUPABASE_DB_PASSWORD=$(envget SUPABASE_DB_PASSWORD)
+# SUPABASE'S POOLER NEEDS THE PROJECT REF IN THE USERNAME. Connecting as a bare
+# `postgres` fails with "(ENOIDENTIFIER) no tenant identifier provided" — the
+# pooler multiplexes every project on one host and the username is how it knows
+# which one. The ref is the subdomain of the public API URL, so it is derived
+# rather than stored twice and cannot drift from it.
+case "$SUPABASE_DB_USER" in
+  *.*) ;;   # already qualified
+  *) _REF=$(envget EXPO_PUBLIC_SUPABASE_URL | sed 's|https://||; s|\.supabase\.co.*||')
+     [ -n "$_REF" ] && SUPABASE_DB_USER="${SUPABASE_DB_USER}.${_REF}" ;;
+esac
 export PGPASSWORD="$SUPABASE_DB_PASSWORD"
 
 psql -h "$SUPABASE_DB_HOST" -p "${SUPABASE_DB_PORT:-5432}" \
@@ -53,9 +77,12 @@ begin
   --    users who own different approvals; if there are not two, say so rather
   --    than passing on an empty set -- a check that verified nothing is not a
   --    pass.
-  select a.owner_id into victim
+  -- `approval` HAS NO owner_id. Ownership is reached through the project (or the
+  -- change order), which is exactly what the new policy tests — so the check has
+  -- to walk the same path the policy does, or it is not testing the policy.
+  select p.owner_id into victim
     from public.approval a
-   where a.owner_id is not null
+    join public.project p on p.id = a.project_id
    limit 1;
 
   select p.id into intruder
@@ -76,7 +103,8 @@ begin
 
   select count(*) into n
     from public.approval a
-   where a.owner_id = victim;
+    join public.project p on p.id = a.project_id
+   where p.owner_id = victim;
 
   leaks := n > 0;
   if leaks then

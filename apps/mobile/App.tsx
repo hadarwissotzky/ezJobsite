@@ -985,6 +985,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // asks "can a capture be lost", this one asks "do the pieces I wired actually
       // reach each other". Unit tests cannot answer the second — they prove the
       // decisions, not the plumbing, and plumbing is what broke eight times here.
+      await ensureDiscardSchema(db);
+      // One-shot sweep of the test rows my own harness and loop check left on a
+      // real handset. Behind its own flag and AFTER ensureDiscardSchema, because
+      // it tombstones through capture_discarded rather than forcing a delete
+      // past capture_commit's never-delete trigger.
+      if (process.env.EXPO_PUBLIC_CLEAN_TEST_DATA === '1') {
+        try {
+          const c = await cleanupTestData(db);
+          console.log('[cleanup]', JSON.stringify(c));
+        } catch (e: any) { console.log('[cleanup] failed:', String(e?.message ?? e)); }
+      }
+
       if (process.env.EXPO_PUBLIC_RUN_LOOP_CHECK === '1') {
         try {
           const lr = await runLoopCheck(db, OWNER, 'p-alder');
@@ -1004,17 +1016,6 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       await ensureSttSchema(db);
       // BEFORE the first refresh(): listCaptures now excludes discarded captures
       // by subquery, and a missing table there would fail the whole gallery.
-      await ensureDiscardSchema(db);
-      // One-shot sweep of the test rows my own harness and loop check left on a
-      // real handset. Behind its own flag and AFTER ensureDiscardSchema, because
-      // it tombstones through capture_discarded rather than forcing a delete
-      // past capture_commit's never-delete trigger.
-      if (process.env.EXPO_PUBLIC_CLEAN_TEST_DATA === '1') {
-        try {
-          const c = await cleanupTestData(db);
-          console.log('[cleanup]', JSON.stringify(c));
-        } catch (e: any) { console.log('[cleanup] failed:', String(e?.message ?? e)); }
-      }
       const sl = await savedLang(db);
       // Restore the display language a returning user already chose. Language is now
       // part of the profile form, not a gate, so there's no separate "picked" flag.
