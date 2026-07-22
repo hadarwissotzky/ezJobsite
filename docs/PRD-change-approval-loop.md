@@ -281,6 +281,56 @@ terms before the price exists.
   push-notified, the change status = "In Discussion," and the message joins the on-record
   thread (see R5b).
 
+**R5c. Classify the extra, and route it to the right approver `[hadar 2026-07-21]`**
+
+*Status: REQUIREMENT ONLY — specified here, not built. The build order in §Timeline is
+unchanged; this lands after the P0 loop is boringly reliable.*
+
+- **The need.** Today the recipient is picked by hand at send (R5) and the only clue the
+  system has is GPS. But a jobsite has more than one person who can say yes, and **which
+  one depends on what the extra is**. A structural surprise goes to the GC; a finish or
+  fixture choice goes to the designer; anything that costs the client money goes to the
+  owner; a code/permit issue may go to an internal specialist. Making the contractor
+  re-decide that on every send is the friction R1 exists to remove — and picking wrong is
+  worse than slow, because a priced commitment sent to someone who cannot authorise it is
+  an approval that does not bind.
+- **Classify.** At structuring (R2), the system infers a **type** for the extra from the
+  narration and photos — e.g. *structural · mechanical/electrical/plumbing · finish or
+  fixture selection · code or permit · site condition/discovery · scope clarification*.
+  The final taxonomy is an open question below; it must be derived from real captures,
+  not invented at a desk.
+- **The approver roster is per job, and it grows.** Each job carries a list of people who
+  can approve on it, each with a **role**: *owner · general contractor · designer/architect
+  · internal specialist · property manager · other*. The roster starts as whoever the
+  first extra was sent to and accumulates as more people are added — the contractor never
+  fills in a directory up front (same principle as R7's implicit project creation).
+- **Route, but SUGGEST — never decide.** The type plus the roster produce a **pre-filled**
+  "Send to" on the preview card, with the reason visible ("Finish selection → Dana, your
+  designer"). It is always one tap to override, and Send always displays the recipient's
+  name and role. This is mandate #8's suggest-never-decide applied to people instead of
+  places, and it is not optional: mandate #2 forbids a commitment leaving on an inference.
+- **The tag earns its keep beyond routing.** Type is stored on the item and enables the
+  things a contractor actually asks for later: what kind of extra keeps recurring on this
+  job, which types get approved fastest, and per-trade template matching (R9).
+- AC: Given a capture whose narration describes a finish selection, when the preview
+  renders, then type = finish/fixture is pre-selected and Send-to is pre-filled with the
+  roster member whose role is designer, with the reason shown.
+- AC: Given the system's suggested approver is wrong, when the contractor taps the
+  recipient, then the full job roster is offered and the override is one tap.
+- AC: Given a job with no roster member for the inferred role, when the preview renders,
+  then the contractor is asked who approves this (quick-add name + phone + role) and that
+  person joins the job's roster for next time.
+- AC: Given an extra was sent, when its record is viewed (R6b), then the type and the
+  approver's role are both shown — "who was entitled to approve this" is part of the
+  record, not just who did.
+- AC: Given classification is unavailable (offline, model down), when the preview renders,
+  then the extra is untyped, Send-to falls back to recents (R1), and nothing is blocked.
+- **Open:** (a) the type taxonomy itself — derive from real captures, and keep it short
+  enough that a wrong guess is obvious; (b) whether an approver's **authority** is
+  modelled (can a designer approve money, or only selections?) — that is closer to
+  multi-party approval chains, which are a v1 non-goal, so v1 likely records the role
+  without enforcing a limit; (c) whether type is inferred, contractor-set, or both.
+
 **R5b. Feedback loop — on-record discussion and revision**
 - "In Discussion" is a first-class status between Sent and Approved/Declined—negotiation is
   expected behavior, not an edge case.
