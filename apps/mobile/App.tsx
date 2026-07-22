@@ -46,7 +46,7 @@ import { sendEwa } from './src/ewasend';
 // R2 on device. No key, no signal needed — the contractor in a crawlspace gets a
 // filled preview before he stands up. The worker still re-transcribes via the
 // cloud and supersedes this under 150's newest-wins.
-import { drainSttOutbox, ensureSttSchema, transcribeOnDevice } from './src/ondevicestt';
+import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
 import { ensureVoiceCacheSchema, voiceReadingForDecision, narrationForExtra,
          type VoiceReading } from './src/voicesource';
 // R2: photos beside the sentence spoken over them. Degrades to a plain strip when
@@ -231,6 +231,11 @@ export default function App() {
   // R8: the bell. `activity` is the list; `bell` is whether the sheet is open.
   const [activity, setActivity] = React.useState<ActivityRow[]>([]);
   const [bell, setBell] = React.useState(false);
+  // The rough, live transcript shown WHILE recording. Never stored: the real
+  // transcript comes from the file after the recording stops. This exists so the
+  // contractor can see that something is happening.
+  const [live, setLive] = React.useState<string>('');
+  const liveRef = React.useRef<{ stop: () => void } | null>(null);
   // null until the bell has been opened once; 'granted' hides the ask.
   const [notifyPerm, setNotifyPerm] = React.useState<string | null>(null);
   // R1: partial sessions found on disk at launch. Every one is offered — see
@@ -1125,10 +1130,22 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       await recorder.prepareToRecordAsync();
       recorder.record();
       setUi({ k: 'recording' });
+      // AFTER the recorder is running, never before, and not awaited into it.
+      // The live line is an indicator; the recording is the evidence. If iOS
+      // refuses a second listener on the input, startLive returns null, the
+      // contractor sees no moving text, and the capture is entirely unaffected.
+      setLive('');
+      startLive((t) => setLive(t))
+        .then((h) => { liveRef.current = h; })
+        .catch(() => { /* indicator only */ });
       return;
     }
     if (ui.k === 'recording') {
       setUi({ k: 'saving' });
+      // Stop listening BEFORE stopping the recorder: the recogniser must not be
+      // holding the input when expo-audio finalises the file.
+      try { liveRef.current?.stop(); } catch { /* already stopped */ }
+      liveRef.current = null;
       await recorder.stop();
       const uri = recorder.uri;
       if (!uri) { setUi({ k: 'refused', why: 'recorder produced no file' }); return; }
@@ -2568,6 +2585,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           : ui.k === 'saving' ? 'Finishing…'
           : ready ? T('rec.ready') : T('st.starting')}
       </Text>
+
+      {/* The live line, while recording. Its whole job is to show the contractor
+          that something is being heard — it is rough by construction and is
+          never stored. Rendered ONLY during 'recording' so it cannot be mistaken
+          for the saved transcript, and it says so on the row. */}
+      {ui.k === 'recording' && live.length > 0 && (
+        <View style={s.card}>
+          <Text style={s.cardNote}>{T('r2.liveRough')}</Text>
+          <Text style={s.frozen} numberOfLines={4}>{live}</Text>
+        </View>
+      )}
 
       {/* REQ-PROC8: the pipeline structures what was said; this is where a human
           checks it. Offered right after a save, when the moment is still in mind. */}

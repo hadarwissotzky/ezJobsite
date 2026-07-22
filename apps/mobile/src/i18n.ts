@@ -374,6 +374,9 @@ const EN: Record<string, string> = {
   'r8.nothingYet': 'Nothing yet. Questions and answers from your clients land here.',
   'r8.markAllRead': 'Mark all as read',
   // R8 / R5b push. Local notifications: no provider, no server.
+  // R2 live view. "Rough" is in the string on purpose: the contractor must not
+  // read this as the transcript, because it is not the one that gets stored.
+  'r2.liveRough': 'Hearing you… (rough, not saved yet)',
   'r8.pushApproved': 'Approved: {scope}',
   'r8.pushAsk': 'Turn on alerts',
   'r8.pushWhy': 'A client question or an approval reaches you while the phone is in your pocket. With alerts off you find out the next time you open the app.',
@@ -900,6 +903,7 @@ const ES: Record<string, string> = {
   'r8.nothingYet': 'Todavía nada. Las preguntas y respuestas de sus clientes aparecen aquí.',
   'r8.markAllRead': 'Marcar todo como leído',
   // R8 / R5b avisos. Notificaciones locales: sin proveedor, sin servidor.
+  'r2.liveRough': 'Escuchando… (aproximado, todavía no se guarda)',
   'r8.pushApproved': 'Aprobado: {scope}',
   'r8.pushAsk': 'Activar avisos',
   'r8.pushWhy': 'Una pregunta del cliente o una aprobación le llega con el teléfono en el bolsillo. Sin avisos se entera la próxima vez que abra la app.',
@@ -1094,6 +1098,11 @@ const DICT: Record<Lang, Record<string, string>> = { en: EN, es: ES };
 
 let current: Lang = 'en';
 export function setLang(l: Lang) { current = l; }
+/** Which language the contractor is working in. The speech recogniser needs a
+ *  locale up front — SFSpeechRecognizer cannot detect one — and the app's own
+ *  language is the honest proxy: a Spanish-speaking contractor runs it in
+ *  Spanish. Guessing en-US for him would transcribe his Spanish as nonsense. */
+export function currentLang(): Lang { return current; }
 export function getLang(): Lang { return current; }
 
 /**

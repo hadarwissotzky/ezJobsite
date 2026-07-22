@@ -23,6 +23,7 @@
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { currentLang } from './i18n.ts';
 
 /** What the recogniser produced. Mirrors `capture_transcript`'s columns. */
 export type OnDeviceTranscript = {
@@ -124,6 +125,74 @@ export async function recognizeFile(uri: string): Promise<OnDeviceTranscript | n
       });
     } catch { done(null); }
   });
+}
+
+// ── live view while recording ───────────────────────────────────────────────
+//
+// WHAT THIS IS FOR, in hadar's words: "so the user will see that information is
+// coming through". It is a PROGRESS INDICATOR, not evidence. Accuracy is
+// explicitly not the bar — interim results are rough by construction and the
+// authoritative transcript still comes from the file pass after the recording
+// stops, or from the cloud after that.
+//
+// THEREFORE IT CAN NEVER TOUCH THE RECORDING. `expo-audio` keeps the microphone
+// and keeps producing the m4a that `performCapture` hashes into evidence; this
+// only asks to listen alongside. Every failure path here is silent and leaves
+// the recorder untouched, because mandate #1 outranks a nice indicator by a
+// distance that is not close. If iOS refuses two consumers of the input, the
+// contractor loses a moving line of text and loses nothing else.
+//
+// The language is the CONTRACTOR'S, not en-US. SFSpeechRecognizer needs a locale
+// up front and cannot detect one, so a Spanish-speaking crew transcribed as
+// English produces nonsense on screen — worse than no indicator, because it
+// looks like the app misheard rather than like it was never listening.
+const LOCALE: Record<string, string> = { en: 'en-US', es: 'es-ES' };
+
+export type LiveHandle = { stop: () => void };
+
+/**
+ * Start showing words as they are spoken. Returns null if it could not start,
+ * which the caller treats as "no live view" and nothing more.
+ *
+ * @param onText called with the running text, rough and frequently revised.
+ */
+export async function startLive(
+  onText: (text: string) => void
+): Promise<LiveHandle | null> {
+  let M: any;
+  try { M = await import('expo-speech-recognition'); } catch { return null; }
+  const mod = M.ExpoSpeechRecognitionModule;
+  if (!mod?.supportsOnDeviceRecognition?.()) return null;
+  // Read only. Requesting here would raise a dialog in the middle of the
+  // contractor pressing record, which is the worst possible moment.
+  const perm = await mod.getPermissionsAsync?.();
+  if (perm && perm.status !== 'granted') return null;
+
+  const subs = [
+    M.addSpeechRecognitionListener('result', (e: any) => {
+      const t = e?.results?.[0]?.transcript;
+      if (typeof t === 'string' && t.length) onText(t);
+    }),
+    // Errors are swallowed on purpose: the recording is still running and the
+    // contractor must not be told that anything failed, because nothing that
+    // matters did.
+    M.addSpeechRecognitionListener('error', () => { /* indicator only */ }),
+  ];
+  const stop = () => {
+    try { mod.stop?.(); } catch { /* already stopped */ }
+    try { subs.forEach((x) => x.remove()); } catch { /* already gone */ }
+  };
+
+  try {
+    mod.start({
+      lang: LOCALE[currentLang()] ?? 'en-US',
+      interimResults: true,   // the whole point: partial text, as it arrives
+      continuous: true,       // do not stop at the first pause in a walkthrough
+      requiresOnDeviceRecognition: true,
+      addsPunctuation: true,
+    });
+  } catch { stop(); return null; }
+  return { stop };
 }
 
 /** Has the user never been asked? Only then is a dialog appropriate — iOS will

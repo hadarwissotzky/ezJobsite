@@ -423,6 +423,7 @@ console.log('\nverifying…\n');
     ['R2  on-device recognise',    'transcribeOnDevice',      'App.tsx'],
     ['R2  on-device upload',       'drainSttOutbox',          'App.tsx'],
     ['R2  on-device schema',       'ensureSttSchema',         'App.tsx'],
+    ['R2  live while recording',   'startLive',               'App.tsx'],
   ];
   const broken = [];
   for (const [label, sym, where] of CLAIMS) {
