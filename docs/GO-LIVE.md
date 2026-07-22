@@ -199,6 +199,30 @@ Supabase and Supabase needs a session. So it ends at "the extra is ready to send
 addressed to the right person" — the last state reachable without an account. It says
 so rather than skipping the step quietly.
 
+## 4d. What is proven, joint by joint — and the one join that is not
+
+The loop is five hops. Four are verified; naming which, because "not verified
+end-to-end" hides that most of it is.
+
+| Hop | Verified? | By what |
+|---|---|---|
+| app → local SQLite | YES | `loopcheck` 7/7 on the simulator, real database |
+| local durability | YES | REQ-PROC4: 100 cycles, 10 mid-sync kills, zero loss |
+| **app → server (send)** | **NO** | needs an authenticated session — the only gap |
+| server logic | YES | `verify-approval-loop.sql`, 13 checks against the LIVE database: send→sent, approve→approved + signed + grade, decline→declined, resend retires the old link, unsigned refused, price/hash mismatch refused, cross-tenant refused |
+| server → client page | YES | a real production token loaded in a browser; the page rendered real frozen data, priced card, NTE clause, running total |
+
+So the send's SERVER EFFECT is proven and the page's READ is proven. What is not
+proven is `sendForConfirmation` itself — the app calling `confirmation_create` with a
+real session. That one call is the whole gap, and one sign-in closes it.
+
+The client's ANSWER (`confirmation_respond`) is proven server-side by CHECK 2 —
+approve moves the change order, writes the signature and stamps grade `typed_link`.
+It has not been driven from the page against production, deliberately: a
+`confirmation_response` row is append-only evidence and cannot be deleted, and I was
+not willing to leave permanent test data in your database to prove a call whose
+server side is already tested.
+
 ## 5. What is deliberately not built, and what it would take
 
 **R1 draft recovery — a session paused and then killed still dies.**
