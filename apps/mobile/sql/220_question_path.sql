@@ -115,18 +115,10 @@ end $$;
 revoke all on function public.confirmation_questions from public;
 grant execute on function public.confirmation_questions to anon, authenticated;
 
--- ── both terminal answers are signed ────────────────────────────────────────
--- Widened from 'confirmed' only. See 210_approval_signature.sql for why this lives
--- on the table rather than in the RPC (it survives the 020-after-200 migration-order
--- hazard, and it holds for every write path).
-create or replace function public.confirmation_response_require_signature()
-  returns trigger language plpgsql as $$
-begin
-  -- Both answers commit somebody to something: approve authorises the work and the
-  -- money, decline stops the work and the contractor acts on it. Both are signed.
-  if new.signed_name is null or length(btrim(new.signed_name)) < 2 then
-    raise exception 'an answer requires a typed signature'
-      using errcode = '23514', hint = 'signature_required';
-  end if;
-  return new;
-end $$;
+-- ── signatures on the terminal answers ──────────────────────────────────────
+-- NOT redefined here. `confirmation_response_require_signature` is owned by
+-- 210_approval_signature.sql and was widened there to cover declines as well as
+-- approvals. An earlier draft of this file redefined it, which added a FIFTH fatal
+-- duplicate to check-sql-duplicates (4 -> 5) and created exactly the hazard that
+-- checker exists to catch: re-running 210 after 220 would have narrowed the rule
+-- back and silently re-allowed unsigned declines. One object, one file.

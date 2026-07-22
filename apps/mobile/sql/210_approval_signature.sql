@@ -49,15 +49,17 @@
 create or replace function public.confirmation_response_require_signature()
   returns trigger language plpgsql as $$
 begin
-  -- Declines and questions pass through untouched: saying no commits you to nothing.
-  if new.action is distinct from 'confirmed' then
-    return new;
-  end if;
-
-  -- Everything that says "yes" is signed. No exception for no-cost Decisions:
-  -- a confirmed spec is exactly what a rework argument turns on later.
+  -- BOTH terminal answers are signed. Approve authorises the work and the money;
+  -- decline stops the work and the contractor acts on it, so an unsigned decline
+  -- would let anyone holding the link halt a job. No exception for no-cost
+  -- Decisions either: a confirmed spec is exactly what a rework argument turns on
+  -- later. [hadar 2026-07-21: "yes decisions should also be signed"]
+  --
+  -- Questions never reach this table at all -- they are messages in
+  -- confirmation_question (220_question_path.sql), unsigned by design, because a
+  -- signature wall in front of "I have a question" produces silence, not questions.
   if new.signed_name is null or length(btrim(new.signed_name)) < 2 then
-    raise exception 'an approval requires a typed signature'
+    raise exception 'an answer requires a typed signature'
       using errcode = '23514', hint = 'signature_required';
   end if;
 
