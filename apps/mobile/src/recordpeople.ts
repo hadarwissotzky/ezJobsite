@@ -222,15 +222,35 @@ export const KIND_KEY: Record<ItemKind, string> = {
  * one. R6b's AC is "no price is shown ANYWHERE on the screen", and a boolean flag
  * beside an amount field is one forgotten `&&` away from breaking it.
  */
-export type PricedItem = { kind: 'extra'; amount: string; nte: string | null; isMini: boolean };
+export type PricedItem = {
+  kind: 'extra';
+  /** null when the contractor never said a price. NOT the same as zero. */
+  amount: string | null;
+  nte: string | null; isMini: boolean;
+};
 export type Item = PricedItem | { kind: 'decision' };
 
 export type MoneyBlock =
   | { show: 'price'; amount: string; nte: string | null; isMini: boolean }
   /** Renders `erec.noCostChange` (R10: "Confirmation — no cost change"). */
-  | { show: 'noCost' };
+  | { show: 'noCost' }
+  /**
+   * AN EXTRA THAT COSTS MONEY, WITH NO PRICE STATED YET — and it is a THIRD
+   * thing, not a variant of the other two.
+   *
+   * R2 takes the price from what the contractor said; if he never said one,
+   * there is no price to show. Folding that into 'noCost' would tell the
+   * homeowner the work is free, which is the most expensive sentence this app
+   * could print. Folding it into 'price' with an empty amount puts a
+   * price-shaped hole on a binding document.
+   *
+   * It was structurally unrepresentable until now, which is why the audit
+   * flagged it before the column went nullable rather than after.
+   */
+  | { show: 'priceToCome' };
 
 export function moneyBlock(item: Item): MoneyBlock {
   if (item.kind === 'decision') return { show: 'noCost' };
+  if (item.amount === null) return { show: 'priceToCome' };
   return { show: 'price', amount: item.amount, nte: item.nte, isMini: item.isMini };
 }

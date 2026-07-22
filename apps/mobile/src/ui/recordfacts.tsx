@@ -99,6 +99,18 @@ export function MoneyLine(
       </View>
     );
   }
+  // An extra that costs money with no price stated yet. Rendered at the same size
+  // as a price so it reads as the answer to "how much", not as a missing field —
+  // and never as "no cost change", which would tell the homeowner it is free.
+  if (b.show === 'priceToCome') {
+    return (
+      <View style={{ marginTop: 8 }}>
+        <Text style={{ ...moneyStyle, fontSize: 24, color: C.steel }}>
+          {t('erec.priceToCome')}
+        </Text>
+      </View>
+    );
+  }
   return (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 9, marginTop: 8 }}>
       <Text style={{ ...moneyStyle, fontSize: 30, color: C.ink }}>{b.amount}</Text>

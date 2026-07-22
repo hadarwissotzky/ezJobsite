@@ -61,9 +61,14 @@ export type ExtraRecord = {
   id: string;
   title: string;
   status: string;
-  /** Always present: change_order.amount_cents is NOT NULL. A `mini` change order
-   *  is a SMALL one and still carries money — it is not R10's price-less Decision,
-   *  which is a different entity that never arrives through ledger(). */
+  /** `money()` renders '—' when no price was ever given: R2 takes the price from
+   *  what the contractor SAID, and he may not have said one. That is a different
+   *  fact from R10's price-less Decision (a distinct entity that never arrives
+   *  through ledger()) and from a genuine zero. The comment here used to assert
+   *  "always present: amount_cents is NOT NULL", which stopped being true in 370
+   *  — left uncorrected it is the kind of doc that sends the next person to build
+   *  on a guarantee that no longer exists. A `mini` change order is a SMALL one
+   *  and still carries money. */
   amount: string;
   nte: string | null;
   isMini: boolean;

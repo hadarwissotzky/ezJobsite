@@ -644,6 +644,7 @@ const EN: Record<string, string> = {
   'erec.approverRole': 'Approver',
   'erec.kindExtra': 'Extra',
   'erec.kindDecision': 'Decision',
+  'erec.priceToCome': 'No price given yet',
 
   'common.close': 'Close',
   'common.cancel': 'Cancel',
@@ -1239,6 +1240,7 @@ const ES: Record<string, string> = {
   'erec.approverRole': 'Aprobador',
   'erec.kindExtra': 'Extra',
   'erec.kindDecision': 'Decisión',
+  'erec.priceToCome': 'Todavía sin precio',
 
   'common.close': 'Cerrar',
   'common.cancel': 'Cancelar',

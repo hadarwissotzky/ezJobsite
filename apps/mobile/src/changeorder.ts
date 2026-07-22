@@ -43,7 +43,13 @@ export const CHANGE_ORDER_DDL = [
       scope         TEXT NOT NULL CHECK (length(scope) > 0),
       line_items    TEXT NOT NULL DEFAULT '[]',
       -- INTEGER cents. Never float. Money in floats is a bug with a lawyer attached.
-      amount_cents  INTEGER NOT NULL CHECK (amount_cents >= 0),
+      --
+      -- NULLABLE, and null is NOT zero. R2 takes the price from what the
+      -- contractor said; if he never said one there is no price, and that is a
+      -- different fact from "this costs nothing". Storing 0 for it would tell a
+      -- homeowner the work is free, which is the most expensive sentence this
+      -- app could print. The CHECK still bars negatives when a price IS given.
+      amount_cents  INTEGER CHECK (amount_cents IS NULL OR amount_cents >= 0),
       currency      TEXT NOT NULL DEFAULT 'USD',
       nte_cents     INTEGER,
       is_mini       INTEGER NOT NULL DEFAULT 0 CHECK (is_mini IN (0,1)),
@@ -85,6 +91,75 @@ export const CHANGE_ORDER_DDL = [
 
 export async function ensureChangeOrderSchema(db: AbstractPowerSyncDatabase) {
   for (const s of CHANGE_ORDER_DDL) await db.execute(s);
+  await makeAmountNullable(db);
+}
+
+/**
+ * EXISTING INSTALLS: drop NOT NULL from change_order.amount_cents.
+ *
+ * `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists, so a
+ * phone that has been running keeps the old NOT NULL column and a priceless
+ * extra fails on insert. SQLite has no ALTER COLUMN, so the only way is to
+ * rebuild the table — which is why this is a guarded one-off and not an ALTER.
+ *
+ * IT RUNS AT MOST ONCE. The guard reads `pragma table_info` and returns
+ * immediately if the column is already nullable, so this costs one pragma on
+ * every launch after the first and rewrites nothing.
+ *
+ * THE COPY IS THE DANGEROUS PART and it is why the whole thing is one
+ * transaction: this table holds the contractor's extras, including sent ones a
+ * homeowner may have already approved. A rebuild that failed halfway with the
+ * old table dropped and the new one unpopulated would lose the ledger. On any
+ * error the transaction rolls back and the old table is still there, unchanged.
+ *
+ * Columns are listed EXPLICITLY rather than `SELECT *`: a positional copy is
+ * correct only while the column order matches, and silently shifts every value
+ * one place the day someone inserts a column into the DDL above.
+ */
+async function makeAmountNullable(db: AbstractPowerSyncDatabase) {
+  const cols = await db.getAll<{ name: string; notnull: number }>(
+    `SELECT name, "notnull" FROM pragma_table_info('change_order')`);
+  const amount = cols.find((c) => c.name === 'amount_cents');
+  // No column at all means the table is not there yet and the DDL above just
+  // created it nullable. Nothing to migrate either way.
+  if (!amount || amount.notnull === 0) return;
+
+  await db.writeTransaction(async (tx) => {
+    await tx.execute(`CREATE TABLE change_order_rebuild (
+      id TEXT PRIMARY KEY, decision_id TEXT NOT NULL, project_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL, scope TEXT NOT NULL CHECK (length(scope) > 0),
+      line_items TEXT NOT NULL DEFAULT '[]',
+      amount_cents INTEGER CHECK (amount_cents IS NULL OR amount_cents >= 0),
+      currency TEXT NOT NULL DEFAULT 'USD', nte_cents INTEGER,
+      is_mini INTEGER NOT NULL DEFAULT 0 CHECK (is_mini IN (0,1)),
+      who_directed TEXT NOT NULL, ref_estimate TEXT,
+      numbers_confirmed_at_ms INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft','sent','approved','declined','superseded')),
+      signed_by TEXT, created_at_ms INTEGER NOT NULL
+    ) STRICT`);
+    await tx.execute(`INSERT INTO change_order_rebuild
+      (id, decision_id, project_id, owner_id, scope, line_items, amount_cents,
+       currency, nte_cents, is_mini, who_directed, ref_estimate,
+       numbers_confirmed_at_ms, status, signed_by, created_at_ms)
+      SELECT id, decision_id, project_id, owner_id, scope, line_items, amount_cents,
+             currency, nte_cents, is_mini, who_directed, ref_estimate,
+             numbers_confirmed_at_ms, status, signed_by, created_at_ms
+        FROM change_order`);
+    await tx.execute(`DROP TABLE change_order`);
+    await tx.execute(`ALTER TABLE change_order_rebuild RENAME TO change_order`);
+    // The trigger went with the dropped table. Recreating it is not optional:
+    // without it a sent change order becomes editable, which is the one thing
+    // the frozen rule exists to prevent.
+    await tx.execute(`CREATE TRIGGER IF NOT EXISTS change_order_frozen
+       BEFORE UPDATE ON change_order
+       WHEN old.status IN ('sent','approved','declined')
+        AND (new.amount_cents IS NOT old.amount_cents
+             OR new.scope IS NOT old.scope
+             OR new.nte_cents IS NOT old.nte_cents)
+       BEGIN SELECT RAISE(ABORT, 'a sent change order is frozen: supersede it'); END`);
+  });
+  console.log('change_order: amount_cents is now nullable');
 }
 
 export type ParsedMoney = {
@@ -261,7 +336,12 @@ export async function createChangeOrder(
  * 23503 is NOT permanent: a CO whose decision has not synced yet is an ordering
  * race the next attempt wins, not a corrupt payload.
  */
-const CO_PERMANENT = new Set(['42501', '23505', '23514']);
+// 23502 = not_null_violation. It was ABSENT, and the audit found what that
+// costs: a row the server structurally cannot accept retried forever at the
+// 30-minute cap, never parked, never surfaced, with the contractor's ledger
+// quietly showing "pending" for the rest of the install's life. A constraint
+// violation is the server saying "never", and never is permanent by definition.
+const CO_PERMANENT = new Set(['42501', '23505', '23514', '23502']);
 
 export async function drainChangeOrderOutbox(
   db: AbstractPowerSyncDatabase, supabase: SupabaseClient, ownerId: string
@@ -483,7 +563,7 @@ export async function hydrateChangeOrders(
     .from('change_order')
     .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at')
     .eq('project_id', projectId);
-  if (error || !data) return { pulled: 0, statusUpdated: 0 };
+  if (error || !data) return { pulled: 0, statusUpdated: 0, skipped: 0 };
 
   // The signer's name lives on the approval, not the CO.
   const { data: appr } = await supabase
@@ -492,9 +572,18 @@ export async function hydrateChangeOrders(
     .filter((a: any) => a.action === 'approved')
     .map((a: any) => [a.change_order_id, a.legal_name]));
 
-  let pulled = 0, statusUpdated = 0;
+  let pulled = 0, statusUpdated = 0, skipped = 0;
   for (const co of data as any[]) {
-    const res = await db.execute(
+    // ONE ROW MUST NOT TAKE THE HYDRATE WITH IT. This had no guard: a single
+    // change order the local schema cannot accept — a priceless one once the
+    // server column goes nullable, or any future column mismatch — threw out of
+    // the loop, and every extra AFTER it in the same pull silently never landed.
+    // The failure is invisible from the app: the ledger is simply short, with no
+    // error anywhere, which is the shape of bug this codebase has been bitten by
+    // repeatedly. Skip the row, count it, keep going.
+    let res;
+    try {
+      res = await db.execute(
       `INSERT OR IGNORE INTO change_order (id, decision_id, project_id, owner_id, scope,
          line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate,
          numbers_confirmed_at_ms, status, signed_by, created_at_ms)
@@ -504,7 +593,12 @@ export async function hydrateChangeOrders(
        co.is_mini ?? 0, co.who_directed, co.ref_estimate,
        new Date(co.numbers_confirmed_at).getTime(), co.status,
        signedBy.get(co.id) ?? null, new Date(co.created_at).getTime()]
-    );
+      );
+    } catch (e: any) {
+      skipped++;
+      console.log('hydrate skipped a change order:', co.id, String(e?.message ?? e).slice(0, 120));
+      continue;
+    }
     if (res.rowsAffected) { pulled++; continue; }
 
     // Existing row: status only, and only if we are not holding an unsent intent.
@@ -516,5 +610,5 @@ export async function hydrateChangeOrders(
     );
     if (upd.rowsAffected) statusUpdated++;
   }
-  return { pulled, statusUpdated };
+  return { pulled, statusUpdated, skipped };
 }
