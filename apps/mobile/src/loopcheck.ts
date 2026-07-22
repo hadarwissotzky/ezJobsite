@@ -374,9 +374,27 @@ export async function runLoopCheck(
     const stillThere = (await ledger(db, projectId)).some((r) => r.id === `co-${capId}`);
     t('sent extra refuses delete', !del.ok && stillThere,
       `refused=${!del.ok} reason=${del.reason ?? '-'} stillInLedger=${stillThere}`);
+
+    // CLEAN UP AFTER ITSELF. This step deliberately creates a row the delete path
+    // is guaranteed to refuse, so nothing else can ever remove it — and it ran on
+    // every launch. hadar's extras list filled with these. A check that leaves
+    // residue on a real handset is a check that damages the thing it is meant to
+    // protect, so it removes its own rows directly once the assertion is made.
+    await db.execute(`DELETE FROM change_order WHERE id = ?`, [`co-${capId}`]);
+    await db.execute(`DELETE FROM change_order_outbox WHERE change_order_id = ?`,
+                     [`co-${capId}`]);
   } catch (e: any) {
     t('sent extra refuses delete', false, String(e?.message ?? e).slice(0, 200));
   }
+
+  // Everything this run created, gone. The checks above have already made their
+  // assertions; keeping the rows afterwards only pollutes a real ledger.
+  try {
+    await db.execute(`DELETE FROM change_order_outbox WHERE change_order_id LIKE ?`, [`co-${tag}%`]);
+    await db.execute(`DELETE FROM change_order WHERE id LIKE ? OR scope LIKE ?`,
+                     [`co-${tag}%`, `Loop check ${tag}%`]);
+    await db.execute(`DELETE FROM decision WHERE id LIKE ?`, [`d-${tag}%`]);
+  } catch { /* cleanup must never fail the run it is tidying */ }
 
   const failed = steps.filter((s) => !s.ok).length;
   return { steps, passed: steps.length - failed, failed, pass: failed === 0 };
