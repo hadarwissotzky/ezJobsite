@@ -126,6 +126,26 @@ export async function recognizeFile(uri: string): Promise<OnDeviceTranscript | n
   });
 }
 
+/** Has the user never been asked? Only then is a dialog appropriate — iOS will
+ *  not ask twice, and re-requesting a denial is noise the contractor cannot act
+ *  on from inside the app. */
+export async function needsPermissionAsk(): Promise<boolean> {
+  try {
+    const M: any = await import('expo-speech-recognition');
+    const p = await M.ExpoSpeechRecognitionModule?.getPermissionsAsync?.();
+    return p?.status === 'undetermined' || p?.canAskAgain === true && p?.status !== 'granted';
+  } catch { return false; }
+}
+
+/** Raises the OS dialog. Call ONLY where a person is looking at the screen. */
+export async function requestSpeechPermission(): Promise<string> {
+  try {
+    const M: any = await import('expo-speech-recognition');
+    const p = await M.ExpoSpeechRecognitionModule?.requestPermissionsAsync?.();
+    return p?.status ?? 'unknown';
+  } catch { return 'unavailable'; }
+}
+
 /**
  * Recognise, cache locally, and queue the upload. The local write happens even
  * if the queue insert fails, because the preview card is what the contractor is
@@ -134,6 +154,21 @@ export async function recognizeFile(uri: string): Promise<OnDeviceTranscript | n
 export async function transcribeOnDevice(
   db: AbstractPowerSyncDatabase, captureId: string, uri: string
 ): Promise<{ ok: boolean; reason?: string }> {
+  // ASK, ONCE, HERE — and deliberately not inside recognizeFile.
+  //
+  // recognizeFile only READS the permission so an automated check can call it
+  // without raising a dialog that blocks until a human answers; a probe that did
+  // that hung an entire run in this repo already. But read-only everywhere means
+  // the answer stays `undetermined` forever and the feature never runs on a real
+  // phone even once. The device check caught exactly that: onDevice=true,
+  // permission=undetermined, recognition never attempted.
+  //
+  // This is the right moment to ask. The contractor has just finished recording,
+  // he is holding the phone and looking at it, and the sentence he sees explains
+  // the thing he just did. The capture is already durable by now and the caller
+  // does not await this, so the dialog cannot delay or endanger it.
+  if (await needsPermissionAsk()) await requestSpeechPermission();
+
   const t = await recognizeFile(uri);
   if (!t) return { ok: false, reason: 'unsupported' };
   // Silence is a real result and must not become a stored transcript: an empty

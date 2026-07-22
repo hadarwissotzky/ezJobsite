@@ -52,6 +52,8 @@
 	<string>Allow $(PRODUCT_NAME) to access your location</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>EZjobsite stamps each photo with where it was taken, so it is evidence of what happened on this job.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>EZjobsite turns what you said into text on this phone, so your notes fill themselves in.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>EZjobsite records jobsite decisions so nothing gets lost.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

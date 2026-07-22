@@ -49,7 +49,13 @@
         }
       ],
       "expo-font",
-      "expo-speech-recognition"
+      [
+        "expo-speech-recognition",
+        {
+          "speechRecognitionPermission": "EZjobsite turns what you said into text on this phone, so your notes fill themselves in.",
+          "microphonePermission": "EZjobsite records what you say on site so nothing gets lost."
+        }
+      ]
     ]
   }
 }

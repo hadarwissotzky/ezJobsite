@@ -32,6 +32,7 @@ import { canRemind } from './remind';
 import { buildActivity, unreadCount } from './activity';
 import { notifyPermissionStatus, runNotifications } from './notifystore';
 import { markNotified } from './discussionstore';
+import { recognizeFile } from './ondevicestt';
 
 export type Step = { name: string; ok: boolean; detail: string };
 export type LoopResult = { steps: Step[]; passed: number; failed: number; pass: boolean };
@@ -259,6 +260,53 @@ export async function runLoopCheck(
       `notified_at_ms=${after[0]?.notified_at_ms ?? 'null'} (trigger excludes this column)`);
   } catch (e: any) {
     t('R8 stamped iff presented', false, String(e?.message ?? e).slice(0, 70));
+  }
+
+  // 13 ── R2 on device: does the phone actually recognise recorded speech?
+  //
+  // THE ONE THING THE DATABASE TESTS COULD NOT SETTLE. 368's guards and the
+  // newest-wins supersession were both proven against a real Postgres, but every
+  // one of those tests handed the transcript in by hand. Whether iOS can turn a
+  // recorded jobsite m4a into words is a question only a device answers, and it
+  // is the entire premise of choosing on-device over a paid API.
+  //
+  // The audio is REAL SPEECH, not a fixture: generated with macOS `say` and
+  // pushed into the app container, so this exercises the actual recogniser on
+  // actual encoded audio rather than a stub agreeing with itself.
+  //
+  // It asserts CONTENT, not just "it returned". A recogniser that hands back an
+  // empty string has failed, and an empty string is exactly what would silently
+  // sail through a truthiness check.
+  try {
+    const probe = `${FS.documentDirectory}stt-probe.m4a`;
+    const info = await FS.getInfoAsync(probe);
+    if (!info.exists) {
+      // Absent is VISIBLE, never a quiet pass. The fixture has to be pushed in
+      // before this can mean anything.
+      t('R2 on-device recognises', false,
+        'no stt-probe.m4a in documentDirectory — push it, then re-run');
+    } else {
+      // WHY separately, before calling: recognizeFile returns null for
+      // "this device cannot" and for "you have not been allowed" alike, and a
+      // failure that cannot name its cause sends the next person to the wrong
+      // fix. The first version of this step reported them as one string and I
+      // could not tell a simulator limitation from a permission I had not
+      // granted.
+      const M: any = await import('expo-speech-recognition');
+      const supports = !!M.ExpoSpeechRecognitionModule?.supportsOnDeviceRecognition?.();
+      const sperm = await M.ExpoSpeechRecognitionModule?.getPermissionsAsync?.();
+      const why = `onDevice=${supports} permission=${sperm?.status ?? 'unknown'}`;
+      const r = supports && sperm?.status === 'granted' ? await recognizeFile(probe) : null;
+      const text = (r?.text ?? '').toLowerCase();
+      // "subfloor" is the word that matters: it is domain vocabulary, not a
+      // stock phrase, so hearing it means the recogniser read THIS audio.
+      const heard = text.includes('subfloor') || text.includes('sub floor');
+      t('R2 on-device recognises', !!r && text.trim().length > 0 && heard,
+        r ? `"${(r.text ?? '').slice(0, 40)}" segments=${r.segments?.length ?? 0}`
+          : why);
+    }
+  } catch (e: any) {
+    t('R2 on-device recognises', false, String(e?.message ?? e).slice(0, 70));
   }
 
   const failed = steps.filter((s) => !s.ok).length;
