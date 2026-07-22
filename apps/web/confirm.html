@@ -217,12 +217,35 @@ async function load() {
   if (data.status === 'not_found') { done('⚠️', 'This link is not valid', 'It may have been mistyped. Ask for a new one.'); return; }
   if (data.status === 'expired') { done('⏰', 'This link has expired', 'Ask for a new one — nothing is lost.'); return; }
   if (data.status === 'already_answered') {
+    // R6 AC2, the CLIENT's half. This used to be a bare "done" screen: an emoji, a
+    // line of text, and nothing else. The client had just typed their name onto a
+    // priced commitment and the document itself became unreadable to them the
+    // instant they signed it — the contractor kept a copy on the record screen and
+    // the person who signed did not.
+    //
+    // That is the wrong way round. They are the party with the least access and the
+    // most at stake, and "either party opening the record later sees the identical
+    // immutable snapshot" is the requirement. So the frozen wording stays on the
+    // page, verbatim, after the answer. Collapsed by default because the answer is
+    // the headline — but one tap away, forever, at the same link.
     const when = data.answered_at ? new Date(data.answered_at).toLocaleString() : '';
     const who = data.signed_name ? ` by ${data.signed_name}` : '';
     const approved = data.answered_action === 'confirmed';
-    done(approved ? '✅' : '✋',
-      approved ? `Already approved${who ? ' — signed' + who.slice(3) : ''}` : 'Already answered',
-      when ? `Answered ${when}. Your answer stands.` : 'Your answer stands.');
+    const title = approved
+      ? `Already approved${who ? ' — signed' + who.slice(3) : ''}` : 'Already answered';
+    const sub = when ? `Answered ${when}. Your answer stands.` : 'Your answer stands.';
+    screen(`<div class="done"><div class="mark">${approved ? '✅' : '✋'}</div>
+      <h2>${esc(title)}</h2><p>${esc(sub)}</p></div>
+      <div class="wrap">
+        <div class="card">
+          <details class="exact" open>
+            <summary>What you signed</summary>
+            <div class="doc">${esc(data.shown_content)}</div>
+          </details>
+          <p class="recordnote">This is the exact wording, kept as it was when you
+            answered. It does not change.</p>
+        </div>
+      </div>`);
     return;
   }
   // Photos are OPTIONAL and their absence is never an error. On a database where
