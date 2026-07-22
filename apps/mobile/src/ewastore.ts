@@ -271,6 +271,11 @@ export async function markReminded(
 export type EwaRow = {
   id: string;
   projectId: string;
+  /** The decision this authorization came from. Step two (the priced change order)
+   *  is authored against the DECISION, not against the EWA's change-order id, so
+   *  the settle-it flow needs this to open the price composer on the right subject.
+   *  Added when wiring the ledger's unpriced banner. */
+  decisionId: string;
   scope: string;
   proceed: ProceedTerm;
   hourlyRateCents: number | null;
@@ -308,7 +313,7 @@ export async function listEwa(
   db: AbstractPowerSyncDatabase, projectId: string, nowMs = Date.now()
 ): Promise<EwaRow[]> {
   const rows = await db.getAll<{
-    id: string; project_id: string; scope: string; proceed_term: string;
+    id: string; project_id: string; decision_id: string; scope: string; proceed_term: string;
     hourly_rate_cents: number | null; cap_cents: number | null;
     settlement_hours: number; status: string; signed_by: string | null;
     approved_at_ms: number | null; last_reminded_at_ms: number | null;
@@ -316,7 +321,7 @@ export async function listEwa(
     child_id: string | null; child_status: string | null; child_amount: number | null;
     child_created_at_ms: number | null;
   }>(
-    `SELECT e.change_order_id AS id, e.project_id, co.scope, e.proceed_term,
+    `SELECT e.change_order_id AS id, e.project_id, co.decision_id, co.scope, e.proceed_term,
             e.hourly_rate_cents, e.cap_cents, e.settlement_hours,
             co.status, co.signed_by, e.approved_at_ms, e.last_reminded_at_ms,
             co.created_at_ms,
@@ -349,7 +354,7 @@ export async function listEwa(
     const childSentAtMs =
       r.child_id && r.child_status !== 'draft' ? r.child_created_at_ms : null;
     return {
-      id: r.id, projectId: r.project_id, scope: r.scope, proceed,
+      id: r.id, projectId: r.project_id, decisionId: r.decision_id, scope: r.scope, proceed,
       hourlyRateCents: r.hourly_rate_cents, capCents: r.cap_cents,
       settlementHours, rawStatus: r.status, status,
       approvedAtMs: r.approved_at_ms, lastRemindedAtMs: r.last_reminded_at_ms,

@@ -36,6 +36,13 @@ import { threadState, type ThreadMessage } from './src/discussion';
 import { drainR5bOutbox, ensureDiscussionSchema, postReply, pullThreads,
          threadFor, threadsForProject, undeliveredReplyIds } from './src/discussionstore';
 import { revisionOf } from './src/revision';
+// R3 step one. The screen composes the authorization; the store is local-first; the
+// sender is separate because putting a signable link in a client's hands is a
+// different act from storing a record (same split as confirmations.ts).
+import { EwaScreen, UnpricedEwaBanner } from './src/ui/ewascreen';
+import { drainEwaOutbox, ensureEwaSchema, ewaIds, listEwa, linkPriceToEwa,
+         markEwaApproved, markReminded, type EwaRow } from './src/ewastore';
+import { sendEwa } from './src/ewasend';
 import { decisionSummaryFor } from './src/decisionsummarydata';
 import type { DecisionSummary } from './src/decisionsummary';
 import { shareApprovalDoc } from './src/approvalrecordshare';
@@ -237,6 +244,33 @@ const changeType = async (t: ExtraType | null) => {
 };
 
 const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
+  // R3: an EWA is a DIFFERENT INSTRUMENT and takes a different sender — no price, no
+  // running total, kind='ewa'. Branching inside sendForConfirmation would have put a
+  // dozen conditionals in the one function whose output a client signs.
+  const asEwa = ewas.find((e) => e.id === c.id);
+  if (asEwa) {
+    const prof0 = await getProfile(db);
+    const re = await sendEwa(connector.client, {
+      ewaChangeOrderId: c.id, decisionId: c.decision_id, projectId,
+      projectName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
+      scope: c.scope, directedBy: c.who_directed || 'Owner',
+      counterparty: to?.name || c.who_directed || 'Owner',
+      terms: asEwa.proceed === 'tm_capped'
+        ? { proceed: 'tm_capped', hourlyRateCents: asEwa.hourlyRateCents!,
+            capCents: asEwa.capCents!, settlementHours: asEwa.settlementHours }
+        : { proceed: 'hold', settlementHours: asEwa.settlementHours },
+      channel: 'link', whenMs: Date.now(), linkBase: CONFIRM_BASE,
+      companyName: prof0?.company || prof0?.name || null,
+    });
+    if (!re.ok) { setUi({ k: 'refused', why: T(re.reason as any) }); return; }
+    await markLocalSent(db, c.id);
+    if (to) await markApproverUsed(db, to.id);
+    setSendPrep(null);
+    setSentLink({ url: re.url, shown: re.shownContent });
+    await refresh();
+    return;
+  }
+
   // The CONFIRM_BASE check that used to sit here moved INTO
   // sendForConfirmation, which now refuses before it writes. It was here and
   // not on the decision-confirm path, so one of the two send paths could mint
@@ -365,6 +399,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // R5b. `threads` is every thread on the job, for the ledger's flags; `thread` is
   // the one open on screen. The ref keeps refresh()'s identity stable, exactly as
   // recordIdRef does for the record.
+  const [ewas, setEwas] = React.useState<EwaRow[]>([]);
+  const [ewaSet, setEwaSet] = React.useState<Set<string>>(new Set());
+  // R3 step one, being composed. Null = not authoring one.
+  const [ewaDraft, setEwaDraft] = React.useState<null | {
+    decisionId: string; scope: string; whoDirected: string;
+  }>(null);
+  // R3 step two: which EWA the price about to be created will settle.
+  const [settling, setSettling] = React.useState<string | null>(null);
   const [threads, setThreads] = React.useState<Map<string, ThreadMessage[]>>(new Map());
   const [thread, setThread] = React.useState<null | {
     co: LedgerRow; messages: ThreadMessage[];
@@ -606,6 +648,21 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       setCoRows(await ledger(db, pid));
       try { setQuestions(await openQuestions(db, pid)); } catch { /* schema not up yet */ }
       try { setThreads(await threadsForProject(db, pid)); } catch { /* schema not up yet */ }
+      // R3: derived every cycle, never cached — AC4's flag depends on the clock, so a
+      // snapshot taken on tap would show "not yet due" hours after it came due.
+      try {
+        const es = await listEwa(db, pid);
+        setEwas(es);
+        setEwaSet(await ewaIds(db, pid));
+        // The clock starts when this device LEARNS the client approved, not when they
+        // signed — the local row has no signature timestamp. Deliberately
+        // conservative: it can only ever start LATE, so AC4 never flags early.
+        for (const e of es) {
+          if (e.rawStatus === 'approved' && e.approvedAtMs == null) {
+            await markEwaApproved(db, e.id, Date.now());
+          }
+        }
+      } catch { /* schema not up yet */ }
       // An open thread re-derives on the SAME cycle as everything else, for the same
       // reason the record does: a client can answer while he is reading it.
       const openThreadId = threadIdRef.current;
@@ -677,6 +734,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // ALTERs change_order to add superseded_by, the lineage the thread walks to
       // carry a conversation across a revision (R5b AC2).
       await ensureDiscussionSchema(db);
+      // AFTER ensureChangeOrderSchema for the same reason as the lines above: this
+      // ALTERs change_order to add parent_ewa_id, so the table has to exist first.
+      await ensureEwaSchema(db);
       // R6b: who captured / priced / sent, and who it was addressed to.
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
@@ -776,6 +836,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // forever. The drain carries his replies back out.
           const br = await drainR5bOutbox(db, connector.client, data.user.id);
           if (br.attempted) console.log('drain r5b:', JSON.stringify(br));
+          const er = await drainEwaOutbox(db, connector.client, data.user.id);
+          if (er.attempted) console.log('drain ewa:', JSON.stringify(er));
           const pt = await pullThreads(db, connector.client, projectId);
           if (pt.pulled || pt.revisions) { console.log('threads:', JSON.stringify(pt)); await refresh(); }
           // R6b actor facts. Same reason as the roster: a fact that only ever lives
@@ -2349,11 +2411,30 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               }}>
                 <Text style={s.askT}>Price it (change order) →</Text>
               </Pressable>
+              {/* R3: the price is not knowable on site. Same row as "Price it",
+                  because the choice between them is made in the same moment. */}
+              <Pressable style={s.ask} onPress={() => setEwaDraft({
+                decisionId: d.id, scope: d.current_value,
+                whoDirected: d.directed_by ?? 'Owner',
+              })}>
+                <Text style={s.askT}>{T('ewa.entry')} →</Text>
+              </Pressable>
             </Pressable>
           ))}
         </>
       )}
 
+      {ewaDraft && (
+        <EwaScreen
+          db={db} decisionId={ewaDraft.decisionId} projectId={projectId}
+          projectName={projects.find((p) => p.id === projectId)?.name ?? 'this job'}
+          ownerId={OWNER} scope={ewaDraft.scope} whoDirected={ewaDraft.whoDirected}
+          onClose={() => setEwaDraft(null)}
+          // MANDATE #2: creating it does not send it. It lands in the ledger as a
+          // draft and goes out through the same send-preview a priced CO does.
+          onCreated={async () => { setEwaDraft(null); await refresh(); }}
+        />
+      )}
       {priced && (() => {
         const cents = centsFromInput(priced.amountText);
         const nte = centsFromInput(priced.nteText);
@@ -2478,6 +2559,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     // for one piece of work is the contradiction 250_one_live_link
                     // exists to prevent, and the client could sign the retired one
                     // while the revision sits unsent in the ledger.
+                    // R3 AC3: step two names its parent, and it does so BEFORE the
+                    // client ever sees it. Linking after send would mean the price
+                    // they signed had its relationship to the authorization decided
+                    // afterwards.
+                    if (settling) {
+                      const lk = await linkPriceToEwa(db, r.id, settling);
+                      if (!lk.ok) setUi({ k: 'refused', why: T(lk.reason as any) });
+                      setSettling(null);
+                    }
                     if (priced.supersedes) {
                       const sup = await supersedeExtra(db,
                         { changeOrderId: priced.supersedes, supersededBy: r.id });
@@ -2520,6 +2610,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // share sheet delivers it from a number the client already recognises.
         return (
         <>
+          {/* AC4: "flagged prominently". Above the totals card, not a chip on a row
+              he has to scroll to — it is his own late promise. */}
+          <UnpricedEwaBanner rows={ewas} onPrice={(e) => {
+            markReminded(db, e.id);
+            setSettling(e.id);
+            setPriced({ decisionId: e.decisionId, scope: e.scope, whoDirected: 'Owner',
+                        amountText: '', confidence: 'none', nteText: '' });
+          }} />
           <Text style={s.ledgerHead}>Extras</Text>
 
           {/* Dark totals card — reads as the summary, not another row. */}
@@ -2602,8 +2700,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     </View>
                   </View>
                   <View style={s.coR2}>
+                    {/* R3 AC3: an EWA has no price, so "$0.00" would read as "this
+                        extra is free". Show the TERM instead — the cap is exposure,
+                        not a charge. */}
                     <Text style={s.coAmt}>
-                      {c.amount}{c.is_mini ? ' · mini' : ''}{c.nte ? ` · NTE ${c.nte}` : ''}
+                      {ewaSet.has(c.id)
+                        ? T(ewas.find((e) => e.id === c.id)?.proceed === 'tm_capped'
+                            ? 'ewa.rowTm' : 'ewa.rowHold')
+                        : `${c.amount}${c.is_mini ? ' · mini' : ''}${c.nte ? ` · NTE ${c.nte}` : ''}`}
                     </Text>
                     {c.signed_by && <Text style={s.coSub}>Signed by {c.signed_by}</Text>}
                   </View>
