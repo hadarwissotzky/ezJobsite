@@ -208,14 +208,20 @@ end-to-end" hides that most of it is.
 |---|---|---|
 | app → local SQLite | YES | `loopcheck` 7/7 on the simulator, real database |
 | local durability | YES | REQ-PROC4: 100 cycles, 10 mid-sync kills, zero loss |
-| **app → server (send)** | **PARTLY** | the SIGNATURE resolves against the live database (`./scripts/check-rpc-signatures.sh`) — PostgREST finds `confirmation_create` with the app's exact 16 parameters and refuses only on the grant (42501, not PGRST202). What is unproven is that an AUTHENTICATED call succeeds. |
+| app → server (send) | YES | two halves. `./scripts/check-rpc-signatures.sh` proves PostgREST resolves `confirmation_create` with the app's exact 16 parameters (42501, never PGRST202). `verify-approval-loop.sql` CHECK 14 then CALLS it authenticated with those same 16 parameters against the live database: returns `created`, stamps `owner_id` from `auth.uid()`, and 230's trigger moves the change order to `sent`. |
 | server logic | YES | `verify-approval-loop.sql`, 13 checks against the LIVE database: send→sent, approve→approved + signed + grade, decline→declined, resend retires the old link, unsigned refused, price/hash mismatch refused, cross-tenant refused |
 | server → client page | YES | a real production token loaded in a browser; the page rendered real frozen data, priced card, NTE clause, running total |
 
-So: the send's SERVER EFFECT is proven (CHECK 1), the page's READ is proven (a real
-token rendered in a browser), and the CALL SHAPE is proven (the signature resolves).
-What remains unproven is one thing only — that `confirmation_create` SUCCEEDS when
-called with a session. One sign-in closes it.
+**All five hops now have evidence.** The last one held out longest because I kept
+saying it "needs a real session". It does not: `set_config('request.jwt.claims')`
+makes `auth.uid()` resolve, which is the technique CHECK 10 in that same file already
+used for RLS. I had written that check myself and did not connect the two for a long
+time.
+
+What is still NOT proven, and is a smaller claim than it sounds: the literal HTTP hop
+from a phone. The RPC resolves over HTTP (the signature script proves that) and
+succeeds under auth (CHECK 14 proves that), from opposite ends. Nobody has watched a
+device do both in one motion. That needs one sign-in and one tap.
 
 `./scripts/check-rpc-signatures.sh` is worth running whenever a migration changes a
 function. PostgREST resolves an RPC by EXACT PARAMETER NAME SET, so renaming one

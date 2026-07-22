@@ -334,4 +334,54 @@ begin
          else 'FAIL -- would send them to an already-signed link' end;
 end $$;
 
+-- 14 ── THE APP'S OWN SEND, AUTHENTICATED (the app -> server join)
+--
+-- Every other check here inserts into confirmation_request DIRECTLY, because that is
+-- where the triggers under test live. That leaves one thing unproven: the RPC the app
+-- actually calls, with the exact parameters it sends, as an authenticated user.
+--
+-- I claimed for a long time that this needed a real Supabase session and could not be
+-- tested here. It does not. set_config('request.jwt.claims') makes auth.uid() resolve
+-- — the same technique CHECK 10 above already uses for RLS, in this same file.
+do $$
+declare me uuid := gen_random_uuid();
+        res jsonb; st text; tok text := 'vsend-' || substr(md5(random()::text),1,8);
+        body text;
+begin
+  insert into public.project (id, owner_id, name) values ('vasp', me, 'Auth send');
+  insert into public.change_order
+    (id,decision_id,project_id,owner_id,scope,amount_cents,nte_cents,who_directed,
+     numbers_confirmed_at,status)
+    values ('vasco','vasd','vasp',me,'Relocate the gas line',185000,220000,'Sarah',now(),'draft');
+
+  perform set_config('request.jwt.claims', json_build_object('sub', me)::text, true);
+  perform set_config('role','authenticated', true);
+
+  body := 'Price: $1,850.00 (time & materials)' || chr(10) ||
+          'Not to exceed: $2,200.00' || chr(10) ||
+          'Work will not exceed $2,200.00 without a new approval.';
+
+  -- The 16 parameters sendForConfirmation sends, named exactly as it names them. If
+  -- a migration renames one, this fails here instead of at a contractor's thumb.
+  res := public.confirmation_create(
+    p_token := tok, p_decision_id := 'vasd', p_project_id := 'vasp', p_kind := 'confirm',
+    p_shown_content := body,
+    p_shown_sha256 := encode(sha256(convert_to(body,'UTF8')),'hex'),
+    p_counterparty := 'Sarah Miller', p_channel := 'link', p_destination := null,
+    p_amount_cents := 185000, p_nte_cents := 220000,
+    p_scope_title := 'Relocate the gas line', p_company_name := 'Ridgeline Builders',
+    p_job_label := '41 Alder Street', p_approved_running_cents := 640000,
+    p_change_order_id := 'vasco');
+  perform set_config('role','postgres', true);
+
+  raise notice 'CHECK 14a rpc      -> %   %', res->>'status',
+    case when res->>'status' = 'created' then 'PASS' else 'FAIL' end;
+  select owner_id::text into st from public.confirmation_request where token = tok;
+  raise notice 'CHECK 14b owner    -> %   %', case when st = me::text then 'auth.uid()' else 'WRONG' end,
+    case when st = me::text then 'PASS' else 'FAIL' end;
+  select status into st from public.change_order where id='vasco';
+  raise notice 'CHECK 14c CO sent  -> %   %', st,
+    case when st='sent' then 'PASS' else 'FAIL' end;
+end $$;
+
 rollback;
