@@ -757,6 +757,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       setDelivery({ pending: (s?.pending ?? 0) + ds.pending, parked: (s?.parked ?? 0) + ds.parked });
       setDecisions(await listDecisions(db, pid));
       const ledgerRows = await ledger(db, pid);
+      // TEMPORARY DIAGNOSTIC. Two copies of the phone's database came back with
+      // different sizes and an mtime hours old, so a file copy is not telling me
+      // what the app sees. This reads the live database in-process, which is the
+      // only thing that can settle it.
+      console.log('[ledger]', JSON.stringify({
+        project: pid, rows: ledgerRows.length,
+        statuses: ledgerRows.map((r) => r.status),
+      }));
       setCoRows(ledgerRows); coRowsRef.current = ledgerRows;
       try { setQuestions(await openQuestions(db, pid)); } catch { /* schema not up yet */ }
       try { setThreads(await threadsForProject(db, pid)); } catch { /* schema not up yet */ }
@@ -2283,6 +2291,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // Mandate #2: this writes a file and opens the OS share sheet. It does not
         // transmit anything to a client, and must never be changed to.
         onShare={() => { void shareApprovalDoc(db, record.id); }}
+        // Only for a draft. Undefined once sent hides the control entirely
+        // rather than showing something that refuses — an action you can press
+        // and be told no is worse than one that was never offered.
+        onDelete={record.status === 'draft' ? async () => {
+          const row = coRowsRef.current.find((c) => c.id === record.id);
+          const plan = await previewDiscard(db, record.id);
+          setRecord(null);
+          setDiscard({ co: row ?? ({ id: record.id, scope: record.title } as any), plan });
+        } : undefined}
         onBack={() => { recordIdRef.current = null; setRecord(null); setRecordSummary(null); setApproval(null); setNarration(null); }}
         // R1: capture stays one tap away on secondary screens. Leaving the record to
         // capture is the point — a new extra should never require going home first.

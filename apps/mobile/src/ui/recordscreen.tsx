@@ -54,6 +54,9 @@ export function RecordScreen(props: {
   onCapture?: () => void;
   /** R6 / R5b AC3 — write the approval document and open the share sheet. */
   onShare?: () => void;
+  /** Offered ONLY while the extra is a draft — App.tsx passes undefined once it
+   *  has been sent, because a client may have read it by then. */
+  onDelete?: () => void;
 }) {
   const { rec } = props;
   const chip = chipStyle(chipKind(rec.status));
@@ -180,6 +183,22 @@ export function RecordScreen(props: {
         <Text style={{ ...T.bodySteel, fontSize: 11.5, marginTop: 2 }}>
           {t('erec.deliveryNote')}
         </Text>
+
+        {/* Delete lives HERE, at the bottom of the record, because this is the
+            screen someone opens when they have decided they do not want it. It
+            was first put on the ledger row only, which is not where anyone
+            looks. Last in the scroll on purpose: a destructive action should be
+            reachable, never adjacent to the thumb by accident. */}
+        {props.onDelete && (
+          <Pressable
+            onPress={props.onDelete}
+            accessibilityLabel={t('discard.action')}
+            style={{ marginTop: 28, marginBottom: 40, paddingVertical: 14, alignItems: 'center' }}>
+            <Text style={{ ...T.body, fontSize: 15, color: C.danger }}>
+              {t('discard.action')}
+            </Text>
+          </Pressable>
+        )}
       </ScrollView>
 
       {props.onCapture && (
