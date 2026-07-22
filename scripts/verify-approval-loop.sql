@@ -208,7 +208,11 @@ begin
   -- Alice, presented the way PostgREST presents her.
   perform set_config('request.jwt.claims', json_build_object('sub', alice)::text, true);
   perform set_config('role','authenticated', true);
-  execute 'select count(*) from public.approval' into seen_alice;
+  -- Scoped to THIS check's two fixtures. An unscoped count(*) reported "alice sees 5
+  -- of 2", because earlier checks in this same transaction insert approvals of their
+  -- own -- a number that cannot be read at a glance is a number that gets misread.
+  execute $q$select count(*) from public.approval where project_id in ('vp_alice','vp_bob')$q$
+    into seen_alice;
   execute $q$select string_agg(legal_name,',') from public.approval where project_id='vp_bob'$q$
     into leaked;
   perform set_config('role','postgres', true);
@@ -218,6 +222,75 @@ begin
   raise notice 'CHECK 10b isolation-> alice reads bob''s signature: %   %',
     coalesce(leaked,'(nothing)'),
     case when leaked is null then 'PASS' else 'FAIL -- TENANT LEAK' end;
+end $$;
+
+-- 11 ── R5c: the taxonomy and the roster (280_approver_roster, 290_r5c_transport)
+--
+-- These SKIP rather than fail when the migrations are not applied. That is the point:
+-- 280 and 290 are written and unapplied, and a harness that either exploded or
+-- silently passed would tell you nothing about which is true. A SKIPPED line names
+-- the migration that is missing, so this file doubles as a report of what is live.
+do $$
+declare has_roster boolean; has_type boolean; v bigint; st text; o uuid;
+begin
+  select to_regclass('public.project_approver') is not null into has_roster;
+  select exists(select 1 from information_schema.columns
+                 where table_name='change_order' and column_name='extra_type') into has_type;
+
+  if not has_type then
+    raise notice 'CHECK 11 extra_type -> SKIPPED (280_approver_roster not applied)';
+  else
+    insert into public.project (id, owner_id, name) values ('vp_t', gen_random_uuid(), 'T');
+    insert into public.change_order
+      (id,decision_id,project_id,owner_id,scope,amount_cents,who_directed,numbers_confirmed_at)
+      values ('vco_t','vd_t','vp_t',gen_random_uuid(),'s',100,'Owner',now());
+    begin
+      update public.change_order set extra_type='finish' where id='vco_t';
+      raise notice 'CHECK 11a known type      -> accepted   PASS';
+    exception when others then raise notice 'CHECK 11a known type      -> REFUSED    FAIL'; end;
+    begin
+      update public.change_order set extra_type='plumbing' where id='vco_t';
+      raise notice 'CHECK 11b unknown type    -> accepted   FAIL (taxonomy unenforced)';
+    exception when check_violation then
+      raise notice 'CHECK 11b unknown type    -> refused    PASS'; end;
+    begin
+      -- R5c's last AC: an untyped extra must work. A NOT NULL here would be a bug.
+      update public.change_order set extra_type=null where id='vco_t';
+      raise notice 'CHECK 11c untyped         -> allowed    PASS';
+    exception when others then
+      raise notice 'CHECK 11c untyped         -> REFUSED    FAIL (breaks the offline AC)'; end;
+  end if;
+
+  if not has_roster then
+    raise notice 'CHECK 12 roster     -> SKIPPED (280_approver_roster not applied)';
+  else
+    o := gen_random_uuid();
+    insert into public.project_approver
+      (id,project_id,owner_id,name,role,last_used_ms,created_at_ms)
+      values ('va_1','vp_t',o,'Sarah','owner',500,0);
+    begin
+      insert into public.project_approver (id,project_id,owner_id,name,role,created_at_ms)
+        values ('va_2','vp_t',o,'X','boss',0);
+      raise notice 'CHECK 12a bogus role      -> accepted   FAIL';
+    exception when check_violation then
+      raise notice 'CHECK 12a bogus role      -> refused    PASS'; end;
+
+    -- Recency must never walk backwards. Devices drain out of order routinely, and
+    -- last_used_ms decides who the next priced approval is addressed to.
+    update public.project_approver set last_used_ms=900
+      where id='va_1' and owner_id=o and last_used_ms<900;
+    update public.project_approver set last_used_ms=100
+      where id='va_1' and owner_id=o and last_used_ms<100;
+    select last_used_ms into v from public.project_approver where id='va_1';
+    raise notice 'CHECK 12b out-of-order    -> last_used=%  %', v,
+      case when v=900 then 'PASS' else 'FAIL (routing corrupted by replay order)' end;
+
+    update public.project_approver set status='removed'
+      where id='va_1' and owner_id=gen_random_uuid() and status='active';
+    select status into st from public.project_approver where id='va_1';
+    raise notice 'CHECK 12c cross-tenant    -> %      %', st,
+      case when st='active' then 'PASS' else 'FAIL (a stranger retired my approver)' end;
+  end if;
 end $$;
 
 rollback;

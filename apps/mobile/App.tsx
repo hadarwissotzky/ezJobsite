@@ -60,7 +60,14 @@ import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
 import { sendForConfirmation } from './src/confirmations';
-import { ensureApproverSchema } from './src/approvers';
+import {
+  ensureApproverSchema, drainR5cOutbox, suggestFor, listRoster, addApprover,
+  markApproverUsed, setExtraType, reasonText, typeLabel, roleLabel,
+  type RosterMember,
+} from './src/approvers';
+import {
+  EXTRA_TYPES, APPROVER_ROLES, type ExtraType, type ApproverRole, type Suggestion,
+} from './src/approverrouting';
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine,
          markLocalSent, money, parseMoney, validateLines,
@@ -177,6 +184,106 @@ export default function App() {
   }>(null);
   const [history, setHistory] = React.useState<any[] | null>(null);
   const [sentLink, setSentLink] = React.useState<{url:string; shown:string} | null>(null);
+
+// Open the preview instead of sending. R5c + mandate #2: the recipient is a
+// SUGGESTION until a human has looked at it.
+const openSendPrep = async (c: LedgerRow) => {
+  const t = (c.extra_type ?? null) as ExtraType | null;
+  const { suggestion, roster } = await suggestFor(db, projectId, t);
+  setSendPrep({ co: c, type: t, suggestion, roster,
+                chosenId: null, picking: false, adding: null, busy: false });
+};
+
+// Re-derive the suggestion whenever the type changes. The whole point of the
+// type is that it moves the recipient; a picker that did not would be theatre.
+const changeType = async (t: ExtraType | null) => {
+  setSendPrep((p) => p && { ...p, type: t });
+  if (!sendPrep) return;
+  await setExtraType(db, sendPrep.co.id, t);
+  const { suggestion, roster } = await suggestFor(db, projectId, t);
+  // chosenId is cleared: an explicit override was made against the OLD
+  // suggestion, and silently keeping it after the type changed would show a
+  // reason that no longer explains the person.
+  setSendPrep((p) => p && { ...p, type: t, suggestion, roster, chosenId: null });
+};
+
+const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
+  // The CONFIRM_BASE check that used to sit here moved INTO
+  // sendForConfirmation, which now refuses before it writes. It was here and
+  // not on the decision-confirm path, so one of the two send paths could mint
+  // a request for a link that goes nowhere. The refusal surfaces through the
+  // same `r.ok === false` branch below, so the user-visible behaviour on this
+  // path is unchanged.
+  const prof = await getProfile(db);
+  // Recomputed here rather than captured from the ledger's render scope: this now
+  // runs from a sheet that outlives that scope, and a stale figure would freeze a
+  // WRONG "extras you've approved on this job" total into the instrument the client
+  // signs (mandate #5/#6).
+  const approvedCents = coRows
+    .filter((x) => x.status === 'approved')
+    .reduce((n, x) => n + x.amount_cents, 0);
+  const r = await sendForConfirmation(connector.client, {
+    kind: 'confirm', decisionId: c.decision_id, projectId,
+    projectName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
+    subject: c.scope, value: c.scope,
+    directedBy: c.who_directed || 'Owner',
+    // The APPROVER, not who asked for the work. These are different people
+    // and conflating them is how a request reaches someone who cannot
+    // authorise it. Falls back to who_directed only when the roster is empty,
+    // which is the pre-R5c behaviour and still better than nothing.
+    counterparty: to?.name || c.who_directed || 'Owner',
+    channel: 'link', whenMs: Date.now(), linkBase: CONFIRM_BASE,
+    amountCents: c.amount_cents,
+    // The cap travels with the price or the client signs the wrong
+    // instrument: renderCard bakes the not-to-exceed clause into the frozen
+    // shown_content, and the approval page renders it, only if this is here.
+    nteCents: c.nte_cents,
+    companyName: prof?.company || prof?.name || null,
+    approvedRunningCents: approvedCents, changeOrderId: c.id,
+  });
+  if (r.ok) {
+    // The link is out, so the row says so immediately. The server marks it
+    // sent as well (230_close_the_loop) and stays the authority; this is
+    // here so the ledger does not keep offering "Send for approval →" for
+    // the thing he just watched himself send.
+    //
+    // The return value is READ, which is the whole reason it exists.
+    // markLocalSent only moves a row OUT of 'draft', so false means the
+    // change order was already past draft -- the client answered between
+    // this screen rendering and this tap, or a hydrate landed first. The
+    // link did go out, so nothing is undone and nothing is refused; but the
+    // local row is not the one this code just moved, and refresh() below is
+    // what makes the screen honest about that.
+    const moved = await markLocalSent(db, c.id);
+    if (!moved) {
+      console.log('[send] %s was already past draft; server state wins', c.id);
+    }
+    // AFTER a successful send, never before: last_used_ms drives who gets
+    // suggested next, and an attempt that failed is not evidence of anything.
+    if (to) await markApproverUsed(db, to.id);
+    setSendPrep(null);
+    setSentLink({ url: r.url, shown: r.shownContent });
+    await refresh();
+  } else setUi({ k: 'refused', why: r.reason });
+};
+
+  /**
+   * R5c — the send preview. Tapping "Send for approval" no longer sends; it opens
+   * this. That is mandate #2 ("anything carrying a price or a commitment requires a
+   * mandatory human confirmation step before it commits or sends"), and it is also
+   * the only place the routing suggestion can be shown before it is acted on. A
+   * pre-filled recipient nobody read is an inference carrying a price.
+   */
+  const [sendPrep, setSendPrep] = React.useState<{
+    co: LedgerRow;
+    type: ExtraType | null;
+    suggestion: Suggestion | null;
+    roster: RosterMember[];
+    chosenId: string | null;     // null = take the suggestion
+    picking: boolean;            // showing the full roster to override
+    adding: null | { name: string; role: ApproverRole };
+    busy: boolean;
+  } | null>(null);
 
   // Where the no-login page is hosted. REQ-VAL3's link is only as good as the
   // page it lands on, so this is configuration, not a constant -- and its absence
@@ -550,6 +657,13 @@ export default function App() {
           if (tg.attempted) console.log('drain tags:', JSON.stringify(tg));
           const cr = await drainChangeOrderOutbox(db, connector.client, data.user.id);
           if (cr.attempted) console.log('drain change orders:', JSON.stringify(cr));
+          // R5c: roster additions, retirements, recency and extra-type changes. This
+          // was WRITTEN AND NOT WIRED -- rows were enqueued atomically and then sat on
+          // the device forever, so a second phone saw an empty roster and the type the
+          // contractor picked never left the handset. An outbox nothing drains is a
+          // queue that looks like sync.
+          const ar = await drainR5cOutbox(db, connector.client, data.user.id);
+          if (ar.attempted) console.log('drain r5c:', JSON.stringify(ar));
           // Pull anything this device does not have: a reinstall, a second phone,
           // or a CO authored before the device became the author.
           // Tie walkthrough photos to the sentences spoken over them, once the
@@ -2209,50 +2323,6 @@ export default function App() {
         // client opens: company (from profile), scope, price, and the running total
         // already approved on this job, all frozen together (mandate #5/#6). The
         // share sheet delivers it from a number the client already recognises.
-        const sendPricedApproval = async (c: LedgerRow) => {
-          // The CONFIRM_BASE check that used to sit here moved INTO
-          // sendForConfirmation, which now refuses before it writes. It was here and
-          // not on the decision-confirm path, so one of the two send paths could mint
-          // a request for a link that goes nowhere. The refusal surfaces through the
-          // same `r.ok === false` branch below, so the user-visible behaviour on this
-          // path is unchanged.
-          const prof = await getProfile(db);
-          const r = await sendForConfirmation(connector.client, {
-            kind: 'confirm', decisionId: c.decision_id, projectId,
-            projectName: proj?.name ?? 'this job',
-            subject: c.scope, value: c.scope,
-            directedBy: c.who_directed || 'Owner',
-            counterparty: c.who_directed || 'Owner',
-            channel: 'link', whenMs: Date.now(), linkBase: CONFIRM_BASE,
-            amountCents: c.amount_cents,
-            // The cap travels with the price or the client signs the wrong
-            // instrument: renderCard bakes the not-to-exceed clause into the frozen
-            // shown_content, and the approval page renders it, only if this is here.
-            nteCents: c.nte_cents,
-            companyName: prof?.company || prof?.name || null,
-            approvedRunningCents: approvedCents, changeOrderId: c.id,
-          });
-          if (r.ok) {
-            // The link is out, so the row says so immediately. The server marks it
-            // sent as well (230_close_the_loop) and stays the authority; this is
-            // here so the ledger does not keep offering "Send for approval →" for
-            // the thing he just watched himself send.
-            //
-            // The return value is READ, which is the whole reason it exists.
-            // markLocalSent only moves a row OUT of 'draft', so false means the
-            // change order was already past draft -- the client answered between
-            // this screen rendering and this tap, or a hydrate landed first. The
-            // link did go out, so nothing is undone and nothing is refused; but the
-            // local row is not the one this code just moved, and refresh() below is
-            // what makes the screen honest about that.
-            const moved = await markLocalSent(db, c.id);
-            if (!moved) {
-              console.log('[send] %s was already past draft; server state wins', c.id);
-            }
-            setSentLink({ url: r.url, shown: r.shownContent });
-            await refresh();
-          } else setUi({ k: 'refused', why: r.reason });
-        };
         return (
         <>
           <Text style={s.ledgerHead}>Extras</Text>
@@ -2350,7 +2420,7 @@ export default function App() {
                     Sending again is legitimate only while it is still open, and it
                     now RETIRES the previous link (250_one_live_link). */}
                 {(c.status === 'draft' || c.status === 'sent') && (
-                  <Pressable style={s.coSendRow} onPress={() => sendPricedApproval(c)}>
+                  <Pressable style={s.coSendRow} onPress={() => openSendPrep(c)}>
                     <Text style={s.coNudge}>
                       {c.status === 'sent' ? 'Resend link →' : 'Send for approval →'}
                     </Text>
@@ -2363,6 +2433,148 @@ export default function App() {
         );
       })()}
 
+
+      {/* ── R5c SEND PREVIEW ─────────────────────────────────────────────────
+          What kind of extra is this, and who is entitled to approve it. Nothing is
+          sent from here until the contractor taps the confirm button, because
+          mandate #2 forbids a priced commitment leaving on an inference and R5c
+          requires the routing REASON to be visible, not merely computed. */}
+      {sendPrep && (() => {
+        const sp = sendPrep;
+        const sug = sp.suggestion;
+        const suggested = sug && sug.kind === 'suggested' ? sug.approver : null;
+        const chosen = sp.chosenId
+          ? sp.roster.find((r) => r.id === sp.chosenId) ?? null
+          : sp.roster.find((r) => r.id === suggested?.id) ?? null;
+        const unconfirmed = !sp.chosenId && sug?.kind === 'suggested' && !sug.bindsMoney;
+        return (
+          <View style={s.money}>
+            <Text style={s.cardH}>{T('r5c.sendTo')}</Text>
+            <Text style={s.moneyScope}>{sp.co.scope} · {sp.co.amount}</Text>
+
+            {/* ── what kind of extra ── */}
+            <Text style={s.cardH}>{T('r5c.whatKind')}</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+              {EXTRA_TYPES.map((t) => (
+                <Pressable key={t} onPress={() => changeType(t)}
+                  style={[s.chip, sp.type === t && s.chipOn]}>
+                  <Text style={[s.chip, sp.type === t && s.chipOn,
+                                { borderWidth: 0, paddingHorizontal: 0, paddingVertical: 0 }]}>
+                    {typeLabel(t)}
+                  </Text>
+                </Pressable>
+              ))}
+              {/* Untyped is a real choice, not the absence of one (R5c's offline AC). */}
+              <Pressable onPress={() => changeType(null)}
+                style={[s.chip, sp.type === null && s.chipOn]}>
+                <Text style={[s.chip, sp.type === null && s.chipOn,
+                              { borderWidth: 0, paddingHorizontal: 0, paddingVertical: 0 }]}>
+                  {T('r5c.untyped')}
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* ── who approves ── */}
+            {sp.adding ? (
+              <View>
+                <Text style={s.cardH}>{T('r5c.whoApproves')}</Text>
+                <TextInput
+                  style={s.input} placeholder={T('r5c.namePlaceholder')}
+                  value={sp.adding.name}
+                  onChangeText={(v) => setSendPrep((p) => p && p.adding
+                    ? { ...p, adding: { ...p.adding, name: v } } : p)}
+                />
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 8 }}>
+                  {APPROVER_ROLES.map((role) => (
+                    <Pressable key={role}
+                      onPress={() => setSendPrep((p) => p && p.adding
+                        ? { ...p, adding: { ...p.adding, role } } : p)}
+                      style={[s.chip, sp.adding!.role === role && s.chipOn]}>
+                      <Text style={[s.chip, sp.adding!.role === role && s.chipOn,
+                                    { borderWidth: 0, paddingHorizontal: 0, paddingVertical: 0 }]}>
+                        {roleLabel(role)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Pressable style={s.confirmWide} disabled={!sp.adding.name.trim()}
+                  onPress={async () => {
+                    const a = sp.adding!;
+                    const id = await addApprover(db, {
+                      projectId, name: a.name.trim(), role: a.role,
+                    });
+                    const roster = await listRoster(db, projectId);
+                    // Chosen explicitly: they were just added FOR this send, so
+                    // re-deriving a suggestion here would throw that away.
+                    setSendPrep((p) => p && { ...p, roster, chosenId: id, adding: null });
+                  }}>
+                  <Text style={s.confirmT}>{T('r5c.addApprover')}</Text>
+                </Pressable>
+              </View>
+            ) : sp.picking ? (
+              <View>
+                <Text style={s.cardH}>{T('r5c.whoApproves')}</Text>
+                {sp.roster.map((m) => (
+                  <Pressable key={m.id} style={s.coSendRow}
+                    onPress={() => setSendPrep((p) => p && { ...p, chosenId: m.id, picking: false })}>
+                    <Text style={s.dval}>{m.name}</Text>
+                    <Text style={s.dmeta}>{roleLabel(m.role)}</Text>
+                  </Pressable>
+                ))}
+                <Pressable style={s.coSendRow}
+                  onPress={() => setSendPrep((p) => p && { ...p, picking: false,
+                    adding: { name: '', role: 'owner' } })}>
+                  <Text style={s.coNudge}>{T('r5c.addApprover')} →</Text>
+                </Pressable>
+              </View>
+            ) : chosen ? (
+              <View>
+                <Text style={s.dval}>{chosen.name}</Text>
+                {/* The REASON, shown verbatim. R5c: "with the reason visible". A
+                    pre-filled recipient the sender cannot check is the failure. */}
+                <Text style={s.dmeta}>
+                  {sp.chosenId ? roleLabel(chosen.role) : reasonText(sug!)}
+                </Text>
+                {unconfirmed && (
+                  <Text style={s.warn}>{T('r5c.unconfirmedAuthority')}</Text>
+                )}
+                <Pressable style={s.coSendRow}
+                  onPress={() => setSendPrep((p) => p && { ...p, picking: true })}>
+                  <Text style={s.coNudge}>{T('r5c.change')} →</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View>
+                <Text style={s.warn}>{T('r5c.noRoster')}</Text>
+                <Pressable style={s.coSendRow}
+                  onPress={() => setSendPrep((p) => p && { ...p,
+                    adding: { name: '', role: (sug && sug.kind === 'needs_approver'
+                      && sug.wantedRole) ? sug.wantedRole : 'owner' } })}>
+                  <Text style={s.coNudge}>{T('r5c.addApprover')} →</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {/* Send is DISABLED until somebody is named. Sending a priced commitment
+                to nobody is not a degraded send, it is a lost one. */}
+            {!sp.adding && !sp.picking && (
+              <>
+                <Pressable style={s.confirmWide} disabled={!chosen || sp.busy}
+                  onPress={async () => {
+                    setSendPrep((p) => p && { ...p, busy: true });
+                    await sendPricedApproval(sp.co, chosen);
+                    setSendPrep((p) => p && { ...p, busy: false });
+                  }}>
+                  <Text style={s.confirmT}>{T('conf.send')}</Text>
+                </Pressable>
+                <Pressable style={s.coSendRow} onPress={() => setSendPrep(null)}>
+                  <Text style={s.dmeta}>{T('common.cancel')}</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+        );
+      })()}
 
       {sentLink && (
         <View style={s.card}>

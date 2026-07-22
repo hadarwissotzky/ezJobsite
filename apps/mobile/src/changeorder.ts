@@ -357,6 +357,11 @@ export type LedgerRow = {
   // labels it "Created", which is now true. Raw ms alongside the rendered label for
   // the same reason as amount_cents -- never re-parse a formatted string.
   created_at_ms: number; created: string;
+  /**
+   * R5c. Null is a FIRST-CLASS value, not a missing one: an untyped extra is a
+   * normal extra and must never be blocked (R5c's last AC, mandate #7).
+   */
+  extra_type: string | null;
 };
 
 /**
@@ -380,10 +385,10 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     id: string; decision_id: string; who_directed: string; scope: string;
     amount_cents: number; nte_cents: number | null;
     status: string; is_mini: number; signed_by: string | null;
-    created_at_ms: number; pending: number;
+    created_at_ms: number; pending: number; extra_type: string | null;
   }>(
     `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.amount_cents, co.nte_cents,
-            co.status, co.is_mini, co.signed_by, co.created_at_ms,
+            co.status, co.is_mini, co.signed_by, co.created_at_ms, co.extra_type,
             EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending
        FROM change_order co
       WHERE co.project_id = ?
@@ -407,6 +412,7 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
       approved_running: money(running),
       amount_cents: r.amount_cents,
       created_at_ms: r.created_at_ms, created: createdLabel(r.created_at_ms),
+      extra_type: r.extra_type,
       // "on this phone" and "in the cloud" are different facts and the sender is
       // entitled to know which one they are looking at.
       synced: r.pending ? 0 : 1,
