@@ -75,6 +75,23 @@
   .trow { display: flex; justify-content: space-between; font-size: 14.5px; padding: 3px 0; color: var(--steel); }
   .trow b { color: var(--ink); font-family: var(--disp); font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; }
 
+  /* PHOTOS — PRD R4. The evidence the client is being asked to believe.
+     Two columns with the first tile spanning both: the opening shot of the walk is
+     the one that says what this is about, and a uniform grid of thumbnails on a
+     phone reads as decoration rather than as the thing you are approving.
+     `aspect-ratio` + a filled background means every tile reserves its space BEFORE
+     the bytes land, so the page does not reflow under the client's thumb while the
+     images stream in on LTE — which on a slow link is how you get an accidental tap
+     on a button that just moved. */
+  .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; }
+  .shot { position: relative; display: block; border-radius: 12px; overflow: hidden;
+          background: #ECEDEA; aspect-ratio: 4 / 3; }
+  .shot:first-child { grid-column: 1 / -1; aspect-ratio: 3 / 2; }
+  .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .shotd { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 8px;
+           font-size: 11.5px; color: #fff; letter-spacing: .02em;
+           background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0)); }
+
   /* Frozen legal wording, available but not shouting. */
   .exact { margin-top: 10px; }
   .exact summary { font-size: 13px; color: var(--steel); cursor: pointer; }
@@ -175,9 +192,19 @@ async function load() {
   // price. Say that here rather than letting the client read, type their name and
   // only THEN hit a refusal. Checked separately because confirmation_fetch is one of
   // the four already-duplicated functions and extending it would add a fifth.
-  const [{ data, error }, { data: st }] = await Promise.all([
+  //
+  // PRD R4's photos ride along as a THIRD parallel call, not a fourth field on
+  // confirmation_fetch. Two reasons, and the second is the one that matters:
+  //   * confirmation_fetch is owned by 200_priced_approval.sql and has already been
+  //     redefined across files once, at real cost. 304_approval_photos.sql owns this
+  //     one and nothing else touches it.
+  //   * it is inside the SAME Promise.all, so it costs ZERO extra round trips against
+  //     the AC's 3 seconds. The photos themselves are what has to fit in that budget,
+  //     not the question of whether there are any.
+  const [{ data, error }, { data: st }, ph] = await Promise.all([
     supabase.rpc('confirmation_fetch', { p_token: token }),
     supabase.rpc('confirmation_state', { p_token: token }),
+    supabase.rpc('confirmation_photos', { p_token: token }),
   ]);
   if (error) { done('⚠️', 'Could not load this', 'Check your connection and open the link again.'); return; }
 
@@ -198,8 +225,50 @@ async function load() {
       when ? `Answered ${when}. Your answer stands.` : 'Your answer stands.');
     return;
   }
+  // Photos are OPTIONAL and their absence is never an error. On a database where
+  // 304_approval_photos.sql has not been applied the RPC does not exist and `ph.error`
+  // is set — the approval must still render and still be signable. An extra with no
+  // photos is a legal extra (PRD R4 says "0-8"), so the two cases collapse to the
+  // same empty list rather than to a failure screen.
+  data.photos = (ph && ph.data && Array.isArray(ph.data.photos)) ? ph.data.photos : [];
+
   // A price present means this is a priced approval; otherwise the legacy confirm.
   (data.amount_cents != null) ? renderPriced(data) : renderPlain(data);
+}
+
+// PRD R4 — the photo strip.
+//
+// The <=3s-on-LTE AC is met by three things together, and none of them alone:
+//   1. `url` is a Storage signed URL carrying a resize+quality transform, so the
+//      bytes on the wire are a phone-sized JPEG and not a 9 MB camera original.
+//   2. `eager` is decided on the device against a stated byte budget
+//      (src/approvalphotos.ts). Only what fits in the budget loads with the page;
+//      the rest is loading="lazy", which the browser does not fetch at all until the
+//      client scrolls to it. So the load time does not grow with photo count.
+//   3. the tiles reserve their space, so a slow photo never reflows the page.
+//
+// The transform is a storage-tier feature and can refuse. `onerror` falls back to the
+// untransformed object exactly once (`this.onerror = null` first, or a broken object
+// loops forever). Slower, still the right photo, never an empty box.
+//
+// Each tile links to the full-size original: the client zooming into the crack is the
+// entire point of attaching a photo to a price. A plain <a> does that with no
+// lightbox, no JS, and no way to get stuck in a modal on a phone.
+function photoStrip(photos) {
+  if (!photos || !photos.length) return '';
+  const tiles = photos.map((p) => {
+    const full = esc(p.fallback_url || p.url);
+    const when = p.captured_at_ms
+      ? new Date(Number(p.captured_at_ms)).toLocaleDateString() : '';
+    return `<a class="shot" href="${full}" target="_blank" rel="noopener">
+        <img src="${esc(p.url)}" data-full="${full}" alt="${esc(when)}"
+             loading="${p.eager ? 'eager' : 'lazy'}" decoding="async"
+             ${p.eager ? 'fetchpriority="high"' : ''}
+             onerror="this.onerror=null;this.src=this.dataset.full">
+        ${when ? `<span class="shotd">${esc(when)}</span>` : ''}
+      </a>`;
+  }).join('');
+  return `<div class="card shots">${tiles}</div>`;
 }
 
 function renderPriced(d) {
@@ -244,6 +313,8 @@ function renderPriced(d) {
           <div class="doc">${esc(d.shown_content)}</div>
         </details>
       </div>
+
+      ${photoStrip(d.photos)}
 
       <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
       <button class="approve" id="approve" disabled>✓ Approve${isNte ? ` — up to ${esc(usd(d.nte_cents))}` : ` — ${esc(priced)}`}</button>
@@ -336,6 +407,11 @@ function renderPlain(d) {
       <div class="who">For ${esc(d.counterparty)}</div>
       <h1 class="plain">Please read this and ${verb} it.</h1>
       <div class="plaincard">${esc(d.shown_content)}</div>
+      ${/* An EWA (PRD R3 step 1) is "condition description + photos" and carries no
+            price, so it renders through here. Leaving the strip off this path would
+            drop the photos from the one instrument whose entire content IS the
+            condition being photographed. */ ''}
+      ${photoStrip(d.photos)}
       <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
       <div class="btns">
         <button class="yes" id="yes" disabled>Yes — that's right</button>

@@ -92,6 +92,38 @@ console.log('\nverifying…\n');
     `EN ${m[1]} / ES ${m[2]}${missing ? '' : ', keys missing from Spanish'}`);
 }
 
+// ── 4b. Every key the code ASKS FOR actually exists ───────────────────────────
+// PARITY IS NOT COVERAGE, and conflating them cost real money here. check 4 compares
+// EN against ES and passed at 315/315 while 116 keys referenced by newly written
+// screens did not exist in either language. t() returns the key when it misses
+// (i18n.ts: `if (s === undefined) return k`), so the failure is silent and the
+// contractor reads "ewa.capReadback" off the screen instead of a sentence.
+{
+  const i18nSrc = readFileSync(join(MOBILE, 'src/i18n.ts'), 'utf8');
+  const files = run('sh', ['-c',
+    `find "${join(MOBILE, 'src')}" "${MOBILE}/App.tsx" -name '*.ts' -o -name '*.tsx' -o -name 'App.tsx' 2>/dev/null`],
+    ROOT).out.split('\n').map((s) => s.trim())
+    .filter((f) => f && !f.endsWith('.test.ts') && !f.endsWith('/i18n.ts'));
+
+  const referenced = new Set();
+  for (const f of files) {
+    let t; try { t = readFileSync(f, 'utf8'); } catch { continue; }
+    // t('a.b') / T('a.b') / { k: 'a.b' } — the three call shapes used in this repo.
+    for (const m of t.matchAll(/\b[tT]\(\s*['"]([a-z0-9]+\.[A-Za-z0-9_.]+)['"]/g)) referenced.add(m[1]);
+    for (const m of t.matchAll(/\bk:\s*['"]([a-z0-9]+\.[A-Za-z0-9_.]+)['"]/g)) referenced.add(m[1]);
+  }
+  const missing = [...referenced].filter((k) => !i18nSrc.includes(`'${k}'`)).sort();
+  if (referenced.size === 0) {
+    record('i18n coverage', 'inconclusive', 'found 0 key references — the scan is wrong');
+  } else {
+    record('i18n coverage', missing.length === 0 ? 'pass' : 'fail',
+      missing.length === 0
+        ? `${referenced.size} keys referenced, all defined`
+        : `${missing.length} of ${referenced.size} referenced keys are UNDEFINED — ` +
+          `t() will render the key itself. e.g. ${missing.slice(0, 4).join(', ')}`);
+  }
+}
+
 // ── 5. Client vs server schema ────────────────────────────────────────────────
 {
   const r = run('node', [join(ROOT, 'scripts/check-schema-agreement.mjs')], ROOT);

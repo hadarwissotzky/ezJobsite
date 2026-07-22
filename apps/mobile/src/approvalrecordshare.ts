@@ -1,0 +1,152 @@
+/**
+ * R6 / R5b AC3 / R6c AC3 — produce and share the approval document for one extra.
+ *
+ * The boring half of `approvalpdf.ts`: read local rows, translate the keys into the
+ * reader's language, write the file, hand it to the OS share sheet. Every decision
+ * about what the document CONTAINS lives in the pure module and is unit-tested
+ * there; nothing here chooses what goes in the signed block.
+ *
+ * ─── HOW THIS DIFFERS FROM bundle.ts, WHICH ALREADY EXPORTS EVIDENCE ─────────
+ * `bundle.ts` is the DISPUTE bundle (§7.3): every extra on a job, assembled
+ * server-side because only the server holds every party's acts, and useless
+ * offline. This is R6's per-extra artifact — "PDF generated to both parties
+ * includes the discussion log beneath the approved snapshot" — which a contractor
+ * hands over one item at a time, and which must work with no signal. Two documents,
+ * two audiences, one shared rule: assemble, never re-render.
+ *
+ * ─── WHY THIS EMITS HTML AND NOT PDF BYTES, SAID PLAINLY ────────────────────
+ * There is no PDF library in this app and adding a dependency is not this change's
+ * call. `expo-print`'s `printToFileAsync({ html })` turns exactly this string into a
+ * PDF; when it is added, the change is one import and one line in `writeApprovalDoc`
+ * below, and nothing in `approvalpdf.ts` moves. Until then the document is real,
+ * offline, shareable and printable from any phone — it is just not a .pdf, and this
+ * file does not claim it is. bundle.ts already ships an .html artifact for the same
+ * reason, so this is the existing answer rather than a new one.
+ *
+ * ─── MANDATE #2 ─────────────────────────────────────────────────────────────
+ * Nothing here sends anything to a client. It writes a file and opens the OS share
+ * sheet, which is a human choosing a recipient. There is no code path that
+ * transmits, and there must never be one: this document carries a price.
+ */
+import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import * as FS from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import { sha256 } from 'js-sha256';
+import { createdLabel } from './changeorder';
+import { snapshotVerifies } from './eventtimeline';
+import { decisionSummaryFor } from './decisionsummarydata';
+import { threadFor } from './discussionstore';
+import { readEventLog } from './eventlog';
+import { t } from './i18n';
+import {
+  approvalDocument, renderApprovalHtml,
+  type ApprovalDoc, type DiscussionEntry, type PdfLabels,
+} from './approvalpdf';
+
+/** Every heading, resolved in the reader's language at the moment of export
+ *  (mandate #5). Built here rather than in the pure module because t() reads
+ *  module-level state and the pure module may not import anything. */
+function labels(signedName: string | null, traced: number): PdfLabels {
+  return {
+    signedHeading: t('r6c.pdfSigned'),
+    unsignedHeading: t('r6c.pdfUnsigned'),
+    signedByLine: signedName
+      ? t({ k: 'r6c.pdfSignedBy', p: { name: signedName } } as any)
+      : t('r6c.pdfUnsigned'),
+    integrityOk: t('r6c.pdfHashOk'),
+    integrityFailed: t('r6c.pdfHashBad'),
+    discussionHeading: t('r6c.pdfDiscussion'),
+    clientLabel: t('r6c.pdfClient'),
+    contractorLabel: t('r6c.pdfContractor'),
+    summaryHeading: t('r6c.title'),
+    derivedNote: t({ k: 'r6c.derived', p: { n: traced } } as any),
+    owedLabel: t('r6c.owedLabel'),
+    footer: t('r6c.pdfFooter'),
+  };
+}
+
+/**
+ * Assemble the document for one extra from what this device holds.
+ *
+ * LOCAL ONLY, and deliberately not hydrating first: `hydrateEventLog` is the
+ * caller's job on the record screen, and making an export depend on a fetch would
+ * mean a contractor standing in a basement cannot hand over the approval he is
+ * being asked about. What is on the device is what goes in the document, and the
+ * snapshot's integrity line says whether it still matches its frozen hash.
+ */
+export async function buildApprovalDoc(
+  db: AbstractPowerSyncDatabase, changeOrderId: string
+): Promise<{ doc: ApprovalDoc; labels: PdfLabels } | null> {
+  const co = (await db.getAll<{ scope: string }>(
+    `SELECT scope FROM change_order WHERE id = ?`, [changeOrderId]))[0];
+  if (!co) return null;
+
+  const { snapshot } = await readEventLog(db, changeOrderId);
+  const messages = await threadFor(db, changeOrderId);
+  const summary = await decisionSummaryFor(db, changeOrderId);
+
+  const discussion: DiscussionEntry[] = messages.map((m) => ({
+    side: m.side, text: m.text, atLabel: createdLabel(m.atMs),
+  }));
+
+  const doc = approvalDocument({
+    title: co.scope,
+    snapshot: snapshot ? {
+      content: snapshot.content,
+      sha256: snapshot.sha256,
+      signedName: snapshot.signedName,
+      signedAtLabel: snapshot.answeredAtMs === null ? null : createdLabel(snapshot.answeredAtMs),
+      action: snapshot.action,
+      // Hashed HERE, on the exact bytes about to be written into the file, using
+      // the same two functions the record screen uses (eventlog.withEventLog). A
+      // document that asserted "matches the frozen copy" without checking would be
+      // the worst possible line in this app: an integrity claim that is itself
+      // unverified, printed on the page a dispute turns on.
+      verified: snapshotVerifies(sha256(snapshot.content), snapshot.sha256),
+    } : null,
+    discussion,
+    // R6c AC3 lives one line up, in approvalDocument: the summary goes in as a
+    // non-binding block and cannot be constructed as anything else.
+    summary: summary ? {
+      lines: summary.clauses.map((c) => t({ k: c.k, p: c.p } as any)),
+      owed: t({ k: summary.owed.k, p: summary.owed.p } as any),
+    } : null,
+  });
+
+  return { doc, labels: labels(snapshot?.signedName ?? null, summary?.traced ?? 0) };
+}
+
+/** Render to a file in the app's document directory. Returns the path. */
+export async function writeApprovalDoc(
+  db: AbstractPowerSyncDatabase, changeOrderId: string
+): Promise<string | null> {
+  const built = await buildApprovalDoc(db, changeOrderId);
+  if (!built) return null;
+  const html = renderApprovalHtml(built.doc, built.labels);
+  // Timestamped, never overwritten: two exports of the same extra a week apart are
+  // two documents, and the older one may already be in somebody's inbox. Colons are
+  // stripped because they are not legal in a filename on every platform.
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const path = `${FS.documentDirectory}approval-${changeOrderId}-${stamp}.html`;
+  await FS.writeAsStringAsync(path, html);
+  return path;
+}
+
+/**
+ * Write it and open the share sheet. Mirrors `bundle.shareBundle` down to the
+ * failure message: when sharing is unavailable the file is still on disk and the
+ * caller is told where, rather than being told nothing happened.
+ */
+export async function shareApprovalDoc(
+  db: AbstractPowerSyncDatabase, changeOrderId: string
+): Promise<{ ok: boolean; path?: string; reasonKey?: string }> {
+  const path = await writeApprovalDoc(db, changeOrderId);
+  if (!path) return { ok: false, reasonKey: 'r6c.pdfNoRecord' };
+  if (!(await Sharing.isAvailableAsync())) {
+    return { ok: false, path, reasonKey: 'r6c.pdfNoShare' };
+  }
+  await Sharing.shareAsync(path, {
+    mimeType: 'text/html', dialogTitle: t('r6c.pdfDialog'),
+  });
+  return { ok: true, path };
+}
