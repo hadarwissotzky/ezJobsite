@@ -8,7 +8,13 @@ This is a status note, not a spec. `SPEC-capture-core-v1.md` is still the source
 
 ## The one-line state
 
-**42 of 43 v1 requirements trace to code** (`node scripts/trace-requirements.mjs`). The capture core, the durable queue, the evidence chain and the live AI pipeline all run against real Supabase and are tested. The remaining one, **REQ-CAP7, is blocked on hardware, not on code.**
+**40 of 43 v1 requirements trace to REACHABLE code** (`node scripts/trace-requirements.mjs`). The capture core, the durable queue, the evidence chain and the live AI pipeline all run against real Supabase and are tested. The remaining three: **REQ-CAP7 is blocked on hardware, not on code** (this machine
+has no microphone), and **REQ-TL2/TL3 are TAGGED BUT UNREACHABLE** — their tags live
+in `src/timeline.ts`, which nothing imports and whose table is never created, so
+walkthrough section-breaks do not work today. This line previously read "42 of 43"
+and counted those two, because the tracer matched tags without asking whether the
+app could reach the file holding them. It now walks imports from App.tsx first
+`[corrected 2026-07-22]`.
 
 Read that number carefully. The trace script prints its own warning and it is the right one: *"This is a tag count, not a score. REQ-PROC2 sat in this list while being fully built and proven."* A tag proves a requirement was **claimed**, not that it **works**.
 
