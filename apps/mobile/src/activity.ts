@@ -27,6 +27,12 @@ export type ActivityKind =
   | 'question'
   | 'approved'
   | 'declined'
+  /**
+   * R3 AC4: an approved EWA whose priced Step 2 is overdue. It is the contractor's
+   * OWN late promise, so it outranks everything except a client's question — the
+   * client already signed and is waiting for a number he said he would send.
+   */
+  | 'unpriced'
   /** A link went out. Informational -- he did it himself. */
   | 'sent';
 
@@ -53,11 +59,16 @@ export type ActivitySource = {
   createdAtMs: number;
   /** Client questions on this item, oldest first. */
   questions: { id: string; body: string; atMs: number }[];
+  /**
+   * R3 AC4. Set only for an approved EWA whose priced Step 2 is overdue. Absent for
+   * everything else, so a normal extra never produces one of these rows.
+   */
+  unpricedSince?: number | null;
 };
 
 /** Questions first at equal time; otherwise newest first. */
 const KIND_RANK: Record<ActivityKind, number> = {
-  question: 0, declined: 1, approved: 2, sent: 3,
+  question: 0, unpriced: 1, declined: 2, approved: 3, sent: 4,
 };
 
 /**
@@ -83,6 +94,18 @@ export function buildActivity(
     // with it. The trade is that we have no timestamp for the answer -- the local
     // row carries none -- so it sorts by creation, which is honest about being
     // approximate rather than inventing a moment.
+    // R3 AC4, surfaced HERE and not only on the job's ledger. The ledger banner is
+    // where he fixes it; this is where he FINDS OUT, from any screen. A promise that
+    // is only visible on the job you are already looking at is a promise you keep by
+    // accident.
+    if (s.unpricedSince != null) {
+      rows.push({
+        id: `unpriced:${s.changeOrderId}`, kind: 'unpriced',
+        changeOrderId: s.changeOrderId, scope: s.scope, jobName: s.jobName,
+        detail: null, atMs: s.unpricedSince,
+        read: readIds.has(`unpriced:${s.changeOrderId}`),
+      });
+    }
     if (s.status === 'approved' || s.status === 'declined') {
       rows.push({
         id: `${s.status}:${s.changeOrderId}`,
@@ -107,7 +130,10 @@ export function buildActivity(
  * count nobody can clear is a count nobody reads.
  */
 export function unreadCount(rows: ActivityRow[]): number {
-  return rows.filter((r) => r.kind === 'question' && !r.read).length;
+  // Questions AND overdue prices. Both are work the CONTRACTOR owes someone who is
+  // waiting on him; approvals and declines are news, not tasks. A badge that counted
+  // news would sit at 12 on a healthy job and stop meaning anything.
+  return rows.filter((r) => (r.kind === 'question' || r.kind === 'unpriced') && !r.read).length;
 }
 
 /** Rows whose read-state would change. Used so marking read writes once, not N times. */

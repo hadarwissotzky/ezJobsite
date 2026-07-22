@@ -35,7 +35,14 @@ export async function ensureActivitySchema(db: AbstractPowerSyncDatabase) {
  * where the contractor is standing when a question lands.
  */
 export async function activityFor(
-  db: AbstractPowerSyncDatabase, projectId: string, jobName: string
+  db: AbstractPowerSyncDatabase, projectId: string, jobName: string,
+  /**
+   * R3 AC4: change-order ids whose priced Step 2 is overdue, mapped to when the
+   * promise came due. Passed IN rather than queried here because the caller has
+   * already derived it (listEwa runs every refresh and the flag depends on the
+   * clock) — deriving it twice is two answers to one question.
+   */
+  unpricedSince: Record<string, number> = {}
 ): Promise<ActivityRow[]> {
   const cos = await db.getAll<{
     id: string; scope: string; status: string;
@@ -70,6 +77,7 @@ export async function activityFor(
     status: c.status, signedBy: c.signed_by, createdAtMs: c.created_at_ms,
     questions: msgs.filter((m) => m.change_order_id === c.id)
       .map((m) => ({ id: m.id, body: m.body, atMs: m.at_ms })),
+    unpricedSince: unpricedSince[c.id] ?? null,
   }));
 
   return buildActivity(sources, read);

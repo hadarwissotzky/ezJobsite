@@ -362,6 +362,7 @@ const EN: Record<string, string> = {
   'erec.evSigned': 'Signed by {name}',
   'erec.evDeclined': 'Declined',
   'erec.noTime': 'time not recorded',
+  'r3.unpricedRow': 'Send the price',
   // R8 remind
   'r8.remind': 'Remind',
   'r8.tooSoon': 'You reminded them today already. One reminder a day per extra.',
@@ -882,6 +883,7 @@ const ES: Record<string, string> = {
   'erec.evSigned': 'Firmado por {name}',
   'erec.evDeclined': 'Rechazado',
   'erec.noTime': 'sin hora registrada',
+  'r3.unpricedRow': 'Envíe el precio',
   // R8 recordatorio
   'r8.remind': 'Recordar',
   'r8.tooSoon': 'Ya le recordó hoy. Un recordatorio por día por cada extra.',

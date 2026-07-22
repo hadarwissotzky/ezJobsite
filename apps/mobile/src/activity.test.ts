@@ -89,3 +89,29 @@ test('a job with nothing to report produces no rows', () => {
   assert.deepEqual(buildActivity([src({ changeOrderId: 'co1' })], new Set()), []);
   assert.equal(unreadCount([]), 0);
 });
+
+// ── R3 AC4 surfaced in the activity centre ────────────────────────────────────
+
+test('AC4: an overdue unpriced EWA appears, and the badge counts it', () => {
+  const rows = buildActivity([
+    src({ changeOrderId: 'ewa1', scope: 'Sill plate rot', unpricedSince: 5000 }),
+  ], new Set());
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, 'unpriced');
+  assert.equal(rows[0].changeOrderId, 'ewa1', 'must deep-link to the EWA');
+  assert.equal(unreadCount(rows), 1, 'work he owes is counted');
+});
+
+test('an unanswered question still outranks his own late price at the same moment', () => {
+  const rows = buildActivity([
+    src({ changeOrderId: 'a', unpricedSince: 900,
+          questions: [{ id: 'q', body: '?', atMs: 900 }] }),
+  ], new Set());
+  assert.equal(rows[0].kind, 'question');
+  assert.equal(rows[1].kind, 'unpriced');
+});
+
+test('a normal extra produces no unpriced row', () => {
+  const rows = buildActivity([src({ changeOrderId: 'x', status: 'approved', signedBy: 'S' })], new Set());
+  assert.ok(!rows.some((r) => r.kind === 'unpriced'));
+});

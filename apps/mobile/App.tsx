@@ -695,7 +695,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       try { setThreads(await threadsForProject(db, pid)); } catch { /* schema not up yet */ }
       try {
         const jn = projects.find((p) => p.id === pid)?.name ?? '';
-        setActivity(await activityFor(db, pid, jn));
+        // R3 AC4 -> R8's centre. Derived from the SAME listEwa call the ledger banner
+        // uses; passing it in rather than re-querying keeps one answer to "is this
+        // overdue", which depends on the clock and would otherwise drift between the
+        // two surfaces showing it.
+        const overdue: Record<string, number> = {};
+        for (const e of await listEwa(db, pid)) {
+          if (e.unpriced?.flagged && e.unpriced.dueAtMs != null) {
+            overdue[e.id] = e.unpriced.dueAtMs;
+          }
+        }
+        setActivity(await activityFor(db, pid, jn, overdue));
       } catch { /* schema not up yet */ }
       // R3: derived every cycle, never cached — AC4's flag depends on the clock, so a
       // snapshot taken on tap would show "not yet due" hours after it came due.
@@ -2952,8 +2962,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               await refresh();
             }}>
               <Text style={a.read ? s.dval : s.coNudge}>
-                {a.kind === 'question' ? '💬 ' : a.kind === 'approved' ? '✅ ' :
-                 a.kind === 'declined' ? '✋ ' : '→ '}{a.scope}
+                {a.kind === 'question' ? '💬 ' : a.kind === 'unpriced' ? '⏱ ' :
+                 a.kind === 'approved' ? '✅ ' : a.kind === 'declined' ? '✋ ' : '→ '}
+                {a.kind === 'unpriced' ? T('r3.unpricedRow') + ' — ' : ''}{a.scope}
               </Text>
               <Text style={s.dmeta}>
                 {a.jobName}{a.detail ? ` · ${a.detail}` : ''} · {createdLabel(a.atMs)}
