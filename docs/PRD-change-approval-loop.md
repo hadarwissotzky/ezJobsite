@@ -157,7 +157,7 @@ approved it—**before** the work happened.
 
 ## Requirements
 
-### Build status of P0 `[audited 2026-07-22]`
+### Build status of P0 `[audited 2026-07-22, wiring updated same day]`
 
 Independent read-only audit against the code, one agent per requirement group, with
 file:line evidence for every claim. The rule applied throughout: **a module with no
@@ -167,18 +167,41 @@ NOT BUILT, because nothing called it. It has since been wired.
 
 | Req | Status | The gap that matters most |
 |-----|--------|---------------------------|
-| R1  | PARTIAL | A paused session does **not** survive app kill — `recoverySweep` deletes the temp files it would need to recover from |
+| R1  | PARTIAL | A paused session does **not** survive app kill. The fix is WRITTEN and unit-tested (`capturesession.ts`) but **deliberately not wired** — see the note below |
 | R2  | PARTIAL | Pipeline is built but **not configured** (no STT/LLM key), so it cannot be demonstrated end to end. Amount is never prefilled into the preview |
 | R3  | PARTIAL | Fixed price + NTE work. The **entire two-step EWA does not exist** |
-| R4  | PARTIAL | Capture and record are done. The approval page shows **no photos at all** |
+| R4  | BUILT | Photos publish after send and render on the approval page. Needs `304` applied |
 | R5  | PARTIAL | Link, three outcomes and the question path work. **The app never reads `confirmation_question`** — a client question is stored and then invisible forever |
-| R5b | PARTIAL | Server side exists (thread table, supersede). **No contractor-side thread, no reply, no "In Discussion" status** |
+| R5b | PARTIAL | Thread, reply, revision lineage and "In Discussion" are wired. **Push half not built** — needs a native dependency |
 | R5c | BUILT | Type is contractor-set; inference from narration still needs real captures (open (a)) |
 | R6  | PARTIAL | **Open/view events are not tracked at all.** `src/timeline.ts` — the natural backbone — is 192 lines with zero callers |
-| R6b | PARTIAL | People block cannot show captured-by / priced-by: those names are not stored anywhere |
-| R6c | NOT BUILT | Nothing generates a summary. The "never blocks the record" guardrail holds by construction |
-| R7  | BUILT | `discussing` is missing from the status vocabulary |
+| R6b | BUILT | Actor facts are written at the moment of the act; Decisions render "No cost change". Needs `306` applied |
+| R6c | BUILT | Summary card renders above the history; loaded alongside the record so it can never block it |
+| R7  | BUILT | `discussing` derived, `superseded` reachable via Revise. Needs `307` applied |
 | R8  | NOT BUILT | No push infrastructure, no scheduler, no notification centre. Only manual resend exists |
+
+**Three integration specs are written, unit-tested, and DELIBERATELY NOT WIRED
+`[2026-07-22]`.** Six of nine were applied. These three were not, and the reason is
+the same for each: the code is sound in isolation and the *integration* is what
+cannot be verified without a device.
+
+- **R1 — capture draft recovery.** The fix changes the recorder lifecycle: `pause`
+  would stop-and-bank a segment instead of holding the file open, because a paused
+  `expo-audio` recording is an incomplete file on disk and only a stopped one is
+  recoverable. That is almost certainly the right design. It is also surgery on the
+  one path mandate #1 protects, its failure mode is **silent audio loss**, and no
+  check in `npm run verify` can detect it. Applying it blind risks regressing a
+  working Done path to fix a broken kill-while-paused path.
+- **R2 — price from the transcript.** Touches how a dollar figure reaches the
+  preview. Mandate #6 makes numbers the highest-risk field, and the pipeline cannot
+  run at all without an STT/LLM key, so the wiring could not be exercised even once.
+- **R3 — the two-step EWA.** A whole new contractual instrument with proceed terms
+  and settlement. Large, and it needs `303` applied plus a client-page rendering
+  before any of it is answerable.
+
+Each needs a device, a human watching, and in two cases a credential. Wiring them
+unattended would produce green checks on unexercised safety-critical paths, which is
+the exact failure this table exists to stop reporting as progress.
 
 **Cross-cutting gaps, each blocking several requirements at once:**
 
