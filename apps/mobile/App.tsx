@@ -48,6 +48,11 @@ import { sendEwa } from './src/ewasend';
 // cloud and supersedes this under 150's newest-wins.
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
 import { discardCapture, discardExtra, ensureDiscardSchema, previewDiscard } from './src/discardstore';
+// The send gate. hadar: "only then it can be sent to the owner for approval —
+// until then we keep the raw data on the device and waiting for processing."
+// Nothing enforced that; openSendPrep had no check of any kind.
+import { canSendExtra, extraProcState } from './src/extraprocstate';
+import { captureStatesForExtra } from './src/extrareadiness';
 import { discardSummary } from './src/discard';
 import { ensureVoiceCacheSchema, voiceReadingForDecision, narrationForExtra,
          type VoiceReading } from './src/voicesource';
@@ -499,6 +504,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     supersedes?: string | null;
   }>(null);
   const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
+  // extra id -> weakest state across its captures. Absent means "not computed
+  // yet", which the gate treats as NOT ready: an unknown answer must never open
+  // a send, for the same reason procState refuses to infer success from silence.
+  const [readiness, setReadiness] = React.useState<Map<string, string>>(new Map());
   // R7: open client questions per extra, keyed by change-order id. Read from the
   // LOCAL mirror, so the "discussing" chip renders in a basement like the rest of
   // this screen (mandate #7).
@@ -757,6 +766,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       setDelivery({ pending: (s?.pending ?? 0) + ds.pending, parked: (s?.parked ?? 0) + ds.parked });
       setDecisions(await listDecisions(db, pid));
       const ledgerRows = await ledger(db, pid);
+      // Readiness per extra, DERIVED not stored — same rule status.ts states for
+      // captures. A stored column would go stale exactly when signal returns,
+      // which is the moment it most needs to be right.
+      const ready = new Map<string, ReturnType<typeof extraProcState>>();
+      for (const r of ledgerRows) {
+        try {
+          ready.set(r.id, extraProcState(await captureStatesForExtra(db, r.decision_id)));
+        } catch { /* schema not up yet; the gate closes rather than opens */ }
+      }
+      setReadiness(ready);
       // TEMPORARY DIAGNOSTIC. Two copies of the phone's database came back with
       // different sizes and an mtime hours old, so a file copy is not telling me
       // what the app sees. This reads the live database in-process, which is the
@@ -3166,13 +3185,35 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     had already refused; approved/superseded are equally finished.
                     Sending again is legitimate only while it is still open, and it
                     now RETIRES the previous link (250_one_live_link). */}
-                {(c.status === 'draft' || c.status === 'sent') && (
-                  <Pressable style={s.coSendRow} onPress={() => openSendPrep(c)}>
-                    <Text style={s.coNudge}>
-                      {c.status === 'sent' ? 'Resend link →' : 'Send for approval →'}
-                    </Text>
-                  </Pressable>
-                )}
+                {(c.status === 'draft' || c.status === 'sent') && (() => {
+                  // THE GATE. An extra may not be sent until everything behind it
+                  // has uploaded and been processed — otherwise the client opens a
+                  // link describing work whose evidence is still on the phone and
+                  // may never arrive. A missing entry counts as NOT ready: an
+                  // unknown answer must never open a send.
+                  //
+                  // Resend is exempt. The link already went out and the client may
+                  // be holding it; re-sharing the same link cannot make the record
+                  // any less backed than it already is, and blocking it would strand
+                  // someone mid-conversation.
+                  const gate = c.status === 'sent'
+                    ? { ok: true as const }
+                    : canSendExtra((readiness.get(c.id) ?? 'captured') as any);
+                  if (!gate.ok) {
+                    return (
+                      <View style={s.coSendRow}>
+                        <Text style={s.dmeta}>{T(gate.whyKey!)}</Text>
+                      </View>
+                    );
+                  }
+                  return (
+                    <Pressable style={s.coSendRow} onPress={() => openSendPrep(c)}>
+                      <Text style={s.coNudge}>
+                        {c.status === 'sent' ? 'Resend link →' : 'Send for approval →'}
+                      </Text>
+                    </Pressable>
+                  );
+                })()}
                 {/* Delete, offered ONLY on a draft. The moment a link exists a
                     client may have opened it and read a frozen price, and that is
                     theirs too — Revise retires those, this does not touch them.

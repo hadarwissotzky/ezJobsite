@@ -131,12 +131,30 @@ console.log('\nverifying…\n');
     ROOT).out.split('\n').map((s) => s.trim())
     .filter((f) => f && !f.endsWith('.test.ts') && !f.endsWith('/i18n.ts'));
 
+  // Namespaces the dictionary actually uses, taken from the dictionary itself so
+  // this cannot drift as prefixes are added.
+  const NAMESPACES = new Set(
+    [...i18nSrc.matchAll(/^\s*'([a-z0-9]+)\.[A-Za-z0-9_.]+':/gm)].map((m) => m[1]));
+
   const referenced = new Set();
   for (const f of files) {
     let t; try { t = readFileSync(f, 'utf8'); } catch { continue; }
     // t('a.b') / T('a.b') / { k: 'a.b' } — the three call shapes used in this repo.
     for (const m of t.matchAll(/\b[tT]\(\s*['"]([a-z0-9]+\.[A-Za-z0-9_.]+)['"]/g)) referenced.add(m[1]);
     for (const m of t.matchAll(/\bk:\s*['"]([a-z0-9]+\.[A-Za-z0-9_.]+)['"]/g)) referenced.add(m[1]);
+    // A KEY RETURNED AS DATA is still a key. extraprocstate.ts returns
+    // `{ whyKey: 'send.notReady.waitingForSignal' }` and the caller passes it to
+    // T() somewhere else entirely, so none of the three patterns above see it.
+    // Two agents disagreed about the names, this check said "all defined", and
+    // the ledger would have rendered the raw key string on screen — which is the
+    // exact failure this check exists to prevent, one indirection out of reach.
+    //
+    // Any literal sharing a NAMESPACE with a real key is treated as a key. The
+    // namespace test is what keeps it precise: 'audio/m4a' and 'expo-av' do not
+    // match, and a typo'd 'send.notReady.typo' does.
+    for (const m of t.matchAll(/['"]([a-z0-9]+)\.([A-Za-z0-9_.]+)['"]/g)) {
+      if (NAMESPACES.has(m[1])) referenced.add(`${m[1]}.${m[2]}`);
+    }
   }
   const missing = [...referenced].filter((k) => !i18nSrc.includes(`'${k}'`)).sort();
   if (referenced.size === 0) {
