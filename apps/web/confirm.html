@@ -209,8 +209,31 @@ async function load() {
   if (error) { done('⚠️', 'Could not load this', 'Check your connection and open the link again.'); return; }
 
   if (st && st.found && st.superseded && !st.answered) {
-    done('🔄', 'This version was replaced',
-      'The contractor sent an updated version of this request. Please open the most recent link they texted you — nothing here was recorded.');
+    // R6 AC2: LINK to the current version, do not describe it. This used to say
+    // "please open the most recent link they texted you", which asks a homeowner
+    // standing in a doorway to go hunting through their SMS history and diff two
+    // near-identical URLs by eye. The live token was in the database the whole time.
+    //
+    // The URL is built from THIS page's own origin, never from a base stored
+    // server-side: a second source of truth for where this page lives has already
+    // been wrong once (EXPO_PUBLIC_CONFIRM_BASE pointed at a domain that did not
+    // exist). Whatever host served this link serves the next one.
+    //
+    // live_token is null when a link was retired with no replacement — the
+    // contractor changed his mind. That is a real state and it keeps the old copy,
+    // because sending someone to a page that does not exist is worse than telling
+    // them to ask.
+    const live = st.live_token
+      ? `${location.pathname}?t=${encodeURIComponent(st.live_token)}`
+      : null;
+    screen(`<div class="done"><div class="mark">🔄</div>
+      <h2>This version was replaced</h2>
+      <p>${live
+        ? 'The contractor sent an updated version. Nothing here was recorded.'
+        : 'The contractor withdrew this request. Nothing here was recorded — ask them for a new link.'}</p>
+      ${live ? `<div class="btns"><a class="yes" style="display:block;text-decoration:none;text-align:center"
+           href="${esc(live)}">Open the current version</a></div>` : ''}
+      </div>`);
     return;
   }
 

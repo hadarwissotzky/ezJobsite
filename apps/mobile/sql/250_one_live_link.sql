@@ -76,25 +76,17 @@ create trigger confirmation_response_live_only before insert on public.confirmat
   for each row execute function public.confirmation_response_not_superseded();
 
 -- ── let the page say so up front, instead of failing at the last tap ────────
--- A NEW function rather than extending confirmation_fetch, which is one of the four
--- already-duplicated functions (Codex #5). Adding a fifth duplicate to improve a
--- message would be trading a real hazard for a cosmetic gain.
-create or replace function public.confirmation_state(p_token text)
-  returns jsonb language plpgsql security definer set search_path = public as $$
-declare r public.confirmation_request%rowtype;
-        answered boolean;
-begin
-  select * into r from public.confirmation_request where token = p_token;
-  if not found then return jsonb_build_object('found', false); end if;
-  select exists(select 1 from public.confirmation_response where token = p_token)
-    into answered;
-  return jsonb_build_object(
-    'found', true,
-    'superseded', r.superseded_at is not null,
-    'answered', answered,
-    'expired', now() > r.expires_at
-  );
-end $$;
-
-revoke all on function public.confirmation_state from public;
-grant execute on function public.confirmation_state to anon, authenticated;
+-- `confirmation_state` is NOT defined here any more [2026-07-22]. It lives in
+-- 367_supersede_forward_link.sql, its single owner.
+--
+-- Why it moved: 367 widens it to return `live_token` -- the link that REPLACED a
+-- retired one -- so R6 AC2 can link the client forward instead of telling them to
+-- go hunting through their SMS history. Defining it in both files would mean
+-- re-running THIS file silently dropped that field, the page would find
+-- `st.live_token` undefined, and the forward link would quietly disappear with
+-- nothing failing anywhere. Exactly the hazard check-sql-duplicates exists to
+-- catch, and it did catch it.
+--
+-- This file still owns the SUPERSESSION ITSELF: the column, the index, the trigger
+-- that retires the prior live link, and the trigger that refuses to answer a
+-- retired one. 367 only owns the read.

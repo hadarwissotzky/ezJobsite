@@ -293,4 +293,45 @@ begin
   end if;
 end $$;
 
+-- 13 ── R6 AC2: a retired link points FORWARD to the live one (367)
+do $$
+declare has_fn boolean; st jsonb; o uuid := gen_random_uuid();
+begin
+  select exists(
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname='public' and p.proname='confirmation_state'
+       and pg_get_functiondef(p.oid) like '%live_token%') into has_fn;
+  if not has_fn then
+    raise notice 'CHECK 13 forward link -> SKIPPED (367_supersede_forward_link not applied)';
+    return;
+  end if;
+  insert into public.project (id,owner_id,name) values ('vfp',o,'F');
+  insert into public.change_order (id,decision_id,project_id,owner_id,scope,amount_cents,
+                                   who_directed,numbers_confirmed_at)
+    values ('vfco','vd','vfp',o,'s',185000,'Owner',now());
+  insert into public.confirmation_request
+    (token,decision_id,project_id,owner_id,kind,shown_content,shown_sha256,
+     counterparty_label,channel,amount_cents,change_order_id)
+    values ('v-tok1','vd','vfp',o,'confirm','Price: $1,850.00',null,'S','link',185000,'vfco');
+  insert into public.confirmation_request
+    (token,decision_id,project_id,owner_id,kind,shown_content,shown_sha256,
+     counterparty_label,channel,amount_cents,change_order_id)
+    values ('v-tok2','vd','vfp',o,'confirm','Price: $1,500.00',null,'S','link',150000,'vfco');
+
+  st := public.confirmation_state('v-tok1');
+  raise notice 'CHECK 13a retired -> live  -> %   %', st->>'live_token',
+    case when st->>'live_token' = 'v-tok2' then 'PASS' else 'FAIL' end;
+  st := public.confirmation_state('v-tok2');
+  raise notice 'CHECK 13b live has no fwd  -> %   %', coalesce(st->>'live_token','(null)'),
+    case when st->>'live_token' is null then 'PASS' else 'FAIL' end;
+  -- Answering the live one must stop the retired one pointing at it: sending a
+  -- client to a link that is already signed is worse than telling them to ask.
+  insert into public.confirmation_response (token,action,signed_name)
+    values ('v-tok2','confirmed','Sarah Miller');
+  st := public.confirmation_state('v-tok1');
+  raise notice 'CHECK 13c answered -> none -> %   %', coalesce(st->>'live_token','(null)'),
+    case when st->>'live_token' is null then 'PASS'
+         else 'FAIL -- would send them to an already-signed link' end;
+end $$;
+
 rollback;
