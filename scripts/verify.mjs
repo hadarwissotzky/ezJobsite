@@ -225,6 +225,19 @@ console.log('\nverifying…\n');
       : `${files.length} files, all uniquely numbered`);
 }
 
+// ── 8. Migration ORDER is checked by scripts/check-migration-order.sh, not here ──
+// I wrote a static version of that check twice and deleted both. Matching bare
+// column names claimed 020 depended on 100 because both say `created_at`.
+// Table-qualifying it still flagged 080 -> 100 on `project.lat`, in migrations that
+// are applied and demonstrably working. A check that cries wolf gets muted, and then
+// it is not there for the real one.
+//
+// The order bug is real -- 305 died on `column prior.superseded_by does not exist`
+// because 307 creates it, taking every later migration down with it -- but it is
+// only visible by APPLYING them in sequence. That needs database credentials, so it
+// cannot live in this offline script. It lives in check-migration-order.sh and is a
+// deliberate, separate step before any migration run.
+
 // ── verdict ───────────────────────────────────────────────────────────────────
 const failed = results.filter((r) => r.status === 'fail');
 const unknown = results.filter((r) => r.status === 'inconclusive');

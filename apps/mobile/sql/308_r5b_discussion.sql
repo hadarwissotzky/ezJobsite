@@ -1,4 +1,18 @@
--- 305_r5b_discussion.sql
+-- 308_r5b_discussion.sql
+--
+-- RENUMBERED 305 -> 308 [2026-07-22]. This file walks the revision chain through
+-- `change_order.superseded_by`, and that column is created by 307_extras_ledger.sql.
+-- Applied in numeric order, 305 ran BEFORE 307 and died with
+--   ERROR: column prior.superseded_by does not exist
+-- taking every later migration in the same transaction down with it.
+--
+-- Found by applying all eleven pending migrations in ONE transaction against the
+-- live database with ON_ERROR_STOP and rolling back -- not by reading them. Each one
+-- had been checked alone, where nothing was wrong; the ORDER was the bug, and order
+-- is invisible until you run them in it.
+--
+-- The header below already said 307 owned the column. Knowing a dependency and
+-- being sequenced behind it are different things.
 --
 -- THE OTHER HALF OF THE THREAD. PRD R5b.
 --
