@@ -6,6 +6,13 @@
 (durability foundation) and are governed by `CLAUDE.md`'s mandates. See
 `PRD-RECONCILIATION.md` for how this maps onto the older `PRD-companycam-parity.md` REQ IDs.*
 
+***UI source of truth `[hadar 2026-07-21]`:** the interactive prototype (contractor app c1–c6 +
+client web link h1–h4) is the design reference this PRD's surfaces are specified against — the
+same prototype `apps/mobile/src/ui/theme.ts` lifts its tokens from. Requirements added from it
+are marked `[design prototype 2026-07-21]`. The prototype specifies **presentation**; it never
+overrides a mandate, and where it appeared to (a generated decision narrative) the guardrail is
+written into the requirement itself — see R6c.*
+
 ---
 
 ## Problem Statement
@@ -175,6 +182,16 @@ approved it—**before** the work happened.
   displays the recipient name.
 - Location is captured only at the moment of capture—no background tracking of the
   contractor, ever.
+- **Capture stays one tap away everywhere `[design prototype 2026-07-21]`.** Capture is the
+  home screen (above), *and* a persistent floating Capture control sits on the secondary
+  contractor screens (job ledger, extra record) so starting a new extra never requires
+  navigating home first. It is deliberately absent while a capture flow is already in progress
+  (recording, review, paywall) — offering "capture" mid-capture is noise — and absent from the
+  client-facing web page. Serves mandate #3: the reflex must not depend on where you are.
+- AC: Given the contractor is on a job ledger or an extra record, when they tap the floating
+  Capture control, then a new capture session starts immediately.
+- AC: Given a capture flow is already in progress, when any of its screens render, then the
+  floating Capture control is not shown.
 - AC: Given one known project within GPS range, when the preview renders, then that project
   pre-fills Send-to with the detected marker and can be changed in one tap.
 - AC: Given two projects within range (e.g., duplex), when the preview renders, then a
@@ -264,6 +281,56 @@ terms before the price exists.
   push-notified, the change status = "In Discussion," and the message joins the on-record
   thread (see R5b).
 
+**R5c. Classify the extra, and route it to the right approver `[hadar 2026-07-21]`**
+
+*Status: REQUIREMENT ONLY — specified here, not built. The build order in §Timeline is
+unchanged; this lands after the P0 loop is boringly reliable.*
+
+- **The need.** Today the recipient is picked by hand at send (R5) and the only clue the
+  system has is GPS. But a jobsite has more than one person who can say yes, and **which
+  one depends on what the extra is**. A structural surprise goes to the GC; a finish or
+  fixture choice goes to the designer; anything that costs the client money goes to the
+  owner; a code/permit issue may go to an internal specialist. Making the contractor
+  re-decide that on every send is the friction R1 exists to remove — and picking wrong is
+  worse than slow, because a priced commitment sent to someone who cannot authorise it is
+  an approval that does not bind.
+- **Classify.** At structuring (R2), the system infers a **type** for the extra from the
+  narration and photos — e.g. *structural · mechanical/electrical/plumbing · finish or
+  fixture selection · code or permit · site condition/discovery · scope clarification*.
+  The final taxonomy is an open question below; it must be derived from real captures,
+  not invented at a desk.
+- **The approver roster is per job, and it grows.** Each job carries a list of people who
+  can approve on it, each with a **role**: *owner · general contractor · designer/architect
+  · internal specialist · property manager · other*. The roster starts as whoever the
+  first extra was sent to and accumulates as more people are added — the contractor never
+  fills in a directory up front (same principle as R7's implicit project creation).
+- **Route, but SUGGEST — never decide.** The type plus the roster produce a **pre-filled**
+  "Send to" on the preview card, with the reason visible ("Finish selection → Dana, your
+  designer"). It is always one tap to override, and Send always displays the recipient's
+  name and role. This is mandate #8's suggest-never-decide applied to people instead of
+  places, and it is not optional: mandate #2 forbids a commitment leaving on an inference.
+- **The tag earns its keep beyond routing.** Type is stored on the item and enables the
+  things a contractor actually asks for later: what kind of extra keeps recurring on this
+  job, which types get approved fastest, and per-trade template matching (R9).
+- AC: Given a capture whose narration describes a finish selection, when the preview
+  renders, then type = finish/fixture is pre-selected and Send-to is pre-filled with the
+  roster member whose role is designer, with the reason shown.
+- AC: Given the system's suggested approver is wrong, when the contractor taps the
+  recipient, then the full job roster is offered and the override is one tap.
+- AC: Given a job with no roster member for the inferred role, when the preview renders,
+  then the contractor is asked who approves this (quick-add name + phone + role) and that
+  person joins the job's roster for next time.
+- AC: Given an extra was sent, when its record is viewed (R6b), then the type and the
+  approver's role are both shown — "who was entitled to approve this" is part of the
+  record, not just who did.
+- AC: Given classification is unavailable (offline, model down), when the preview renders,
+  then the extra is untyped, Send-to falls back to recents (R1), and nothing is blocked.
+- **Open:** (a) the type taxonomy itself — derive from real captures, and keep it short
+  enough that a wrong guess is obvious; (b) whether an approver's **authority** is
+  modelled (can a designer approve money, or only selections?) — that is closer to
+  multi-party approval chains, which are a v1 non-goal, so v1 likely records the role
+  without enforcing a limit; (c) whether type is inferred, contractor-set, or both.
+
 **R5b. Feedback loop — on-record discussion and revision**
 - "In Discussion" is a first-class status between Sent and Approved/Declined—negotiation is
   expected behavior, not an edge case.
@@ -315,6 +382,69 @@ terms before the price exists.
 - AC: Given a change is voided, when the homeowner opens the old link, then it clearly shows
   "Superseded" and links to the current version.
 
+**R6b. The extra record screen (one screen answers "what is this and where does it stand")
+`[design prototype 2026-07-21]`**
+- R6 establishes the timeline as a first-class screen. This specifies what else that screen
+  must carry, because "the timeline" alone does not answer the questions a contractor opens
+  the record to ask. Ordered top-to-bottom:
+  1. **Identity + state:** item title, type (Extra/Decision), status chip, amount + price mode
+     (or "No cost change" for a Decision). The amount is labeled as *the contractor's price* —
+     the system never authors a price (mandate #6, R2).
+  2. **Current state, in plain language:** one line saying what is true now and what is owed
+     next ("Discussing — opened 3× today, awaiting her approval"). A status chip alone is a
+     label; this is the instruction.
+  3. **People on this record:** the **approver** (name + role label — Homeowner/GC/Property
+     manager/Other, per R5), **captured by**, and **priced/sent by**, each with its timestamp.
+     R15 already records captured-by/sent-by on the internal timeline; this surfaces them as a
+     first-class block, because "who recorded this" is the first thing asked when a record is
+     questioned. The approver-facing page still shows company + sender only (R15 unchanged).
+  4. **Description:** the English canonical scope, with a one-tap toggle to the source-language
+     original (mandate #5, R13).
+  5. **Photos:** the attached evidence (R4).
+  6. **Decision summary:** see R6c.
+  7. **Full history:** the append-only event timeline from R6, unabridged, beneath the summary.
+- The summary and the history are never alternatives: the summary is the fast read, the history
+  is the evidence. Both are always present on the same screen.
+- AC: Given an extra with a capturing crew member and a separate sender, when the contractor
+  opens its record, then approver (with role), captured-by, and priced/sent-by are each shown
+  with timestamps.
+- AC: Given an item of type Decision, when its record renders, then no price is shown anywhere
+  on the screen and the money block reads "No cost change" (R10).
+- AC: Given a record in any state, when it renders, then the plain-language state line names
+  the next owed action, not just the status word.
+
+**R6c. Decision summary — a derived narrative, never a new fact
+`[design prototype 2026-07-21]`**
+- **The need:** when an item passes through several hands (crew captures, owner prices, client
+  questions, owner answers, client approves), the raw timeline is accurate but slow to read.
+  The summary is a short plain-language account of *how this item reached its current state and
+  who did what* — the thing a contractor would say out loud if asked "where is this?".
+- It names the participants and their contribution ("Marco captured it · you priced and
+  explained · Sarah raised a question"), states the outcome so far, and ends on what is owed.
+- **Guardrails (this is a generated narrative, so it is fenced):**
+  - **Derived only from logged events.** Every clause must trace to an event already in the R6
+    timeline or a field on the record. It may compress and re-word; it may never introduce a
+    fact — no inferred motive, no predicted outcome, no invented number. Mandate #6: a dollar
+    figure in the summary is a *restatement* of the record's own field, never a fresh reading
+    of a transcript.
+  - **Never the binding instrument.** The signed snapshot (R6) is the legal artifact. The
+    summary is a reading aid and is labeled as derived; it carries no signature and appears
+    nowhere in the approver's signed content or the PDF's snapshot section.
+  - **Never blocks the record.** If the summary cannot be produced (offline, model
+    unavailable), the record renders complete without it — the timeline is the source. The
+    summary is additive, never a dependency (mandate #7).
+  - **Regenerates, never rewrites.** New events produce a new summary; the underlying events
+    are untouched (mandate #1's append-only chain is not in scope for summarization).
+- AC: Given an item whose timeline contains capture, price, send, question, and reply events,
+  when the record renders, then the summary names each participant's contribution and ends
+  with the currently-owed action.
+- AC: Given the summary cannot be generated, when the record renders, then every other section
+  including the full history is present and the record is fully usable.
+- AC: Given an approved item, when its PDF is produced, then the signed snapshot and discussion
+  log appear (R6) and the derived summary does not appear inside the signed content.
+- **Open:** whether the summary is generated on-device, server-side at event time, or on
+  render — an eng call, not a product one. Tracked in §Open Questions.
+
 **R7. Projects and the extras ledger (extras only)**
 - Every extra belongs to a project; a project = client + job name (e.g., "Sarah Miller —
   Hall bath") and holds many extras. Projects are created implicitly at first send via
@@ -323,6 +453,25 @@ terms before the price exists.
 - The app never holds the base contract—it has no access to it and doesn't ask. Per project:
   approved extras + pending extras = extras total. Visible to contractor always; to
   homeowner via any approval link ("Extras you've approved on this job").
+- **Ledger order = create date, newest first `[design prototype 2026-07-21]`.** The job's
+  extras are ordered by when the extra record was **created**, most recent at top, and **each
+  row shows that date**. Rationale: the items needing action are almost always the newest, and
+  ordering by status would reshuffle the list under the contractor as states change — a list
+  that moves is a list you stop trusting. The decision log (R10) uses the same order.
+  - **What "created" means, exactly `[corrected 2026-07-21 after Codex challenge]`.** It is
+    when the change order row was created, which in the current build is **the moment the
+    price was confirmed** (`createChangeOrder` stamps `created_at_ms` at insert). An earlier
+    draft of this requirement asserted it was the *capture* moment. That was wrong, and the
+    code comments repeated the error. The real capture time lives on `capture_commit`
+    (`captured_at_ms`); the record screen (R6b) shows both, separately labelled, so a capture
+    priced days later is not silently redated.
+  - **Open:** whether the ledger should sort by capture time rather than price-confirm time.
+    Sorting by capture is arguably truer to "when did this happen on the job", but it needs
+    the capture time denormalized onto the change order or a join. Deferred, not assumed.
+- AC: Given a project with extras created on different days, when the ledger renders, then
+  rows appear newest-created first and each row displays its create date.
+- AC: Given an extra changes status (sent → discussing → approved), when the ledger re-renders,
+  then its position in the list does not move.
 - AC: Given a quick-add at first send, when the extra is sent, then a project exists and
   appears in recents for the next capture.
 - AC: Given 3 approved extras on a project, when the contractor opens it, then approved
@@ -345,6 +494,21 @@ terms before the price exists.
   your approval for: Subfloor rot repair — $1,850"), always via the same link.
 - AC: Given a change is Sent and unviewed for 24h, when auto-remind is on, then one reminder
   SMS is sent and logged (max 2 total reminders).
+- **In-app notification centre `[design prototype 2026-07-21]`.** Push (above) reaches the
+  contractor when the app is closed; this is the same activity when it is open. A bell in the
+  home top bar carries an **unread count**, and opens a list of recent activity — client
+  questions, approvals/declines, reminders sent — newest first, each row naming the item and
+  its job. **Every row deep-links to the record it refers to** (R6b), landing on the same
+  screen the push would have opened, so an unanswered question is at most two taps from
+  anywhere. Rows carry the same colour semantics as the chips (question = accent, approved =
+  approve-green, informational = muted). Mark-read is available; unread state is per-device
+  and never alters the item's own status or its timeline.
+- AC: Given an unanswered client question exists, when the contractor opens the app, then the
+  bell shows an unread count and the question is the first row in the notification list.
+- AC: Given the contractor taps a notification row, when it opens, then they land on that
+  item's record (R6b) — the same destination as the push deep-link.
+- AC: Given the contractor marks notifications read, when the item list is re-read, then no
+  item's status, timeline, or approval state has changed.
 
 ### P1 — Nice-to-have (fast follows)
 
@@ -467,6 +631,14 @@ contractor dashboard; the retention/marketing number.
    acceptable to contractors' client relationships? Test with design partners.
 6. **[Design — non-blocking]** Contractor branding on homeowner page (logo/color) in v1 or
    P1? Leans P1 unless design partners flag trust issues.
+7. **[Eng — non-blocking]** Where the R6c decision summary is produced: on-device at render,
+   server-side at event time (cached on the record), or in the durable-jobs pipeline. Affects
+   offline behaviour — the requirement already mandates the record stays usable without it, so
+   this is a cost/latency call, not a correctness one. `[hadar 2026-07-21]`
+8. **[Product — non-blocking]** Ledger ordering is create-date-newest-first (R7). If design
+   partners in the field ask to see a job's extras in the order the job unfolded (oldest
+   first), that is a per-user preference, not a default change — revisit after beta.
+   `[hadar 2026-07-21]`
 
 ## Timeline & Phasing
 

@@ -18,6 +18,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { sha256 } from 'js-sha256';
+import { getLang } from './i18n';
 
 /**
  * The device authors change orders. The cloud gets a copy.
@@ -336,16 +337,53 @@ export type LedgerRow = {
   id: string; scope: string; amount: string; nte: string | null;
   status: string; is_mini: number; signed_by: string | null;
   approved_running: string; synced: number;
+  // Raw cents alongside the formatted string: the c4 ledger totals (approved sum,
+  // awaiting sum) are DERIVED in the UI, and deriving them from formatted "$1,850"
+  // strings would be a parser bug waiting to happen. One number, two renderings.
+  amount_cents: number;
+  // Needed to send a priced approval: the confirmation is keyed to the decision,
+  // and the report names who directed the extra.
+  decision_id: string; who_directed: string;
+  // Raw cap alongside the formatted `nte`, for the same reason as amount_cents:
+  // the SENDER must pass the number, and it previously exposed only the formatted
+  // string, so sendPricedApproval had nothing to pass and every not-to-exceed went
+  // out as a flat fixed price.
+  nte_cents: number | null;
+  // When the CHANGE ORDER was created, which is the moment the price was confirmed
+  // (see createChangeOrder: created_at_ms = Date.now() at insert). It is NOT the
+  // capture moment -- an earlier version of this comment claimed it was, and the
+  // PRD repeated the claim. The real capture time lives on capture_commit and the
+  // record screen shows it separately. PRD R7 orders the ledger by this field and
+  // labels it "Created", which is now true. Raw ms alongside the rendered label for
+  // the same reason as amount_cents -- never re-parse a formatted string.
+  created_at_ms: number; created: string;
 };
+
+/**
+ * "Jul 20 · 2:14 pm" — a stored moment as a row or record shows it.
+ * Deliberately no year: a job's extras live inside weeks, and the year is noise on a
+ * phone row.
+ *
+ * Locale follows the reader (mandate #5). Forcing 'en-US' put an English date on a
+ * Spanish-language legal record.
+ */
+export function createdLabel(ms: number): string {
+  const d = new Date(ms);
+  const locale = getLang() === 'es' ? 'es-419' : 'en-US';
+  const date = d.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+  return `${date} · ${time.toLowerCase()}`;
+}
 
 export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): Promise<LedgerRow[]> {
   const rows = await db.getAll<{
-    id: string; scope: string; amount_cents: number; nte_cents: number | null;
+    id: string; decision_id: string; who_directed: string; scope: string;
+    amount_cents: number; nte_cents: number | null;
     status: string; is_mini: number; signed_by: string | null;
     created_at_ms: number; pending: number;
   }>(
-    `SELECT co.id, co.scope, co.amount_cents, co.nte_cents, co.status, co.is_mini,
-            co.signed_by, co.created_at_ms,
+    `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.amount_cents, co.nte_cents,
+            co.status, co.is_mini, co.signed_by, co.created_at_ms,
             EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending
        FROM change_order co
       WHERE co.project_id = ?
@@ -353,19 +391,28 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     [projectId]
   );
 
+  // The SQL stays ASCENDING on purpose. `approved_running` is a running total and only
+  // means anything computed forward through time; flipping the ORDER BY to DESC would
+  // still "work" and silently invert every running figure on the screen. So: accumulate
+  // chronologically, then reverse for presentation (PRD R7 = newest created first).
   let running = 0;
-  return rows.map((r) => {
+  const chronological = rows.map((r) => {
     if (r.status === 'approved') running += r.amount_cents;
     return {
-      id: r.id, scope: r.scope, amount: money(r.amount_cents),
+      id: r.id, decision_id: r.decision_id, who_directed: r.who_directed,
+      scope: r.scope, amount: money(r.amount_cents),
       nte: r.nte_cents == null ? null : money(r.nte_cents),
+      nte_cents: r.nte_cents,
       status: r.status, is_mini: r.is_mini, signed_by: r.signed_by,
       approved_running: money(running),
+      amount_cents: r.amount_cents,
+      created_at_ms: r.created_at_ms, created: createdLabel(r.created_at_ms),
       // "on this phone" and "in the cloud" are different facts and the sender is
       // entitled to know which one they are looking at.
       synced: r.pending ? 0 : 1,
     };
   });
+  return chronological.reverse();
 }
 
 /** Mark the outcome of a signature locally. The signing path is online-only. */
@@ -376,6 +423,31 @@ export async function applyLocalApproval(
     `UPDATE change_order SET status = ?, signed_by = ? WHERE id = ?`,
     [action, action === 'approved' ? legalName : null, coId]
   );
+}
+
+/**
+ * Mark a change order sent, locally, the moment its link goes out.
+ *
+ * The server does this too (`confirmation_request_marks_sent`, 230_close_the_loop),
+ * and that remains the authority. This exists because the contractor is holding the
+ * phone: without it the row he just sent still reads "Send for approval →" until the
+ * next hydrate, so the app looks like it dropped the thing he watched it do.
+ *
+ * `status = 'draft'` in the WHERE is the same rule the server trigger uses, for the
+ * same reason: never walk a terminal state backwards. If the client somehow answered
+ * before this ran, the answer wins and this is a no-op.
+ *
+ * Returns whether a row actually moved, so the caller never reports a transition
+ * that did not happen.
+ */
+export async function markLocalSent(
+  db: AbstractPowerSyncDatabase, coId: string
+): Promise<boolean> {
+  const r = await db.execute(
+    `UPDATE change_order SET status = 'sent' WHERE id = ? AND status = 'draft'`,
+    [coId]
+  );
+  return !!r.rowsAffected;
 }
 
 /**

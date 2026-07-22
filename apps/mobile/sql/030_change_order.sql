@@ -85,15 +85,24 @@ drop trigger if exists approval_immutable on public.approval;
 create trigger approval_immutable before update or delete on public.approval
   for each row execute function public.approval_no_change();
 
--- A signature-grade approval is INVALID without its identity binding. Enforcing
--- this in the DB rather than the app means no client bug can mint a signature
--- that would not stand up.
-alter table public.approval drop constraint if exists approval_signature_binding;
-alter table public.approval add constraint approval_signature_binding check (
-  grade not in ('signature','priced')
-  or (legal_name is not null and length(legal_name) > 1
-      and otp_verified_at is not null and phone_e164 is not null)
-);
+-- A signature-grade approval is INVALID without its identity binding: enforced in
+-- the DB rather than the app, so no client bug can mint a signature that would not
+-- stand up. The constraint (`approval_signature_binding`) is NOT defined here. It
+-- lives in `230_close_the_loop.sql`, its single owner.
+--
+-- Why it moved [2026-07-21]: 230 adds the `typed_link` grade -- the no-account link
+-- instrument, a typed legal name with no OTP -- and has to widen this constraint to
+-- bind it. That left the same constraint defined in two files. Unlike the inline
+-- `create table` checks above, which a re-run skips because the table already exists,
+-- this was a bare `drop constraint if exists` + `add constraint` that re-runs every
+-- time. So running THIS file after 230 restored a version with no typed_link branch,
+-- and `grade not in ('signature','priced')` is trivially true for typed_link --
+-- silently dropping the requirement that a link approval carry a typed legal name.
+--
+-- The duplicate checker could not see it: it only matched create function/view/
+-- trigger/table and had reasoned itself out of checking `alter` at all. It now
+-- matches `add constraint` and `create policy` too. This file owns the TABLES;
+-- 230 owns this constraint. One object, one file.
 
 -- The CO's frozen scope/amount must not move after it is sent.
 create or replace function public.change_order_guard() returns trigger

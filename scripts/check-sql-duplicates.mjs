@@ -33,6 +33,21 @@ const patterns = [
   [/create\s+(?:or\s+replace\s+)?view\s+([\w.]+)/gi, 'view'],
   [/create\s+trigger\s+([\w.]+)/gi, 'trigger'],
   [/create\s+table\s+(?:if\s+not\s+exists\s+)?([\w.]+)/gi, 'table'],
+  // A named CONSTRAINT is a full definition, not an increment. `drop constraint if
+  // exists X; add constraint X ...` -- the idiom every file here uses -- IS a replace,
+  // so two files carrying it own one object and the last run wins.
+  //
+  // This was missed until 2026-07-21: `approval_signature_binding` was owned by BOTH
+  // 030_change_order.sql and 230_close_the_loop.sql, and the checker reported "0 owned
+  // by more than one file" while it was true. Re-running 030 after 230 restored a
+  // version whose typed_link branch does not exist, silently dropping the requirement
+  // that a no-account link approval carry a typed legal name. That is the exact class
+  // of bug this file was written to catch, and the note below had exempted it by
+  // reasoning about `add column` and then applying the conclusion to all of `alter`.
+  [/add\s+constraint\s+([\w.]+)/gi, 'constraint'],
+  // Same argument: `create policy` after `drop policy if exists` is a replace, and an
+  // RLS policy is the thing standing between one tenant's data and another's.
+  [/create\s+policy\s+([\w.]+)/gi, 'policy'],
 ];
 
 for (const f of files) {
@@ -58,9 +73,15 @@ for (const [key, fs] of [...owners].sort()) {
   }
 }
 
-// `alter table ... add column if not exists` is fine in many files -- that is
-// additive and idempotent. Only CREATE is exclusive, which is why alter is not
-// checked above.
+// `alter table ... add column if not exists` is still fine in many files -- that one
+// IS additive and idempotent, and is deliberately not checked.
+//
+// What this note used to say [corrected 2026-07-21]: that `alter` as a whole is
+// additive, so no form of it needs checking. The premise was true only of ADD COLUMN,
+// and the conclusion was applied to ADD CONSTRAINT, which is a full definition and is
+// how approval_signature_binding came to be owned by two files unnoticed. The rule is
+// not "create is exclusive, alter is not" -- it is that anything REPLACING a whole
+// definition is exclusive, whichever keyword spells it.
 console.log(`\n${files.length} files, ${owners.size} objects, ${bad} owned by more than one file`);
 if (bad) {
   console.log('A duplicate means an object\'s definition depends on the order someone');

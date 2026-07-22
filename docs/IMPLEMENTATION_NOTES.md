@@ -479,3 +479,86 @@ third-party consent on the user's behalf. The strict per-job basis logic (`ALL_P
 `defaultConsentFor`, `setRecordingConsent`) remains in `consent.ts` — unused by the UI
 now, retained so this decision is reversible.
 
+
+### §5.7 The unsigned-approval bypass — FOUND, FIXED, APPLIED (mandate #2)
+
+**Found** by a Codex adversarial review on 2026-07-21 (the cross-model critic §4
+mandates), ranked its #2 of 16 and the highest-severity finding in the branch.
+
+**The hole.** `confirmation_respond` is granted to `anon` — correctly; the whole
+client-side design is a no-account SMS link — and took `p_signed_name text default
+null` with no validation in the function, the table, or anywhere else. The only thing
+requiring a signature was two lines of browser JavaScript:
+`approveEl.disabled = nameEl.value.trim().length < 2`. Anyone holding a link could call
+the RPC directly with `p_action='confirmed'` and no name and mint a binding,
+**append-only** "approval" nobody signed. Mandate #2 defines approval as "a digital
+signature — a binding, verifiable sign-off"; and because `confirmation_response` carries
+the no-update/no-delete trigger, the forged row could never be removed.
+
+**Why it survived review until now:** every existing guard was about *tampering with
+what was shown* (`confirmation_request_guard` freezes `shown_content`). Nobody had
+asked the opposite question — whether the *answer* was real. Freezing the question is
+not the same as authenticating the answer.
+
+**The fix** (`210_approval_signature.sql`): a `BEFORE INSERT` trigger on
+`confirmation_response` refusing `action='confirmed'` when the linked request is priced
+(`amount_cents IS NOT NULL`) and `signed_name` is absent or under two trimmed chars.
+
+Three choices, each load-bearing:
+1. **A trigger, not a CHECK constraint.** The rule depends on the *request* row, and a
+   CHECK cannot read another table. This is not pedantry: the legacy no-price decision
+   path legitimately answers `confirmed` with **no name**
+   (`confirm.html` `renderPlain` → `answer('confirmed',null,null)`), so a blanket
+   constraint would have broken every decision confirmation in the product.
+2. **At the table, not in the RPC.** It holds for every write path, and it survives the
+   migration-order hazard in Codex #5 — re-running `020_confirmations.sql` after `200`
+   restores the older function definitions, which would revert a guard living in a
+   function. A trigger owned by `210` is not reverted by that.
+3. **A new function name**, so the already-red duplicate checker gains nothing.
+
+**Applied to production 2026-07-21** and verified against the live database inside a
+transaction that was rolled back (0 rows left behind):
+
+| Test | Expected | Result |
+|---|---|---|
+| priced + `confirmed` + no name | refused | **REFUSED** ✓ |
+| priced + `confirmed` + name | allowed | **ALLOWED** ✓ |
+| legacy no-price + `confirmed` + no name | allowed | **ALLOWED** ✓ |
+
+Pre-flight also confirmed **0 existing rows** would have been refused, so no historical
+evidence was invalidated by applying it.
+
+**What this does NOT settle.** It raises the floor from "nothing at all" to the v1
+instrument (typed name + immutable snapshot + audit trail). Whether that clears the
+ESIGN/UETA enforceability bar is still **Fable Q1, BLOCKING before launch**
+(`PRD-RECONCILIATION` §5/§6). It also does not verify the typed name belongs to the
+person typing it, and it does not close Codex #1 — a correctly signed approval still
+does not move the change order out of Draft.
+
+**AMENDED 2026-07-21 — the rule is now unconditional.** The version above scoped the
+signature requirement to PRICED requests, to avoid breaking the legacy no-price path.
+hadar: *"yes decisions should also be signed."* That was the right call and it closed a
+second hole the first fix left open: a **Decision** — "confirm the vanity height at 34
+inches", the thing that exists to prevent a rework argument — could still be confirmed
+by anyone holding the link, unsigned. It also contradicted the product spec, which was
+correct all along: `PRD-change-approval-loop` R10 says a Decision "records signature +
+timestamp **like any item**". The spec was right; the implementation was wrong.
+
+The trigger no longer reads the request row at all — every `confirmed` response is
+signed. `confirm.html` `renderPlain` gained the matching name field in the same change,
+because a server rule with no client field is just a wall. Declines still need no name:
+identity is not the price of saying no.
+
+Re-verified against the live database, rolled back, 0 rows left:
+
+| Test | Expected | Result |
+|---|---|---|
+| priced + `confirmed` + no name | refused | **REFUSED** ✓ |
+| **Decision** + `confirmed` + no name | refused | **REFUSED** ✓ |
+| Decision + `confirmed` + name | allowed | **ALLOWED** ✓ |
+| decline + no name | allowed | **ALLOWED** ✓ |
+| name of `"  x  "` (1 char trimmed) | refused | **REFUSED** ✓ |
+
+Pre-flight: **0** existing confirmed rows were unsigned, so no historical evidence sits
+on the wrong side of the new rule. Existing rows are never re-validated (BEFORE INSERT)
+— they are evidence of what happened, and rewriting them would be its own dishonesty.

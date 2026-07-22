@@ -18,13 +18,19 @@
  *
  * ORDER MATTERS, and it is not the order the requirement lists things in:
  *
- *  1. LANGUAGE FIRST. Everything after this is words. Asking someone to read
- *     English in order to choose Spanish is the joke every app makes. This is the
- *     ONE screen that must be readable before a choice is made, so it shows both
- *     languages simultaneously and needs no reading at all.
+ *  1. ONE SETUP SCREEN: THE PROFILE (revised 2026-07-20, hadar). Language is no
+ *     longer a screen of its own — it is a bilingual EN|Español toggle at the top
+ *     of the profile form, so it still needs no reading to pick, but it no longer
+ *     stands between the user and knowing what the app is. The form collects the
+ *     minimum that personalises a proposal: language, name, solo/company (+ name),
+ *     and an optional trade.
  *
- *  2. THE JOB. Because consent belongs to a project (REQ-CON1) — there is nothing
- *     to attach a recording decision to until a job exists. A name is enough.
+ *  2. NO JOB STEP. You do not start by filing a job — you start by creating an
+ *     EXTRA (the goal is to send one to the customer fast). A job still exists and
+ *     an extra still needs one, but it is created/assigned DURING the extra flow
+ *     (capture → assign sheet / "new job right here"), never demanded up front.
+ *     Recording consent still belongs to a project (REQ-CON1); it is deferred to
+ *     the first record tap, by which point the capture has a job to attach to.
  *
  *  3. CONSENT IS NOT ASKED HERE (changed 2026-07-17, hadar). Same reasoning as #4
  *     below: a recording-consent form shown before the user has ever tried to
@@ -93,34 +99,35 @@ export async function saveLang(db: AbstractPowerSyncDatabase, l: Lang) {
   );
 }
 
-export type Step = 'lang' | 'profile' | 'job' | 'done';
+export type Step = 'profile' | 'done';
 
 /**
  * Where the user is. Derived from what actually exists, NOT from a stored step
  * counter: a counter and reality drift apart the moment someone kills the app
- * mid-setup, and then a user with a job gets asked to make a job again. The state
- * IS the answer. Consent is deliberately NOT a step here -- it is deferred to the
- * first record tap (see the header comment, point 3).
+ * mid-setup, and then a user with a profile gets asked to set it up again. The
+ * state IS the answer. Consent is deliberately NOT a step here -- it is deferred
+ * to the first record tap (see the header comment, point 3).
  *
- * Order (research-grounded 2026-07-17): language first (everything after is words),
- * THEN who-you-are (name/business/trade -- the minimum that personalises a proposal),
- * THEN the first job. Value-first slides + sign-in happen BEFORE this, pre-login.
+ * REVISED 2026-07-20 (hadar): setup is now ONE step -- the profile. Two things
+ * moved out of it:
+ *   - LANGUAGE is no longer its own screen. It folds INTO the profile form (a
+ *     bilingual EN|Español toggle at the top, so it still needs no reading to
+ *     pick). Choosing a language should not be a gate a user hits before they
+ *     even know what the app is.
+ *   - THE JOB is gone from onboarding entirely. You do not start by filing a job;
+ *     you start by creating an EXTRA. The job still exists and an extra still
+ *     needs one -- but it is created/assigned DURING the extra flow (capture ->
+ *     assign sheet), not demanded up front. Goal: send an extra to the customer
+ *     as fast as possible. Value-first slides + sign-in happen BEFORE this.
  */
-export function nextStep(o: {
-  langChosen: boolean; hasProfile: boolean; hasJob: boolean;
-}): Step {
-  if (!o.langChosen) return 'lang';
-  if (!o.hasProfile) return 'profile';
-  if (!o.hasJob) return 'job';
-  return 'done';
+export function nextStep(o: { hasProfile: boolean }): Step {
+  return o.hasProfile ? 'done' : 'profile';
 }
 
 /** How many taps first-run costs, so the claim can be checked rather than asserted. */
 export const FIRST_RUN_TAPS = {
-  lang: 1,       // tap your language
-  profile: 3,    // name (type) + solo/company + trade (or skip)
-  job: 2,        // type a name (1 field) + CREATE
-  total: 6,      // consent is deferred to first record, not part of first-run
+  profile: 4,    // language toggle + name (type) + solo/company + trade (or skip)
+  total: 4,      // consent is deferred to first record; no job step (2026-07-20)
   /**
    * REQ-X1 budgets the CAPTURE path at <=2 touches and the SEND path at <=3.
    * First-run is not in either budget -- it happens once, before any capture --
