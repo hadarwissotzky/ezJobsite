@@ -362,6 +362,10 @@ const EN: Record<string, string> = {
   'erec.evSigned': 'Signed by {name}',
   'erec.evDeclined': 'Declined',
   'erec.noTime': 'time not recorded',
+  // R8 in-app activity centre.
+  'r8.activity': 'Activity',
+  'r8.nothingYet': 'Nothing yet. Questions and answers from your clients land here.',
+  'r8.markAllRead': 'Mark all as read',
   'ewa.entry': 'No price yet — authorize the work',
   'co.answerOwed': 'Waiting on your answer',
   'co.chip.approved': 'Approved',
@@ -872,6 +876,10 @@ const ES: Record<string, string> = {
   'erec.evSigned': 'Firmado por {name}',
   'erec.evDeclined': 'Rechazado',
   'erec.noTime': 'sin hora registrada',
+  // R8 centro de actividad.
+  'r8.activity': 'Actividad',
+  'r8.nothingYet': 'Todavía nada. Las preguntas y respuestas de sus clientes aparecen aquí.',
+  'r8.markAllRead': 'Marcar todo como leído',
   'ewa.entry': 'Sin precio todavía — autoriza el trabajo',
   'co.answerOwed': 'Te toca contestar',
   'co.chip.approved': 'Aprobado',

@@ -52,6 +52,11 @@ import { VoicePriceCard } from './src/ui/voicepricecard';
 import { SendToCard } from './src/ui/sendtocard';
 import { prepareSendTo, quickAddDestination } from './src/sendtoprep';
 import type { SendToPrefill, SendToProject } from './src/sendto';
+// R8 in-app activity centre. The push half needs a provider; this half needs
+// nothing but the rows already on the device, and without it there is no path at
+// all from "a client asked something" to the contractor noticing.
+import { ensureActivitySchema, activityFor, markRead } from './src/activitystore';
+import { unreadCount, unreadIds, type ActivityRow } from './src/activity';
 import { decisionSummaryFor } from './src/decisionsummarydata';
 import type { DecisionSummary } from './src/decisionsummary';
 import { shareApprovalDoc } from './src/approvalrecordshare';
@@ -191,6 +196,9 @@ export default function App() {
   // read the fix; the card renders nothing rather than guessing meanwhile.
   const [sendTo, setSendTo] = React.useState<SendToPrefill | null>(null);
   const [sendToId, setSendToId] = React.useState<string | null>(null);
+  // R8: the bell. `activity` is the list; `bell` is whether the sheet is open.
+  const [activity, setActivity] = React.useState<ActivityRow[]>([]);
+  const [bell, setBell] = React.useState(false);
   // The wedge home (prototype c1): extras awaiting a signature, and the money already
   // recovered. Both read from real change_order rows — never invented.
   const [homeTab, setHomeTab] = React.useState<'extras' | 'jobs'>('extras');
@@ -666,6 +674,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       setCoRows(await ledger(db, pid));
       try { setQuestions(await openQuestions(db, pid)); } catch { /* schema not up yet */ }
       try { setThreads(await threadsForProject(db, pid)); } catch { /* schema not up yet */ }
+      try {
+        const jn = projects.find((p) => p.id === pid)?.name ?? '';
+        setActivity(await activityFor(db, pid, jn));
+      } catch { /* schema not up yet */ }
       // R3: derived every cycle, never cached — AC4's flag depends on the clock, so a
       // snapshot taken on tap would show "not yet due" hours after it came due.
       try {
@@ -755,6 +767,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // AFTER ensureChangeOrderSchema for the same reason as the lines above: this
       // ALTERs change_order to add parent_ewa_id, so the table has to exist first.
       await ensureEwaSchema(db);
+      await ensureActivitySchema(db);
       // R6b: who captured / priced / sent, and who it was addressed to.
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
@@ -2038,6 +2051,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         <View style={s.homeTop}>
           <Text style={s.brand}>EZ<Text style={s.brandAccent}>changeorder</Text></Text>
           <View style={s.topRight}>
+            {/* R8: the bell. Its badge counts UNANSWERED QUESTIONS only — a number
+                that also counted approvals would sit at 12 on a healthy job and stop
+                meaning anything, and a count nobody can clear is a count nobody
+                reads. */}
+            <Pressable onPress={() => setBell(true)}>
+              <Text style={unreadCount(activity) > 0 ? s.bellOn : s.bell}>
+                {unreadCount(activity) > 0 ? `🔔 ${unreadCount(activity)}` : '🔔'}
+              </Text>
+            </Pressable>
             {inbox > 0 && (
               <Pressable onPress={async () => {
                 setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true);
@@ -2845,6 +2867,45 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           sent from here until the contractor taps the confirm button, because
           mandate #2 forbids a priced commitment leaving on an inference and R5c
           requires the routing REASON to be visible, not merely computed. */}
+      {/* R8 activity centre. Every row deep-links to the item's record (R6b) —
+          the same destination the push would open, so an unanswered question is at
+          most two taps from anywhere. */}
+      {bell && (
+        <View style={s.card}>
+          <Text style={s.cardH}>{T('r8.activity')}</Text>
+          {!activity.length && <Text style={s.cardNote}>{T('r8.nothingYet')}</Text>}
+          {activity.slice(0, 40).map((a) => (
+            <Pressable key={a.id} style={s.coSendRow} onPress={async () => {
+              // Reading it marks THIS row read, never the whole list: a badge that
+              // clears because you opened the sheet has told you nothing.
+              await markRead(db, [a.id]);
+              const r = await extraRecord(db, a.changeOrderId);
+              if (r) { recordIdRef.current = a.changeOrderId; setRecord(r); }
+              setRecordSummary(await decisionSummaryFor(db, a.changeOrderId));
+              setBell(false);
+              await refresh();
+            }}>
+              <Text style={a.read ? s.dval : s.coNudge}>
+                {a.kind === 'question' ? '💬 ' : a.kind === 'approved' ? '✅ ' :
+                 a.kind === 'declined' ? '✋ ' : '→ '}{a.scope}
+              </Text>
+              <Text style={s.dmeta}>
+                {a.jobName}{a.detail ? ` · ${a.detail}` : ''} · {createdLabel(a.atMs)}
+              </Text>
+            </Pressable>
+          ))}
+          {unreadIds(activity).length > 0 && (
+            <Pressable style={s.later} onPress={async () => {
+              await markRead(db, unreadIds(activity)); await refresh();
+            }}>
+              <Text style={s.laterT}>{T('r8.markAllRead')}</Text>
+            </Pressable>
+          )}
+          <Pressable style={s.later} onPress={() => setBell(false)}>
+            <Text style={s.laterT}>{T('common.close')}</Text>
+          </Pressable>
+        </View>
+      )}
       {sendPrep && (() => {
         const sp = sendPrep;
         const sug = sp.suggestion;
@@ -3242,6 +3303,10 @@ const s = StyleSheet.create({
   // unanswered client question is. NOT ink — chipRevised already owns ink, and two
   // statuses that look identical defeat the point of a chip.
   chipDiscussing: { backgroundColor: '#FF5A00' },
+  bell: { fontSize: 17, opacity: 0.55, paddingHorizontal: 6 },
+  bellOn: { fontSize: 15, color: '#fff', backgroundColor: '#FF5A00', overflow: 'hidden',
+            borderRadius: 11, paddingHorizontal: 8, paddingVertical: 2,
+            fontFamily: 'BarlowCondensed_700Bold' },
   chipDraft: { backgroundColor: '#5C6570' },
 
   hNow: { color: '#0E8A4C', fontSize: 14, marginBottom: 4 },
