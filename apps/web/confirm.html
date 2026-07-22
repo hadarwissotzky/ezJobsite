@@ -210,6 +210,7 @@ function renderPriced(d) {
       <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
       <button class="approve" id="approve" disabled>✓ Approve — ${esc(priced)}</button>
       <button class="ghost" id="ask">Ask a question instead</button>
+      <button class="ghost" id="decline">Decline — do not proceed</button>
       <p class="recordnote">Your response, your name, and the date &amp; time become part of the project record. No account needed.</p>
     </div>`);
 
@@ -217,23 +218,75 @@ function renderPriced(d) {
   const approveEl = document.getElementById('approve');
   nameEl.addEventListener('input', () => { approveEl.disabled = nameEl.value.trim().length < 2; });
   approveEl.onclick = () => answer('confirmed', null, nameEl.value.trim());
-  document.getElementById('ask').onclick = () => askQuestion(d, false);
+  // Three distinct outcomes (PRD R5). Asking is not declining.
+  document.getElementById('ask').onclick = () => askQuestion(d);
+  document.getElementById('decline').onclick = () => declineFlow(d);
 }
 
-// Decline / question path — optional reason. Demanding an explanation to say "not
-// yet" is how you get no answer at all, so the note is optional.
-function askQuestion(d, priced) {
+// ASK A QUESTION — not a decline.
+//
+// This used to call answer('declined', …), which permanently declined the item and
+// burned the single-use token, so a client who asked a question could never approve
+// afterwards. It also made the decline status meaningless, because "I have a
+// question" and "do not proceed" wrote the same row. A question is now a message on
+// its own thread: it commits nobody, needs no signature, and leaves Approve live —
+// PRD R5b, "the Approve button remains pinned at every point in the thread".
+function askQuestion(d) {
   screen(`
     <div class="wrap" style="padding-top:24px">
       <h1 class="plain">What's your question?</h1>
-      <textarea id="note" placeholder="Optional — what would you like to ask or change?"></textarea>
+      <textarea id="note" placeholder="What would you like to ask or change?"></textarea>
       <div class="btns">
-        <button class="decline" id="send">Send to ${esc(d.company_name || 'the contractor')}</button>
+        <button class="yes" id="send">Send to ${esc(d.company_name || 'the contractor')}</button>
+        <button class="ghost" id="back">Back</button>
+      </div>
+      <p class="recordnote">Asking does not approve or decline anything. You can still
+        approve after they answer.</p>
+    </div>`);
+  document.getElementById('send').onclick = async () => {
+    const note = document.getElementById('note').value.trim();
+    if (!note) return;
+    document.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    const { data, error } = await supabase.rpc('confirmation_ask', {
+      p_token: token, p_note: note, p_user_agent: navigator.userAgent,
+    });
+    if (error) {
+      screen(`<div class="done"><div class="mark err">⚠️</div>
+        <h2>That didn't send</h2><p>Nothing was recorded. Please tap again.</p>
+        <div class="btns"><button class="yes" onclick="location.reload()">Try again</button></div></div>`);
+      return;
+    }
+    if (data && data.status === 'already_answered') {
+      done('✅', 'Already answered', 'Your first answer stands.'); return;
+    }
+    done('💬', 'Question sent',
+      'The contractor has your question. This is still open — you can approve once they reply.');
+  };
+  document.getElementById('back').onclick = () => (d.amount_cents != null ? renderPriced(d) : renderPlain(d));
+}
+
+// DECLINE — a real, terminal, signed answer. It stops work and the contractor acts
+// on it, so it carries the same signature an approval does: unsigned, anyone holding
+// the link could halt a job. The reason stays optional; demanding an explanation to
+// say no is how you get no answer at all.
+function declineFlow(d) {
+  screen(`
+    <div class="wrap" style="padding-top:24px">
+      <h1 class="plain">Decline this?</h1>
+      <p class="recordnote" style="margin:0 0 10px">This tells ${esc(d.company_name || 'the contractor')}
+        not to proceed. It is final and becomes part of the project record.</p>
+      <textarea id="note" placeholder="Optional — why?"></textarea>
+      <input class="sign" id="dname" placeholder="Type your full name to sign" autocomplete="name">
+      <div class="btns">
+        <button class="decline" id="send" disabled>Decline — do not proceed</button>
         <button class="ghost" id="back">Back</button>
       </div>
     </div>`);
-  document.getElementById('send').onclick = () =>
-    answer('declined', document.getElementById('note').value, null);
+  const dn = document.getElementById('dname');
+  const sendEl = document.getElementById('send');
+  dn.addEventListener('input', () => { sendEl.disabled = dn.value.trim().length < 2; });
+  sendEl.onclick = () =>
+    answer('declined', document.getElementById('note').value, dn.value.trim());
   document.getElementById('back').onclick = () => (d.amount_cents != null ? renderPriced(d) : renderPlain(d));
 }
 
@@ -249,6 +302,7 @@ function renderPlain(d) {
       <div class="btns">
         <button class="yes" id="yes" disabled>Yes — that's right</button>
         <button class="no" id="no">No — that's not right</button>
+        <button class="ghost" id="askp">Ask a question instead</button>
       </div>
       <p class="recordnote">Your answer, your name, and the date &amp; time become part of the project record. No account needed.</p>
     </div>`);
@@ -260,7 +314,9 @@ function renderPlain(d) {
   const yesEl = document.getElementById('yes');
   plainName.addEventListener('input', () => { yesEl.disabled = plainName.value.trim().length < 2; });
   yesEl.onclick = () => answer('confirmed', null, plainName.value.trim());
-  document.getElementById('no').onclick = () => askQuestion(d, false);
+  // "No" is a real decline (signed, terminal). Asking is its own, unsigned path.
+  document.getElementById('no').onclick = () => declineFlow(d);
+  document.getElementById('askp').onclick = () => askQuestion(d);
 }
 
 async function answer(action, note, name) {
