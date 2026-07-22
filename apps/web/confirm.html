@@ -89,7 +89,20 @@
   }
   .approve { background: var(--approve); color: #fff; display: flex; align-items: center; justify-content: center; gap: 8px; }
   .approve:disabled { opacity: .4; }
-  .ghost { background: none; color: var(--steel); font-size: 16px; margin-top: 6px; }
+  /* A BORDER, BECAUSE A CHOICE HAS TO LOOK LIKE ONE.
+     `background: none` with no border rendered these as bare text under a large green
+     button -- seen for the first time when the page was actually opened in a browser,
+     2026-07-21. PRD R5 says approve / ask / decline are three distinct outcomes; on a
+     phone this read as one button and two lines of footer copy. The client most likely
+     to need "Ask a question instead" is the one least likely to recognise unbordered
+     text as tappable, which is the core design test in CLAUDE.md: would someone who
+     does not think in software succeed here without being taught?
+     The card and the decline-confirmation button in this same file already carry
+     `1px solid var(--line)`; these were simply missed. */
+  .ghost {
+    background: var(--card); color: var(--steel); font-size: 16px; margin-top: 10px;
+    border: 1px solid var(--line);
+  }
   .decline { background: none; color: var(--danger); border: 1.5px solid #E4C4C4; }
   .recordnote { font-size: 12px; color: var(--steel); text-align: center; margin-top: 12px; line-height: 1.5; }
 
