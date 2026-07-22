@@ -298,6 +298,61 @@ console.log('\nverifying…\n');
         ' — wire it, revoke it, or add it to KNOWN_UNCALLED with the reason');
 }
 
+// ── 4f. Does each feature I claimed is BUILT still have a live entry point? ──
+// Reachability (4c) proves a module can be imported. This proves the specific
+// function that makes a feature work is actually CALLED from the app.
+//
+// A module can be reachable while its key export is never invoked — R5c was exactly
+// that for three commits: approvers.ts was imported for ensureApproverSchema while
+// suggestFor, addApprover and setExtraType had no callers at all, and I reported it
+// 75% complete.
+//
+// So every "BUILT" claim gets a symbol here. If someone refactors a call away, the
+// claim fails loudly instead of quietly becoming false in a status doc. This list is
+// the only place in the repo where a completion claim is executable.
+{
+  const CLAIMS = [
+    ['R1  send-to prefill',        'prepareSendTo',           'App.tsx'],
+    ['R1  draft banking',          'useSessionDraft',         'src/ui/capturescreen.tsx'],
+    ['R1  draft recovery',         'recoverableDrafts',       'App.tsx'],
+    ['R2  price from transcript',  'voiceReadingForDecision', 'App.tsx'],
+    ['R2  photo placement',        'narrationForExtra',       'App.tsx'],
+    ['R3  EWA send',               'sendEwa',                 'App.tsx'],
+    ['R3  unpriced banner',        'UnpricedEwaBanner',       'App.tsx'],
+    ['R4  photos to the client',   'publishApprovalPhotos',   'App.tsx'],
+    ['R5b thread pull',            'pullThreads',             'App.tsx'],
+    ['R5b reply',                  'postReply',               'App.tsx'],
+    ['R5c approver routing',       'suggestFor',              'App.tsx'],
+    ['R5c extra type',             'setExtraType',            'App.tsx'],
+    ['R6  frozen snapshot',        'withEventLog',            'App.tsx'],
+    ['R6b actor facts',            'noteActorNow',            'App.tsx'],
+    ['R6c decision summary',       'decisionSummaryFor',      'App.tsx'],
+    ['R7  discussing derivation',  'displayStatus',           'App.tsx'],
+    ['R7  supersede',              'supersedeExtra',          'App.tsx'],
+    ['R8  activity centre',        'activityFor',             'App.tsx'],
+    ['R8  manual remind',          'canRemind',               'App.tsx'],
+  ];
+  const broken = [];
+  for (const [label, sym, where] of CLAIMS) {
+    let t; try { t = readFileSync(join(MOBILE, where), 'utf8'); } catch { broken.push(`${label} (${where} missing)`); continue; }
+    // A CALL, not a mention. Strip imports and comments first: the naive version
+    // passed while the call was deleted, because the symbol was still in the import
+    // line. That is the THIRD time I have written a check that counts a name instead
+    // of a use — 4d did it with a filename in a comment. Same bug, same fix.
+    const body = t
+      .replace(/^\s*import[\s\S]*?from\s+['"][^'"]+['"];?\s*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/[^\n]*$/gm, '');
+    // `sym(` for a function, `<Sym` for a component.
+    const used = new RegExp(`\\b${sym}\\s*\\(|<\\s*${sym}\\b`).test(body);
+    if (!used) broken.push(`${label} — ${sym} is imported but never called in ${where}`);
+  }
+  record('feature claims', broken.length === 0 ? 'pass' : 'fail',
+    broken.length === 0
+      ? `${CLAIMS.length} claimed features, all with a live entry point`
+      : broken.slice(0, 3).join('; '));
+}
+
 // ── 5. Client vs server schema ────────────────────────────────────────────────
 {
   const r = run('node', [join(ROOT, 'scripts/check-schema-agreement.mjs')], ROOT);
