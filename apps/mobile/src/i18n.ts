@@ -362,6 +362,9 @@ const EN: Record<string, string> = {
   'erec.evSigned': 'Signed by {name}',
   'erec.evDeclined': 'Declined',
   'erec.noTime': 'time not recorded',
+  'r4.photosAttached': '{n} photos are on the client’s page',
+  'r4.photosCapped': '{n} photos sent — 8 is the most one extra can carry',
+  'r4.photosFailed': 'Sent — but the photos did not upload. The client sees the price without them.',
 
   // ── r5b / r6c: English came from the build agents, Spanish written here
   // [2026-07-22]. Shipping EN-only would have left a Spanish-speaking
@@ -858,6 +861,9 @@ const ES: Record<string, string> = {
   'erec.evSigned': 'Firmado por {name}',
   'erec.evDeclined': 'Rechazado',
   'erec.noTime': 'sin hora registrada',
+  'r4.photosAttached': '{n} fotos están en la página del cliente',
+  'r4.photosCapped': '{n} fotos enviadas — 8 es el máximo por cada extra',
+  'r4.photosFailed': 'Enviado, pero las fotos no se subieron. El cliente ve el precio sin ellas.',
 
   // ── r5b / r6c: English came from the build agents, Spanish written here
   // [2026-07-22]. Shipping EN-only would have left a Spanish-speaking

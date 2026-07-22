@@ -60,6 +60,7 @@ import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
 import { sendForConfirmation } from './src/confirmations';
+import { publishApprovalPhotos } from './src/approvalphotopublish';
 import {
   ensureApproverSchema, drainR5cOutbox, suggestFor, listRoster, addApprover,
   markApproverUsed, setExtraType, reasonText, typeLabel, roleLabel,
@@ -258,6 +259,25 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     if (!moved) {
       console.log('[send] %s was already past draft; server state wins', c.id);
     }
+
+    // PRD R4 — the photos go with the price. AFTER the send succeeded and BEFORE the
+    // link is handed to the client, so the first person to open it already sees them.
+    // This can NEVER turn a successful send into a failure: the approval is live and
+    // its price is frozen, so a photo that would not upload is REPORTED, not raised.
+    // `data.user.id` and not OWNER: the Storage object key was built from the auth uid
+    // by the outbox drainer, and OWNER falls back to 'owner-local' before sign-in.
+    const { data: who } = await connector.client.auth.getUser();
+    const pr = who?.user
+      ? await publishApprovalPhotos(db, connector.client,
+          { token: r.token, changeOrderId: c.id, ownerId: who.user.id })
+      : null;
+    setPhotoNote(
+      !pr ? null
+        : (pr.blocked || pr.failed.length) ? T('r4.photosFailed')
+        : pr.droppedOverCap > 0 ? T({ k: 'r4.photosCapped', p: { n: pr.attached } } as any)
+        : pr.attached > 0 ? T({ k: 'r4.photosAttached', p: { n: pr.attached } } as any)
+        : null
+    );
     // AFTER a successful send, never before: last_used_ms drives who gets
     // suggested next, and an attempt that failed is not evidence of anything.
     if (to) await markApproverUsed(db, to.id);
@@ -407,6 +427,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // placeholder: the server's types are the contract, and a string that cannot be
   // a UUID is not a user.
   const [OWNER, setOwner] = React.useState<string>(OWNER_FALLBACK);
+  // PRD R4. What happened to the photos on the last send — shown beside the link,
+  // never swallowed. "Sent" and "sent with the evidence" are different facts.
+  const [photoNote, setPhotoNote] = React.useState<string | null>(null);
   const [newJob, setNewJob] = React.useState<
     null | { name: string; address: string; lat?: number | null; lng?: number | null }
   >(null);
@@ -2586,6 +2609,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           </Text>
           <Text style={s.link}>{sentLink.url}</Text>
           <Text style={s.cardNote}>{T('conf.noLogin')}</Text>
+          {photoNote && <Text style={s.cardNote}>{photoNote}</Text>}
 
           {/* REQ-VAL8, delivered.
               We do NOT need an email provider. The user is a solo operator with
@@ -2601,7 +2625,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <Text style={s.confirmT}>{T('conf.send')}</Text>
           </Pressable>
 
-          <Pressable style={s.later} onPress={() => setSentLink(null)}>
+          {/* Clear the photo note too, or a stale "3 photos are on the client's
+              page" from the previous send reappears on the next one. */}
+          <Pressable style={s.later} onPress={() => { setSentLink(null); setPhotoNote(null); }}>
             <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
         </View>
