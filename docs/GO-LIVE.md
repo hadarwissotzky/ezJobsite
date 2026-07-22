@@ -18,10 +18,19 @@ What that proved, which nothing static could:
     PRESENT, and `change_order.extra_type` PRESENT — which means the ALTER with the
     duplicate-column catch works against a real database, not just in my head.
 
-What it did NOT prove, and still needs a phone:
-  * Anything past the first screen. I could launch and screenshot but not TAP —
-    `simctl` has no tap primitive and no `idb` is installed. The ledger, the bell,
-    the send preview and the record screen have rendered in no test.
+What it did NOT prove, and how to unblock it in two minutes:
+  * Anything past the first screen. I could launch and screenshot but not TAP. Two
+    mechanisms exist and both are closed HERE, each for a fixable reason:
+      - `idb` is not installed (`pip install fb-idb`, needs network).
+      - AppleScript CAN drive the Simulator, and is refused:
+        `osascript is not allowed assistive access (-1719)`. Granting Terminal (or
+        whichever app runs the agent) Accessibility permission in
+        System Settings ▸ Privacy & Security ▸ Accessibility opens this up
+        permanently.
+    With either one, a future session can tap through the whole loop on the
+    simulator and verify the ledger, the bell, the send preview and the record
+    screen — none of which has rendered in any test. That is now the single largest
+    gap in the evidence, and it is a checkbox, not a purchase.
   * Capture. The simulator borrows the host microphone and this Mac mini has none.
     R1's pause change still needs real hardware.
 
