@@ -198,9 +198,23 @@ export async function discardedCaptureIds(
 export async function discardCapture(
   db: AbstractPowerSyncDatabase, captureId: string
 ): Promise<{ ok: boolean; reason?: 'confirmed' | 'not_found'; freedBytes: number; deleted: number }> {
-  const used = await db.getAll<{ n: number }>(
-    `SELECT count(*) AS n FROM decision_version WHERE capture_id = ?`, [captureId]);
-  if ((used[0]?.n ?? 0) > 0) return { ok: false, reason: 'confirmed', freedBytes: 0, deleted: 0 };
+  // THE GUARD THAT BROKE ITSELF. It used to refuse whenever a decision_version
+  // pointed at the capture, which meant "he confirmed it into a decision". Then
+  // startExtraFromCapture began creating that row the instant a recording is
+  // saved, so the condition became true for EVERY capture and this refused
+  // everything — silently, because the caller only surfaced 'confirmed' as a
+  // message and the list simply did not change. hadar: "even after i tap twice
+  // the records are kept in the job list".
+  //
+  // The question was never "does a decision exist". It is the same question
+  // discardExtra asks: HAS IT BEEN SENT. Nothing is owed to anyone until a link
+  // goes out, and until then this is the contractor's own draft.
+  const sent = await db.getAll<{ n: number }>(
+    `SELECT count(*) AS n
+       FROM change_order co
+       JOIN decision_version dv ON dv.decision_id = co.decision_id
+      WHERE dv.capture_id = ? AND co.status <> 'draft'`, [captureId]);
+  if ((sent[0]?.n ?? 0) > 0) return { ok: false, reason: 'confirmed', freedBytes: 0, deleted: 0 };
 
   // THE WHOLE GROUP, NOT ONE ROW. What a contractor made is one thing — he
   // talked and took three photos of the same rot — and `capture_pair` is what
@@ -217,8 +231,11 @@ export async function discardCapture(
   // A sibling already confirmed makes the whole group evidence. Refuse rather
   // than delete around it and leave the group half gone.
   const confirmed = await db.getAll<{ n: number }>(
-    `SELECT count(*) AS n FROM decision_version
-      WHERE capture_id IN (${ids.map(() => '?').join(',')})`, ids);
+    `SELECT count(*) AS n
+       FROM change_order co
+       JOIN decision_version dv ON dv.decision_id = co.decision_id
+      WHERE dv.capture_id IN (${ids.map(() => '?').join(',')})
+        AND co.status <> 'draft'`, ids);
   if ((confirmed[0]?.n ?? 0) > 0) {
     return { ok: false, reason: 'confirmed', freedBytes: 0, deleted: 0 };
   }
@@ -236,6 +253,25 @@ export async function discardCapture(
            (capture_id, change_order_id, at_ms, bytes_freed) VALUES (?, ?, ?, ?)`,
         // No change order exists yet; the column records what it was discarded FROM.
         [r.capture_id, 'unsent', now, r.media_bytes]);
+    }
+  });
+
+  // AND THE EXTRA ITSELF. Every recording now creates one (startextra.ts), so
+  // deleting the media while leaving the change order would keep a row in the
+  // ledger pointing at evidence that no longer exists — which is what "the
+  // records are kept in the job list" looked like from the outside.
+  await db.writeTransaction(async (tx) => {
+    for (const id of ids) {
+      await tx.execute(
+        `DELETE FROM change_order_outbox WHERE row_id IN
+           (SELECT co.id FROM change_order co
+              JOIN decision_version dv ON dv.decision_id = co.decision_id
+             WHERE dv.capture_id = ? AND co.status = 'draft')`, [id]);
+      await tx.execute(
+        `DELETE FROM change_order WHERE id IN
+           (SELECT co.id FROM change_order co
+              JOIN decision_version dv ON dv.decision_id = co.decision_id
+             WHERE dv.capture_id = ? AND co.status = 'draft')`, [id]);
     }
   });
 

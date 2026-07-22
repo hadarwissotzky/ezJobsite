@@ -246,7 +246,10 @@ export default function App() {
   // The discard confirmation. Holds the PLAN it was opened with, so the sentence
   // on screen and the act are computed from one set of numbers.
   const [discard, setDiscard] = React.useState<
-    { co: LedgerRow; plan: Awaited<ReturnType<typeof previewDiscard>> } | null>(null);
+    { co: LedgerRow; plan: Awaited<ReturnType<typeof previewDiscard>>;
+      /** Set when the sheet was opened from a capture rather than a ledger row.
+       *  discardCapture takes the whole pair group — recording and photos. */
+      captureId?: string } | null>(null);
   const liveRef = React.useRef<{ stop: () => void } | null>(null);
   // null until the bell has been opened once; 'granted' hides the ask.
   const [notifyPerm, setNotifyPerm] = React.useState<string | null>(null);
@@ -1478,9 +1481,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               <Pressable style={s.confirmWide} onPress={async () => {
                 // discardExtra re-plans from scratch: the extra can be sent
                 // between this sheet opening and the thumb landing.
-                const r = await discardExtra(db, discard.co.id, connector.client);
+                const r = discard.captureId
+                  ? await discardCapture(db, discard.captureId)
+                  : await discardExtra(db, discard.co.id, connector.client);
                 setDiscard(null);
                 if (!r.ok) setFiled(T('discard.alreadySent'));
+                // refresh() reloads the ledger AND the captures list; both change.
                 await refresh();
               }}>
                 <Text style={s.confirmT}>{T('discard.yes')}</Text>
@@ -2169,12 +2175,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // offered Confirm and Not now — keep it, or keep it for later — and no
         // way to say no. discardCapture refuses once a decision_version points
         // at it, which is the point where discardExtra takes over.
-        onDiscard={async () => {
-          const r = await discardCapture(db, review);
+        // ONE confirmation for every way in. The ledger row, the record screen
+        // and this all open the same full-screen sheet, so the sentence a person
+        // reads before destroying something is written once and cannot drift.
+        onDiscard={() => {
+          const capId = review;
           setReview(null);
-          if (!r.ok && r.reason === 'confirmed') setFiled('Already confirmed — delete the extra instead.');
-          else if (r.ok) setFiled(`Deleted — ${r.deleted} file(s) removed.`);
-          await refresh();
+          setDiscard({
+            co: { id: `co-${capId}`, scope: T('discard.thisRecording') } as any,
+            plan: { allowed: true, deleteCaptures: [capId], keepCaptures: [], needsServer: [] },
+            captureId: capId,
+          });
         }}
       />
     );

@@ -47,9 +47,6 @@ export function ReviewScreen({
   const [who, setWho] = React.useState('');
   const [why, setWhy] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
-  // Two-tap arming rather than a modal: the destructive option sits beside two
-  // benign ones, and a single tap next to "Not now" is too easy to hit.
-  const [armed, setArmed] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -202,17 +199,15 @@ export function ReviewScreen({
             <Pressable style={[T.btn, T.btnGhost, { marginTop: 4 }]} onPress={onClose}>
               <Text style={T.btnGhostText}>Not now</Text>
             </Pressable>
-            {/* "Not now" keeps it for later; this is the other answer, and until
-                now the screen only offered one of them. Two taps: the first
-                turns this row into the confirmation, so a destructive action is
-                never one stray thumb away. */}
+            {/* "Not now" keeps it for later; this is the other answer. ONE tap,
+                which opens a confirmation that takes the screen — hadar asked for
+                a modal rather than the two-tap arming that was here, and he is
+                right: arming is invisible state, and a row that quietly changes
+                meaning under your thumb is worse than a dialog that says what it
+                will destroy. */}
             {onDiscard && (
-              <Pressable
-                style={[T.btn, T.btnGhost, { marginTop: 4 }]}
-                onPress={() => (armed ? onDiscard() : setArmed(true))}>
-                <Text style={[T.btnGhostText, armed && { color: C.danger }]}>
-                  {armed ? 'Tap again — this deletes the recording and its photos' : 'Delete this'}
-                </Text>
+              <Pressable style={[T.btn, T.btnGhost, { marginTop: 4 }]} onPress={onDiscard}>
+                <Text style={[T.btnGhostText, { color: C.danger }]}>Delete this</Text>
               </Pressable>
             )}
           </View>
