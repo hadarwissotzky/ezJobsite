@@ -2324,7 +2324,12 @@ export default function App() {
                   <Text style={s.coCreated}>Created {c.created}</Text>
                   {!c.synced && <Text style={s.coOnPhone}>On this phone · not backed up yet</Text>}
                 </Pressable>
-                {!c.signed_by && (
+                {/* Gate on STATUS, not on signed_by. A declined row has no signer,
+                    so gating on signed_by offered to re-send something the client
+                    had already refused; approved/superseded are equally finished.
+                    Sending again is legitimate only while it is still open, and it
+                    now RETIRES the previous link (250_one_live_link). */}
+                {(c.status === 'draft' || c.status === 'sent') && (
                   <Pressable style={s.coSendRow} onPress={() => sendPricedApproval(c)}>
                     <Text style={s.coNudge}>
                       {c.status === 'sent' ? 'Resend link →' : 'Send for approval →'}

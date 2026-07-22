@@ -155,6 +155,18 @@ async function load() {
   const { data, error } = await supabase.rpc('confirmation_fetch', { p_token: token });
   if (error) { done('⚠️', 'Could not load this', 'Check your connection and open the link again.'); return; }
 
+  // A link is retired the moment a newer one is issued for the same change order
+  // (250_one_live_link), so an old text message can no longer be signed at a stale
+  // price. Say that here rather than letting the client read, type their name and
+  // only THEN hit a refusal. Checked separately because confirmation_fetch is one of
+  // the four already-duplicated functions and extending it would add a fifth.
+  const { data: st } = await supabase.rpc('confirmation_state', { p_token: token });
+  if (st && st.found && st.superseded && !st.answered) {
+    done('🔄', 'This version was replaced',
+      'The contractor sent an updated version of this request. Please open the most recent link they texted you — nothing here was recorded.');
+    return;
+  }
+
   if (data.status === 'not_found') { done('⚠️', 'This link is not valid', 'It may have been mistyped. Ask for a new one.'); return; }
   if (data.status === 'expired') { done('⏰', 'This link has expired', 'Ask for a new one — nothing is lost.'); return; }
   if (data.status === 'already_answered') {
@@ -338,6 +350,16 @@ async function answer(action, note, name) {
     // A normal reader cannot reach this — the button stays disabled until a name is
     // typed — so this is a direct RPC call or a broken client. Say what is missing
     // rather than "that didn't send", which would be the wrong reason.
+    // Retired between opening the page and tapping. Rare, but it is exactly the
+    // race the supersede rule exists to catch, so name it.
+    if ((error.message || '').includes('replaced by a newer one') ||
+        error.hint === 'link_superseded') {
+      screen(`<div class="done"><div class="mark err">🔄</div>
+        <h2>This version was replaced</h2>
+        <p>The contractor sent an updated version while this page was open.
+           Nothing was recorded. Please open the most recent link they texted you.</p></div>`);
+      return;
+    }
     const needsSignature =
       (error.message || '').includes('requires a typed signature') ||
       error.hint === 'signature_required';

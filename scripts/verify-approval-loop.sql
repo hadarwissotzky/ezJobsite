@@ -64,8 +64,9 @@ do $$ declare st text; begin
     case when st='declined' then 'PASS' else 'FAIL (want declined)' end;
 end $$;
 
--- 4 ── a second, conflicting link cannot walk a terminal state (partial Codex #6)
-do $$ declare st text; n int; begin
+-- 4 ── #6: issuing a second link RETIRES the first. The conflict 230 could only
+--      soften can no longer be created: the older link is unanswerable.
+do $$ declare st text; n int; sup int; begin
   insert into public.confirmation_request
     (token,decision_id,project_id,owner_id,kind,shown_content,shown_sha256,
      counterparty_label,channel,amount_cents,change_order_id)
@@ -76,21 +77,34 @@ do $$ declare st text; n int; begin
      counterparty_label,channel,amount_cents,change_order_id)
   values ('vt-c2','vd3','vp1',gen_random_uuid(),'confirm','Approval requested.'||chr(10)||'Price: $2,300.00',null,
           'Sarah','link',230000,'vco-c');
+
+  select count(*) into sup from public.confirmation_request
+   where change_order_id='vco-c' and superseded_at is not null;
+  raise notice 'CHECK 4a resend   -> retired_links=%   %', sup,
+    case when sup=1 then 'PASS' else 'FAIL (want the older one retired)' end;
+
+  -- the OLD link is now dead
+  begin
+    insert into public.confirmation_response(token,action,signed_name)
+    values ('vt-c1','confirmed','Sarah Miller');
+    raise notice 'CHECK 4b old link -> ACCEPTED   FAIL (stale price signable)';
+  exception when check_violation then
+    raise notice 'CHECK 4b old link -> refused   PASS';
+  end;
+
+  -- the CURRENT link still works and settles the change order
   insert into public.confirmation_response(token,action,signed_name)
-  values ('vt-c1','confirmed','Sarah Miller');
-  insert into public.confirmation_response(token,action,signed_name)
-  values ('vt-c2','declined','Someone Else');
+  values ('vt-c2','confirmed','Sarah Miller');
   select status into st from public.change_order where id='vco-c';
   select count(*) into n from public.approval where change_order_id='vco-c';
-  -- BOTH answers are recorded as evidence; only the first moves the change order.
-  raise notice 'CHECK 4 conflict  -> status=% approvals_recorded=%   %', st, n,
-    case when st='approved' and n=2 then 'PASS' else 'FAIL (want approved + 2)' end;
+  raise notice 'CHECK 4c new link -> status=% approvals=%   %', st, n,
+    case when st='approved' and n=1 then 'PASS' else 'FAIL' end;
 end $$;
 
 -- 5 ── signatures are still mandatory on both answers (210)
 do $$ begin
   insert into public.confirmation_response(token,action,signed_name)
-  values ('vt-c1','confirmed',null);
+  values ('vt-a','confirmed',null);
   raise notice 'CHECK 5 unsigned  -> ALLOWED   FAIL';
 exception
   when check_violation then raise notice 'CHECK 5 unsigned  -> refused   PASS';
