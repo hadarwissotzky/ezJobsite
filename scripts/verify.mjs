@@ -417,6 +417,12 @@ console.log('\nverifying…\n');
     ['R6  timeline fetched',       'hydrateEventLog',         'src/eventlog.ts'],
     ['R6  open signal computed',   'openSignal',              'src/eventlog.ts'],
     ['R6  open signal shown',      'RecordApproval',          'src/ui/recordscreen.tsx'],
+    // R2 on device. Three wires, and the middle one is the one that rots
+    // silently: recognising without uploading leaves the transcript on one
+    // handset, which is mandate #1's failure, and the app would look fine.
+    ['R2  on-device recognise',    'transcribeOnDevice',      'App.tsx'],
+    ['R2  on-device upload',       'drainSttOutbox',          'App.tsx'],
+    ['R2  on-device schema',       'ensureSttSchema',         'App.tsx'],
   ];
   const broken = [];
   for (const [label, sym, where] of CLAIMS) {

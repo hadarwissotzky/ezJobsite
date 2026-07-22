@@ -48,7 +48,8 @@
           "recordAudioAndroid": true
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-speech-recognition"
     ]
   }
 }

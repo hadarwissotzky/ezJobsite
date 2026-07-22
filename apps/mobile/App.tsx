@@ -43,6 +43,10 @@ import { EwaScreen, UnpricedEwaBanner } from './src/ui/ewascreen';
 import { drainEwaOutbox, ensureEwaSchema, ewaIds, listEwa, linkPriceToEwa,
          markEwaApproved, markReminded, type EwaRow } from './src/ewastore';
 import { sendEwa } from './src/ewasend';
+// R2 on device. No key, no signal needed — the contractor in a crawlspace gets a
+// filled preview before he stands up. The worker still re-transcribes via the
+// cloud and supersedes this under 150's newest-wins.
+import { drainSttOutbox, ensureSttSchema, transcribeOnDevice } from './src/ondevicestt';
 import { ensureVoiceCacheSchema, voiceReadingForDecision, narrationForExtra,
          type VoiceReading } from './src/voicesource';
 // R2: photos beside the sentence spoken over them. Degrades to a plain strip when
@@ -951,6 +955,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // working in a basement (mandate #7). Fetching is opportunistic; a miss is an
       // empty, flagged price field, never a blocked screen.
       await ensureVoiceCacheSchema(db);
+      await ensureSttSchema(db);
       const sl = await savedLang(db);
       // Restore the display language a returning user already chose. Language is now
       // part of the profile form, not a gate, so there's no separate "picked" flag.
@@ -1077,6 +1082,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // LAST, and after both the thread pull and the status hydrate: there is
           // nothing to announce until the question and the green light are local.
           // Reads permission, never requests it — the request dialog blocks.
+          // Uploads what the phone recognised offline. 368 is the only path an
+          // app has into capture_transcript; 150 revoked the direct INSERT.
+          const st = await drainSttOutbox(db, connector.client);
+          if (st.attempted) console.log('drain stt:', JSON.stringify(st));
           const nt = await runNotifications(db, projectId);
           if (nt.presented || nt.blocked) console.log('notify:', JSON.stringify(nt));
         } catch (e: any) { /* offline is normal; backoff already recorded */ }
@@ -1141,6 +1150,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // AFTER the capture is durable, never before, and it cannot throw: mandate #1
         // — bookkeeping never delays or endangers a capture.
         await noteCapturedBy(db, r.captureId);
+        // R2 on device, under the SAME rule as the line above: after the capture
+        // is durable, and it cannot throw. Recognition is a convenience; the
+        // recording is the evidence and nothing here may endanger it.
+        //
+        // Deliberately NOT awaited into the UI path. The contractor sees "saved"
+        // the instant it is saved — recognition takes seconds and mandate #3's
+        // touch budget does not have seconds to spare. The transcript lands when
+        // it lands, and refresh() picks it up.
+        void transcribeOnDevice(db, r.captureId, uri)
+          .then((t) => { if (t.ok) void refresh(); })
+          .catch(() => { /* the worker's cloud path still covers this capture */ });
         if (res.confidence !== 'high') setFiled(res.why);
       } else setUi({ k: 'refused', why: r.reason });
       await refresh();
