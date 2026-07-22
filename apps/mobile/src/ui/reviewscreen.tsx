@@ -27,7 +27,7 @@ import { fetchProposal, prefillFrom, type Proposal } from '../proposals';
 import { C, F, T, display, label, money as moneyType } from './theme';
 
 export function ReviewScreen({
-  db, client, captureId, projectId, projectName, ownerId, onDone, onClose,
+  db, client, captureId, projectId, projectName, ownerId, onDone, onClose, onDiscard,
 }: {
   db: AbstractPowerSyncDatabase;
   client: SupabaseClient;
@@ -37,6 +37,8 @@ export function ReviewScreen({
   ownerId: string;
   onDone: () => void;
   onClose: () => void;
+  /** Undefined once the capture has been confirmed into a decision. */
+  onDiscard?: () => void;
 }) {
   const [loading, setLoading] = React.useState(true);
   const [prop, setProp] = React.useState<Proposal | null>(null);
@@ -45,6 +47,9 @@ export function ReviewScreen({
   const [who, setWho] = React.useState('');
   const [why, setWhy] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
+  // Two-tap arming rather than a modal: the destructive option sits beside two
+  // benign ones, and a single tap next to "Not now" is too easy to hit.
+  const [armed, setArmed] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -197,6 +202,19 @@ export function ReviewScreen({
             <Pressable style={[T.btn, T.btnGhost, { marginTop: 4 }]} onPress={onClose}>
               <Text style={T.btnGhostText}>Not now</Text>
             </Pressable>
+            {/* "Not now" keeps it for later; this is the other answer, and until
+                now the screen only offered one of them. Two taps: the first
+                turns this row into the confirmation, so a destructive action is
+                never one stray thumb away. */}
+            {onDiscard && (
+              <Pressable
+                style={[T.btn, T.btnGhost, { marginTop: 4 }]}
+                onPress={() => (armed ? onDiscard() : setArmed(true))}>
+                <Text style={[T.btnGhostText, armed && { color: C.danger }]}>
+                  {armed ? 'Tap again to delete it' : 'Delete this recording'}
+                </Text>
+              </Pressable>
+            )}
           </View>
         </>
       )}

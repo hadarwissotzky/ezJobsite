@@ -47,7 +47,7 @@ import { sendEwa } from './src/ewasend';
 // filled preview before he stands up. The worker still re-transcribes via the
 // cloud and supersedes this under 150's newest-wins.
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
-import { discardExtra, ensureDiscardSchema, previewDiscard } from './src/discardstore';
+import { discardCapture, discardExtra, ensureDiscardSchema, previewDiscard } from './src/discardstore';
 import { discardSummary } from './src/discard';
 import { ensureVoiceCacheSchema, voiceReadingForDecision, narrationForExtra,
          type VoiceReading } from './src/voicesource';
@@ -2125,6 +2125,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         ownerId={OWNER}
         onDone={async () => { setReview(null); await refresh(); }}
         onClose={() => setReview(null)}
+        // The other answer to "Review before it counts". Until now the screen
+        // offered Confirm and Not now — keep it, or keep it for later — and no
+        // way to say no. discardCapture refuses once a decision_version points
+        // at it, which is the point where discardExtra takes over.
+        onDiscard={async () => {
+          const r = await discardCapture(db, review);
+          setReview(null);
+          if (!r.ok && r.reason === 'confirmed') setFiled('Already confirmed — delete the extra instead.');
+          await refresh();
+        }}
       />
     );
   }

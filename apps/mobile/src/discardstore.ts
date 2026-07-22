@@ -175,3 +175,47 @@ export async function discardedCaptureIds(
     `SELECT capture_id FROM capture_discarded`);
   return new Set(rows.map((r) => r.capture_id));
 }
+
+
+/**
+ * Discard a CAPTURE that was never confirmed into anything.
+ *
+ * A different thing from discarding an extra, and earlier in the life of the
+ * evidence: this is the review screen's "I do not want this at all" — the
+ * proposal has not become a decision, so no decision, no change order and no
+ * counterparty depend on it. It is the cheapest possible moment to change your
+ * mind, which is exactly why it must be offered.
+ *
+ * REFUSES ONCE IT HAS BEEN CONFIRMED. The moment a `decision_version` points at
+ * this capture it is the evidence behind a decision, and a decision may already
+ * carry an extra that has been sent. From there the path is `discardExtra`,
+ * which does the sharing and ever-sent checks this cannot.
+ *
+ * Same shape as everywhere else here: the BYTES go, `capture_commit` stays
+ * (its trigger refuses deletion and that is not negotiable), and a tombstone
+ * records the act so a deliberate discard never looks like a silent loss.
+ */
+export async function discardCapture(
+  db: AbstractPowerSyncDatabase, captureId: string
+): Promise<{ ok: boolean; reason?: 'confirmed' | 'not_found'; freedBytes: number }> {
+  const used = await db.getAll<{ n: number }>(
+    `SELECT count(*) AS n FROM decision_version WHERE capture_id = ?`, [captureId]);
+  if ((used[0]?.n ?? 0) > 0) return { ok: false, reason: 'confirmed', freedBytes: 0 };
+
+  const row = await db.getAll<{ media_relpath: string; media_bytes: number }>(
+    `SELECT media_relpath, media_bytes FROM capture_commit WHERE capture_id = ?`, [captureId]);
+  if (!row.length) return { ok: false, reason: 'not_found', freedBytes: 0 };
+
+  await db.execute(
+    `INSERT OR IGNORE INTO capture_discarded
+       (capture_id, change_order_id, at_ms, bytes_freed) VALUES (?, ?, ?, ?)`,
+    // No change order exists yet; the column records what it was discarded FROM.
+    [captureId, 'review', Date.now(), row[0].media_bytes]);
+
+  let freedBytes = 0;
+  try {
+    await FS.deleteAsync(`${FS.documentDirectory}${row[0].media_relpath}`, { idempotent: true });
+    freedBytes = row[0].media_bytes;
+  } catch { /* orphan; recoverySweep collects it */ }
+  return { ok: true, freedBytes };
+}
