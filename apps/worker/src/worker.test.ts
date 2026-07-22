@@ -10,23 +10,31 @@ import { runOnce, type Job } from './worker.ts';
  * nothing is outstanding. Those are the parts that cost money or lose work when
  * they are wrong.
  */
-function fakeClient(job: Job | null) {
+function fakeClient(job: Job | null, transcriptRows: any[] = [{ text: 'work at 14 Elm St' }]) {
   const calls: Array<{ fn: string; args: any }> = [];
   const sb: any = {
     calls,
     rpc(fn: string, args: any) {
       calls.push({ fn, args });
       if (fn === 'claim_job') return Promise.resolve({ data: job, error: null });
+      if (fn === 'content_resolve') return Promise.resolve({
+        data: [{ project_id: 'p1', matched_on: 'address',
+                 matched_text: '14 Elm St', confidence: 'high' }], error: null });
       return Promise.resolve({ data: null, error: null });
     },
     from(table: string) {
       return {
         insert: (row: any) => (calls.push({ fn: 'insert', args: row }),
                                Promise.resolve({ error: null })),
-        select: () => ({ eq: () => ({ single: () => (
-          calls.push({ fn: 'select', args: table }),
-          Promise.resolve({ data: { payload: 'k/a.m4a', media_mime_type: 'audio/m4a' },
-                            error: null })) }) }),
+        select: () => ({
+          eq: () => ({
+            single: () => (calls.push({ fn: 'select', args: table }),
+              Promise.resolve({ data: { payload: 'k/a.m4a', media_mime_type: 'audio/m4a' },
+                                error: null })),
+            order: () => ({ limit: () => (calls.push({ fn: 'select', args: table }),
+              Promise.resolve({ data: transcriptRows, error: null })) }),
+          }),
+        }),
       };
     },
     storage: {
@@ -171,4 +179,84 @@ test('a provider error parks the job and writes nothing', async () => {
     globalThis.fetch = realFetch;
     delete process.env.DEEPGRAM_API_KEY;
   }
+});
+
+// ── resolve_project: needs no credential at all ──────────────────────────────
+
+test('resolve_project writes a signal from the transcript', async () => {
+  const sb = fakeClient(job({ steps: ['resolve_project'] }));
+  const r = await runOnce(sb, 'w1');
+
+  assert.equal(r.done, true);
+  const ins = sb.calls.find((c: any) => c.fn === 'insert');
+  assert.equal(ins.args.candidate_project_id, 'p1');
+  assert.equal(ins.args.matched_on, 'address');
+  assert.equal(ins.args.confidence, 'high');
+  // Auditable: the words that produced the signal travel with it.
+  assert.match(ins.args.from_transcript, /14 Elm St/);
+});
+
+// 'none' is a real answer — "the words point at nothing we know". Recording it is
+// what distinguishes a capture that was considered from one never reached.
+test('no match still writes a signal, with confidence none', async () => {
+  const sb = fakeClient(job({ steps: ['resolve_project'] }));
+  sb.rpc = (fn: string, args: any) => {
+    sb.calls.push({ fn, args });
+    if (fn === 'claim_job') return Promise.resolve({ data: job({ steps: ['resolve_project'] }), error: null });
+    if (fn === 'content_resolve') return Promise.resolve({ data: [], error: null });
+    return Promise.resolve({ data: null, error: null });
+  };
+  await runOnce(sb, 'w1');
+  const ins = sb.calls.find((c: any) => c.fn === 'insert');
+  assert.equal(ins.args.candidate_project_id, null);
+  assert.equal(ins.args.confidence, 'none');
+});
+
+// A transcript naming TWO jobs. Verified against the real content_resolve on a
+// local Postgres: it returns {project_id: null, matched_on: 'ambiguous',
+// confidence: 'none'} — one row, not zero, and 'none' is already a legal value.
+// So the coercion below is defensive, not load-bearing, and this test says which
+// it is rather than implying the function returns something it does not.
+test('an unexpected confidence is coerced, not inserted raw', async () => {
+  const sb = fakeClient(job({ steps: ['resolve_project'] }));
+  sb.rpc = (fn: string, args: any) => {
+    sb.calls.push({ fn, args });
+    if (fn === 'claim_job') return Promise.resolve({ data: job({ steps: ['resolve_project'] }), error: null });
+    if (fn === 'content_resolve') return Promise.resolve({
+      // Deliberately NOT the real shape: this asserts what happens if the
+      // function ever returns a value the check constraint would reject.
+      data: [{ project_id: null, matched_on: 'ambiguous', confidence: 'ambiguous' }], error: null });
+    return Promise.resolve({ data: null, error: null });
+  };
+  await runOnce(sb, 'w1');
+  assert.equal(sb.calls.find((c: any) => c.fn === 'insert').args.confidence, 'none');
+});
+
+// A signal saying "matched nothing" when nothing was READ would be a lie about
+// evidence. Out-of-order must park, not invent.
+test('no transcript parks the step instead of writing an empty signal', async () => {
+  const sb = fakeClient(job({ steps: ['resolve_project'] }), []);
+  const r = await runOnce(sb, 'w1');
+  assert.equal(r.blocked, 'needs_api_key');
+  assert.equal(sb.calls.some((c: any) => c.fn === 'insert'), false);
+});
+
+// The observed ambiguous shape, taken from a real call rather than assumed: two
+// jobs named in one transcript must file to NEITHER. Mandate #8 — the column is
+// `candidate_project_id`, and nothing here moves a capture between jobs.
+test('a transcript naming two jobs resolves to neither', async () => {
+  const sb = fakeClient(job({ steps: ['resolve_project'] }));
+  sb.rpc = (fn: string, args: any) => {
+    sb.calls.push({ fn, args });
+    if (fn === 'claim_job') return Promise.resolve({ data: job({ steps: ['resolve_project'] }), error: null });
+    if (fn === 'content_resolve') return Promise.resolve({
+      data: [{ project_id: null, matched_on: 'ambiguous', matched_text: null, confidence: 'none' }],
+      error: null });
+    return Promise.resolve({ data: null, error: null });
+  };
+  await runOnce(sb, 'w1');
+  const ins = sb.calls.find((c: any) => c.fn === 'insert');
+  assert.equal(ins.args.candidate_project_id, null);
+  assert.equal(ins.args.matched_on, 'ambiguous');
+  assert.equal(ins.args.confidence, 'none');
 });

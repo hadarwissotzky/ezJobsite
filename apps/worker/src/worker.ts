@@ -72,13 +72,72 @@ export async function runStep(
     if (t === null) return { ok: false, reason: 'needs_api_key' };
     return writeTranscript(sb, job, t);
   }
-  // detect_language and structure both consume the transcript. Until the
-  // transcribe step can run there is nothing for them to read, so they are not
-  // implemented here rather than being implemented against nothing — a step that
-  // "succeeds" without doing anything would mark the job done and the capture
-  // processed, and the contractor would get an empty preview card with no
-  // indication that anything was missing.
+  // NEEDS NO CREDENTIAL. `content_resolve` is a plain SQL function — it matches
+  // the transcript against the owner's project names, addresses and client refs.
+  // I had this filed under "blocked on a key" alongside the rest of the pipeline,
+  // which was wrong: the only thing it needs is a transcript.
+  if (step === 'resolve_project') return resolveProject(sb, job);
+
+  // detect_language and structure genuinely do consume a provider.
+  // detect_language is already answered by the transcribe response
+  // (`source_language`), and structure needs the LLM the PRD names. Neither is
+  // implemented against nothing: a step that "succeeds" without doing anything
+  // marks the job done and the capture processed, and hands the contractor an
+  // empty preview card with nothing saying why.
   return { ok: false, reason: 'needs_api_key' };
+}
+
+/**
+ * Which job do these words point at? (170)
+ *
+ * WRITES THE SIGNAL EVEN WHEN IT MATCHES NOTHING. 'none' is a real, useful
+ * answer — "the words point at nothing we know" — and recording it is what lets
+ * a person see the capture was considered rather than skipped. Writing only on a
+ * hit would leave an unresolved capture indistinguishable from one the worker
+ * never reached.
+ *
+ * It is a SIGNAL, never a filing decision. The column is `candidate_project_id`
+ * and mandate #8 is suggest-never-decide: nothing here moves a capture between
+ * jobs.
+ */
+async function resolveProject(sb: SupabaseClient, job: Job): Promise<StepOutcome> {
+  // Newest transcript wins: 150 is append-only, so a re-transcribe is a NEW row
+  // and the latest is the current reading.
+  const { data: tr, error: trErr } = await sb
+    .from('capture_transcript').select('text')
+    .eq('capture_id', job.capture_id)
+    .order('created_at', { ascending: false }).limit(1);
+  if (trErr) return { ok: false, reason: 'needs_connection', error: trErr.message };
+
+  const text = tr?.[0]?.text;
+  // No transcript yet means the step is out of order, not that it failed. Park
+  // it rather than writing a 'none' signal derived from nothing — a signal that
+  // says "matched nothing" when nothing was READ is a lie about evidence.
+  if (typeof text !== 'string') {
+    return { ok: false, reason: 'needs_api_key', error: 'no transcript to resolve against' };
+  }
+
+  const { data: hits, error } = await sb.rpc('content_resolve', {
+    p_owner: job.owner_id, p_transcript: text,
+  });
+  if (error) return { ok: false, reason: 'needs_connection', error: error.message };
+
+  const hit = (Array.isArray(hits) ? hits[0] : hits) ?? null;
+  const ins = await sb.from('capture_content_signal').insert({
+    id: `sig-${job.capture_id}-${Date.now()}`,
+    capture_id: job.capture_id,
+    owner_id: job.owner_id,
+    candidate_project_id: hit?.project_id ?? null,
+    matched_on: hit?.matched_on ?? null,
+    matched_text: hit?.matched_text ?? null,
+    // The check constraint allows high/low/none only. content_resolve returns
+    // 'none' for both "no match" and "ambiguous"; anything unexpected becomes
+    // 'none' rather than violating the constraint and failing the whole job.
+    confidence: ['high', 'low', 'none'].includes(hit?.confidence) ? hit.confidence : 'none',
+    from_transcript: text.slice(0, 2000),
+  });
+  if (ins.error) return { ok: false, reason: 'needs_connection', error: ins.error.message };
+  return { ok: true };
 }
 
 /**
