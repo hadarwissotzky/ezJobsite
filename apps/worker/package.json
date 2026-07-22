@@ -1,0 +1,13 @@
+{
+  "name": "@ezjobsite/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types src/run.ts",
+    "test": "node --experimental-strip-types --test src/*.test.ts",
+    "backlog": "node --experimental-strip-types src/backlog.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}

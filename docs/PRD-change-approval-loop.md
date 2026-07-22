@@ -168,7 +168,7 @@ NOT BUILT, because nothing called it. It has since been wired.
 | Req | Status | The gap that matters most |
 |-----|--------|---------------------------|
 | R1  | PARTIAL | A paused session does **not** survive app kill. The fix is WRITTEN and unit-tested (`capturesession.ts`) but **deliberately not wired** — see the note below |
-| R2  | PARTIAL | Pipeline is built but **not configured** (no STT/LLM key), so it cannot be demonstrated end to end. Amount is never prefilled into the preview |
+| R2  | PARTIAL — needs a WORKER, not a key | Both halves of this row were wrong. (1) "Amount is never prefilled" is false: `App.tsx:2681` prefills it from `voiceReadingForDecision`, and mandate #6 leaves it empty for two figures, a bare spoken number, or silence. Verified on device (loopcheck step 8: spoken "eighteen fifty" → none; written "$1,850.00" → 185000). (2) It is not "built but unconfigured": the CONSUMER side is built (`voicesource.ts` reads `capture_transcript`, `voiceprice.ts` extracts), but **nothing writes `capture_transcript`** — there is no worker and no server in this repo. The server-side contract already exists in `140_processing_jobs` (`claim_job` / `complete_step` / `finish_job` / `block_job`); what is missing is something that implements it. A key alone would change nothing |
 | R3  | PARTIAL | Fixed price + NTE work. The **entire two-step EWA does not exist** |
 | R4  | BUILT | Photos publish after send and render on the approval page. Needs `304` applied |
 | R5  | PARTIAL | Link, three outcomes and the question path work. **The app never reads `confirmation_question`** — a client question is stored and then invisible forever |
