@@ -100,8 +100,10 @@ export async function recognizeFile(
     // take the caller with it. Every await in this file must be able to return.
     const timer = setTimeout(() => done(null), 60_000);
 
-    const subs = [
-      M.addSpeechRecognitionListener('result', (e: any) => {
+    let subs: Array<{ remove: () => void }> = [];
+    try {
+      subs = [
+      mod.addListener('result', (e: any) => {
         if (!e?.isFinal) return;
         const r = e.results?.[0];
         if (!r) return done(null);
@@ -118,9 +120,13 @@ export async function recognizeFile(
           durationSec: null,
         });
       }),
-      M.addSpeechRecognitionListener('error', () => done(null)),
-      M.addSpeechRecognitionListener('end', () => done(null)),
-    ];
+      mod.addListener('error', () => done(null)),
+      mod.addListener('end', () => done(null)),
+      ];
+    } catch (e: any) {
+      void logDiag(db, 'file.threw', 'attach: ' + String(e?.message ?? e).slice(0, 100));
+      return done(null);
+    }
 
     try {
       mod.start({
@@ -184,8 +190,14 @@ export async function startLive(
   if (perm && perm.status !== 'granted') return null;
 
   let heard = 0;
-  const subs = [
-    M.addSpeechRecognitionListener('result', (e: any) => {
+  // THE BUG THAT ATE EVERY WORD lived on the next lines: a listener helper that
+  // does not exist in this package version, called outside any try. Permission
+  // granted, support present, and not one word — with nothing anywhere saying
+  // why. The attach is now guarded and the guard WRITES ITS TRAIL.
+  let subs: Array<{ remove: () => void }> = [];
+  try {
+    subs = [
+    mod.addListener('result', (e: any) => {
       const t = e?.results?.[0]?.transcript;
       if (typeof t === 'string' && t.length) {
         heard++;
@@ -198,12 +210,16 @@ export async function startLive(
     // Errors are swallowed on purpose: the recording is still running and the
     // contractor must not be told that anything failed, because nothing that
     // matters did.
-    M.addSpeechRecognitionListener('error', (e: any) => {
+    mod.addListener('error', (e: any) => {
       // Swallowed for the contractor, surfaced for the log. The recording is
       // still running and nothing that matters has failed.
       console.log('[live] error:', JSON.stringify(e?.error ?? e?.message ?? 'unknown'));
     }),
-  ];
+    ];
+  } catch (e: any) {
+    void logDiag(db, 'live.threw', 'attach: ' + String(e?.message ?? e).slice(0, 100));
+    return null;
+  }
   const stop = () => {
     void logDiag(db, 'live.stop', `results=${heard}`);
     try { mod.stop?.(); } catch { /* already stopped */ }
