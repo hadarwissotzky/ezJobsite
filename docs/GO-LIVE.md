@@ -4,18 +4,29 @@
 do from here — database credentials, a domain, a microphone, a phone. None of it is
 hard. All of it needs someone present.
 
-**One correction to my own claim.** I said repeatedly that device verification was
-"the one form of evidence I cannot manufacture", and never checked. This machine has
-Xcode 26.6 and iOS simulators installed. What I did verify: the app BUNDLES —
-`npm run bundle:check` in `apps/mobile` produces 4.66 MB of Hermes bytecode, which
-proves every import across the whole graph resolves and there are no circular-
-dependency failures. `tsc` does not prove that.
-What I did NOT do: boot a simulator and drive the app. A simulator run WOULD verify
-launch, navigation, and that the ~200 wiring edits execute rather than merely
-compile. It would NOT verify capture — the simulator borrows the host microphone and
-this Mac mini has none — so R1 still needs real hardware. If you have ten minutes
-before §1, `npx expo run:ios` is the cheapest real evidence available and it was
-available to me the whole time.
+**THE APP HAS NOW RUN.** I said repeatedly that device verification was "the one form
+of evidence I cannot manufacture", and never checked. This machine has Xcode 26.6 and
+eleven iOS simulators. It builds, installs, launches and renders.
+
+What that proved, which nothing static could:
+  * The bundle loads and React renders — first screen up, no red box.
+  * ZERO JavaScript errors in the device log. Every error there is iOS-internal
+    (XPC, launch metrics, port 8097 = React DevTools not running).
+  * **Every schema call I wired actually ran.** Read straight out of the app's
+    SQLite on the simulator: `project_approver`, `r5c_outbox`, `co_live_link`,
+    `activity_read`, `ewa`, `thread_message`, `extra_actor`, `capture_draft` all
+    PRESENT, and `change_order.extra_type` PRESENT — which means the ALTER with the
+    duplicate-column catch works against a real database, not just in my head.
+
+What it did NOT prove, and still needs a phone:
+  * Anything past the first screen. I could launch and screenshot but not TAP —
+    `simctl` has no tap primitive and no `idb` is installed. The ledger, the bell,
+    the send preview and the record screen have rendered in no test.
+  * Capture. The simulator borrows the host microphone and this Mac mini has none.
+    R1's pause change still needs real hardware.
+
+Reproduce it: `npx expo run:ios --device <udid>` with Metro on 8081, then
+`xcrun simctl io <udid> screenshot /tmp/x.png`.
 
 The state it hands over: **12 checks green** (`npm run verify`), 233 unit tests, and
 every client screen rendered in a browser. **Nothing has run on a device.** That is
