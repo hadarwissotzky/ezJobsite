@@ -147,7 +147,8 @@ import {
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
          createdLabel, markLocalSent, money, parseMoney, validateLines,
-         type LineItem, type LedgerRow } from './src/changeorder';
+         type LineItem, type LedgerRow,
+         type BillingTiming, type ScheduleEffect } from './src/changeorder';
 import { displayStatus, canSupersede, type LedgerStatus } from './src/extrastatus';
 import { ensureLedgerStatusSchema, hydrateQuestions, openQuestions, supersededBy,
          supersedeExtra, drainSupersessions, reassertSupersessions } from './src/ledgerstatus';
@@ -413,6 +414,12 @@ const startRevision = (c: LedgerRow) => {
     amountText: (c.amount_cents / 100).toFixed(2),
     nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
     mode: c.nte_cents == null ? 'fixed' : 'nte', voice: null, supersedes: c.id,
+    // A revision carries the prior version's flow terms forward — the price is
+    // what changed; the terms stay unless the contractor edits them.
+    billingTiming: (c.billing_timing as BillingTiming) ?? 'when_completed',
+    scheduleEffect: (c.schedule_effect as ScheduleEffect) ?? null,
+    scheduleDaysText: c.schedule_days ? String(c.schedule_days) : '',
+    exclusions: c.exclusions ?? '',
   });
   setLines([]);
 };
@@ -598,6 +605,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     voice: VoiceReading | null;
     /** R7: the extra this new price replaces. Retired when the price is confirmed. */
     supersedes?: string | null;
+    /** Flow-mock questions (FLOW-SIMPLEST-JOBSITE.md, phase 3). Billing defaults
+     *  to when_completed (decision 2); schedule starts unanswered — "not sure
+     *  yet" is an explicit, honest choice, never a silent default. */
+    billingTiming: BillingTiming;
+    scheduleEffect: ScheduleEffect | null;
+    scheduleDaysText: string;
+    exclusions: string;
   }>(null);
   const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
   // extra id -> weakest state across its captures. Absent means "not computed
@@ -3148,6 +3162,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   decisionId: d.id, scope: d.current_value,
                   whoDirected: d.directed_by ?? 'Owner',
                   amountText: '', nteText: '', mode: 'fixed', voice: null,
+                  billingTiming: 'when_completed', scheduleEffect: null,
+                  scheduleDaysText: '', exclusions: '',
                 });
                 const v = await voiceReadingForDecision(db, connector.client, d.id, parseMoney);
                 setPriced((p) => {
@@ -3292,6 +3308,52 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               placeholderTextColor="#8c959f"
             />
 
+            {/* The flow-mock questions (FLOW-SIMPLEST-JOBSITE.md phase 3). Their
+                answers become TERMS in the frozen instrument (renderCard), which
+                is why they live here on the read-back card and nowhere later:
+                what the contractor confirms is what the owner reads. */}
+            <Text style={s.sub}>{T('co.qBilling')}</Text>
+            <View style={s.qRow}>
+              {([['next_invoice', 'co.billNext'], ['when_completed', 'co.billDone'],
+                 ['other', 'co.billOther']] as const).map(([v, k]) => (
+                <Pressable key={v} onPress={() => setPriced({ ...priced, billingTiming: v })}
+                  style={[s.qChip, priced.billingTiming === v && s.qChipOn]}>
+                  <Text style={[s.qChipT, priced.billingTiming === v && s.qChipTOn]}>{T(k)}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={s.sub}>{T('co.qSchedule')}</Text>
+            <View style={s.qRow}>
+              {([['no_change', 'co.schedNo'], ['adds_days', 'co.schedAdds'],
+                 ['not_sure', 'co.schedUnsure']] as const).map(([v, k]) => (
+                <Pressable key={v}
+                  onPress={() => setPriced({ ...priced,
+                    scheduleEffect: priced.scheduleEffect === v ? null : v })}
+                  style={[s.qChip, priced.scheduleEffect === v && s.qChipOn]}>
+                  <Text style={[s.qChipT, priced.scheduleEffect === v && s.qChipTOn]}>{T(k)}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {priced.scheduleEffect === 'adds_days' && (
+              <TextInput
+                style={s.moneyInput}
+                value={priced.scheduleDaysText}
+                onChangeText={(v) => setPriced({ ...priced, scheduleDaysText: v })}
+                keyboardType="number-pad"
+                placeholder={T('co.schedDaysPh')}
+                placeholderTextColor="#8c959f"
+              />
+            )}
+            <Text style={s.sub}>{T('co.qExcluded')}</Text>
+            <TextInput
+              style={[s.moneyInput, { fontSize: 15, minHeight: 44 }]}
+              value={priced.exclusions}
+              onChangeText={(v) => setPriced({ ...priced, exclusions: v })}
+              multiline
+              placeholder={T('co.exclPh')}
+              placeholderTextColor="#8c959f"
+            />
+
             <View style={s.cardBtns}>
               <Pressable
                 style={[s.confirm, (cents === null || !!validateLines(lines, cents ?? 0)) && s.btnOff]}
@@ -3299,10 +3361,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 onPress={async () => {
                   const { data } = await connector.client.auth.getUser();
                   if (!data?.user) { setUi({k:'refused',why:'not signed in'}); return; }
+                  const days = parseInt(priced.scheduleDaysText, 10);
                   const r = await createChangeOrder(db, {
                     id: `co-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`,
                     decisionId: priced.decisionId, projectId: projectId, ownerId: data.user.id,
                     scope: priced.scope, amountCents: cents!, nteCents: nte,
+                    billingTiming: priced.billingTiming,
+                    scheduleEffect: priced.scheduleEffect,
+                    scheduleDays: priced.scheduleEffect === 'adds_days' && days > 0 ? days : null,
+                    exclusions: priced.exclusions,
                     whoDirected: priced.whoDirected, lineItems: lines,
                     // The read-back happened HERE. This timestamp is the proof,
                     // and the DB refuses the row without it.
@@ -3375,7 +3442,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             markReminded(db, e.id);
             setSettling(e.id);
             setPriced({ decisionId: e.decisionId, scope: e.scope, whoDirected: 'Owner',
-                        amountText: '', nteText: '', mode: 'fixed', voice: null });
+                        amountText: '', nteText: '', mode: 'fixed', voice: null,
+                        billingTiming: 'when_completed', scheduleEffect: null,
+                        scheduleDaysText: '', exclusions: '' });
           }} />
           <Text style={s.ledgerHead}>Extras</Text>
 
@@ -3990,6 +4059,15 @@ const s = StyleSheet.create({
   cardH: { color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
   cardV: { color: '#0D0F12', fontSize: 17, lineHeight: 23, marginBottom: 10 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  // Flow-mock question chips (phase 3). 48px minimum: these are answered on a
+  // jobsite, and the field-UX floor applies to every interactive element.
+  qRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  qChip: { borderWidth: 1, borderColor: '#d0d7de', borderRadius: 10,
+    paddingHorizontal: 14, minHeight: 48, justifyContent: 'center',
+    backgroundColor: '#ffffff' },
+  qChipOn: { borderColor: '#1f2328', backgroundColor: '#1f2328' },
+  qChipT: { fontSize: 15, color: '#1f2328' },
+  qChipTOn: { color: '#ffffff' },
   chip: { color: '#0E8A4C', backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1,
           borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, fontSize: 12, overflow: 'hidden' },
   chipDim: { color: '#8c959f', borderColor: '#E4E5E1', backgroundColor: 'transparent' },
