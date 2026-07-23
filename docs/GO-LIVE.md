@@ -66,6 +66,27 @@ the gap this file closes.
 
 ---
 
+## 0a. Machine-verified on the handset `[2026-07-23]`
+
+Sixteen device checks pass on the real phone (`loop.result 16/16` in diag_log),
+including the two that closed this build-out:
+
+  * **On-device recognition**: the probe file came back as
+    "Subfloor rot repair the price is $1850" with 7 timing segments — spoken
+    money arrives WRITTEN, which is what the price gate prefires on.
+  * **Live mic-sharing**: a real recording held the microphone while the live
+    recognizer streamed 56 interim results beside it. The overlay's feed works;
+    only its pixels remain eyes-only.
+
+Delete is verified to the last byte: local files, ledger, server rows, and the
+storage bucket (swept via 372's authorize-then-Storage-API split — Supabase
+forbids SQL deletes on storage tables, a law the flight recorder caught live).
+
+The `diag_log` table in the app's database is the flight recorder: every silent
+failure path writes its reason there, because console.log does not exist in a
+Release build and six of this build-out's bugs were invisible until failures
+had somewhere to land. Read it before guessing. Ever.
+
 ## 0. The three credentials, and exactly what each one unblocks
 
 Everything else in this document can be done today. These cannot, and no amount
