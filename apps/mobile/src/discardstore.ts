@@ -357,15 +357,34 @@ export async function drainServerDiscards(
 
   const ids = pending.map((p) => p.capture_id);
   const { data, error } = await client.rpc('discard_captures_own', { p_capture_ids: ids });
-  // Offline, or 371 not applied yet (PGRST202): not a no. The tombstones wait —
-  // but the REASON is written down, because "waits forever, silently" and
-  // "works" are indistinguishable from the outside and that has burned us four
-  // times today.
+  // Offline, or the migration not applied: not a no. The tombstones wait — and
+  // the reason is written down, because "waits forever, silently" and "works"
+  // are indistinguishable from outside; that identity burned four diagnosis
+  // rounds in one day.
   if (error) {
     void logDiag(db, 'ddrain.rpc', String((error as any)?.message ?? error).slice(0, 200));
     return { attempted: ids.length, discarded: 0, kept: 0, missing: 0 };
   }
-  void logDiag(db, 'ddrain.ok', JSON.stringify(data ?? {}));
+
+  // THE SPLIT THE PLATFORM DEMANDS. Supabase forbids SQL deletes on storage
+  // tables — the flight recorder caught 371 failing on exactly that, every
+  // tick. So the RPC AUTHORIZES (guards + tombstone) and returns the approved
+  // object keys, and this client removes the bytes through the Storage API,
+  // fenced to its own folder by 372's delete policy. A key the RPC did not
+  // return cannot be deleted here, and a key it did return is already
+  // tombstoned server-side.
+  const keys: string[] = Array.isArray((data as any)?.keys) ? (data as any).keys : [];
+  if (keys.length) {
+    const rm = await client.storage.from('captures').remove(keys);
+    if (rm.error) {
+      // The bytes are still there, so nothing is confirmed: the same batch
+      // retries next tick, idempotently — the RPC re-approves already-
+      // tombstoned rows without complaint.
+      void logDiag(db, 'ddrain.storage', String(rm.error.message ?? rm.error).slice(0, 200));
+      return { attempted: ids.length, discarded: 0, kept: 0, missing: 0 };
+    }
+  }
+  void logDiag(db, 'ddrain.ok', JSON.stringify({ removed: keys.length, ...(data as any) }));
 
   const now = Date.now();
   for (const id of ids) {
@@ -374,7 +393,7 @@ export async function drainServerDiscards(
   }
   return {
     attempted: ids.length,
-    discarded: Number((data as any)?.discarded ?? 0),
+    discarded: keys.length,
     kept: Number((data as any)?.kept ?? 0),
     missing: Number((data as any)?.missing ?? 0),
   };

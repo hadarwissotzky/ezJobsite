@@ -273,21 +273,30 @@ test('plumbing and dead decisions never surface as cards', async () => {
 
 // ── the cloud half of delete ─────────────────────────────────────────────────
 
-function rpcClient(reply: any) {
+function rpcClient(reply: any, storageReply: any = { error: null }) {
   const calls: any[] = [];
-  return { calls, rpc: (fn: string, args: any) => (calls.push({ fn, args }), Promise.resolve(reply)) } as any;
+  return {
+    calls,
+    rpc: (fn: string, args: any) => (calls.push({ fn, args }), Promise.resolve(reply)),
+    storage: { from: (b: string) => ({ remove: (keys: string[]) =>
+      (calls.push({ fn: 'storage.remove', args: { b, keys } }), Promise.resolve(storageReply)) }) },
+  } as any;
 }
 
 test('the drain sends unconfirmed tombstones and marks every id confirmed', async () => {
   const { raw, db } = fresh();
   raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms)
             VALUES ('t1','unsent',1), ('t2','unsent',1)`);
-  const client = rpcClient({ data: { discarded: 1, kept: 0, missing: 1 }, error: null });
+  const client = rpcClient({ data: { keys: ['u1/t1/a.m4a'], kept: 0, missing: 1 }, error: null });
 
   const r = await drainServerDiscards(db, client);
 
   assert.equal(client.calls[0].fn, 'discard_captures_own');
   assert.deepEqual(client.calls[0].args.p_capture_ids.sort(), ['t1', 't2']);
+  // The bytes go through the STORAGE API — Supabase refuses SQL deletes on
+  // storage tables, which the flight recorder caught 371 doing every tick.
+  assert.equal(client.calls[1].fn, 'storage.remove');
+  assert.deepEqual(client.calls[1].args.keys, ['u1/t1/a.m4a']);
   assert.equal(r.discarded, 1);
   // MISSING IS CONFIRMED. A capture the server never received has nothing in
   // the bucket to delete; retrying it forever is the no-exit loop this repo
@@ -298,11 +307,12 @@ test('the drain sends unconfirmed tombstones and marks every id confirmed', asyn
 test('a second drain has nothing to send', async () => {
   const { raw, db } = fresh();
   raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms) VALUES ('t3','unsent',1)`);
-  const client = rpcClient({ data: { discarded: 1, kept: 0, missing: 0 }, error: null });
+  const client = rpcClient({ data: { keys: ['u1/t3/a.m4a'], kept: 0, missing: 0 }, error: null });
   await drainServerDiscards(db, client);
   const r2 = await drainServerDiscards(db, client);
   assert.equal(r2.attempted, 0);
-  assert.equal(client.calls.length, 1, 'no second RPC for confirmed ids');
+  assert.equal(client.calls.filter((c: any) => c.fn !== 'storage.remove').length, 1,
+    'no second RPC for confirmed ids');
 });
 
 // Offline — or 371 not applied yet — is NOT a no. The tombstones must wait.
@@ -344,4 +354,16 @@ test('redriveParked frees exactly the named code', async () => {
     `SELECT mutation_id FROM change_order_outbox
       WHERE next_attempt_at_ms = 0 AND last_error_code IS NULL`);
   assert.deepEqual(ready.map((r: any) => r.mutation_id), ['m1']);
+});
+
+// A storage failure confirms NOTHING: the bytes are still there, so the batch
+// must retry — the RPC re-approves already-tombstoned rows idempotently.
+test('a storage-remove failure leaves the batch pending', async () => {
+  const { raw, db } = fresh();
+  raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms) VALUES ('t5','unsent',1)`);
+  const client = rpcClient({ data: { keys: ['u1/t5/a.m4a'], kept: 0, missing: 0 }, error: null },
+                           { error: { message: 'network gave up' } });
+  const r = await drainServerDiscards(db, client);
+  assert.equal(r.discarded, 0);
+  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced`).length, 0, 'still pending');
 });
