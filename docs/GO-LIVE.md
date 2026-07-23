@@ -79,8 +79,9 @@ have lead time and one is a live security fix that does not need them at all.
 | **A push provider** | R8 delivery while the app is fully killed | Local notifications already cover the green light and client questions whenever the app is running or backgrounded |
 | **An SMS sender** | R8's 24h auto-reminder | Manual Remind works today; it goes out through the native share sheet, tapped by a person. Nothing automated can reach a homeowner |
 
-**Do §1 before any of this.** The cross-tenant read is live and closing it needs
-no credential at all.
+**Already applied to production `[2026-07-22]`:** 260 (the cross-tenant read is
+CLOSED), 368 (on-device transcripts upload), 369 + 371 (delete reaches the
+bucket: extras and captures). The remaining twelve above are still queued.
 
 ### Running the worker
 
@@ -117,10 +118,12 @@ cd apps/../                       # repo root
   260_approval_visibility 270_ask_live_only 280_approver_roster 290_r5c_transport \
   302_structure_timing 303_ewa 304_approval_photos 306_extra_actor \
   307_extras_ledger 308_r5b_discussion 366_event_timeline 367_supersede_forward_link \
-  368_ondevice_transcript 369_discard_unsent 370_optional_price
+  270_ask_live_only 280_approver_roster 290_r5c_transport 302_structure_timing \
+  303_ewa 304_approval_photos 306_extra_actor 307_extras_ledger 308_r5b_discussion \
+  366_event_timeline 367_supersede_forward_link 370_optional_price
 ```
 
-Expect: `ALL 15 APPLIED CLEANLY IN SEQUENCE`. It runs them in ONE transaction with
+Expect: `ALL 12 APPLIED CLEANLY IN SEQUENCE`. It runs them in ONE transaction with
 `ON_ERROR_STOP` and rolls back, so it proves the sequence without changing anything.
 
 Then apply them for real, in that same order.

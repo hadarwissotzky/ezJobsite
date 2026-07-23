@@ -25,7 +25,7 @@ import { CHANGE_ORDER_DDL } from './changeorder.ts';
 import { APP_OWNED_DDL } from './captureddl.ts';
 import { DECISION_DDL } from './decisions.ts';
 import { PAIR_DDL } from './pair.ts';
-import { DISCARD_DDL, discardCapture } from './discardstore.ts';
+import { DISCARD_DDL, DISCARD_SYNC_DDL, discardCapture, drainServerDiscards } from './discardstore.ts';
 
 /**
  * The narrow slice of PowerSync's surface `discardstore` uses, backed by real
@@ -51,7 +51,7 @@ function realDb(db: DatabaseSync): any {
 
 function fresh() {
   const raw = new DatabaseSync(':memory:');
-  for (const s of [...APP_OWNED_DDL, ...CHANGE_ORDER_DDL, ...DECISION_DDL, PAIR_DDL, ...DISCARD_DDL]) {
+  for (const s of [...APP_OWNED_DDL, ...CHANGE_ORDER_DDL, ...DECISION_DDL, PAIR_DDL, ...DISCARD_DDL, ...DISCARD_SYNC_DDL]) {
     raw.exec(s);
   }
   return { raw, db: realDb(raw) };
@@ -268,4 +268,48 @@ test('plumbing and dead decisions never surface as cards', async () => {
   assert.equal(r.ok, true);
   assert.deepEqual(rows(raw, CARD).map((r: any) => r.id), ['dReal'],
     'plumbing must not surface after its extra is deleted');
+});
+
+// ── the cloud half of delete ─────────────────────────────────────────────────
+
+function rpcClient(reply: any) {
+  const calls: any[] = [];
+  return { calls, rpc: (fn: string, args: any) => (calls.push({ fn, args }), Promise.resolve(reply)) } as any;
+}
+
+test('the drain sends unconfirmed tombstones and marks every id confirmed', async () => {
+  const { raw, db } = fresh();
+  raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms)
+            VALUES ('t1','unsent',1), ('t2','unsent',1)`);
+  const client = rpcClient({ data: { discarded: 1, kept: 0, missing: 1 }, error: null });
+
+  const r = await drainServerDiscards(db, client);
+
+  assert.equal(client.calls[0].fn, 'discard_captures_own');
+  assert.deepEqual(client.calls[0].args.p_capture_ids.sort(), ['t1', 't2']);
+  assert.equal(r.discarded, 1);
+  // MISSING IS CONFIRMED. A capture the server never received has nothing in
+  // the bucket to delete; retrying it forever is the no-exit loop this repo
+  // has shipped once already (23502). Both ids must be marked done.
+  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced`).length, 2);
+});
+
+test('a second drain has nothing to send', async () => {
+  const { raw, db } = fresh();
+  raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms) VALUES ('t3','unsent',1)`);
+  const client = rpcClient({ data: { discarded: 1, kept: 0, missing: 0 }, error: null });
+  await drainServerDiscards(db, client);
+  const r2 = await drainServerDiscards(db, client);
+  assert.equal(r2.attempted, 0);
+  assert.equal(client.calls.length, 1, 'no second RPC for confirmed ids');
+});
+
+// Offline — or 371 not applied yet — is NOT a no. The tombstones must wait.
+test('an RPC error confirms nothing', async () => {
+  const { raw, db } = fresh();
+  raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms) VALUES ('t4','unsent',1)`);
+  const client = rpcClient({ data: null, error: { message: 'PGRST202' } });
+  const r = await drainServerDiscards(db, client);
+  assert.equal(r.attempted, 1);
+  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced`).length, 0, 'still pending');
 });

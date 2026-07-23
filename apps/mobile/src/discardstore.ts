@@ -310,3 +310,59 @@ export async function discardCapture(
   }
   return { ok: true, freedBytes, deleted: rows.length };
 }
+
+
+/**
+ * Push local discards to the cloud, when there is signal.
+ *
+ * hadar's rule is "deleted means all of it", and the phone half already holds:
+ * bytes gone, lists clean, tombstone written. This is the cloud half — for
+ * every locally tombstoned capture the server has not yet confirmed, ask 371 to
+ * drop the storage object. Offline is the normal case (mandate #7): the
+ * tombstones simply wait, exactly like every other outbox here.
+ *
+ * `discard_synced` marks confirmation, one row per capture, never uploaded —
+ * "has the SERVER dealt with this" is a fact about sync state, not evidence.
+ * The server counts a capture it never received as `missing`, and missing is
+ * CONFIRMED: there is nothing in the bucket to delete, so asking again forever
+ * would be the retry-loop-with-no-exit this repo has already shipped once.
+ * `kept` (refused: not ours, or evidence behind a sent request) is confirmed
+ * for the same reason — the server said no on the merits, and no is an answer.
+ */
+export const DISCARD_SYNC_DDL = [
+  `CREATE TABLE IF NOT EXISTS discard_synced (
+      capture_id TEXT NOT NULL PRIMARY KEY,
+      at_ms      INTEGER NOT NULL
+   ) STRICT`,
+];
+
+export async function ensureDiscardSyncSchema(db: AbstractPowerSyncDatabase) {
+  for (const s of DISCARD_SYNC_DDL) await db.execute(s);
+}
+
+export async function drainServerDiscards(
+  db: AbstractPowerSyncDatabase, client: SupabaseClient
+): Promise<{ attempted: number; discarded: number; kept: number; missing: number }> {
+  const pending = await db.getAll<{ capture_id: string }>(
+    `SELECT d.capture_id FROM capture_discarded d
+      WHERE d.capture_id NOT IN (SELECT capture_id FROM discard_synced)
+      LIMIT 50`);
+  if (!pending.length) return { attempted: 0, discarded: 0, kept: 0, missing: 0 };
+
+  const ids = pending.map((p) => p.capture_id);
+  const { data, error } = await client.rpc('discard_captures_own', { p_capture_ids: ids });
+  // Offline, or 371 not applied yet (PGRST202): not a no. The tombstones wait.
+  if (error) return { attempted: ids.length, discarded: 0, kept: 0, missing: 0 };
+
+  const now = Date.now();
+  for (const id of ids) {
+    await db.execute(
+      `INSERT OR IGNORE INTO discard_synced (capture_id, at_ms) VALUES (?, ?)`, [id, now]);
+  }
+  return {
+    attempted: ids.length,
+    discarded: Number((data as any)?.discarded ?? 0),
+    kept: Number((data as any)?.kept ?? 0),
+    missing: Number((data as any)?.missing ?? 0),
+  };
+}

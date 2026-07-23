@@ -47,7 +47,7 @@ import { sendEwa } from './src/ewasend';
 // filled preview before he stands up. The worker still re-transcribes via the
 // cloud and supersedes this under 150's newest-wins.
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
-import { discardCapture, discardExtra, ensureDiscardSchema, previewDiscard } from './src/discardstore';
+import { discardCapture, discardExtra, drainServerDiscards, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
 import { startExtraFromCapture, titleExtraIfUntitled } from './src/startextra';
 import { cleanupTestData } from './src/testdatacleanup';
 // The send gate. hadar: "only then it can be sent to the owner for approval —
@@ -1010,6 +1010,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // reach each other". Unit tests cannot answer the second — they prove the
       // decisions, not the plumbing, and plumbing is what broke eight times here.
       await ensureDiscardSchema(db);
+      await ensureDiscardSyncSchema(db);
       // One-shot sweep of the test rows my own harness and loop check left on a
       // real handset. Behind its own flag and AFTER ensureDiscardSchema, because
       // it tombstones through capture_discarded rather than forcing a delete
@@ -1170,6 +1171,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // app has into capture_transcript; 150 revoked the direct INSERT.
           const st = await drainSttOutbox(db, connector.client);
           if (st.attempted) console.log('drain stt:', JSON.stringify(st));
+          // The cloud half of delete: locally tombstoned captures the server
+          // has not yet confirmed. hadar: "all of the items are being deleted
+          // with it" — this is what makes that true past the handset.
+          const sd = await drainServerDiscards(db, connector.client);
+          if (sd.attempted) console.log('drain discards:', JSON.stringify(sd));
           const nt = await runNotifications(db, projectId);
           if (nt.presented || nt.blocked) console.log('notify:', JSON.stringify(nt));
         } catch (e: any) { /* offline is normal; backoff already recorded */ }
