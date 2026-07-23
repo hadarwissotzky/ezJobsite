@@ -296,6 +296,11 @@ export async function discardCapture(
       // evidence; there is no append-only trigger here, and a group whose every
       // member is discarded has nothing left to group.
       await tx.execute(`DELETE FROM capture_pair WHERE capture_id = ?`, [id]);
+      // A deleted capture must never upload afterwards — resurrection by outbox
+      // is worse than a stale card. hadar's phone carried three of these:
+      // deleted captures whose upload rows kept retrying against a project the
+      // server never had, surfacing as "3 won't back up" forever.
+      await tx.execute(`DELETE FROM capture_outbox WHERE capture_id = ?`, [id]);
     }
   });
 

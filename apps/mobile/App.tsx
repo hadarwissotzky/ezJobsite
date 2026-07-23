@@ -144,7 +144,7 @@ import {
   EXTRA_TYPES, APPROVER_ROLES, type ExtraType, type ApproverRole, type Suggestion,
 } from './src/approverrouting';
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
-         ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine,
+         ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
          createdLabel, markLocalSent, money, parseMoney, validateLines,
          type LineItem, type LedgerRow } from './src/changeorder';
 import { displayStatus, canSupersede, type LedgerStatus } from './src/extrastatus';
@@ -1011,6 +1011,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // decisions, not the plumbing, and plumbing is what broke eight times here.
       await ensureDiscardSchema(db);
       await ensureDiscardSyncSchema(db);
+      // One-time repairs for verdicts issued under an older world:
+      //  - extras parked on 23502 while the server still demanded a price (370
+      //    dropped that) get their upload retried;
+      //  - upload rows for captures that were later DELETED are removed — a
+      //    deliberately discarded capture must never upload afterwards.
+      const rd = await redriveParked(db, ['23502']);
+      if (rd) console.log('redrive:', rd);
+      await db.execute(
+        `DELETE FROM capture_outbox WHERE capture_id IN
+           (SELECT capture_id FROM capture_discarded)`);
       // One-shot sweep of the test rows my own harness and loop check left on a
       // real handset. Behind its own flag and AFTER ensureDiscardSchema, because
       // it tombstones through capture_discarded rather than forcing a delete

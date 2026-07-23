@@ -628,3 +628,31 @@ export async function hydrateChangeOrders(
   }
   return { pulled, statusUpdated, skipped };
 }
+
+
+/**
+ * Un-park extras the server refused for a reason that has since been FIXED.
+ *
+ * 23502 (not_null_violation) was permanent while the server demanded a price on
+ * every extra; hadar's first two recordings under the new model parked on it
+ * and would have sat "pending" forever. Then 370 dropped the constraint — the
+ * refusal's reason no longer exists, but "parked" is a one-way door with no
+ * retry. This is the other half of parking honestly: when the WORLD changes,
+ * the verdicts issued under the old world must be reviewable, or a fixed server
+ * still leaves permanently-lost uploads behind.
+ *
+ * Scoped to exactly the code whose meaning changed. A 42501 stays parked — the
+ * server still means it.
+ */
+export async function redriveParked(
+  db: AbstractPowerSyncDatabase, codes: readonly string[]
+): Promise<number> {
+  if (!codes.length) return 0;
+  const marks = codes.map(() => '?').join(',');
+  const r = await db.execute(
+    `UPDATE change_order_outbox
+        SET attempt_count = 0, next_attempt_at_ms = 0,
+            last_error_code = NULL, last_error_text = NULL
+      WHERE last_error_code IN (${marks})`, [...codes]);
+  return r.rowsAffected ?? 0;
+}

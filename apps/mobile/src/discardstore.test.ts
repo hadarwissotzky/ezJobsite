@@ -26,6 +26,7 @@ import { APP_OWNED_DDL } from './captureddl.ts';
 import { DECISION_DDL } from './decisions.ts';
 import { PAIR_DDL } from './pair.ts';
 import { DISCARD_DDL, DISCARD_SYNC_DDL, discardCapture, drainServerDiscards } from './discardstore.ts';
+import { redriveParked } from './changeorder.ts';
 
 /**
  * The narrow slice of PowerSync's surface `discardstore` uses, backed by real
@@ -312,4 +313,35 @@ test('an RPC error confirms nothing', async () => {
   const r = await drainServerDiscards(db, client);
   assert.equal(r.attempted, 1);
   assert.equal(rows(raw, `SELECT capture_id FROM discard_synced`).length, 0, 'still pending');
+});
+
+// ── repairs for verdicts issued under an older world ─────────────────────────
+
+test('deleting a capture removes its pending upload row', async () => {
+  const { raw, db } = fresh();
+  seed(raw, 'capU');
+  raw.exec(`INSERT INTO capture_outbox (mutation_id, capture_id, operation,
+              payload_json, payload_sha256, queued_at_ms, next_attempt_at_ms)
+            VALUES ('mut-capU','capU','capture.create.v1','{}','${'c'.repeat(64)}',1,0)`);
+  const r = await discardCapture(db, 'capU');
+  assert.equal(r.ok, true);
+  assert.equal(rows(raw, `SELECT * FROM capture_outbox`).length, 0,
+    'a deliberately deleted capture must never upload afterwards');
+});
+
+// 23502 parked extras: the server refused for want of 370; 370 is live now.
+// Only the code whose meaning changed is re-driven — 42501 still means no.
+test('redriveParked frees exactly the named code', async () => {
+  const { raw, db } = fresh();
+  raw.exec(`INSERT INTO change_order_outbox (mutation_id, change_order_id, payload_json,
+              payload_sha256, queued_at_ms, next_attempt_at_ms, attempt_count,
+              last_error_code, last_error_text)
+            VALUES ('m1','co1','{}','h',1,8640000000000,3,'23502','null violation'),
+                   ('m2','co2','{}','h',1,8640000000000,3,'42501','not yours')`);
+  const n = await redriveParked(db, ['23502']);
+  assert.equal(n, 1);
+  const ready = rows(raw,
+    `SELECT mutation_id FROM change_order_outbox
+      WHERE next_attempt_at_ms = 0 AND last_error_code IS NULL`);
+  assert.deepEqual(ready.map((r: any) => r.mutation_id), ['m1']);
 });
