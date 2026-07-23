@@ -374,17 +374,27 @@ export async function drainServerDiscards(
   // return cannot be deleted here, and a key it did return is already
   // tombstoned server-side.
   const keys: string[] = Array.isArray((data as any)?.keys) ? (data as any).keys : [];
+  let removed = 0;
   if (keys.length) {
     const rm = await client.storage.from('captures').remove(keys);
     if (rm.error) {
-      // The bytes are still there, so nothing is confirmed: the same batch
-      // retries next tick, idempotently — the RPC re-approves already-
-      // tombstoned rows without complaint.
+      // Bytes still there: nothing confirms; the batch retries idempotently.
       void logDiag(db, 'ddrain.storage', String(rm.error.message ?? rm.error).slice(0, 200));
       return { attempted: ids.length, discarded: 0, kept: 0, missing: 0 };
     }
+    // THE LIE THAT COST A ROUND: remove() reports success with an EMPTY result
+    // when RLS filters every row — no error, nothing deleted. The first version
+    // read "no error" as done and confirmed 12 tombstones whose bytes were
+    // still sitting in the bucket. Success is a COUNT, not the absence of an
+    // error: zero removals with keys outstanding is a failure with extra steps.
+    removed = Array.isArray(rm.data) ? rm.data.length : 0;
+    if (removed === 0) {
+      void logDiag(db, 'ddrain.storage',
+        `removed=0 of ${keys.length} — API ok but RLS filtered; first=${keys[0]?.slice(0, 60)}`);
+      return { attempted: ids.length, discarded: 0, kept: 0, missing: 0 };
+    }
   }
-  void logDiag(db, 'ddrain.ok', JSON.stringify({ removed: keys.length, ...(data as any) }));
+  void logDiag(db, 'ddrain.ok', JSON.stringify({ removed, ...(data as any) }));
 
   const now = Date.now();
   for (const id of ids) {

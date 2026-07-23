@@ -1107,6 +1107,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       //    dropped that) get their upload retried;
       //  - upload rows for captures that were later DELETED are removed — a
       //    deliberately discarded capture must never upload afterwards.
+      // Un-confirm the tombstones the first drain wrongly marked done: remove()
+      // reported success while RLS filtered every deletion, and "no error" was
+      // read as "removed". Rows confirmed BEFORE this build's fix re-confirm
+      // honestly (missing ones cheaply, real ones by actually deleting).
+      await db.execute(`DELETE FROM discard_synced WHERE at_ms < 1784760000000`);
       const rd = await redriveParked(db, ['23502']);
       if (rd) console.log('redrive:', rd);
       await db.execute(

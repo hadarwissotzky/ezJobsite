@@ -279,7 +279,10 @@ function rpcClient(reply: any, storageReply: any = { error: null }) {
     calls,
     rpc: (fn: string, args: any) => (calls.push({ fn, args }), Promise.resolve(reply)),
     storage: { from: (b: string) => ({ remove: (keys: string[]) =>
-      (calls.push({ fn: 'storage.remove', args: { b, keys } }), Promise.resolve(storageReply)) }) },
+      (calls.push({ fn: 'storage.remove', args: { b, keys } }),
+       Promise.resolve(storageReply === 'echo'
+         ? { data: keys.map((k: string) => ({ name: k })), error: null }
+         : storageReply)) }) },
   } as any;
 }
 
@@ -287,7 +290,7 @@ test('the drain sends unconfirmed tombstones and marks every id confirmed', asyn
   const { raw, db } = fresh();
   raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms)
             VALUES ('t1','unsent',1), ('t2','unsent',1)`);
-  const client = rpcClient({ data: { keys: ['u1/t1/a.m4a'], kept: 0, missing: 1 }, error: null });
+  const client = rpcClient({ data: { keys: ['u1/t1/a.m4a'], kept: 0, missing: 1 }, error: null }, 'echo');
 
   const r = await drainServerDiscards(db, client);
 
@@ -307,7 +310,7 @@ test('the drain sends unconfirmed tombstones and marks every id confirmed', asyn
 test('a second drain has nothing to send', async () => {
   const { raw, db } = fresh();
   raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms) VALUES ('t3','unsent',1)`);
-  const client = rpcClient({ data: { keys: ['u1/t3/a.m4a'], kept: 0, missing: 0 }, error: null });
+  const client = rpcClient({ data: { keys: ['u1/t3/a.m4a'], kept: 0, missing: 0 }, error: null }, 'echo');
   await drainServerDiscards(db, client);
   const r2 = await drainServerDiscards(db, client);
   assert.equal(r2.attempted, 0);
@@ -363,6 +366,19 @@ test('a storage-remove failure leaves the batch pending', async () => {
   raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms) VALUES ('t5','unsent',1)`);
   const client = rpcClient({ data: { keys: ['u1/t5/a.m4a'], kept: 0, missing: 0 }, error: null },
                            { error: { message: 'network gave up' } });
+  const r = await drainServerDiscards(db, client);
+  assert.equal(r.discarded, 0);
+  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced`).length, 0, 'still pending');
+});
+
+// remove() can "succeed" while RLS filters every deletion: no error, empty
+// result. That empty result confirmed 12 tombstones whose bytes still sat in
+// the bucket. Success is a count.
+test('a filtered remove — ok but empty — confirms nothing', async () => {
+  const { raw, db } = fresh();
+  raw.exec(`INSERT INTO capture_discarded (capture_id, change_order_id, at_ms) VALUES ('t6','unsent',1)`);
+  const client = rpcClient({ data: { keys: ['u1/t6/a.m4a'], kept: 0, missing: 0 }, error: null },
+                           { data: [], error: null });
   const r = await drainServerDiscards(db, client);
   assert.equal(r.discarded, 0);
   assert.equal(rows(raw, `SELECT capture_id FROM discard_synced`).length, 0, 'still pending');
