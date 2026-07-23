@@ -138,6 +138,13 @@ export async function runStep(
       proposed_value: s?.value ?? null,
       proposed_who_directed: s?.whoDirected ?? null,
       proposed_extra_type: s?.extraType ?? null,
+      // Verbatim-quote task grouping (374). price_words in here is a QUOTE of
+      // the transcript, never a figure — the app's parser + read-back remain
+      // the only path a number takes into a field.
+      proposed_tasks: s?.tasks?.length ? s.tasks.map((t) => ({
+        title: t.title, scope: t.scope, materials: t.materials,
+        price_words: t.priceWords, time_words: t.timeWords, start_words: t.startWords,
+      })) : null,
       // proposed_amount_cents stays NULL forever from this step (mandate #6).
       confidence: s?.confidence ?? 'none',
       engine: 'worker-claude',

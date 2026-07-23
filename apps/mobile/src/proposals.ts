@@ -25,6 +25,36 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type Confidence = 'high' | 'low' | 'none';
 
+/** One grouped task from the structure step (374). The *_words fields are
+ *  verbatim transcript spans — evidence of a mention, never a parsed figure. */
+export type ProposalTask = {
+  title: string;
+  scope: string;
+  materials: string[];
+  priceWords: string | null;
+  timeWords: string | null;
+  startWords: string | null;
+};
+
+function parseTasks(raw: unknown): ProposalTask[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ProposalTask[] = [];
+  for (const t of raw) {
+    if (!t || typeof t !== 'object') continue;
+    const r = t as Record<string, unknown>;
+    if (typeof r.title !== 'string' || typeof r.scope !== 'string') continue;
+    out.push({
+      title: r.title, scope: r.scope,
+      materials: Array.isArray(r.materials)
+        ? r.materials.filter((m): m is string => typeof m === 'string') : [],
+      priceWords: typeof r.price_words === 'string' ? r.price_words : null,
+      timeWords: typeof r.time_words === 'string' ? r.time_words : null,
+      startWords: typeof r.start_words === 'string' ? r.start_words : null,
+    });
+  }
+  return out;
+}
+
 export type Proposal = {
   id: string;
   captureId: string;
@@ -36,6 +66,8 @@ export type Proposal = {
   /** R5c type the model proposed (373). A suggestion for the send preview's
    *  contractor-set picker — never applied without the human seeing it. */
   extraType: string | null;
+  /** Grouped tasks (374). Empty when the proposal predates them. */
+  tasks: ProposalTask[];
   confidence: Confidence;
   engine: string;
   engineModel: string | null;
@@ -51,7 +83,7 @@ export async function fetchProposal(
     .from('capture_structured')
     .select('id, capture_id, proposed_subject, proposed_value, proposed_scope, ' +
             'proposed_who_directed, proposed_amount_cents, proposed_extra_type, ' +
-            'confidence, engine, engine_model, from_transcript, created_at')
+            'proposed_tasks, confidence, engine, engine_model, from_transcript, created_at')
     .eq('capture_id', captureId)
     .order('created_at', { ascending: false })
     .limit(1);
@@ -66,6 +98,7 @@ export async function fetchProposal(
     whoDirected: r.proposed_who_directed ?? null,
     amountCents: r.proposed_amount_cents ?? null,
     extraType: r.proposed_extra_type ?? null,
+    tasks: parseTasks(r.proposed_tasks),
     confidence: (['high', 'low', 'none'].includes(r.confidence) ? r.confidence : 'low') as Confidence,
     engine: r.engine,
     engineModel: r.engine_model ?? null,
