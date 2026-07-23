@@ -469,14 +469,27 @@ export function RecordScreen(props: {
         </Pressable>
       )}
 
-      {/* Photo lightbox — tap a thumbnail to see it full-size, tap anywhere to close. */}
+      {/* Photo lightbox — tap a thumbnail to see it full-size. Closed by a
+          glove-sized bottom button (hadar, 2026-07-23: a corner ✕ is exactly the
+          target the field-UX numbers exist to forbid); tapping the photo itself
+          still closes too. */}
       <Modal visible={zoom !== null} transparent animationType="fade"
         onRequestClose={() => setZoom(null)}>
         <Pressable onPress={() => setZoom(null)}
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' }}>
           {zoom && <Image source={{ uri: zoom }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />}
-          <Text style={{ position: 'absolute', top: 54, right: 22, color: '#fff',
-            fontFamily: F.disp, fontSize: 15, letterSpacing: 1 }}>✕ {t('common.close')}</Text>
+        </Pressable>
+        <Pressable onPress={() => setZoom(null)}
+          accessibilityLabel={t('common.close')}
+          style={{
+            position: 'absolute', left: 18, right: 18, bottom: 34,
+            minHeight: 64, borderRadius: 14, backgroundColor: '#fff',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+          <Text style={{ fontFamily: F.dispSemi, fontSize: 17, letterSpacing: 1.2,
+            textTransform: 'uppercase', color: C.ink }}>
+            {t('common.close')}
+          </Text>
         </Pressable>
       </Modal>
     </View>
