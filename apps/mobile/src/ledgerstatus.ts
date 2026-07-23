@@ -201,14 +201,29 @@ export async function supersedeExtra(
   return { ok: true };
 }
 
-/** What replaced this extra, if anything — the lineage the ledger can show. */
+/** What replaced this extra, if anything — the lineage the ledger can show.
+ *
+ *  TWO SOURCES, deliberately: `co_supersession` exists only on the device that
+ *  AUTHORED the revision (it is the upload intent). A second device learns the
+ *  lineage through the synced `change_order.superseded_by` column that
+ *  pullThreads hydrates — without the fallback, "see the current version" only
+ *  ever appeared on the phone that made the revision (Codex review, 2026-07-22). */
 export async function supersededBy(
   db: AbstractPowerSyncDatabase, changeOrderId: string
 ): Promise<string | null> {
   const r = (await db.getAll<{ superseded_by: string }>(
     `SELECT superseded_by FROM co_supersession WHERE change_order_id = ?`,
     [changeOrderId]))[0];
-  return r?.superseded_by ?? null;
+  if (r?.superseded_by) return r.superseded_by;
+  try {
+    const c = (await db.getAll<{ superseded_by: string | null }>(
+      `SELECT superseded_by FROM change_order WHERE id = ?`, [changeOrderId]))[0];
+    return c?.superseded_by ?? null;
+  } catch {
+    // The column arrives with ensureDiscussionSchema; a device that has not run
+    // that migration simply has no lineage to show yet.
+    return null;
+  }
 }
 
 /**

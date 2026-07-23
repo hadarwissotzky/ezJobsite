@@ -632,6 +632,9 @@ const EN: Record<string, string> = {
   'erec.stDraft': 'Draft — not sent yet. Send it for approval.',
   'erec.stDraftLocal': 'Draft, on this phone only — not sent yet. Send it for approval.',
   'erec.stSent': 'Sent — waiting on approval. Remind them if it goes quiet.',
+  // R5b on the record: the two discussing states name whose move it is.
+  'erec.stQuestion': 'They asked a question — approval is waiting on your answer. Reply below.',
+  'erec.stTheirTurn': 'You answered — waiting on them. The same link still works.',
   'erec.stApprovedBy': 'Approved and signed by {name}. Nothing owed — you can bill it.',
   'erec.stApproved': 'Approved. Nothing owed — you can bill it.',
   'erec.stDeclined': 'Declined — do not proceed with this work.',
@@ -650,6 +653,11 @@ const EN: Record<string, string> = {
   'erec.kindExtra': 'Extra',
   'erec.kindDecision': 'Decision',
   'erec.priceToCome': 'No price given yet',
+  // The record's action bar (design prototype c5). Labels only — the flows they
+  // open (remind, revise, send, share) each keep their own strings.
+  'erec.send': 'Send for approval',
+  'erec.share': 'Share the record',
+  'erec.viewCurrent': 'See the current version',
 
   'common.close': 'Close',
   'common.cancel': 'Cancel',
@@ -1233,6 +1241,8 @@ const ES: Record<string, string> = {
   'erec.stDraft': 'Borrador — todavía sin enviar. Mándalo para que lo aprueben.',
   'erec.stDraftLocal': 'Borrador, sólo en este teléfono — sin enviar. Mándalo para que lo aprueben.',
   'erec.stSent': 'Enviado — esperando la aprobación. Recuérdale si se queda callado.',
+  'erec.stQuestion': 'Hicieron una pregunta — la aprobación espera tu respuesta. Contesta abajo.',
+  'erec.stTheirTurn': 'Ya contestaste — esperando su respuesta. El mismo enlace sigue activo.',
   'erec.stApprovedBy': 'Aprobado y firmado por {name}. No debes nada — ya lo puedes cobrar.',
   'erec.stApproved': 'Aprobado. No debes nada — ya lo puedes cobrar.',
   'erec.stDeclined': 'Rechazado — no hagas este trabajo.',
@@ -1251,6 +1261,9 @@ const ES: Record<string, string> = {
   'erec.kindExtra': 'Extra',
   'erec.kindDecision': 'Decisión',
   'erec.priceToCome': 'Todavía sin precio',
+  'erec.send': 'Enviar para aprobación',
+  'erec.share': 'Compartir el registro',
+  'erec.viewCurrent': 'Ver la versión actual',
 
   'common.close': 'Cerrar',
   'common.cancel': 'Cancelar',

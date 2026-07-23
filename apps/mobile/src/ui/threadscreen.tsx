@@ -49,6 +49,8 @@ function chipKind(s: LedgerStatus) {
 export function DiscussionLog(props: {
   messages: ThreadMessage[];
   formatAt: (ms: number) => string;
+  /** Reply ids still in the outbox — same honesty rule as ThreadScreen. */
+  undelivered?: ReadonlySet<string>;
   /** Tapping through to the live thread. Omitted on a closed record. */
   onOpen?: () => void;
 }) {
@@ -66,6 +68,11 @@ export function DiscussionLog(props: {
               {t(m.side === 'contractor' ? 'r5b.fromYou' : 'r5b.fromClient')} · {props.formatAt(m.atMs)}
             </Text>
             <Text style={[T.body, { fontSize: 14.5, marginTop: 1 }]}>{m.text}</Text>
+            {m.side === 'contractor' && props.undelivered?.has(m.id) && (
+              <Text style={{ ...T.bodySteel, fontSize: 11.5, marginTop: 2 }}>
+                {t('r5b.notSentYet')}
+              </Text>
+            )}
           </View>
         ))}
       </View>
@@ -109,6 +116,9 @@ export function ThreadScreen(props: {
 }) {
   const [draft, setDraft] = React.useState('');
   const [busy, setBusy] = React.useState(false);
+  // A failed reply's reason. Shown here because a reply that silently vanishes —
+  // or silently stays — is the failure mode this repo refuses everywhere else.
+  const [sendError, setSendError] = React.useState<string | null>(null);
   const now = props.nowMs ?? Date.now();
   const st = threadState({ coStatus: props.extra.status, messages: props.messages, nowMs: now });
   const shown = displayStatus(props.extra.status,
@@ -123,7 +133,9 @@ export function ThreadScreen(props: {
       await props.onReply(text);
       // Cleared only after the write resolved. Clearing optimistically loses what
       // someone typed on the one path where the write failed.
-      setDraft('');
+      setDraft(''); setSendError(null);
+    } catch (e: any) {
+      setSendError(String(e?.message ?? e));
     } finally { setBusy(false); }
   };
 
@@ -264,6 +276,9 @@ export function ThreadScreen(props: {
               </Pressable>
             )}
           </View>
+          {sendError !== null && (
+            <Text style={{ ...T.body, fontSize: 13, color: C.danger }}>{sendError}</Text>
+          )}
           {/* Says the rule out loud, at the moment it could be broken: the contractor
               is one tap from typing "ok, $1,500" and calling it settled. */}
           <Text style={{ ...T.bodySteel, fontSize: 11.5 }}>{t('r5b.priceNeedsRevision')}</Text>

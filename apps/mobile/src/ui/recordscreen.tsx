@@ -13,7 +13,7 @@
  * AC made structural rather than remembered. See ui/decisionsummarycard.tsx.
  */
 import React from 'react';
-import { Image, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import type { ExtraRecord, RecordPerson, RecordVoice } from '../record';
 import { playCapture, playbackState, stopPlayback } from '../annotate';
 import type { DecisionSummary } from '../decisionsummary';
@@ -22,15 +22,24 @@ import type { ApprovalPanel } from '../eventlog';
 import { RecordApproval } from './recordapproval';
 import { NarratedScope, type ScopePhoto } from './narratedscope';
 import type { Alignment } from '../photonarration';
+import { threadState, type ThreadMessage } from '../discussion';
+import { chipKey, displayStatus, type LedgerStatus } from '../extrastatus';
+import { DiscussionLog } from './threadscreen';
+import { createdLabel } from '../changeorder';
 import { t } from '../i18n';
 import { C, F, T, chipStyle, display, label } from './theme';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { MoneyLine, PeopleCard, TypeLine, useRecordFacts } from './recordfacts';
 
-function chipKind(status: string) {
-  if (status === 'approved') return 'approved' as const;
-  if (status === 'declined') return 'declined' as const;
-  if (status === 'sent') return 'pending' as const;
+/** Mirrors the ledger's colour semantics (coChip in App.tsx): discussing is
+ *  orange — this app's "act on this" — because a question means the ball is in
+ *  the contractor's court. Superseded and draft share ink; on this screen the
+ *  state bar disambiguates them in words. */
+function chipKind(s: LedgerStatus) {
+  if (s === 'approved') return 'approved' as const;
+  if (s === 'declined') return 'declined' as const;
+  if (s === 'sent') return 'pending' as const;
+  if (s === 'discussing') return 'ewa' as const;
   return 'discuss' as const;
 }
 
@@ -51,10 +60,37 @@ export function RecordScreen(props: {
   /** R2: photos grouped under the sentence spoken over them. Null, or an alignment
    *  with nothing in it, renders nothing and the plain evidence grid below stands. */
   narration?: Alignment<ScopePhoto> | null;
+  /** R5b: the discussion, lineage-walked (threadFor). Null when not loaded — the
+   *  record renders without it, same rule as every other optional layer here. */
+  thread?: ThreadMessage[] | null;
+  /** Open client questions on THIS version — the ledger's own signal (R7), NOT
+   *  derived from `thread`: the thread deliberately carries prior versions'
+   *  messages, and counting those would mark a fresh revision "discussing" here
+   *  while the ledger says "sent" (Codex review, 2026-07-22). */
+  openQuestions?: number;
+  /** Reply ids still in the outbox (mandate #1: an undelivered reply says so). */
+  undelivered?: ReadonlySet<string>;
+  /** R5b's "Revised: $1,850 → $1,500" marker — set when THIS extra supersedes an
+   *  older version. Both sides pre-formatted by money(). */
+  revision?: { priorAmount: string; newAmount: string } | null;
   onBack: () => void;
   onCapture?: () => void;
   /** R6 / R5b AC3 — write the approval document and open the share sheet. */
   onShare?: () => void;
+  /** R5b reply, straight from the record (prototype c5's reply bar). A reply is a
+   *  message: it commits nothing, prices nothing, and may never move status. */
+  onReply?: (text: string) => Promise<void>;
+  /** R8 manual remind — same link, never a new token. Resolves with the verdict so
+   *  a refusal is SHOWN here; the record screen has no other status surface. */
+  onRemind?: () => Promise<{ ok: boolean; why?: string }>;
+  /** R5b/R7 Revise & resend — hands off to the priced read-back composer.
+   *  App.tsx passes it only when canSupersede(status). */
+  onRevise?: () => void;
+  /** Send a ready draft for approval (opens the R5c send preview). Passed only
+   *  when the draft's readiness gate is green. */
+  onSend?: () => void;
+  /** On a superseded record: open the version that replaced it. */
+  onOpenCurrent?: () => void;
   /** Offered ONLY while the extra is a draft — App.tsx passes undefined once it
    *  has been sent, because a client may have read it by then. */
   onDelete?: () => void;
@@ -66,10 +102,53 @@ export function RecordScreen(props: {
   readinessKey?: string;
 }) {
   const { rec } = props;
-  const chip = chipStyle(chipKind(rec.status));
+  const messages = props.thread ?? [];
+  // R7's derived vocabulary, the same way the ledger and the thread derive it:
+  // the chip must never disagree with the list the contractor just came from.
+  const st = threadState({ coStatus: rec.status, messages, nowMs: Date.now() });
+  const shown = displayStatus(rec.status, { openQuestions: props.openQuestions ?? 0 });
+  const chip = chipStyle(chipKind(shown));
   const facts = useRecordFacts(props.db, rec.id, rec.status);
   // The photo the lightbox is showing, or null. Tapping a thumbnail sets it.
   const [zoom, setZoom] = React.useState<string | null>(null);
+  // Reply being typed, and the in-flight flag (same rules as ThreadScreen: clear
+  // only after the write resolved; a failed write keeps the words).
+  const [draft, setDraft] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  // A refused action's reason. This screen has no other status surface, and a
+  // button that silently does nothing is the failure this repo names most often.
+  const [actionNote, setActionNote] = React.useState<string | null>(null);
+  // Measured height of the bottom bar, so the capture FAB sits above it instead
+  // of covering the reply field's send button.
+  const [barH, setBarH] = React.useState(0);
+
+  // R6b item 2 with R5b folded in: when the thread says the ball moved, the state
+  // line says so — the stored status alone would keep reading "Sent — remind them"
+  // while the client sits waiting on an answer.
+  const stateMsg = shown === 'discussing'
+    ? { k: st.unansweredSinceMs !== null ? 'erec.stQuestion' : 'erec.stTheirTurn' }
+    : { k: rec.stateLineKey, p: rec.stateLineParams };
+
+  const composer = st.canReply && !!props.onReply;
+  const terminal = shown === 'approved' || shown === 'declined' || shown === 'superseded';
+
+  const sendReply = async () => {
+    const text = draft.trim();
+    if (!text || busy || !props.onReply) return;
+    setBusy(true);
+    try {
+      await props.onReply(text);
+      setDraft(''); setActionNote(null);
+    } catch (e: any) {
+      setActionNote(String(e?.message ?? e));
+    } finally { setBusy(false); }
+  };
+
+  const remind = async () => {
+    if (!props.onRemind) return;
+    const r = await props.onRemind();
+    setActionNote(!r.ok && r.why ? r.why : null);
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: C.paper }}>
@@ -81,7 +160,7 @@ export function RecordScreen(props: {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
           <Text style={{ ...display(22), flex: 1 }} numberOfLines={3}>{rec.title}</Text>
           <View style={[T.chip, { backgroundColor: chip.bg }]}>
-            <Text style={[T.chipText, { color: chip.fg }]}>{rec.status}</Text>
+            <Text style={[T.chipText, { color: chip.fg }]}>{t(chipKey(shown))}</Text>
           </View>
         </View>
 
@@ -91,12 +170,25 @@ export function RecordScreen(props: {
         <TypeLine facts={facts} />
         <MoneyLine rec={rec} facts={facts} />
 
+        {/* R5b: the thread carries across versions with a visible marker. */}
+        {props.revision && (
+          <View style={{
+            marginTop: 10, borderRadius: 12, padding: 12,
+            backgroundColor: '#F1F3F0', borderWidth: 1, borderColor: C.line,
+          }}>
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.ink }}>
+              {t({ k: 'r5b.revisedFrom', p: {
+                prior: props.revision.priorAmount, next: props.revision.newAmount } } as any)}
+            </Text>
+          </View>
+        )}
+
         <View style={{
           marginTop: 12, borderRadius: 12, padding: 12,
           backgroundColor: '#FFF3EA', borderWidth: 1, borderColor: '#FFD9C2',
         }}>
           <Text style={{ fontFamily: F.bodyMed, fontSize: 14, color: '#7A3A12', lineHeight: 20 }}>
-            {t({ k: rec.stateLineKey, p: rec.stateLineParams } as any)}
+            {t(stateMsg as any)}
             {props.readinessKey ? `\n${t(props.readinessKey as any)}` : ''}
           </Text>
         </View>
@@ -181,6 +273,11 @@ export function RecordScreen(props: {
             any derived narrative about it. The summary is a reading aid; this is
             the instrument. */}
         <RecordApproval approval={props.approval ?? null} />
+        {/* R5b AC3: the discussion log, with timestamps, beneath the snapshot.
+            Read-only here — the live composer is the bar below, and only while
+            the thread is open; a closed record shows the log alone. */}
+        <DiscussionLog messages={messages} formatAt={createdLabel}
+          undelivered={props.undelivered} />
         <DecisionSummaryCard summary={props.summary ?? null} />
         <Text style={{ ...label, marginTop: 16, marginBottom: 8 }}>{t('erec.history')}</Text>
         <View style={{ borderLeftWidth: 2, borderLeftColor: C.line, paddingLeft: 14 }}>
@@ -200,6 +297,20 @@ export function RecordScreen(props: {
           {t('erec.deliveryNote')}
         </Text>
 
+        {/* Share, as a quiet row while the extra is still live. Once it is
+            terminal the evidence bundle becomes the point of the record and the
+            same action moves into the bar below as the primary. */}
+        {props.onShare && !terminal && (
+          <Pressable
+            onPress={props.onShare}
+            accessibilityLabel={t('erec.share')}
+            style={{ marginTop: 24, paddingVertical: 14, alignItems: 'center' }}>
+            <Text style={{ ...T.body, fontSize: 15, color: C.steel }}>
+              {t('erec.share')}
+            </Text>
+          </Pressable>
+        )}
+
         {/* Delete lives HERE, at the bottom of the record, because this is the
             screen someone opens when they have decided they do not want it. It
             was first put on the ledger row only, which is not where anyone
@@ -217,12 +328,110 @@ export function RecordScreen(props: {
         )}
       </ScrollView>
 
+      {/* The c5 bottom bar: reply, then the ONE action this state calls for.
+          The primary follows the state, not the layout — while the extra is out
+          the primary is Remind; a question makes the reply the primary path; a
+          terminal record's primary is its evidence bundle. A static button pair
+          cannot serve a screen whose job is "where does this stand". */}
+      {(composer || props.onSend || props.onRemind || props.onRevise
+        || props.onOpenCurrent || (terminal && props.onShare)) && (
+        <View
+          onLayout={(e) => setBarH(e.nativeEvent.layout.height)}
+          style={{
+            borderTopWidth: 1, borderTopColor: C.line, backgroundColor: C.card,
+            padding: 12, paddingBottom: 22, gap: 10,
+          }}>
+          {composer && (
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TextInput
+                value={draft}
+                onChangeText={setDraft}
+                multiline
+                placeholder={t('r5b.replyPlaceholder')}
+                placeholderTextColor={C.steel}
+                accessibilityLabel={t('r5b.replyPlaceholder')}
+                style={{
+                  flex: 1, fontFamily: F.body, fontSize: 16, color: C.ink,
+                  minHeight: 54, borderWidth: 1.5, borderColor: C.line,
+                  borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+                  backgroundColor: '#fff',
+                }}
+              />
+              <Pressable
+                onPress={sendReply}
+                disabled={!draft.trim() || busy}
+                accessibilityLabel={t('r5b.send')}
+                style={{
+                  minWidth: 54, minHeight: 54, borderRadius: 12,
+                  backgroundColor: C.ink, alignItems: 'center', justifyContent: 'center',
+                  opacity: !draft.trim() || busy ? 0.4 : 1,
+                }}>
+                <Text style={{ color: '#fff', fontSize: 20 }}>↑</Text>
+              </Pressable>
+            </View>
+          )}
+
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {shown === 'draft' && props.onSend && (
+              <Pressable onPress={props.onSend} accessibilityLabel={t('erec.send')}
+                style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
+                <Text style={T.btnText}>{t('erec.send')}</Text>
+              </Pressable>
+            )}
+            {shown === 'sent' && props.onRemind && (
+              <Pressable onPress={() => { void remind(); }} accessibilityLabel={t('r8.remind')}
+                style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
+                <Text style={T.btnText}>{t('r8.remind')}</Text>
+              </Pressable>
+            )}
+            {(shown === 'sent' || shown === 'discussing') && props.onRevise && (
+              <Pressable onPress={props.onRevise} accessibilityLabel={t('r5b.revise')}
+                style={[T.btn, { flex: 1, minHeight: 60, borderWidth: 1.5, borderColor: C.orange }]}>
+                <Text style={[T.btnText, { color: C.orange, fontSize: 16 }]}>
+                  {t('r5b.revise')}
+                </Text>
+              </Pressable>
+            )}
+            {shown === 'superseded' && props.onOpenCurrent && (
+              <Pressable onPress={props.onOpenCurrent} accessibilityLabel={t('erec.viewCurrent')}
+                style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
+                <Text style={T.btnText}>{t('erec.viewCurrent')}</Text>
+              </Pressable>
+            )}
+            {terminal && props.onShare && (
+              <Pressable onPress={props.onShare} accessibilityLabel={t('erec.share')}
+                style={shown === 'superseded' && props.onOpenCurrent
+                  ? [T.btn, { flex: 1, minHeight: 60, borderWidth: 1.5, borderColor: C.ink }]
+                  : [T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
+                <Text style={shown === 'superseded' && props.onOpenCurrent
+                  ? [T.btnText, { color: C.ink, fontSize: 16 }]
+                  : T.btnText}>
+                  {t('erec.share')}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+
+          {actionNote !== null && (
+            <Text style={{ ...T.body, fontSize: 13, color: C.danger }}>{actionNote}</Text>
+          )}
+          {/* Says the rule out loud where it could be broken (mandate #2 / R5b):
+              a price never settles in chat. */}
+          {composer && (
+            <Text style={{ ...T.bodySteel, fontSize: 11.5 }}>{t('r5b.priceNeedsRevision')}</Text>
+          )}
+        </View>
+      )}
+
       {props.onCapture && (
         <Pressable
           onPress={props.onCapture}
           accessibilityLabel={t('erec.capture')}
           style={{
-            position: 'absolute', bottom: 26, alignSelf: 'center',
+            // Above the action bar when there is one — never covering the reply
+            // field or the primary button — centered at the thumb otherwise.
+            position: 'absolute', bottom: barH > 0 ? barH + 12 : 26,
+            ...(barH > 0 ? { right: 16 } : { alignSelf: 'center' as const }),
             width: 72, height: 72, borderRadius: 36, backgroundColor: C.orange,
             alignItems: 'center', justifyContent: 'center',
             shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 12,

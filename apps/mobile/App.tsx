@@ -149,7 +149,7 @@ import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrder
          createdLabel, markLocalSent, money, parseMoney, validateLines,
          type LineItem, type LedgerRow } from './src/changeorder';
 import { displayStatus, canSupersede, type LedgerStatus } from './src/extrastatus';
-import { ensureLedgerStatusSchema, hydrateQuestions, openQuestions,
+import { ensureLedgerStatusSchema, hydrateQuestions, openQuestions, supersededBy,
          supersedeExtra, drainSupersessions, reassertSupersessions } from './src/ledgerstatus';
 import { issueOtp, newOtpCode, renderApproval, signApproval, verifyOtp } from './src/signing';
 
@@ -333,6 +333,13 @@ const openRecord = async (changeOrderId: string) => {
     return;
   }
   recordIdRef.current = changeOrderId; setRecord(r);
+  // A record can replace another on screen ("See the current version", a push tap
+  // while one is open). The layers below load asynchronously — drop the PRIOR
+  // record's now, or its evidence renders under the new title until each read
+  // lands (Codex review, 2026-07-22).
+  setRecordSummary(null); setApproval(null); setNarration(null);
+  setRecordThread(null); setRecordUndelivered(new Set());
+  setRecordRevision(null); setRecordNextId(null);
   try { setRecordSummary(await decisionSummaryFor(db, changeOrderId)); } catch { /* summary is optional */ }
   try {
     const w = await withEventLog(db, connector.client, r);
@@ -344,6 +351,70 @@ const openRecord = async (changeOrderId: string) => {
     setNarration(await narrationForExtra(db, connector.client, r.id,
       r.photos.map((ph) => ({ captureId: ph.captureId, uri: ph.uri, present: ph.present }))));
   } catch { setNarration(null); }
+  // R5b: the discussion (lineage-walked) and which replies are still queued.
+  try {
+    setRecordThread(await threadFor(db, changeOrderId));
+    setRecordUndelivered(await undeliveredReplyIds(db));
+  } catch { setRecordThread(null); setRecordUndelivered(new Set()); }
+  // R5b's revision marker — what this version replaced, if anything.
+  try {
+    const rev = await revisionOf(db, changeOrderId);
+    setRecordRevision(rev
+      ? { priorAmount: money(rev.priorAmountCents), newAmount: r.amount } : null);
+  } catch { setRecordRevision(null); }
+  // The forward link on a retired version, so the record can hand the reader on.
+  try {
+    setRecordNextId(r.status === 'superseded' ? await supersededBy(db, changeOrderId) : null);
+  } catch { setRecordNextId(null); }
+};
+
+/** Close the record overlay and drop every layer loaded with it. One function so
+ *  a new layer cannot be cleared on one exit path and leak on the other. */
+const closeRecord = () => {
+  recordIdRef.current = null;
+  setRecord(null); setRecordSummary(null); setApproval(null); setNarration(null);
+  setRecordThread(null); setRecordUndelivered(new Set());
+  setRecordRevision(null); setRecordNextId(null);
+};
+
+/**
+ * R8 manual remind — ONE implementation for the ledger row and the record screen.
+ * Same link, never a new token (remind.ts's header owns the why). Returns the
+ * verdict so each caller can show a refusal where its user is actually looking.
+ */
+const remindExtra = async (c: LedgerRow, inDiscussion: boolean):
+  Promise<{ ok: boolean; why?: string }> => {
+  const link = await liveLinkFor(db, c.id);
+  if (!link) return { ok: false, why: T('r8.noLink') };
+  const verdict = canRemind(c.status,
+    { count: link.remindCount, lastAtMs: link.lastRemindMs, inDiscussion }, Date.now());
+  if (!verdict.ok) return { ok: false, why: T(verdict.reasonKey) };
+  const prof = await getProfile(db);
+  const text = reminderText({
+    contractorName: prof?.company || prof?.name || 'Your contractor',
+    scope: c.scope, amount: c.amount, url: link.url,
+  });
+  const sh = await shareLink(link.url, text);
+  // Counted only AFTER the sheet returns. A contractor who opens it and backs out
+  // has not reminded anyone, and burning his one-a-day on a cancelled share would
+  // be the app lying about what it did.
+  if (!sh.ok) return { ok: false, why: sh.reason ?? 'could not share' };
+  await noteReminded(db, c.id);
+  await refresh();
+  return { ok: true };
+};
+
+/** R5b/R7 Revise & resend — ONE handoff to the priced read-back composer, shared
+ *  by the ledger row, the thread screen and the record screen. The price still
+ *  goes through the read-back: mandate #6 has no shortcut for the second number. */
+const startRevision = (c: LedgerRow) => {
+  setPriced({
+    decisionId: c.decision_id, scope: c.scope, whoDirected: c.who_directed,
+    amountText: (c.amount_cents / 100).toFixed(2),
+    nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
+    mode: c.nte_cents == null ? 'fixed' : 'nte', voice: null, supersedes: c.id,
+  });
+  setLines([]);
 };
 
 const openSendPrep = async (c: LedgerRow) => {
@@ -563,6 +634,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // assemble must not be able to stop the record from opening (R6c AC2).
   const [recordSummary, setRecordSummary] = React.useState<DecisionSummary | null>(null);
   const recordIdRef = React.useRef<string | null>(null);
+  // R5b on the record (prototype c5): the discussion, its delivery state, the
+  // revision marker, and — on a superseded record — what replaced it. Loaded
+  // ALONGSIDE the record like the summary: each may fail without costing the rest.
+  const [recordThread, setRecordThread] = React.useState<ThreadMessage[] | null>(null);
+  const [recordUndelivered, setRecordUndelivered] = React.useState<ReadonlySet<string>>(new Set());
+  const [recordRevision, setRecordRevision] =
+    React.useState<{ priorAmount: string; newAmount: string } | null>(null);
+  const [recordNextId, setRecordNextId] = React.useState<string | null>(null);
   const [dsync, setDsync] = React.useState<any>(null);
   const [bundling, setBundling] = React.useState<string | null>(null);
   const [cellOn, setCellOn] = React.useState(false);
@@ -874,6 +953,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // same cycle as the record, so a question that just landed changes the owed
         // line without touching a single stored event.
         setRecordSummary(await decisionSummaryFor(db, openId));
+        // R5b: the discussion on the open record re-derives too — a question that
+        // just landed must flip the state line and surface the reply bar's context
+        // while he is looking at it, same rule as the open thread above.
+        try {
+          setRecordThread(await threadFor(db, openId));
+          setRecordUndelivered(await undeliveredReplyIds(db));
+        } catch { /* discussion schema not up yet */ }
       }
     } catch { /* pre-init */ }
   }, []);
@@ -2481,20 +2567,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // which is exactly why it needs no confirmation step — and exactly why it
           // must never be allowed to move the extra's status. A new PRICE goes
           // through the read-back composer (R7's Revise), never through a chat box.
-          await postReply(db, { changeOrderId: thread.co.id, body: text, ownerId: OWNER });
+          const pr = await postReply(db, { changeOrderId: thread.co.id, body: text, ownerId: OWNER });
+          // Same contract as the record screen: a failed local write must throw so
+          // the composer keeps the words instead of clearing them over nothing.
+          if (!pr.ok) throw new Error(pr.reason);
           await refresh();
         }}
         onRevise={() => {
           // Hand off to the SAME priced composer R7 wired. One place issues a price.
           const c = thread.co;
           threadIdRef.current = null; setThread(null);
-          setPriced({
-            decisionId: c.decision_id, scope: c.scope, whoDirected: c.who_directed,
-            amountText: (c.amount_cents / 100).toFixed(2),
-            nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
-            mode: c.nte_cents == null ? 'fixed' : 'nte', voice: null, supersedes: c.id,
-          });
-          setLines([]);
+          startRevision(c);
         }}
         onBack={() => { threadIdRef.current = null; setThread(null); }}
       />
@@ -2502,6 +2585,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   }
 
   if (record) {
+    // The ledger row behind this record, when the loaded project has it. The
+    // action handlers need its raw fields (decision_id, cents); a record opened
+    // cross-project (a push about another job) renders read-only instead — the
+    // same stated gap as the notification path above, not a silent one.
+    const row = coRowsRef.current.find((c) => c.id === record.id);
+    const gate = record.status === 'draft'
+      ? canSendExtra((readiness.get(record.id) ?? 'captured') as any) : null;
     return (
       <RecordScreen
         rec={record}
@@ -2509,32 +2599,54 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         summary={recordSummary}
         approval={approval}
         narration={narration}
+        thread={recordThread}
+        openQuestions={questions[record.id] ?? 0}
+        undelivered={recordUndelivered}
+        revision={recordRevision}
         // Mandate #2: this writes a file and opens the OS share sheet. It does not
         // transmit anything to a client, and must never be changed to.
         onShare={() => { void shareApprovalDoc(db, record.id); }}
-        readinessKey={(() => {
-          if (record.status !== 'draft') return undefined;
-          const gate = canSendExtra((readiness.get(record.id) ?? 'captured') as any);
-          return gate.ok ? undefined : gate.whyKey;
-        })()}
+        readinessKey={gate && !gate.ok ? gate.whyKey : undefined}
+        // A ready draft can go out from its own record (R6b AC3: the state line
+        // says "send it" — the screen must then offer the send).
+        onSend={gate?.ok && row ? () => { closeRecord(); void openSendPrep(row); } : undefined}
+        // Mandate #2: a reply is a MESSAGE. It commits nothing and prices nothing —
+        // and it must never move the extra's status. A new PRICE goes through the
+        // read-back composer (onRevise), never through a chat box.
+        onReply={record.status === 'sent' ? async (text: string) => {
+          const pr = await postReply(db, { changeOrderId: record.id, body: text, ownerId: OWNER });
+          // postReply reports failure as a value, not a throw. Throwing here is what
+          // keeps the typed words in the composer and puts the reason on screen.
+          if (!pr.ok) throw new Error(pr.reason);
+          setRecordThread(await threadFor(db, record.id));
+          setRecordUndelivered(await undeliveredReplyIds(db));
+          try { setRecordSummary(await decisionSummaryFor(db, record.id)); } catch { /* optional */ }
+          void refresh();
+        } : undefined}
+        // R8: remind. inDiscussion is the ledger's own per-version signal — the
+        // lineage-walked thread would block reminding on a fresh revision because
+        // of a question already answered on the version it replaced.
+        onRemind={record.status === 'sent' && row
+          ? () => remindExtra(row, (questions[record.id] ?? 0) > 0)
+          : undefined}
+        onRevise={canSupersede(record.status) && row
+          ? () => { closeRecord(); startRevision(row); } : undefined}
+        onOpenCurrent={recordNextId
+          ? () => { void openRecord(recordNextId); } : undefined}
         // Only for a draft. Undefined once sent hides the control entirely
         // rather than showing something that refuses — an action you can press
         // and be told no is worse than one that was never offered.
         onDelete={record.status === 'draft' ? async () => {
-          const row = coRowsRef.current.find((c) => c.id === record.id);
           const plan = await previewDiscard(db, record.id);
           setRecord(null);
           setDiscard({ co: row ?? ({ id: record.id, scope: record.title } as any), plan });
         } : undefined}
-        onBack={() => { recordIdRef.current = null; setRecord(null); setRecordSummary(null); setApproval(null); setNarration(null); }}
+        onBack={closeRecord}
         // R1: capture stays one tap away on secondary screens. Leaving the record to
         // capture is the point — a new extra should never require going home first.
         onCapture={() => {
           if (!terms) { openTerms(); return; }
-          recordIdRef.current = null;
-          setRecord(null);
-          setRecordSummary(null);
-          setApproval(null);
+          closeRecord();
           setShowCapture(true);
         }}
       />
@@ -3324,27 +3436,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               <View key={c.id} style={s.coCard}>
                 <Pressable
                   accessibilityLabel={`Open record: ${c.scope}`}
-                  onPress={async () => {
-                    const r = await extraRecord(db, c.id);
-                    if (r) { recordIdRef.current = c.id; setRecord(r); }
-                    setRecordSummary(await decisionSummaryFor(db, c.id));
-                    // R6: real sent/opened/asked/answered times, and the frozen
-                    // snapshot. Wrapped because it reaches the network: offline it
-                    // must leave the record exactly as usable as it already was.
-                    if (r) {
-                      try {
-                        const w = await withEventLog(db, connector.client, r);
-                        setRecord(w); setApproval(w.approval);
-                      } catch { setApproval(null); }
-                      // R2: align the photos to what was said over them. A miss
-                      // returns the fallback strip, so this can only ever ADD
-                      // structure — never remove the photos.
-                      try {
-                        setNarration(await narrationForExtra(db, connector.client, r.id,
-                          r.photos.map((ph) => ({ captureId: ph.captureId, uri: ph.uri, present: ph.present }))));
-                      } catch { setNarration(null); }
-                    }
-                  }}>
+                  // The ONE open-record path (openRecord's header: the bell row, the
+                  // push tap and this row MUST land in the same place). This was an
+                  // inline near-copy of it that predated the helper — it opened
+                  // silently on failure and would have missed each layer added since.
+                  onPress={() => { void openRecord(c.id); }}>
                   <View style={s.coR1}>
                     <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>
                     <View style={[s.chipBase, chip.bg]}>
@@ -3434,24 +3530,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     they were reminded. This re-shares the SAME link. */}
                 {c.status === 'sent' && (
                   <Pressable style={s.coSendRow} onPress={async () => {
-                    const link = await liveLinkFor(db, c.id);
-                    if (!link) { setUi({ k: 'refused', why: T('r8.noLink') }); return; }
-                    const verdict = canRemind(c.status, {
-                      count: link.remindCount, lastAtMs: link.lastRemindMs,
-                      inDiscussion: (questions[c.id] ?? 0) > 0,
-                    }, Date.now());
-                    if (!verdict.ok) { setUi({ k: 'refused', why: T(verdict.reasonKey) }); return; }
-                    const prof = await getProfile(db);
-                    const text = reminderText({
-                      contractorName: prof?.company || prof?.name || 'Your contractor',
-                      scope: c.scope, amount: c.amount, url: link.url,
-                    });
-                    const sh = await shareLink(link.url, text);
-                    // Counted only AFTER the sheet returns. A contractor who opens it
-                    // and backs out has not reminded anyone, and burning his one-a-day
-                    // on a cancelled share would be the app lying about what it did.
-                    if (sh.ok) { await noteReminded(db, c.id); await refresh(); }
-                    else setUi({ k: 'refused', why: sh.reason ?? 'could not share' });
+                    const r = await remindExtra(c, (questions[c.id] ?? 0) > 0);
+                    if (!r.ok) setUi({ k: 'refused', why: r.why ?? '' });
                   }}>
                     <Text style={s.coNudge}>{T('r8.remind')} →</Text>
                   </Pressable>
@@ -3462,17 +3542,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     read-back composer: a revision carries a number, and mandate #6 has no
                     shortcut for the second one. */}
                 {canSupersede(c.status) && (
-                  <Pressable style={s.coSendRow} onPress={() => {
-                    setPriced({
-                      decisionId: c.decision_id, scope: c.scope,
-                      whoDirected: c.who_directed,
-                      amountText: (c.amount_cents / 100).toFixed(2),
-                      nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
-                      mode: c.nte_cents == null ? 'fixed' : 'nte', voice: null,
-                      supersedes: c.id,
-                    });
-                    setLines([]);
-                  }}>
+                  <Pressable style={s.coSendRow} onPress={() => startRevision(c)}>
                     <Text style={s.coNudge}>{T('co.revise')}</Text>
                   </Pressable>
                 )}
