@@ -49,12 +49,20 @@ export async function runStep(
   if (step === 'transcribe') {
     if (!hasSttKey()) return { ok: false, reason: 'needs_api_key' };
     // `capture.payload` holds the storage object key (060 inserts p_object_key
-    // into it). The bucket is 'captures', matching uploader.ts.
+    // into it). The bucket is 'captures', matching uploader.ts. There is NO mime
+    // column on the server capture table — this selected one anyway and every
+    // voice job parked on "column does not exist" (2026-07-23). The key itself
+    // carries the extension; derive the mime from it.
     const { data: cap, error: capErr } = await sb
-      .from('capture').select('payload, media_mime_type').eq('id', job.capture_id).single();
+      .from('capture').select('payload').eq('id', job.capture_id).single();
     if (capErr || !cap?.payload) {
       return { ok: false, reason: 'needs_connection', error: capErr?.message ?? 'no payload key' };
     }
+    const ext = String(cap.payload).split('.').pop()?.toLowerCase() ?? '';
+    const mime = ext === 'wav' ? 'audio/wav'
+      : ext === 'mp3' ? 'audio/mpeg'
+      : ext === 'caf' ? 'audio/x-caf'
+      : 'audio/m4a';
     const dl = await sb.storage.from('captures').download(cap.payload);
     if (dl.error || !dl.data) {
       return { ok: false, reason: 'needs_connection', error: dl.error?.message ?? 'no audio' };
@@ -66,8 +74,7 @@ export async function runStep(
     // attached is REQ-PROC6 working: "what is waiting, and why".
     let t: Transcript | null;
     try {
-      t = await transcribe(await dl.data.arrayBuffer(),
-                           cap.media_mime_type ?? 'audio/m4a');
+      t = await transcribe(await dl.data.arrayBuffer(), mime);
     } catch (e: any) {
       return { ok: false, reason: 'needs_api_key', error: String(e?.message ?? e).slice(0, 400) };
     }
@@ -79,6 +86,21 @@ export async function runStep(
   // I had this filed under "blocked on a key" alongside the rest of the pipeline,
   // which was wrong: the only thing it needs is a transcript.
   if (step === 'resolve_project') return resolveProject(sb, job);
+
+  if (step === 'detect_language') {
+    // Not implemented against nothing: the transcribe step's provider already
+    // reports the language, and writeTranscript stores it (`source_language`).
+    // This step VERIFIES that fact landed rather than re-deriving it — done when
+    // a transcript for this capture carries a language, parked when none does.
+    const { data: tr, error: trErr } = await sb
+      .from('capture_transcript').select('source_language')
+      .eq('capture_id', job.capture_id)
+      .order('created_at', { ascending: false }).limit(1);
+    if (trErr) return { ok: false, reason: 'needs_connection', error: trErr.message };
+    const lang = tr?.[0]?.source_language;
+    if (typeof lang === 'string' && lang.length > 0) return { ok: true };
+    return { ok: false, reason: 'needs_api_key', error: 'no transcript carries a language yet' };
+  }
 
   if (step === 'structure') {
     if (!hasLlmKey()) return { ok: false, reason: 'needs_api_key' };
@@ -126,10 +148,10 @@ export async function runStep(
     return { ok: true };
   }
 
-  // detect_language genuinely does consume a provider — and it is already
-  // answered by the transcribe response (`source_language`). A step that
-  // "succeeds" without doing anything marks the job done and the capture
-  // processed, so it parks until it is really implemented.
+  // An unknown step (declared by a newer job shape this worker predates) parks
+  // rather than "succeeds": a step that passes without doing anything marks the
+  // capture processed and hands the contractor an empty card with nothing
+  // saying why.
   return { ok: false, reason: 'needs_api_key' };
 }
 
