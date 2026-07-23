@@ -47,6 +47,7 @@ import { sendEwa } from './src/ewasend';
 // filled preview before he stands up. The worker still re-transcribes via the
 // cloud and supersedes this under 150's newest-wins.
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
+import { fetchProposal } from './src/proposals';
 import { discardCapture, discardExtra, drainServerDiscards, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
 import { startExtraFromCapture, titleExtraIfUntitled } from './src/startextra';
 import { cleanupTestData } from './src/testdatacleanup';
@@ -738,6 +739,69 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // FLOW step 3: the Review & Send screen over the details card. Holds the
   // company name so the preview renders the same header the owner will read.
   const [reviewSend, setReviewSend] = React.useState<null | { company: string | null }>(null);
+  // FLOW step 1.5 — the transition after capture (hadar, 2026-07-23): live,
+  // HONEST stages (each tracks a real signal, never a timer), then the job
+  // sheet; on weak/no connection, a message + Done that parks at home.
+  const [transition, setTransition] = React.useState<null | {
+    ids: string[]; anchorCaptureId: string | null;
+    assign: { ids: string[]; lat: number | null; lng: number | null;
+              uris: string[]; secs: number; anchorCoId?: string };
+    uploaded: boolean; transcribed: boolean; analyzed: boolean; offline: boolean;
+  }>(null);
+
+  // The transition's watcher. Polls the real signals: capture_outbox emptying
+  // (uploaded), voice_transcript_cache (written down — works OFFLINE, it is
+  // on-device), capture_structured (analyzed, best-effort network read).
+  // Advances to the job sheet when upload + words are in; flips to the offline
+  // message when the outbox has not moved by ~8s.
+  React.useEffect(() => {
+    if (!transition) return;
+    let alive = true;
+    const marks = transition.ids.map(() => '?').join(',');
+    let firstCount = -1;
+    (async () => {
+      for (let tick = 0; alive && tick < 30; tick++) {
+        let up = false, tr = transition.anchorCaptureId === null, an = false;
+        try {
+          const n = (await db.getAll<{ n: number }>(
+            `SELECT count(*) AS n FROM capture_outbox WHERE capture_id IN (${marks})`,
+            transition.ids))[0]?.n ?? 0;
+          if (firstCount < 0) firstCount = n;
+          up = n === 0;
+          if (!tr) {
+            tr = !!(await db.getAll(
+              `SELECT 1 FROM voice_transcript_cache WHERE capture_id = ?`,
+              [transition.anchorCaptureId]))[0];
+          }
+          if (up && transition.anchorCaptureId && tick % 3 === 0) {
+            try {
+              an = !!(await fetchProposal(connector.client, transition.anchorCaptureId));
+            } catch { /* analysis is a bonus, never a gate */ }
+          }
+        } catch { /* schema races: poll again */ }
+        if (!alive) return;
+        const offline = !up && tick >= 8 && firstCount > 0;
+        setTransition((t) => t && { ...t, uploaded: up, transcribed: tr,
+                                    analyzed: an || t.analyzed, offline });
+        if (up && tr) {
+          // A beat so the checkmarks are SEEN — a flash reads as a glitch.
+          await new Promise((r) => setTimeout(r, 900));
+          if (!alive) return;
+          setTransition((t) => {
+            if (t) { setAssign(t.assign); }
+            return null;
+          });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      // 30s and still short: if the words are down but upload is stuck, the
+      // offline message + Done is already showing. If neither, show it too.
+      if (alive) setTransition((t) => t && { ...t, offline: true });
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transition?.ids?.[0]]);
   const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
   // extra id -> weakest state across its captures. Absent means "not computed
   // yet", which the gate treats as NOT ready: an unknown answer must never open
@@ -1682,15 +1746,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           await refresh();
         })().catch(() => { /* the worker's cloud path still covers it */ });
       }
-      // FLOW step 2 — the job is ALWAYS picked by a human (hadar, 2026-07-23:
-      // "step 2 is job selection"; mandate #8's suggest-never-decide applied
-      // fully). GPS only sorts the list; the capture is already durably filed
-      // to the best guess, and the chosen job re-homes it (fileAll).
-      setAssign({ ids, lat: a.stamp.lat, lng: a.stamp.lng,
+      // FLOW step 1.5 then 2 — the transition screen watches the real signals
+      // (upload, words, analysis), then hands to the job sheet; the job is
+      // ALWAYS picked by a human (mandate #8 fully applied — GPS only sorts).
+      const anchorCapId = a.audioSegments.length ? ids[a.photos.length] : null;
+      setTransition({
+        ids,
+        anchorCaptureId: anchorCapId,
+        assign: { ids, lat: a.stamp.lat, lng: a.stamp.lng,
                   uris: a.previewUris, secs: a.durationSecs,
-                  // The extra behind this walk, so filing continues the flow
-                  // into "fill what's missing" (mock step 2 -> step 3).
-                  anchorCoId: a.audioSegments.length ? `co-${ids[a.photos.length]}` : `co-${ids[0]}` });
+                  anchorCoId: anchorCapId ? `co-${anchorCapId}` : `co-${ids[0]}` },
+        uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
+      });
     } catch (e: any) {
       setUi({ k: 'refused', why: e?.message ?? String(e) });
     } finally {
@@ -2581,6 +2648,55 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           });
         }}
       />
+    );
+  }
+
+  // FLOW step 1.5 — the transition after capture. Same dark world as the
+  // capture screen: this is the SAME workflow breathing, not a new place.
+  // Every stage row tracks a real signal; the offline branch tells the truth
+  // and parks at home with everything safe (mandate #1's whole point).
+  if (transition) {
+    const t = transition;
+    const row = (done: boolean, doingKey: string, doneKey: string) => (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 18 }}>
+        <Text style={{ fontSize: 22, color: done ? '#2da44e' : '#8c959f' }}>
+          {done ? '✓' : '…'}
+        </Text>
+        <Text style={{ fontSize: 17, color: done ? '#dafbe1' : '#c9d1d9' }}>
+          {T(done ? doneKey : doingKey)}
+        </Text>
+      </View>
+    );
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0D0F12', paddingTop: 90, paddingHorizontal: 28 }}>
+        <Text style={{ color: '#fff', fontSize: 26, fontWeight: '700' }}>
+          {T('cap.transTitle')}
+        </Text>
+        <View style={{ marginTop: 18 }}>
+          {row(true, 'cap.transSaved', 'cap.transSaved')}
+          {row(t.uploaded, 'cap.transUpload', 'cap.transUploaded')}
+          {t.anchorCaptureId !== null && row(t.transcribed, 'cap.transStt', 'cap.transSttDone')}
+          {row(t.analyzed, 'cap.transAnalyze', 'cap.transAnalyzed')}
+        </View>
+        {t.offline && (
+          <>
+            <View style={{ backgroundColor: '#3a2c00', borderColor: '#d4a72c', borderWidth: 1,
+              borderRadius: 12, padding: 14, marginTop: 26 }}>
+              <Text style={{ color: '#f5d76a', fontSize: 15, lineHeight: 22 }}>
+                {T('cap.transOffline')}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setTransition(null)}
+              style={{ marginTop: 18, minHeight: 60, borderRadius: 12, backgroundColor: '#fff',
+                       alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 17, fontWeight: '600', color: '#0D0F12' }}>
+                {T('cap.transDone')}
+              </Text>
+            </Pressable>
+          </>
+        )}
+      </View>
     );
   }
 
