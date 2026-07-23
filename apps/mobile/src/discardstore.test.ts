@@ -304,7 +304,7 @@ test('the drain sends unconfirmed tombstones and marks every id confirmed', asyn
   // MISSING IS CONFIRMED. A capture the server never received has nothing in
   // the bucket to delete; retrying it forever is the no-exit loop this repo
   // has shipped once already (23502). Both ids must be marked done.
-  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced`).length, 2);
+  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced2`).length, 2);
 });
 
 test('a second drain has nothing to send', async () => {
@@ -325,7 +325,7 @@ test('an RPC error confirms nothing', async () => {
   const client = rpcClient({ data: null, error: { message: 'PGRST202' } });
   const r = await drainServerDiscards(db, client);
   assert.equal(r.attempted, 1);
-  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced`).length, 0, 'still pending');
+  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced2`).length, 0, 'still pending');
 });
 
 // ── repairs for verdicts issued under an older world ─────────────────────────
@@ -368,7 +368,7 @@ test('a storage-remove failure leaves the batch pending', async () => {
                            { error: { message: 'network gave up' } });
   const r = await drainServerDiscards(db, client);
   assert.equal(r.discarded, 0);
-  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced`).length, 0, 'still pending');
+  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced2`).length, 0, 'still pending');
 });
 
 // remove() can "succeed" while RLS filters every deletion: no error, empty
@@ -381,5 +381,5 @@ test('a filtered remove — ok but empty — confirms nothing', async () => {
                            { data: [], error: null });
   const r = await drainServerDiscards(db, client);
   assert.equal(r.discarded, 0);
-  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced`).length, 0, 'still pending');
+  assert.equal(rows(raw, `SELECT capture_id FROM discard_synced2`).length, 0, 'still pending');
 });
