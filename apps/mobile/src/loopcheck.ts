@@ -401,5 +401,18 @@ export async function runLoopCheck(
   } catch { /* cleanup must never fail the run it is tidying */ }
 
   const failed = steps.filter((s) => !s.ok).length;
+  // THE VERDICT GOES TO THE FLIGHT RECORDER, not only to console: console.log
+  // does not exist in a Release build, and this check is about to be the thing
+  // that proves on-device recognition on a real phone — a proof nobody can read
+  // is not a proof. Summary first, then every step that matters by name.
+  try {
+    const { logDiag } = await import('./diaglog');
+    await logDiag(db, 'loop.result', `${steps.length - failed}/${steps.length}`);
+    for (const st of steps) {
+      if (!st.ok || st.name.startsWith('R2 on-device')) {
+        await logDiag(db, st.ok ? 'loop.step' : 'loop.fail', `${st.name}: ${st.detail}`);
+      }
+    }
+  } catch { /* the check itself must never die on its own reporting */ }
   return { steps, passed: steps.length - failed, failed, pass: failed === 0 };
 }
