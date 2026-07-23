@@ -2672,6 +2672,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         <Text style={{ color: '#fff', fontSize: 26, fontWeight: '700' }}>
           {T('cap.transTitle')}
         </Text>
+        {!t.offline && (
+          <Text style={{ color: '#8c959f', fontSize: 15, lineHeight: 21, marginTop: 8 }}>
+            {T('cap.transSub')}
+          </Text>
+        )}
         <View style={{ marginTop: 18 }}>
           {row(true, 'cap.transSaved', 'cap.transSaved')}
           {row(t.uploaded, 'cap.transUpload', 'cap.transUploaded')}
