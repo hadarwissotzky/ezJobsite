@@ -120,8 +120,18 @@ export async function recognizeFile(
           durationSec: null,
         });
       }),
-      mod.addListener('error', () => done(null)),
-      mod.addListener('end', () => done(null)),
+      // Each silent exit WRITES WHY. The real capture's recognition failed for a
+      // day with permission granted and support present, and this listener was
+      // the one place that knew the reason and said nothing (2026-07-23).
+      mod.addListener('error', (e: any) => {
+        void logDiag(db, 'file.err',
+          JSON.stringify(e?.error ?? e?.message ?? e ?? 'unknown').slice(0, 200));
+        done(null);
+      }),
+      mod.addListener('end', () => {
+        if (!settled) void logDiag(db, 'file.end', 'ended with no final result');
+        done(null);
+      }),
       ];
     } catch (e: any) {
       void logDiag(db, 'file.threw', 'attach: ' + String(e?.message ?? e).slice(0, 100));
@@ -289,6 +299,10 @@ export async function transcribeOnDevice(
   }
 
   const t = await recognizeFile(db, uri);
+  // The outcome is written down either way — 'file.state' alone told us
+  // recognition STARTED and nothing ever said how it finished.
+  void logDiag(db, 'file.out',
+    t ? `ok len=${t.text.length} segs=${t.segments?.length ?? 0}` : `null for ${uri.slice(-40)}`);
   if (!t) return { ok: false, reason: 'unsupported' };
   // Silence is a real result and must not become a stored transcript: an empty
   // row would win `capture_transcript_current`'s newest-wins and blank out a

@@ -2637,9 +2637,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // rather than showing something that refuses — an action you can press
         // and be told no is worse than one that was never offered.
         onDelete={record.status === 'draft' ? async () => {
-          const plan = await previewDiscard(db, record.id);
-          setRecord(null);
-          setDiscard({ co: row ?? ({ id: record.id, scope: record.title } as any), plan });
+          // Wrapped because it was not: previewDiscard threw on a column that
+          // does not exist and this tap died silently (2026-07-23). A delete
+          // that fails must SAY so.
+          try {
+            const plan = await previewDiscard(db, record.id);
+            setRecord(null);
+            setDiscard({ co: row ?? ({ id: record.id, scope: record.title } as any), plan });
+          } catch (e: any) {
+            setFiled('Could not open the delete confirmation: ' + (e?.message ?? String(e)));
+          }
         } : undefined}
         onBack={closeRecord}
         // R1: capture stays one tap away on secondary screens. Leaving the record to
@@ -3518,8 +3525,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     The tap opens a confirmation; it never deletes. */}
                 {c.status === 'draft' && (
                   <Pressable style={s.coSendRow} onPress={async () => {
-                    const plan = await previewDiscard(db, c.id);
-                    setDiscard({ co: c, plan });
+                    // Same wrap as the record screen's Delete, same reason.
+                    try {
+                      const plan = await previewDiscard(db, c.id);
+                      setDiscard({ co: c, plan });
+                    } catch (e: any) {
+                      setUi({ k: 'refused', why: e?.message ?? String(e) });
+                    }
                   }}>
                     <Text style={s.coNudge}>{T('discard.action')}</Text>
                   </Pressable>

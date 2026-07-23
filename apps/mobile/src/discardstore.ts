@@ -82,12 +82,18 @@ export async function previewDiscard(
   // DISTINCT extras reach it. `revision.ts` reuses prior.decision_id, so this
   // count is routinely 2 and the difference matters.
   const caps = await db.getAll<{ capture_id: string; used: number; uploaded: number }>(
+    // "uploaded" is DERIVED, the same way capture.ts derives it: the outbox
+    // still holding the intent IS pending. `pending_upload` is not a stored
+    // column — this query referenced one anyway, threw "no such column", and
+    // the record screen's Delete died as an unhandled rejection with nothing
+    // on screen (hadar, on device 2026-07-23).
     `SELECT dv.capture_id                                        AS capture_id,
             (SELECT count(*) FROM change_order c2
               WHERE c2.decision_id = dv.decision_id)             AS used,
             (SELECT count(*) FROM capture_commit cc
               WHERE cc.capture_id = dv.capture_id
-                AND cc.pending_upload = 0)                       AS uploaded
+                AND NOT EXISTS (SELECT 1 FROM capture_outbox o
+                                 WHERE o.capture_id = cc.capture_id)) AS uploaded
        FROM decision_version dv
       WHERE dv.decision_id = ? AND dv.capture_id IS NOT NULL
       GROUP BY dv.capture_id`,
