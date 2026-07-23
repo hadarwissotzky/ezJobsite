@@ -33,6 +33,9 @@ export type Proposal = {
   scope: 'project' | 'party' | null;
   whoDirected: string | null;
   amountCents: number | null;
+  /** R5c type the model proposed (373). A suggestion for the send preview's
+   *  contractor-set picker — never applied without the human seeing it. */
+  extraType: string | null;
   confidence: Confidence;
   engine: string;
   engineModel: string | null;
@@ -47,8 +50,8 @@ export async function fetchProposal(
   const { data, error } = await client
     .from('capture_structured')
     .select('id, capture_id, proposed_subject, proposed_value, proposed_scope, ' +
-            'proposed_who_directed, proposed_amount_cents, confidence, engine, ' +
-            'engine_model, from_transcript, created_at')
+            'proposed_who_directed, proposed_amount_cents, proposed_extra_type, ' +
+            'confidence, engine, engine_model, from_transcript, created_at')
     .eq('capture_id', captureId)
     .order('created_at', { ascending: false })
     .limit(1);
@@ -62,6 +65,7 @@ export async function fetchProposal(
     scope: r.proposed_scope ?? null,
     whoDirected: r.proposed_who_directed ?? null,
     amountCents: r.proposed_amount_cents ?? null,
+    extraType: r.proposed_extra_type ?? null,
     confidence: (['high', 'low', 'none'].includes(r.confidence) ? r.confidence : 'low') as Confidence,
     engine: r.engine,
     engineModel: r.engine_model ?? null,

@@ -24,6 +24,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { isComplete, pendingSteps } from './steps.ts';
 import { hasSttKey, transcribe, type Transcript } from './transcribe.ts';
+import { hasLlmKey, structureTranscript, STRUCTURE_MODEL,
+         type StructureResult } from './structure.ts';
 
 export type Job = {
   id: string; capture_id: string; owner_id: string; project_id: string;
@@ -78,12 +80,56 @@ export async function runStep(
   // which was wrong: the only thing it needs is a transcript.
   if (step === 'resolve_project') return resolveProject(sb, job);
 
-  // detect_language and structure genuinely do consume a provider.
-  // detect_language is already answered by the transcribe response
-  // (`source_language`), and structure needs the LLM the PRD names. Neither is
-  // implemented against nothing: a step that "succeeds" without doing anything
-  // marks the job done and the capture processed, and hands the contractor an
-  // empty preview card with nothing saying why.
+  if (step === 'structure') {
+    if (!hasLlmKey()) return { ok: false, reason: 'needs_api_key' };
+    // Newest transcript wins — same read resolve_project does, same reason (150
+    // is append-only; the latest row is the current reading).
+    const { data: tr, error: trErr } = await sb
+      .from('capture_transcript').select('text')
+      .eq('capture_id', job.capture_id)
+      .order('created_at', { ascending: false }).limit(1);
+    if (trErr) return { ok: false, reason: 'needs_connection', error: trErr.message };
+    const text = (tr?.[0]?.text ?? '').trim();
+    if (!text) {
+      // The declared step order puts transcribe first, so this is a job whose
+      // transcript step was completed by a path that produced nothing. Parked,
+      // not skipped: structure without words is not a success.
+      return { ok: false, reason: 'needs_connection', error: 'no transcript to structure' };
+    }
+    let s: StructureResult | null;
+    try {
+      s = await structureTranscript(text);
+    } catch (e: any) {
+      // Same rule as transcribe: a provider failure PARKS the job with the
+      // provider's own words attached — needs_api_key surfaces in the backlog
+      // as something a person can fix.
+      return { ok: false, reason: 'needs_api_key', error: String(e?.message ?? e).slice(0, 400) };
+    }
+    // A decline or unusable output is RECORDED as a confidence-none proposal —
+    // the step ran, and "nothing usable" is its honest answer. proposals.ts
+    // rule 2 then guarantees it prefills nothing.
+    const { error } = await sb.from('capture_structured').insert({
+      id: `st-${job.capture_id}-${Date.now()}`,
+      capture_id: job.capture_id,
+      owner_id: job.owner_id,
+      proposed_subject: s?.subject ?? null,
+      proposed_value: s?.value ?? null,
+      proposed_who_directed: s?.whoDirected ?? null,
+      proposed_extra_type: s?.extraType ?? null,
+      // proposed_amount_cents stays NULL forever from this step (mandate #6).
+      confidence: s?.confidence ?? 'none',
+      engine: 'worker-claude',
+      engine_model: STRUCTURE_MODEL,
+      from_transcript: text,
+    });
+    if (error) return { ok: false, reason: 'needs_connection', error: error.message };
+    return { ok: true };
+  }
+
+  // detect_language genuinely does consume a provider — and it is already
+  // answered by the transcribe response (`source_language`). A step that
+  // "succeeds" without doing anything marks the job done and the capture
+  // processed, so it parks until it is really implemented.
   return { ok: false, reason: 'needs_api_key' };
 }
 
