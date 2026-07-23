@@ -152,9 +152,13 @@ export function RecordScreen(props: {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.paper }}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 120 }}>
-        <Pressable onPress={props.onBack} hitSlop={10} style={{ paddingVertical: 8 }}>
-          <Text style={{ ...label, color: C.orange }}>‹ {t('erec.back')}</Text>
+      {/* paddingTop 54 = this app's status-bar clearance (homeC, reviewscreen…).
+          Without it the back control rendered UNDER the iPhone clock — hadar,
+          from the device 2026-07-22: "no way to get back from it". */}
+      <ScrollView contentContainerStyle={{ padding: 18, paddingTop: 54, paddingBottom: 120 }}>
+        <Pressable onPress={props.onBack} hitSlop={12}
+          style={{ minHeight: 48, justifyContent: 'center', alignSelf: 'flex-start', paddingRight: 24 }}>
+          <Text style={{ ...label, fontSize: 15, color: C.orange }}>‹ {t('erec.back')}</Text>
         </Pressable>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>

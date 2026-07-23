@@ -141,9 +141,12 @@ export function ThreadScreen(props: {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.paper }}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 24 }}>
-        <Pressable onPress={props.onBack} hitSlop={10} style={{ paddingVertical: 8 }}>
-          <Text style={{ ...label, color: C.orange }}>‹ {t('r5b.back')}</Text>
+      {/* Same status-bar clearance fix as the record screen (2026-07-22): the
+          back control sat under the iPhone clock. */}
+      <ScrollView contentContainerStyle={{ padding: 18, paddingTop: 54, paddingBottom: 24 }}>
+        <Pressable onPress={props.onBack} hitSlop={12}
+          style={{ minHeight: 48, justifyContent: 'center', alignSelf: 'flex-start', paddingRight: 24 }}>
+          <Text style={{ ...label, fontSize: 15, color: C.orange }}>‹ {t('r5b.back')}</Text>
         </Pressable>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
