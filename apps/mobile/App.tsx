@@ -436,15 +436,20 @@ const startRevision = (c: LedgerRow) => {
  */
 const finishExtraById = async (changeOrderId: string) => {
   const rows = await db.getAll<{
-    decision_id: string; scope: string; who_directed: string;
+    decision_id: string; scope: string; who_directed: string; project_id: string;
     billing_timing: string | null; schedule_effect: string | null;
     schedule_days: number | null; exclusions: string | null;
   }>(
-    `SELECT decision_id, scope, who_directed, billing_timing, schedule_effect,
-            schedule_days, exclusions
+    `SELECT decision_id, scope, who_directed, project_id, billing_timing,
+            schedule_effect, schedule_days, exclusions
        FROM change_order WHERE id = ? AND status = 'draft'`, [changeOrderId]);
   if (!rows.length) return;
   const c = rows[0];
+  // The composer renders on the JOB screen. After a capture the user is on
+  // home, so setting `priced` alone opened the card on a screen nobody was
+  // looking at — hadar, twice, 2026-07-23: "no change". Navigate FIRST.
+  setProjectId(c.project_id);
+  setNav('project');
   setPriced({
     decisionId: c.decision_id, scope: c.scope, whoDirected: c.who_directed,
     amountText: '', nteText: '', mode: 'fixed', voice: null,
