@@ -194,6 +194,10 @@ export async function playCapture(uri: string): Promise<Playback> {
 }
 
 export function stopPlayback() {
+  // pause() BEFORE remove(): remove() releases the JS handle, but a native
+  // player that is mid-playback can keep sounding after it — the record
+  // screen's pause button stopped nothing (hadar, on device 2026-07-22).
+  try { player?.pause(); } catch { /* already gone */ }
   try { player?.remove(); } catch { /* already gone */ }
   player = null;
 }
