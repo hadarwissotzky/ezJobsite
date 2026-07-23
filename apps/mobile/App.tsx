@@ -47,9 +47,9 @@ import { sendEwa } from './src/ewasend';
 // filled preview before he stands up. The worker still re-transcribes via the
 // cloud and supersedes this under 150's newest-wins.
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
-import { fetchProposal } from './src/proposals';
+import { fetchProposal, fetchLatestProposalForCaptures, type Proposal } from './src/proposals';
 import { discardCapture, discardExtra, drainServerDiscards, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
-import { startExtraFromCapture, titleExtraIfUntitled } from './src/startextra';
+import { startExtraFromCapture, titleExtraIfUntitled, retitleDraft } from './src/startextra';
 import { cleanupTestData } from './src/testdatacleanup';
 import { logDiag } from './src/diaglog';
 // The send gate. hadar: "only then it can be sent to the owner for approval —
@@ -59,7 +59,7 @@ import { canSendExtra, extraProcState } from './src/extraprocstate';
 import { captureStatesForExtra } from './src/extrareadiness';
 import { discardSummary } from './src/discard';
 import { ensureVoiceCacheSchema, voiceReadingForDecision, narrationForExtra,
-         type VoiceReading } from './src/voicesource';
+         captureIdsForDecision, type VoiceReading } from './src/voicesource';
 // R2: photos beside the sentence spoken over them. Degrades to a plain strip when
 // there is no transcript — the record screen's existing behaviour — so it is safe
 // to wire before an STT key exists and lights up the moment one does.
@@ -143,7 +143,7 @@ import {
 import { drainExtraActorOutbox, ensureExtraActorSchema, noteActorNow, noteApprover,
          noteCapturedBy } from './src/recordactors';
 import {
-  EXTRA_TYPES, APPROVER_ROLES, type ExtraType, type ApproverRole, type Suggestion,
+  EXTRA_TYPES, APPROVER_ROLES, isExtraType, type ExtraType, type ApproverRole, type Suggestion,
 } from './src/approverrouting';
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
@@ -484,9 +484,50 @@ const finishExtraById = async (changeOrderId: string) => {
       };
     });
     if (stop) return;
-    if (v.analyzed) return;   // the AI has spoken; nothing better is coming
+    if (v.analyzed) {
+      // The AI has spoken. Give the extra its real TITLE and its TAG from the
+      // model's own subject + type (hadar, 2026-07-23), then reflect the new title
+      // in the open form and let the ledger pick up both.
+      const applied = await applyProposalToExtra(changeOrderId, c.decision_id);
+      if (applied.title) {
+        setPriced((p) => (p && p.decisionId === c.decision_id ? { ...p, scope: applied.title as string } : p));
+      }
+      await refresh();
+      return;   // nothing better is coming
+    }
     await new Promise((r) => setTimeout(r, 2000));
   }
+};
+
+/**
+ * Give a processed extra its TITLE and its TAG from the AI's proposal.
+ *
+ * The model already writes both — `proposed_subject` is a <=60-char title,
+ * `proposed_extra_type` is the R5c category (structural / mep / finish / …). This
+ * applies them under the mandates:
+ *  - Title only when the model was CONFIDENT (mandate #2), over the machine-written
+ *    interim title, draft-only. It replaces the first-sentence guess with a real name.
+ *  - Tag whenever the model named a valid one. The type is not part of the frozen
+ *    instrument (setExtraType's own note), so it carries no confidence gate beyond
+ *    "is a real category" and stays editable after send. setExtraType validates and
+ *    enqueues its own sync mutation.
+ * Returns what it applied so the caller can refresh the open form.
+ */
+const applyProposalToExtra = async (
+  changeOrderId: string, decisionId: string
+): Promise<{ title: string | null; tag: string | null }> => {
+  const ids = await captureIdsForDecision(db, decisionId);
+  const prop: Proposal | null = await fetchLatestProposalForCaptures(connector.client, ids);
+  if (!prop || prop.confidence === 'none') return { title: null, tag: null };
+  let title: string | null = null;
+  let tag: string | null = null;
+  if (prop.confidence === 'high' && prop.subject && await retitleDraft(db, changeOrderId, prop.subject)) {
+    title = prop.subject;
+  }
+  if (prop.extraType && isExtraType(prop.extraType) && await setExtraType(db, changeOrderId, prop.extraType)) {
+    tag = prop.extraType;
+  }
+  return { title, tag };
 };
 
 /**
@@ -3834,6 +3875,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                       <Text style={[s.chipText, chip.dark && s.chipTextDark]}>{chip.label}</Text>
                     </View>
                   </View>
+                  {/* The AI's category tag: what KIND of extra this is, so the list
+                      reads at a glance (hadar, 2026-07-23). The title says the
+                      specifics; this says the kind. Absent until processed — a
+                      first-class null, never a blocker. */}
+                  {c.extra_type && isExtraType(c.extra_type) && (
+                    <View style={s.coTag}>
+                      <Text style={s.coTagT}>{typeLabel(c.extra_type)}</Text>
+                    </View>
+                  )}
                   <View style={s.coR2}>
                     {/* R3 AC3: an EWA has no price, so "$0.00" would read as "this
                         extra is free". Show the TERM instead — the cap is exposure,
@@ -4443,6 +4493,17 @@ const s = StyleSheet.create({
   // Send sits OUTSIDE the open-record Pressable (see the card above). Its own row,
   // with a real tap target rather than a text hitbox.
   coSendRow: { marginTop: 8, paddingTop: 8, minHeight: 44, justifyContent: 'center' },
+  // The AI category tag. Deliberately QUIET — an outlined neutral pill, not another
+  // coloured status chip: the status chip (right of the title) carries urgency and
+  // must win the eye; the tag only says what kind of work this is.
+  coTag: {
+    alignSelf: 'flex-start', marginTop: 6, borderRadius: 6, paddingVertical: 2,
+    paddingHorizontal: 8, borderWidth: 1, borderColor: '#D0D7DE', backgroundColor: '#F6F8FA',
+  },
+  coTagT: {
+    color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 11.5,
+    textTransform: 'uppercase', letterSpacing: 0.8,
+  },
   // Chips = the notation status. Rounded (not clip-path angled): a clean pill reads
   // better in gloves/sunlight than a cosmetic skew (FIELD-UX). Colour carries meaning.
   chipBase: { borderRadius: 6, paddingVertical: 3, paddingHorizontal: 10 },

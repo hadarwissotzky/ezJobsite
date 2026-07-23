@@ -116,3 +116,27 @@ export async function titleExtraIfUntitled(
   );
   return !!r.rowsAffected;
 }
+
+/**
+ * Replace a DRAFT's machine-written title with a better one — the AI's subject
+ * over the first-sentence interim titleExtraIfUntitled wrote offline (hadar,
+ * 2026-07-23: "when the extra is processed we need to generate a new title").
+ *
+ * Unlike titleExtraIfUntitled this overwrites ANY draft title, not only the
+ * UNTITLED placeholder. That is safe ONLY because the title is not human-editable
+ * in the capture → price flow — there is no rename control, so the only thing this
+ * can overwrite is a machine string. If a rename path is ever added, this must be
+ * gated on a not-human-edited flag before it can run. Draft-only either way: a sent
+ * extra is frozen and change_order_frozen would abort the write regardless.
+ */
+export async function retitleDraft(
+  db: AbstractPowerSyncDatabase, changeOrderId: string, title: string
+): Promise<boolean> {
+  const t = title.trim();
+  if (!t) return false;
+  const r = await db.execute(
+    `UPDATE change_order SET scope = ? WHERE id = ? AND status = 'draft'`,
+    [t.slice(0, 200), changeOrderId]
+  );
+  return !!r.rowsAffected;
+}
