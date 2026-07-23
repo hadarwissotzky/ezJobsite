@@ -304,6 +304,10 @@ export function FusedCapture({
       bakeResolve.current = async () => {
         bakeResolve.current = null;
         try {
+          // Two frames' settle after onLoad: decode-complete is not
+          // composite-complete, and snapshotting mid-composite is how a bake
+          // catches a half-drawn frame.
+          await new Promise((r) => setTimeout(r, 64));
           const uri = await captureRef(bakeRef, { format: 'jpg', quality: 0.9, result: 'tmpfile' });
           resolve(await readRecordingBytes(uri));
         } catch {
@@ -351,15 +355,20 @@ export function FusedCapture({
 
   return (
     <View style={st.c}>
-      <CameraView ref={camRef} style={st.fill} facing={facing} flash={flash} />
-
+      {/* The bake view renders BEFORE the camera, so the opaque preview hides it.
+          It was hidden with opacity 0.01 instead — and captureRef snapshots the
+          view AS RENDERED, so every camera photo was baked at 1% opacity: a valid,
+          near-white JPEG with a ghost of the scene (hadar, on device 2026-07-23,
+          "the squares are empty"). Never hide a view-shot source with opacity. */}
       {bakeShot && (
-        <View ref={bakeRef} collapsable={false} style={[st.fill, st.baker]}>
+        <View ref={bakeRef} collapsable={false} style={st.fill}>
           <Image source={{ uri: bakeShot.uri }} style={st.fill} resizeMode="cover"
             onLoad={() => bakeResolve.current?.()} />
           <StampBlock place={place} now={bakeShot.atMs} />
         </View>
       )}
+
+      <CameraView ref={camRef} style={st.fill} facing={facing} flash={flash} />
 
       <View style={st.topBar}>
         <Pressable onPress={onClose} hitSlop={16} style={st.topBtn}>
@@ -508,7 +517,6 @@ export function FusedCapture({
 const st = StyleSheet.create({
   c: { flex: 1, backgroundColor: '#000' },
   fill: { ...StyleSheet.absoluteFillObject },
-  baker: { opacity: 0.01 },
   center: { alignItems: 'center', justifyContent: 'center', padding: 28 },
   msg: { color: '#fff', fontSize: 18, textAlign: 'center', marginBottom: 22, lineHeight: 25 },
   btn: { backgroundColor: '#FF5A00', borderRadius: 12, paddingVertical: 18, paddingHorizontal: 40 },

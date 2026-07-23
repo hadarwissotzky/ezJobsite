@@ -24,6 +24,7 @@ import { NarratedScope, type ScopePhoto } from './narratedscope';
 import type { Alignment } from '../photonarration';
 import { threadState, type ThreadMessage } from '../discussion';
 import { chipKey, displayStatus, type LedgerStatus } from '../extrastatus';
+import { logDiag } from '../diaglog';
 import { DiscussionLog } from './threadscreen';
 import { createdLabel } from '../changeorder';
 import { t } from '../i18n';
@@ -121,6 +122,14 @@ export function RecordScreen(props: {
   // Measured height of the bottom bar, so the capture FAB sits above it instead
   // of covering the reply field's send button.
   const [barH, setBarH] = React.useState(0);
+
+  // TEMPORARY DIAGNOSTIC (2026-07-23, hadar: thumbnails render empty, lightbox
+  // blank, file verified valid on disk). Writes the exact uri the Image gets and
+  // what the load callbacks say. Remove once the cause is named.
+  React.useEffect(() => {
+    const p = rec.photos[0];
+    if (p) void logDiag(props.db, 'rec.photo', `present=${p.present} …${p.uri.slice(-70)}`);
+  }, [rec.id]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // R6b item 2 with R5b folded in: when the thread says the ball moved, the state
   // line says so — the stored status alone would keep reading "Sent — remind them"
@@ -224,6 +233,16 @@ export function RecordScreen(props: {
             processed yet — this renders nothing and the plain grid below stands.
             Never both: the grid is the fallback, not a companion. */}
         {props.narration && <NarratedScope alignment={props.narration} />}
+        {/* The empty state is SAID, not implied by absence (hadar, 2026-07-23):
+            a missing card reads as "didn't load", a sentence reads as a fact. */}
+        {!props.narration && rec.photos.length === 0 && (
+          <View style={T.card}>
+            <Text style={label}>{t({ k: 'erec.evidence', p: { n: 0 } } as any)}</Text>
+            <Text style={{ ...T.bodySteel, fontSize: 13.5, marginTop: 6 }}>
+              {t('erec.noPhotos')}
+            </Text>
+          </View>
+        )}
         {!props.narration && rec.photos.length > 0 && (
           <View style={T.card}>
             <Text style={label}>
@@ -246,7 +265,8 @@ export function RecordScreen(props: {
                     </View>
                   ) : p.modality === 'photo' ? (
                     <Pressable onPress={() => setZoom(p.uri)}>
-                      <MaybeImage uri={p.uri} />
+                      <MaybeImage uri={p.uri}
+                        onEvent={(w) => { void logDiag(props.db, 'rec.img', w); }} />
                     </Pressable>
                   ) : (
                     <View style={{
@@ -530,7 +550,7 @@ function VoicePlayer({ voice }: { voice: RecordVoice }) {
 
 /** A photo that admits when it cannot be decoded, instead of showing a grey square.
  *  The file existed at query time; decode can still fail (truncated write, codec). */
-function MaybeImage({ uri }: { uri: string }) {
+function MaybeImage({ uri, onEvent }: { uri: string; onEvent?: (what: string) => void }) {
   const [failed, setFailed] = React.useState(false);
   if (failed) {
     return (
@@ -547,7 +567,11 @@ function MaybeImage({ uri }: { uri: string }) {
   return (
     <Image
       source={{ uri }}
-      onError={() => setFailed(true)}
+      onLoad={() => onEvent?.('load ok')}
+      onError={(e: any) => {
+        onEvent?.('error ' + String(e?.nativeEvent?.error ?? 'unknown').slice(0, 120));
+        setFailed(true);
+      }}
       style={{
         width: 86, height: 86, borderRadius: 10,
         backgroundColor: '#D8D2C6', borderWidth: 1, borderColor: C.line,

@@ -628,6 +628,7 @@ const EN: Record<string, string> = {
     'Delivery channel and state are recorded on the server and appear in the evidence bundle.',
   'erec.evidenceMissing': 'Missing on this device',
   'erec.evidenceMore': '+{n} more',
+  'erec.noPhotos': 'No photos were taken for this extra.',
   // State lines — what is true now AND what is owed next.
   'erec.stDraft': 'Draft — not sent yet. Send it for approval.',
   'erec.stDraftLocal': 'Draft, on this phone only — not sent yet. Send it for approval.',
@@ -1238,6 +1239,7 @@ const ES: Record<string, string> = {
     'El canal y el estado de entrega quedan en el servidor y salen en el paquete de evidencia.',
   'erec.evidenceMissing': 'No está en este teléfono',
   'erec.evidenceMore': '+{n} más',
+  'erec.noPhotos': 'No se tomaron fotos para este extra.',
   'erec.stDraft': 'Borrador — todavía sin enviar. Mándalo para que lo aprueben.',
   'erec.stDraftLocal': 'Borrador, sólo en este teléfono — sin enviar. Mándalo para que lo aprueben.',
   'erec.stSent': 'Enviado — esperando la aprobación. Recuérdale si se queda callado.',
