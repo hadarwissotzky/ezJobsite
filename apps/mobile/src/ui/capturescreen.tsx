@@ -113,6 +113,16 @@ export function FusedCapture({
   // Has the mic heard actual speech yet? (metering peak, not just "is recording")
   const spokeRef = React.useRef(false);
   const [spoke, setSpoke] = React.useState(false);
+  // The on-screen stamp is orientation, not chrome: it confirms the where/when
+  // registered, then clears the viewfinder after 5s of recording (hadar,
+  // 2026-07-23). The stamp BAKED INTO EACH PHOTO is untouched — mandate #9
+  // stamps the evidence, not the preview.
+  const [stampVisible, setStampVisible] = React.useState(true);
+  React.useEffect(() => {
+    if (!micOn) return;
+    const tm = setTimeout(() => setStampVisible(false), 5000);
+    return () => clearTimeout(tm);
+  }, [micOn]);
 
   // R1: the session becomes durable WHILE it happens, not at Done. Photos are banked
   // at the shutter and audio wherever the recorder is ALREADY stopped, so a crash
@@ -410,7 +420,7 @@ export function FusedCapture({
         </View>
       )}
 
-      <StampBlock place={place} now={now} />
+      {stampVisible && <StampBlock place={place} now={now} />}
       {/* The live words, over the camera, while he talks. Rough by design and
           labelled so — it is never the stored transcript. Rendered above the
           stamp so the two do not fight for the same corner. */}
