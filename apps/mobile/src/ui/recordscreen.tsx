@@ -161,17 +161,19 @@ export function RecordScreen(props: {
           <Text style={{ ...label, fontSize: 15, color: C.orange }}>‹ {t('erec.back')}</Text>
         </Pressable>
 
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+        {/* R6b item 1, in c5's order: the kicker (type · job) ABOVE the title —
+            "where am I" before "what is this" (hadar, 2026-07-22). */}
+        <TypeLine facts={facts} job={rec.jobName} />
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 3 }}>
           <Text style={{ ...display(22), flex: 1 }} numberOfLines={3}>{rec.title}</Text>
           <View style={[T.chip, { backgroundColor: chip.bg }]}>
             <Text style={[T.chipText, { color: chip.fg }]}>{t(chipKey(shown))}</Text>
           </View>
         </View>
 
-        {/* R6b item 1: type (Extra/Decision), then the money block. Mandate #6: the
-            price is the CONTRACTOR'S, read back and confirmed by a human. A Decision
-            renders "No cost change" and no figure anywhere (R6b AC2 / R10). */}
-        <TypeLine facts={facts} />
+        {/* Mandate #6: the price is the CONTRACTOR'S, read back and confirmed by a
+            human. A Decision renders "No cost change" and no figure anywhere
+            (R6b AC2 / R10). */}
         <MoneyLine rec={rec} facts={facts} />
 
         {/* R5b: the thread carries across versions with a visible marker. */}

@@ -58,12 +58,12 @@ export function useRecordFacts(
  * next question down ("what kind of extra keeps happening on this job") and an
  * untyped extra is a normal extra — no placeholder, the segment is simply absent.
  */
-export function TypeLine({ facts }: { facts: RecordFacts | null }) {
+export function TypeLine({ facts, job }: { facts: RecordFacts | null; job?: string | null }) {
   if (!facts) return null;
   const type = isExtraType(facts.extraType) ? typeLabel(facts.extraType) : null;
   return (
     <Text style={{ ...label, marginTop: 6 }}>
-      {t(KIND_KEY[facts.kind])}{type ? ` · ${type}` : ''}
+      {t(KIND_KEY[facts.kind])}{type ? ` · ${type}` : ''}{job ? ` · ${job}` : ''}
     </Text>
   );
 }
@@ -83,13 +83,17 @@ export function TypeLine({ facts }: { facts: RecordFacts | null }) {
  * read back and confirmed by a human. The system never authors one.
  */
 export function MoneyLine(
-  { rec, facts }: { rec: { amount: string; nte: string | null; isMini: boolean };
+  { rec, facts }: { rec: { amount: string; priced: boolean; nte: string | null; isMini: boolean };
                     facts: RecordFacts | null }
 ) {
   if (!facts) return null;
   const item: Item = facts.kind === 'decision'
     ? { kind: 'decision' }
-    : { kind: 'extra', amount: rec.amount, nte: rec.nte, isMini: rec.isMini };
+    // `priced` gates the amount because money() renders a null price as the
+    // STRING '—' — moneyBlock's null-check can never see a dash, so an unpriced
+    // extra showed "— Fixed · the price you set" instead of "No price given
+    // yet" (hadar, on device 2026-07-22).
+    : { kind: 'extra', amount: rec.priced ? rec.amount : null, nte: rec.nte, isMini: rec.isMini };
   const b = moneyBlock(item);
 
   if (b.show === 'noCost') {

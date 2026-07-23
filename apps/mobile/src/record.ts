@@ -83,8 +83,17 @@ export type ExtraRecord = {
    *  on a guarantee that no longer exists. A `mini` change order is a SMALL one
    *  and still carries money. */
   amount: string;
+  /** False when amount_cents is null — no price was ever given. The formatted
+   *  `amount` renders '—' in that case, and a dash is a STRING: moneyBlock's
+   *  null-check can never see it. This flag is what lets the screen say
+   *  "No price given yet" instead of showing a dash posing as an amount
+   *  (hadar, on device 2026-07-22). */
+  priced: boolean;
   nte: string | null;
   isMini: boolean;
+  /** The job this extra belongs to, for the header kicker (c5: "Extra · Miller —
+   *  Hall Bath"). Null when the project row is not on this device. */
+  jobName: string | null;
   /** When the change order was created = when the price was confirmed. */
   created: string;
   createdAtMs: number;
@@ -127,7 +136,8 @@ export async function extraRecord(
   db: AbstractPowerSyncDatabase, changeOrderId: string
 ): Promise<ExtraRecord | null> {
   const co = (await db.getAll<{
-    id: string; decision_id: string; scope: string; amount_cents: number;
+    id: string; decision_id: string; scope: string; amount_cents: number | null;
+    job_name: string | null;
     nte_cents: number | null; is_mini: number; who_directed: string;
     numbers_confirmed_at_ms: number; status: string; signed_by: string | null;
     created_at_ms: number; pending: number;
@@ -135,6 +145,7 @@ export async function extraRecord(
     `SELECT co.id, co.decision_id, co.scope, co.amount_cents, co.nte_cents, co.is_mini,
             co.who_directed, co.numbers_confirmed_at_ms, co.status, co.signed_by,
             co.created_at_ms,
+            (SELECT p.name FROM project p WHERE p.id = co.project_id) AS job_name,
             EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending
        FROM change_order co WHERE co.id = ?`, [changeOrderId]))[0];
   if (!co) return null;
@@ -298,6 +309,8 @@ export async function extraRecord(
     title: co.scope,
     status: co.status,
     amount: money(co.amount_cents),
+    priced: co.amount_cents != null,
+    jobName: co.job_name ?? null,
     nte: co.nte_cents == null ? null : money(co.nte_cents),
     isMini: co.is_mini === 1,
     created: createdLabel(co.created_at_ms),
