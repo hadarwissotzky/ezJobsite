@@ -420,6 +420,7 @@ const EN: Record<string, string> = {
   // The flow-mock questions (phase 3). Answers become terms the owner signs.
   'co.finish': 'Finish this extra →',
   'co.detailsTitle': 'Complete details',
+  'co.processing': 'Reading your recording… price and details will fill in as soon as it’s written down.',
   'co.toReview': 'Continue to review →',
   'co.reviewTitle': 'Review & send',
   'co.reviewNote': 'This is what the owner will see. Review everything before sending.',
@@ -1057,6 +1058,7 @@ const ES: Record<string, string> = {
   'co.revise': 'Revisar precio →',
   'co.finish': 'Terminar este extra →',
   'co.detailsTitle': 'Completar detalles',
+  'co.processing': 'Leyendo tu grabación… el precio y los detalles se llenarán en cuanto quede escrita.',
   'co.toReview': 'Seguir a revisar →',
   'co.reviewTitle': 'Revisar y enviar',
   'co.reviewNote': 'Esto es lo que verá el dueño. Revísalo todo antes de enviar.',

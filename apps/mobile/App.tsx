@@ -147,7 +147,7 @@ import {
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
          createdLabel, markLocalSent, money, parseMoney, validateLines,
-         type LineItem, type LedgerRow, priceDraftExtra,
+         type LineItem, type LedgerRow, priceDraftExtra, rehomeDraftExtra,
          type BillingTiming, type ScheduleEffect } from './src/changeorder';
 import { displayStatus, canSupersede, type LedgerStatus } from './src/extrastatus';
 import { ensureLedgerStatusSchema, hydrateQuestions, openQuestions, supersededBy,
@@ -460,14 +460,30 @@ const finishExtraById = async (changeOrderId: string) => {
     exclusions: c.exclusions ?? '',
   });
   setLines([]);
-  const v = await voiceReadingForDecision(db, connector.client, c.decision_id, parseMoney);
-  setPriced((p) => {
-    if (!p || p.decisionId !== c.decision_id) return p;
-    const amount = v.price?.prefill && v.price.amountCents !== null
-      ? (v.price.amountCents / 100).toFixed(2) : '';
-    return { ...p, voice: v, mode: v.price?.mode ?? p.mode,
-             amountText: amount || p.amountText };
-  });
+  // The recording is processed asynchronously (on-device STT lands in seconds,
+  // the cloud pass later). POLL until the words exist, then prefill — "if I
+  // said it's going to cost 1500 we already know it's fixed and the price is
+  // set" (hadar, 2026-07-23). The card shows "reading your recording…" until
+  // then. Never clobber what a human already typed (mandate #6: the read-back
+  // is his, not the machine's).
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const v = await voiceReadingForDecision(db, connector.client, c.decision_id, parseMoney);
+    let done = false;
+    setPriced((p) => {
+      if (!p || p.decisionId !== c.decision_id) { done = true; return p; }  // card closed / replaced
+      if (!v.transcript) return p;                                          // keep waiting
+      done = true;
+      const amount = v.price?.prefill && v.price.amountCents !== null
+        ? (v.price.amountCents / 100).toFixed(2) : '';
+      return {
+        ...p, voice: v,
+        mode: p.amountText === '' ? (v.price?.mode ?? p.mode) : p.mode,
+        amountText: p.amountText === '' ? amount : p.amountText,
+      };
+    });
+    if (done) return;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
 };
 
 /**
@@ -1647,9 +1663,6 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       }).then(async (x) => {
         if (!x.ok) { console.log('startExtra (fused) failed:', x.reason); return; }
         await refresh();
-        // FLOW: capture -> (job) -> the questions. When the job needs picking
-        // first, the assign sheet is up and fileAll continues the flow instead.
-        if (res.projectId !== INBOX_ID) await finishExtraById(x.changeOrderId);
       }).catch(() => { /* capture is safe; the ledger row is not owed */ });
 
       if (a.audioSegments.length) {
@@ -1669,16 +1682,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           await refresh();
         })().catch(() => { /* the worker's cloud path still covers it */ });
       }
-      if (res.projectId === INBOX_ID) {
-        // Saved safe — now the ONE question a change order cannot skip: which job?
-        setAssign({ ids, lat: a.stamp.lat, lng: a.stamp.lng,
-                    uris: a.previewUris, secs: a.durationSecs,
-                    // The extra behind this walk, so filing can continue the
-                    // flow into "fill what's missing" (mock step 2 -> step 3).
-                    anchorCoId: a.audioSegments.length ? `co-${ids[a.photos.length]}` : `co-${ids[0]}` });
-      } else if (res.confidence !== 'high') {
-        setFiled(res.why);
-      }
+      // FLOW step 2 — the job is ALWAYS picked by a human (hadar, 2026-07-23:
+      // "step 2 is job selection"; mandate #8's suggest-never-decide applied
+      // fully). GPS only sorts the list; the capture is already durably filed
+      // to the best guess, and the chosen job re-homes it (fileAll).
+      setAssign({ ids, lat: a.stamp.lat, lng: a.stamp.lng,
+                  uris: a.previewUris, secs: a.durationSecs,
+                  // The extra behind this walk, so filing continues the flow
+                  // into "fill what's missing" (mock step 2 -> step 3).
+                  anchorCoId: a.audioSegments.length ? `co-${ids[a.photos.length]}` : `co-${ids[0]}` });
     } catch (e: any) {
       setUi({ k: 'refused', why: e?.message ?? String(e) });
     } finally {
@@ -2602,6 +2614,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       const anchorCoId = assign.anchorCoId;
       setAssign(null); setAssignQ(''); setFiled(null);
       setProjectId(projId);
+      // The draft follows the human's pick — captures moved above, the change
+      // order (and its queued upload) move here.
+      if (anchorCoId) await rehomeDraftExtra(db, anchorCoId, projId);
       await refresh();
       // Mock step 2 flows into step 3: the job is picked, the questions come up.
       if (anchorCoId) await finishExtraById(anchorCoId);
@@ -3327,9 +3342,69 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       {priced && (() => {
         const cents = centsFromInput(priced.amountText);
         const nte = centsFromInput(priced.nteText);
+        // Step 3 pieces, computed up front. ONE Modal hosts both steps: iOS
+        // cannot present a second modal over the first, which is exactly how
+        // "Continue to review" fired into the void (hadar, 2026-07-23).
+        const days = parseInt(priced.scheduleDaysText, 10);
+        const instrument = reviewSend && cents !== null ? renderCard({
+          kind: 'confirm', subject: priced.scope, value: priced.scope,
+          directedBy: priced.whoDirected.trim() || 'Owner',
+          projectName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
+          whenMs: Date.now(), amountCents: cents, nteCents: nte,
+          companyName: reviewSend.company,
+          billingTiming: priced.billingTiming,
+          scheduleEffect: priced.scheduleEffect,
+          scheduleDays: priced.scheduleEffect === 'adds_days' && days > 0 ? days : null,
+          exclusions: priced.exclusions,
+        }) : '';
+        const finish = async (send: boolean) => {
+          const id = await confirmPriced();
+          if (!id) { setReviewSend(null); return; }  // refusal shown; back to details
+          setReviewSend(null); setPriced(null); setLines([]);
+          await refresh();
+          if (send) {
+            const row = coRowsRef.current.find((x) => x.id === id);
+            // R5c still owns the actual send: recipient + reason + final tap.
+            if (row) await openSendPrep(row);
+          }
+        };
         return (
           <Modal visible animationType="slide"
-            onRequestClose={() => { setPriced(null); setLines([]); }}>
+            onRequestClose={() => {
+              if (reviewSend) { setReviewSend(null); return; }
+              setPriced(null); setLines([]);
+            }}>
+          {reviewSend ? (
+          <View style={{ flex: 1, backgroundColor: '#f6f8fa' }}>
+            <View style={[s.detailHead, { paddingTop: 60, paddingHorizontal: 20 }]}>
+              <Pressable style={s.backBtn} onPress={() => setReviewSend(null)}>
+                <Text style={s.backT}>‹ {T('common.back')}</Text>
+              </Pressable>
+              <Text style={s.cardH}>{T('co.reviewTitle')}</Text>
+            </View>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 48 }}>
+              <View style={{ backgroundColor: '#dafbe1', borderColor: '#2da44e',
+                borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                <Text style={{ color: '#0E5A24', fontSize: 14 }}>{T('co.reviewNote')}</Text>
+              </View>
+              <View style={s.money}>
+                <Text style={{ fontSize: 15, lineHeight: 23, color: '#1f2328' }}>
+                  {instrument}
+                </Text>
+              </View>
+              <Text style={s.cardNote}>{T('co.photosAuto')}</Text>
+              <View style={[s.cardBtns, { marginTop: 14 }]}>
+                <Pressable style={s.confirm} onPress={() => { void finish(true); }}>
+                  <Text style={s.confirmT}>{T('co.sendOwner')}</Text>
+                </Pressable>
+                <Pressable style={s.later} onPress={() => { void finish(false); }}>
+                  <Text style={s.laterT}>{T('co.saveDraft')}</Text>
+                </Pressable>
+              </View>
+              <Text style={s.cardNote}>{T('co.auditNote')}</Text>
+            </ScrollView>
+          </View>
+          ) : (
           <View style={{ flex: 1, backgroundColor: '#f6f8fa' }}>
             <View style={[s.detailHead, { paddingTop: 60, paddingHorizontal: 20 }]}>
               <Pressable style={s.backBtn} onPress={() => { setPriced(null); setLines([]); }}>
@@ -3338,6 +3413,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               <Text style={s.cardH}>{T('co.detailsTitle')}</Text>
             </View>
             <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 48 }}>
+          {priced.voice === null && (
+            <View style={{ backgroundColor: '#fff8c5', borderColor: '#d4a72c',
+              borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 10, marginTop: 8 }}>
+              <Text style={{ color: '#7d5e00', fontSize: 14 }}>{T('co.processing')}</Text>
+            </View>
+          )}
           <View style={s.money}>
             <Text style={s.cardH}>{T('co.check')}</Text>
             {priced.supersedes && <Text style={s.cardNote}>{T('co.revisingNote')}</Text>}
@@ -3516,72 +3597,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           </View>
             </ScrollView>
           </View>
-          </Modal>
-        );
-      })()}
-
-      {/* ── FLOW step 3: REVIEW & SEND ─────────────────────────────────────────
-          "This is what the owner will see." The preview IS renderCard — the same
-          function that freezes shown_content at send — so what the contractor
-          reviews and what the owner signs cannot drift (mandate #5). */}
-      {priced && reviewSend && (() => {
-        const cents = centsFromInput(priced.amountText);
-        const nte = centsFromInput(priced.nteText);
-        if (cents === null) return null;
-        const days = parseInt(priced.scheduleDaysText, 10);
-        const instrument = renderCard({
-          kind: 'confirm', subject: priced.scope, value: priced.scope,
-          directedBy: priced.whoDirected.trim() || 'Owner',
-          projectName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
-          whenMs: Date.now(), amountCents: cents, nteCents: nte,
-          companyName: reviewSend.company,
-          billingTiming: priced.billingTiming,
-          scheduleEffect: priced.scheduleEffect,
-          scheduleDays: priced.scheduleEffect === 'adds_days' && days > 0 ? days : null,
-          exclusions: priced.exclusions,
-        });
-        const finish = async (send: boolean) => {
-          const id = await confirmPriced();
-          if (!id) { setReviewSend(null); return; }  // refusal shown; back to details
-          setReviewSend(null); setPriced(null); setLines([]);
-          await refresh();
-          if (send) {
-            const row = coRowsRef.current.find((x) => x.id === id);
-            // R5c still owns the actual send: recipient + reason + final tap.
-            if (row) await openSendPrep(row);
-          }
-        };
-        return (
-          <Modal visible animationType="slide" onRequestClose={() => setReviewSend(null)}>
-            <View style={{ flex: 1, backgroundColor: '#f6f8fa' }}>
-              <View style={[s.detailHead, { paddingTop: 60, paddingHorizontal: 20 }]}>
-                <Pressable style={s.backBtn} onPress={() => setReviewSend(null)}>
-                  <Text style={s.backT}>‹ {T('common.back')}</Text>
-                </Pressable>
-                <Text style={s.cardH}>{T('co.reviewTitle')}</Text>
-              </View>
-              <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 48 }}>
-                <View style={{ backgroundColor: '#dafbe1', borderColor: '#2da44e',
-                  borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}>
-                  <Text style={{ color: '#0E5A24', fontSize: 14 }}>{T('co.reviewNote')}</Text>
-                </View>
-                <View style={s.money}>
-                  <Text style={{ fontSize: 15, lineHeight: 23, color: '#1f2328' }}>
-                    {instrument}
-                  </Text>
-                </View>
-                <Text style={s.cardNote}>{T('co.photosAuto')}</Text>
-                <View style={[s.cardBtns, { marginTop: 14 }]}>
-                  <Pressable style={s.confirm} onPress={() => { void finish(true); }}>
-                    <Text style={s.confirmT}>{T('co.sendOwner')}</Text>
-                  </Pressable>
-                  <Pressable style={s.later} onPress={() => { void finish(false); }}>
-                    <Text style={s.laterT}>{T('co.saveDraft')}</Text>
-                  </Pressable>
-                </View>
-                <Text style={s.cardNote}>{T('co.auditNote')}</Text>
-              </ScrollView>
-            </View>
+          )}
           </Modal>
         );
       })()}

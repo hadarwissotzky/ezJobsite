@@ -678,6 +678,30 @@ export async function priceDraftExtra(
   return { ok: true };
 }
 
+/** Move a DRAFT to the job a human picked (flow step 2). The queued INSERT
+ *  payload follows, same rules as priceDraftExtra: refresh under the same
+ *  mutation_id while the server has never seen it. */
+export async function rehomeDraftExtra(
+  db: AbstractPowerSyncDatabase, changeOrderId: string, projectId: string
+): Promise<void> {
+  const upd = await db.execute(
+    `UPDATE change_order SET project_id = ? WHERE id = ? AND status = 'draft'`,
+    [projectId, changeOrderId]);
+  if (!upd.rowsAffected) return;
+  const q = await db.getAll<{ mutation_id: string; payload_json: string }>(
+    `SELECT mutation_id, payload_json FROM change_order_outbox WHERE change_order_id = ?`,
+    [changeOrderId]);
+  if (!q.length) return;
+  try {
+    const p = JSON.parse(q[0].payload_json);
+    p.project_id = projectId;
+    const json = JSON.stringify(p);
+    await db.execute(
+      `UPDATE change_order_outbox SET payload_json = ?, payload_sha256 = ? WHERE mutation_id = ?`,
+      [json, sha256(json), q[0].mutation_id]);
+  } catch { /* corrupt payload: the drain parks it loudly */ }
+}
+
 /** Mark the outcome of a signature locally. The signing path is online-only. */
 export async function applyLocalApproval(
   db: AbstractPowerSyncDatabase, coId: string, action: 'approved' | 'declined', legalName: string
