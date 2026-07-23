@@ -15,7 +15,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractPrice, nteClause, type MoneyReading } from './voiceprice.ts';
+import { extractPrice, priceFromTasks, nteClause, type MoneyReading } from './voiceprice.ts';
 
 const parse = (text: string): MoneyReading => {
   const m = text.match(/\$\s?([\d,]+(?:\.\d{1,2})?)/)
@@ -131,4 +131,54 @@ test('a parser that returns cents with no `matched` cannot spin the scanner', ()
   const r = extractPrice('anything at all', dumb);
   assert.equal(r.amountCents, 100);
   assert.equal(r.prefill, true);
+});
+
+// ── priceFromTasks: prefill from the AI's ISOLATED price phrase (2026-07-23) ───
+// The regression these guard: "ten hours, $1,500" prefilled nothing because the whole
+// transcript went through extractPrice. The AI already tagged "$1,500" as the price,
+// so parsing THAT span fills the field. Mandate #6 holds — parseMoney still makes the
+// number, and it is still a flagged prefill the human reads back.
+
+test('the AI-tagged price phrase prefills the field extractPrice left empty', () => {
+  const r = priceFromTasks(
+    [{ priceWords: '$1,500', scope: 'Refinish and stain the fireplace.' }], parse);
+  assert.equal(r?.amountCents, 150000);
+  assert.equal(r?.prefill, true);
+  assert.equal(r?.mode, 'fixed');
+  assert.equal(r?.heard, '$1,500');
+});
+
+test('a cap cue in the price phrase makes it NTE, not fixed', () => {
+  const r = priceFromTasks(
+    [{ priceWords: 'up to $2,000', scope: 'Time and materials on the drain.' }], parse);
+  assert.equal(r?.amountCents, 200000);
+  assert.equal(r?.mode, 'nte');
+  assert.equal(r?.modeHeard, true);
+});
+
+test('two tasks that each carry a clean price stay ambiguous — fill neither', () => {
+  const r = priceFromTasks([
+    { priceWords: '$450', scope: 'Add three outlets.' },
+    { priceWords: '$200', scope: 'Trim out the window.' },
+  ], parse);
+  assert.equal(r?.prefill, false);
+  assert.equal(r?.amountCents, null);
+  assert.equal(r?.reasonKey, 'r2.priceAmbiguous');
+  assert.equal(r?.reasonParams.n, 2);
+});
+
+test('no parseable task price returns null — caller falls back to the transcript scan', () => {
+  assert.equal(priceFromTasks([{ priceWords: null, scope: 'Fix the subfloor.' }], parse), null);
+  assert.equal(priceFromTasks([], parse), null);
+  // A task whose price_words hold no currency figure is not a price, so: null, not EMPTY.
+  assert.equal(priceFromTasks([{ priceWords: 'a few hours', scope: 'Sand it.' }], parse), null);
+});
+
+test('one clean task among unpriced siblings prefills that one', () => {
+  const r = priceFromTasks([
+    { priceWords: null, scope: 'Haul the debris.' },
+    { priceWords: '$1,500', scope: 'Refinish the fireplace.' },
+  ], parse);
+  assert.equal(r?.amountCents, 150000);
+  assert.equal(r?.prefill, true);
 });

@@ -28,7 +28,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { alignPhotosToNarration, type Alignment, type Segment } from './photonarration';
 import { detectMultipleExtras, type MultiExtraFlag } from './multiextra';
-import { extractPrice, type MoneyParser, type VoicePriceReading } from './voiceprice';
+import { extractPrice, priceFromTasks, type MoneyParser, type VoicePriceReading } from './voiceprice';
+import { fetchLatestProposalForCaptures } from './proposals';
 
 /**
  * The device's copy of a transcript.
@@ -152,6 +153,14 @@ export type VoiceReading = {
   price: VoicePriceReading | null;
   /** null for the same reason. */
   multi: MultiExtraFlag | null;
+  /**
+   * True once the AI structuring pass has produced a proposal for this decision. It is
+   * the DEFINITIVE stop signal for a prefill poll: the on-device transcript lands in
+   * seconds but the AI's isolated price lands a beat later, so a poll that stopped at
+   * "transcript present" prefilled from the regex and never saw the better answer
+   * (hadar, 2026-07-23: "none of the information was filled"). Wait for this instead.
+   */
+  analyzed: boolean;
 };
 
 /**
@@ -169,11 +178,25 @@ export async function voiceReadingForDecision(
   // Capture order, not map order: a session's narration is a sequence, and a price
   // said in the second clip must not be read before the scope said in the first.
   const transcript = ids.map((id) => map.get(id)?.text).filter(Boolean).join(' ').trim();
-  if (!transcript) return { transcript: '', price: null, multi: null };
+
+  // The AI's opinion, if the pipeline has finished. Network-only (capture_structured
+  // is server-side), so a miss offline is expected and simply leaves us on the
+  // transcript scan below — mandate #7, the price never depends on a connection.
+  const proposal = await fetchLatestProposalForCaptures(client, ids);
+  const analyzed = proposal !== null;
+
+  if (!transcript) return { transcript: '', price: null, multi: null, analyzed };
+
+  // Prefer the AI's isolated price phrase over a regex over the whole transcript: the
+  // model already decided WHICH words are the price (see priceFromTasks). Fall back to
+  // the transcript scan when the model tagged no parseable price. Both run the SAME
+  // parseMoney, so the number a person reads back is identical either way.
+  const aiPrice = proposal ? priceFromTasks(proposal.tasks, parse) : null;
   return {
     transcript,
-    price: extractPrice(transcript, parse),
+    price: aiPrice ?? extractPrice(transcript, parse),
     multi: detectMultipleExtras(transcript),
+    analyzed,
   };
 }
 

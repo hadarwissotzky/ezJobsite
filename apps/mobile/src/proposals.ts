@@ -75,20 +75,45 @@ export type Proposal = {
   createdAt: string;
 };
 
+const PROPOSAL_COLS =
+  'id, capture_id, proposed_subject, proposed_value, proposed_scope, ' +
+  'proposed_who_directed, proposed_amount_cents, proposed_extra_type, ' +
+  'proposed_tasks, confidence, engine, engine_model, from_transcript, created_at';
+
 /** The latest proposal for a capture, or null if the pipeline hasn't produced one. */
 export async function fetchProposal(
   client: SupabaseClient, captureId: string
 ): Promise<Proposal | null> {
   const { data, error } = await client
     .from('capture_structured')
-    .select('id, capture_id, proposed_subject, proposed_value, proposed_scope, ' +
-            'proposed_who_directed, proposed_amount_cents, proposed_extra_type, ' +
-            'proposed_tasks, confidence, engine, engine_model, from_transcript, created_at')
+    .select(PROPOSAL_COLS)
     .eq('capture_id', captureId)
     .order('created_at', { ascending: false })
     .limit(1);
   if (error || !data?.length) return null;
-  const r = data[0] as any;
+  return rowToProposal(data[0] as any);
+}
+
+/**
+ * The latest proposal across a SET of captures — a fused decision has photo captures
+ * too, and only the voice one ever gets a structured row, so the caller passes every
+ * capture behind the decision and takes the newest hit. Null when none has one yet.
+ */
+export async function fetchLatestProposalForCaptures(
+  client: SupabaseClient, captureIds: string[]
+): Promise<Proposal | null> {
+  if (!captureIds.length) return null;
+  const { data, error } = await client
+    .from('capture_structured')
+    .select(PROPOSAL_COLS)
+    .in('capture_id', captureIds)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error || !data?.length) return null;
+  return rowToProposal(data[0] as any);
+}
+
+function rowToProposal(r: any): Proposal {
   return {
     id: r.id,
     captureId: r.capture_id,

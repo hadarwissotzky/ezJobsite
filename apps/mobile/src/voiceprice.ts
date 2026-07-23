@@ -212,6 +212,61 @@ export function extractPrice(transcript: string, parse: MoneyParser): VoicePrice
 }
 
 /**
+ * The price read from the AI's ISOLATED price phrase (structure step's `price_words`),
+ * not from the whole transcript.
+ *
+ * WHY THIS EXISTS. `extractPrice` scans the raw words and cannot tell which figure is
+ * the price when more than one number is spoken — "$450 for the outlets and $200 for
+ * the trim" is two equal figures to it, and it correctly refuses to guess. The AI
+ * already made that judgment per task: `price_words` is the span it tagged as THE
+ * price. Feeding that span (not a whole transcript) to the same `parseMoney` turns a
+ * refusal into a prefill on the common case the user actually hits — "ten hours,
+ * $1,500" prefilling nothing was the bug (hadar, 2026-07-23: "fixed price should have
+ * been extracted from the transcription via ai").
+ *
+ * MANDATE #6 IS NOT RELAXED. The model chose the PHRASE; the app's one `parseMoney`
+ * makes the number; it is a flagged prefill a human reads back before anything sends.
+ * A phrase `parseMoney` cannot resolve high-confidence prefills NOTHING. Two tasks
+ * that each carry a clean price stay ambiguous — a single fixed-price field cannot
+ * honestly hold two, so it shows both and fills neither, exactly as `extractPrice` does.
+ *
+ * Returns `null` (not `EMPTY`) when NO task carried a parseable price, so the caller
+ * knows to fall back to the transcript scan rather than treating "AI found no price"
+ * as "no price heard".
+ */
+export function priceFromTasks(
+  tasks: { priceWords: string | null; scope: string }[],
+  parse: MoneyParser
+): VoicePriceReading | null {
+  const hits: { cents: number; nte: boolean; heard: string }[] = [];
+  for (const t of tasks) {
+    if (!t.priceWords) continue;
+    // A task's price_words is one price span; still walk it in case the model tagged
+    // "$95/hr up to $2,000" — two figures there is genuinely a cap, but two DISTINCT
+    // clean figures we cannot safely reduce, so we drop the whole task rather than pick.
+    const figs = figuresIn(t.priceWords, parse).filter((f) => f.confidence === 'high' && f.cents !== null);
+    if (figs.length !== 1) continue;
+    const nte = NTE_CUES.some((cue) => fold(`${t.priceWords} ${t.scope}`).includes(cue));
+    hits.push({ cents: figs[0].cents as number, nte, heard: t.priceWords });
+  }
+  if (hits.length === 0) return null;
+  if (hits.length === 1) {
+    const h = hits[0];
+    return {
+      amountCents: h.cents, prefill: true,
+      mode: h.nte ? 'nte' : 'fixed', modeHeard: h.nte, heard: h.heard,
+      reasonKey: h.nte ? 'r2.priceHeardNte' : 'r2.priceHeardFixed', reasonParams: {},
+    };
+  }
+  return {
+    amountCents: null, prefill: false,
+    mode: hits.some((h) => h.nte) ? 'nte' : 'fixed', modeHeard: false,
+    heard: hits.map((h) => h.heard).join(' · '),
+    reasonKey: 'r2.priceAmbiguous', reasonParams: { n: hits.length },
+  };
+}
+
+/**
  * The NTE clause R3 makes mandatory: "Work will not exceed $X without a new approval."
  *
  * Lives here, next to the mode, so the mode and the sentence it obliges can never be

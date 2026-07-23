@@ -461,28 +461,30 @@ const finishExtraById = async (changeOrderId: string) => {
     exclusions: c.exclusions ?? '',
   });
   setLines([]);
-  // The recording is processed asynchronously (on-device STT lands in seconds,
-  // the cloud pass later). POLL until the words exist, then prefill — "if I
-  // said it's going to cost 1500 we already know it's fixed and the price is
-  // set" (hadar, 2026-07-23). The card shows "reading your recording…" until
-  // then. Never clobber what a human already typed (mandate #6: the read-back
-  // is his, not the machine's).
-  for (let attempt = 0; attempt < 15; attempt++) {
+  // The recording is processed asynchronously: on-device STT lands the WORDS in
+  // seconds, the cloud AI pass isolates the PRICE a beat later. Poll, and — the fix
+  // for "none of the information was filled" (hadar, 2026-07-23) — keep polling until
+  // the AI has spoken (`analyzed`), not merely until the transcript appears. Stopping
+  // at the transcript meant prefilling from the regex and never seeing the AI's price
+  // "$1,500". The read-back shows the moment the words exist; the amount fills the
+  // moment the AI's figure lands. Never clobber what a human already typed (mandate #6).
+  for (let attempt = 0; attempt < 20; attempt++) {
     const v = await voiceReadingForDecision(db, connector.client, c.decision_id, parseMoney);
-    let done = false;
+    let stop = false;
     setPriced((p) => {
-      if (!p || p.decisionId !== c.decision_id) { done = true; return p; }  // card closed / replaced
-      if (!v.transcript) return p;                                          // keep waiting
-      done = true;
+      if (!p || p.decisionId !== c.decision_id) { stop = true; return p; }  // card closed / replaced
       const amount = v.price?.prefill && v.price.amountCents !== null
         ? (v.price.amountCents / 100).toFixed(2) : '';
+      const takePrice = p.amountText === '' && amount !== '';
       return {
-        ...p, voice: v,
-        mode: p.amountText === '' ? (v.price?.mode ?? p.mode) : p.mode,
-        amountText: p.amountText === '' ? amount : p.amountText,
+        ...p,
+        voice: v.transcript ? v : p.voice,
+        mode: takePrice ? (v.price?.mode ?? p.mode) : p.mode,
+        amountText: takePrice ? amount : p.amountText,
       };
     });
-    if (done) return;
+    if (stop) return;
+    if (v.analyzed) return;   // the AI has spoken; nothing better is coming
     await new Promise((r) => setTimeout(r, 2000));
   }
 };
