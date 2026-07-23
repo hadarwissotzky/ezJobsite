@@ -607,6 +607,77 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
   return chronological.reverse();
 }
 
+/**
+ * Price an EXISTING draft in place — the flow-mock's "fill what's missing"
+ * applied to the extra a capture already created (startExtraFromCapture).
+ *
+ * A draft is mutable by design (the freeze starts at sent), so the local UPDATE
+ * is legal. The server side: if the draft's INSERT is still queued in the
+ * outbox, its payload is refreshed under the same mutation_id (the server has
+ * never seen it, so the replay guard is satisfied); if it already uploaded, the
+ * server row keeps the priceless shape — a NAMED, bounded staleness: what a
+ * client signs is frozen from the LOCAL row at send (shown_content +
+ * confirmation's own amount), never read back from server change_order.
+ */
+export async function priceDraftExtra(
+  db: AbstractPowerSyncDatabase,
+  o: {
+    changeOrderId: string;
+    amountCents: number; nteCents?: number | null;
+    lineItems?: LineItem[];
+    billingTiming?: BillingTiming | null;
+    scheduleEffect?: ScheduleEffect | null;
+    scheduleDays?: number | null;
+    exclusions?: string | null;
+    whoDirected: string;
+    numbersConfirmedAt: Date;
+  }
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const lineItems = o.lineItems ?? [];
+  const bad = validateLines(lineItems, o.amountCents);
+  if (bad) return { ok: false, reason: bad };
+
+  const upd = await db.execute(
+    `UPDATE change_order SET amount_cents = ?, nte_cents = ?, line_items = ?,
+        who_directed = ?, numbers_confirmed_at_ms = ?,
+        billing_timing = ?, schedule_effect = ?, schedule_days = ?, exclusions = ?
+      WHERE id = ? AND status = 'draft'`,
+    [o.amountCents, o.nteCents ?? null, JSON.stringify(lineItems),
+     o.whoDirected, o.numbersConfirmedAt.getTime(),
+     o.billingTiming ?? null, o.scheduleEffect ?? null,
+     o.scheduleDays ?? null, o.exclusions?.trim() || null, o.changeOrderId]
+  );
+  if (!upd.rowsAffected) {
+    return { ok: false, reason: 'this extra is not a draft anymore' };
+  }
+
+  // Refresh the still-queued INSERT payload, if any, so the server's first
+  // sight of this extra is the priced one.
+  const q = await db.getAll<{ mutation_id: string; payload_json: string }>(
+    `SELECT mutation_id, payload_json FROM change_order_outbox WHERE change_order_id = ?`,
+    [o.changeOrderId]);
+  if (q.length) {
+    let p: any = null;
+    try { p = JSON.parse(q[0].payload_json); } catch { /* corrupt: drain will park it */ }
+    if (p) {
+      const next = {
+        ...p, amount_cents: o.amountCents, nte_cents: o.nteCents ?? null,
+        line_items: lineItems, who_directed: o.whoDirected,
+        numbers_confirmed_at_ms: o.numbersConfirmedAt.getTime(),
+        billing_timing: o.billingTiming ?? null,
+        schedule_effect: o.scheduleEffect ?? null,
+        schedule_days: o.scheduleDays ?? null,
+        exclusions: o.exclusions?.trim() || null,
+      };
+      const json = JSON.stringify(next);
+      await db.execute(
+        `UPDATE change_order_outbox SET payload_json = ?, payload_sha256 = ? WHERE mutation_id = ?`,
+        [json, sha256(json), q[0].mutation_id]);
+    }
+  }
+  return { ok: true };
+}
+
 /** Mark the outcome of a signature locally. The signing path is online-only. */
 export async function applyLocalApproval(
   db: AbstractPowerSyncDatabase, coId: string, action: 'approved' | 'declined', legalName: string

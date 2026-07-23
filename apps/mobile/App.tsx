@@ -147,7 +147,7 @@ import {
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
          createdLabel, markLocalSent, money, parseMoney, validateLines,
-         type LineItem, type LedgerRow,
+         type LineItem, type LedgerRow, priceDraftExtra,
          type BillingTiming, type ScheduleEffect } from './src/changeorder';
 import { displayStatus, canSupersede, type LedgerStatus } from './src/extrastatus';
 import { ensureLedgerStatusSchema, hydrateQuestions, openQuestions, supersededBy,
@@ -233,6 +233,8 @@ export default function App() {
   const [assign, setAssign] = React.useState<null | {
     ids: string[]; lat: number | null; lng: number | null;
     uris: string[]; secs: number;
+    /** The change order behind this walk — filing continues the flow into it. */
+    anchorCoId?: string;
   }>(null);
   const [assignQ, setAssignQ] = React.useState('');
   // R1: the Send-to prefill for the walk being filed. Null until prepareSendTo has
@@ -424,6 +426,45 @@ const startRevision = (c: LedgerRow) => {
   setLines([]);
 };
 
+/**
+ * FLOW step 3 — "fill what's missing", opened ON the extra a capture created.
+ * hadar, 2026-07-23: "after i finish capture i don't see the next steps." The
+ * questions come to the contractor; the ledger is the fallback, not the flow.
+ * Loads the draft, opens the composer against the EXISTING row
+ * (priceDraftExtra), and fetches the R2 voice prefill the same way the
+ * ledger's price-it path does.
+ */
+const finishExtraById = async (changeOrderId: string) => {
+  const rows = await db.getAll<{
+    decision_id: string; scope: string; who_directed: string;
+    billing_timing: string | null; schedule_effect: string | null;
+    schedule_days: number | null; exclusions: string | null;
+  }>(
+    `SELECT decision_id, scope, who_directed, billing_timing, schedule_effect,
+            schedule_days, exclusions
+       FROM change_order WHERE id = ? AND status = 'draft'`, [changeOrderId]);
+  if (!rows.length) return;
+  const c = rows[0];
+  setPriced({
+    decisionId: c.decision_id, scope: c.scope, whoDirected: c.who_directed,
+    amountText: '', nteText: '', mode: 'fixed', voice: null,
+    existingCoId: changeOrderId,
+    billingTiming: (c.billing_timing as BillingTiming) ?? 'when_completed',
+    scheduleEffect: (c.schedule_effect as ScheduleEffect) ?? null,
+    scheduleDaysText: c.schedule_days ? String(c.schedule_days) : '',
+    exclusions: c.exclusions ?? '',
+  });
+  setLines([]);
+  const v = await voiceReadingForDecision(db, connector.client, c.decision_id, parseMoney);
+  setPriced((p) => {
+    if (!p || p.decisionId !== c.decision_id) return p;
+    const amount = v.price?.prefill && v.price.amountCents !== null
+      ? (v.price.amountCents / 100).toFixed(2) : '';
+    return { ...p, voice: v, mode: v.price?.mode ?? p.mode,
+             amountText: amount || p.amountText };
+  });
+};
+
 const openSendPrep = async (c: LedgerRow) => {
   const t = (c.extra_type ?? null) as ExtraType | null;
   const { suggestion, roster } = await suggestFor(db, projectId, t);
@@ -605,6 +646,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     voice: VoiceReading | null;
     /** R7: the extra this new price replaces. Retired when the price is confirmed. */
     supersedes?: string | null;
+    /** Set when the composer is FINISHING an existing capture-draft rather than
+     *  minting a new extra: confirm updates that row (priceDraftExtra). */
+    existingCoId?: string | null;
     /** Flow-mock questions (FLOW-SIMPLEST-JOBSITE.md, phase 3). Billing defaults
      *  to when_completed (decision 2); schedule starts unanswered — "not sure
      *  yet" is an explicit, honest choice, never a silent default. */
@@ -1400,6 +1444,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         }).then(async (x) => {
           if (!x.ok) { console.log('startExtra failed:', x.reason); return; }
           await refresh();
+          // FLOW: the questions come next, unprompted. The extra is already
+          // durable — this only opens the finishing card over it.
+          await finishExtraById(x.changeOrderId);
         }).catch(() => { /* the capture is safe; the ledger row is not owed */ });
 
         void transcribeOnDevice(db, r.captureId, uri)
@@ -1535,6 +1582,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       }).then(async (x) => {
         if (!x.ok) { console.log('startExtra (fused) failed:', x.reason); return; }
         await refresh();
+        // FLOW: capture -> (job) -> the questions. When the job needs picking
+        // first, the assign sheet is up and fileAll continues the flow instead.
+        if (res.projectId !== INBOX_ID) await finishExtraById(x.changeOrderId);
       }).catch(() => { /* capture is safe; the ledger row is not owed */ });
 
       if (a.audioSegments.length) {
@@ -1557,7 +1607,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       if (res.projectId === INBOX_ID) {
         // Saved safe — now the ONE question a change order cannot skip: which job?
         setAssign({ ids, lat: a.stamp.lat, lng: a.stamp.lng,
-                    uris: a.previewUris, secs: a.durationSecs });
+                    uris: a.previewUris, secs: a.durationSecs,
+                    // The extra behind this walk, so filing can continue the
+                    // flow into "fill what's missing" (mock step 2 -> step 3).
+                    anchorCoId: a.audioSegments.length ? `co-${ids[a.photos.length]}` : `co-${ids[0]}` });
       } else if (res.confidence !== 'high') {
         setFiled(res.why);
       }
@@ -2481,9 +2534,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       for (const id of assign.ids) {
         await fileCapture(db, { captureId: id, projectId: projId, by: OWNER });
       }
+      const anchorCoId = assign.anchorCoId;
       setAssign(null); setAssignQ(''); setFiled(null);
       setProjectId(projId);
       await refresh();
+      // Mock step 2 flows into step 3: the job is picked, the questions come up.
+      if (anchorCoId) await finishExtraById(anchorCoId);
     };
     const newJobHere = async () => {
       // OPEN the create-job screen, PRE-FILLED from where the user is standing —
@@ -3312,6 +3368,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 answers become TERMS in the frozen instrument (renderCard), which
                 is why they live here on the read-back card and nowhere later:
                 what the contractor confirms is what the owner reads. */}
+            <Text style={s.sub}>{T('co.qWho')}</Text>
+            <TextInput
+              style={[s.moneyInput, { fontSize: 16 }]}
+              value={priced.whoDirected}
+              onChangeText={(v) => setPriced({ ...priced, whoDirected: v })}
+              placeholder={T('co.qWhoPh')}
+              placeholderTextColor="#8c959f"
+            />
             <Text style={s.sub}>{T('co.qBilling')}</Text>
             <View style={s.qRow}>
               {([['next_invoice', 'co.billNext'], ['when_completed', 'co.billDone'],
@@ -3362,6 +3426,26 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   const { data } = await connector.client.auth.getUser();
                   if (!data?.user) { setUi({k:'refused',why:'not signed in'}); return; }
                   const days = parseInt(priced.scheduleDaysText, 10);
+                  // FINISHING an existing capture-draft: update it in place —
+                  // no second row, no placeholder to clean up.
+                  if (priced.existingCoId) {
+                    const fin = await priceDraftExtra(db, {
+                      changeOrderId: priced.existingCoId,
+                      amountCents: cents!, nteCents: nte, lineItems: lines,
+                      billingTiming: priced.billingTiming,
+                      scheduleEffect: priced.scheduleEffect,
+                      scheduleDays: priced.scheduleEffect === 'adds_days' && days > 0 ? days : null,
+                      exclusions: priced.exclusions,
+                      whoDirected: priced.whoDirected.trim() || 'Owner',
+                      numbersConfirmedAt: new Date(),
+                    });
+                    if (fin.ok) {
+                      await noteActorNow(db, { subjectKind: 'change_order',
+                                               subjectId: priced.existingCoId, act: 'priced' });
+                      setPriced(null); setLines([]); await refresh();
+                    } else setUi({ k: 'refused', why: fin.reason });
+                    return;
+                  }
                   const r = await createChangeOrder(db, {
                     id: `co-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`,
                     decisionId: priced.decisionId, projectId: projectId, ownerId: data.user.id,
@@ -3574,6 +3658,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   // be holding it; re-sharing the same link cannot make the record
                   // any less backed than it already is, and blocking it would strand
                   // someone mid-conversation.
+                  // FLOW step 3 gate: an unpriced draft's next step is FINISHING
+                  // it, never sending it — an unpriced send would put a
+                  // price-less instrument in front of an owner.
+                  if (c.status === 'draft' && c.amount_cents == null) {
+                    return (
+                      <Pressable style={s.coSendRow} onPress={() => finishExtraById(c.id)}>
+                        <Text style={s.coNudge}>{T('co.finish')}</Text>
+                      </Pressable>
+                    );
+                  }
                   const gate = c.status === 'sent'
                     ? { ok: true as const }
                     : canSendExtra((readiness.get(c.id) ?? 'captured') as any);
