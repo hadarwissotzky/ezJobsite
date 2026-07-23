@@ -309,6 +309,19 @@ export function FusedCapture({
           // catches a half-drawn frame.
           await new Promise((r) => setTimeout(r, 64));
           const uri = await captureRef(bakeRef, { format: 'jpg', quality: 0.9, result: 'tmpfile' });
+          // The STAMPED bake also goes to the camera roll (hadar, 2026-07-23):
+          // a convenience COPY, add-only permission, never the record — the
+          // app's committed file stays the evidence (mandate #1). Camera shots
+          // only; a gallery pick never reaches bakeOne. Fire-and-forget: the
+          // roll must not delay Done, and a refusal costs only the copy.
+          void (async () => {
+            try {
+              const ML = await import('expo-media-library');
+              await ML.saveToLibraryAsync(uri);
+            } catch (e: any) {
+              void logDiag(db, 'roll.save', String(e?.message ?? e).slice(0, 120));
+            }
+          })();
           resolve(await readRecordingBytes(uri));
         } catch {
           resolve(await readRecordingBytes(shot.uri));

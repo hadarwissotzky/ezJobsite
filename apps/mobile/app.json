@@ -50,6 +50,14 @@
       ],
       "expo-font",
       [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "EZjobsite saves the stamped photos you take to your camera roll, so you have them outside the app too.",
+          "photosPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-speech-recognition",
         {
           "speechRecognitionPermission": "EZjobsite turns what you said into text on this phone, so your notes fill themselves in.",
