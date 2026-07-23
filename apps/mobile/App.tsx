@@ -2659,7 +2659,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   : w.status === 'declined' ? T('home.stDeclined') : T('home.stDraft');
                 return (
                   <Pressable key={w.id} style={[s.waitCard, ok && s.waitCardOk]}
-                    onPress={() => { setProjectId(w.project_id); setNav('project'); }}>
+                    onPress={() => { setProjectId(w.project_id); void openRecord(w.id); }}>
                     <View style={s.waitRow1}>
                       <Text style={[s.waitName, ok && s.waitNameOk]} numberOfLines={1}>
                         {ok ? '✅ ' + T('home.greenLight') + ' — ' : ''}

@@ -57,6 +57,19 @@ export type RecordPhoto = {
   present: boolean;
 };
 
+/** The voice narration behind an extra — what the contractor said as it was
+ *  captured. Displayed with its own metadata and played back on the record screen;
+ *  the transcript is a derived convenience, this is the source. */
+export type RecordVoice = {
+  captureId: string;
+  uri: string;
+  /** Human "Jul 20 · 2:14 pm". */
+  at: string;
+  capturedAtMs: number;
+  /** False when the audio file the row promises is not on this device (mandate #1). */
+  present: boolean;
+};
+
 export type ExtraRecord = {
   id: string;
   title: string;
@@ -84,6 +97,9 @@ export type ExtraRecord = {
   photos: RecordPhoto[];
   /** True when photos were dropped by the render cap. */
   photosTruncated: number;
+  /** The paired voice narration, playable on the record screen. Null when the
+   *  extra has no voice (typed decision, or voice-less walk). */
+  voice: RecordVoice | null;
   history: RecordEvent[];
   synced: boolean;
 };
@@ -141,6 +157,7 @@ export async function extraRecord(
 
   let photos: RecordPhoto[] = [];
   let photosTruncated = 0;
+  let voice: RecordVoice | null = null;
   let capturedAtMs: number | null = null;
 
   if (captureIds.length) {
@@ -183,6 +200,20 @@ export async function extraRecord(
         };
       })
     );
+
+    // The voice behind the extra — the same fetch already has it; the visual grid
+    // just dropped it. It IS the record (the transcript is derived), so surface it
+    // with its own metadata and make it playable.
+    const voiceCap = caps.find((c) => c.modality === 'voice');
+    if (voiceCap) {
+      const uri = FS.documentDirectory + voiceCap.media_relpath;
+      let present = false;
+      try { present = !!(await FS.getInfoAsync(uri)).exists; } catch { present = false; }
+      voice = {
+        captureId: voiceCap.capture_id, uri, at: createdLabel(voiceCap.captured_at_ms),
+        capturedAtMs: voiceCap.captured_at_ms, present,
+      };
+    }
   }
 
   // ---- People: only roles we actually store -------------------------------
@@ -278,6 +309,7 @@ export async function extraRecord(
     description: co.scope,
     photos,
     photosTruncated,
+    voice,
     history: [...stamped, ...unstamped],
     synced,
   };

@@ -13,8 +13,9 @@
  * AC made structural rather than remembered. See ui/decisionsummarycard.tsx.
  */
 import React from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
-import type { ExtraRecord, RecordPerson } from '../record';
+import { Image, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import type { ExtraRecord, RecordPerson, RecordVoice } from '../record';
+import { playCapture, playbackState, stopPlayback } from '../annotate';
 import type { DecisionSummary } from '../decisionsummary';
 import { DecisionSummaryCard } from './decisionsummarycard';
 import type { ApprovalPanel } from '../eventlog';
@@ -67,6 +68,8 @@ export function RecordScreen(props: {
   const { rec } = props;
   const chip = chipStyle(chipKind(rec.status));
   const facts = useRecordFacts(props.db, rec.id, rec.status);
+  // The photo the lightbox is showing, or null. Tapping a thumbnail sets it.
+  const [zoom, setZoom] = React.useState<string | null>(null);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.paper }}>
@@ -112,6 +115,10 @@ export function RecordScreen(props: {
           <Text style={[T.body, { marginTop: 6 }]}>{rec.description}</Text>
         </View>
 
+        {/* The voice narration — the source of the extra, with its own metadata and
+            playback. The transcript (in the summary/description) is derived from it. */}
+        {rec.voice && <VoicePlayer voice={rec.voice} />}
+
         {/* Evidence. Mandate #1: a file the row promises but the device does not
             have is SHOWN as missing. A blank tile would be silent loss. */}
         {/* R2: when the transcript is here, the photos are grouped under what was
@@ -140,7 +147,9 @@ export function RecordScreen(props: {
                       </Text>
                     </View>
                   ) : p.modality === 'photo' ? (
-                    <MaybeImage uri={p.uri} />
+                    <Pressable onPress={() => setZoom(p.uri)}>
+                      <MaybeImage uri={p.uri} />
+                    </Pressable>
                   ) : (
                     <View style={{
                       width: 86, height: 86, borderRadius: 10, backgroundColor: C.ink,
@@ -223,6 +232,82 @@ export function RecordScreen(props: {
             {t('erec.capture').toUpperCase()}
           </Text>
         </Pressable>
+      )}
+
+      {/* Photo lightbox — tap a thumbnail to see it full-size, tap anywhere to close. */}
+      <Modal visible={zoom !== null} transparent animationType="fade"
+        onRequestClose={() => setZoom(null)}>
+        <Pressable onPress={() => setZoom(null)}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' }}>
+          {zoom && <Image source={{ uri: zoom }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />}
+          <Text style={{ position: 'absolute', top: 54, right: 22, color: '#fff',
+            fontFamily: F.disp, fontSize: 15, letterSpacing: 1 }}>✕ {t('common.close')}</Text>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+/** The voice narration: metadata + playback. The audio IS the record (the transcript
+ *  is derived from it), so it gets a real player, not just a transcript. Uses the
+ *  app's shared expo-audio player (annotate.ts) — one player, so starting a second
+ *  clip stops the first, and leaving the screen stops playback. */
+function VoicePlayer({ voice }: { voice: RecordVoice }) {
+  const [playing, setPlaying] = React.useState(false);
+  const [pos, setPos] = React.useState(0);
+  const [dur, setDur] = React.useState(0);
+
+  React.useEffect(() => () => { stopPlayback(); }, []);
+
+  React.useEffect(() => {
+    if (!playing) return;
+    const id = setInterval(() => {
+      const st = playbackState();
+      if (st.durationSec > 0) setDur(st.durationSec);
+      setPos(st.positionSec);
+      // expo-audio flips `playing` false at the tail; treat that as ended and reset.
+      if (!st.playing && st.positionSec > 0) { stopPlayback(); setPlaying(false); setPos(0); }
+    }, 250);
+    return () => clearInterval(id);
+  }, [playing]);
+
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+  const toggle = async () => {
+    if (playing) { stopPlayback(); setPlaying(false); setPos(0); return; }
+    const r = await playCapture(voice.uri);
+    if (r.ok) { setDur(r.durationSec || dur); setPlaying(true); }
+  };
+
+  const pct = dur > 0 ? Math.min(100, (pos / dur) * 100) : 0;
+
+  return (
+    <View style={T.card}>
+      <Text style={label}>{t('erec.voice')}</Text>
+      {!voice.present ? (
+        <Text style={{ ...T.body, fontSize: 13.5, color: C.danger, marginTop: 6 }}>
+          {t('erec.voiceMissing')}
+        </Text>
+      ) : (
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 12 }}>
+          <Pressable onPress={toggle} accessibilityLabel={t('erec.voicePlay')} style={{
+            width: 52, height: 52, borderRadius: 26, backgroundColor: C.ink,
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Text style={{ color: '#fff', fontSize: 20 }}>{playing ? '❚❚' : '▶'}</Text>
+          </Pressable>
+          <View style={{ flex: 1 }}>
+            <View style={{ height: 6, borderRadius: 3, backgroundColor: C.line, overflow: 'hidden' }}>
+              <View style={{ width: `${pct}%`, height: 6, backgroundColor: C.orange }} />
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+              <Text style={{ ...T.bodySteel, fontSize: 12 }}>{voice.at}</Text>
+              <Text style={{ ...T.bodySteel, fontSize: 12, fontVariant: ['tabular-nums'] }}>
+                {(playing || pos > 0) ? `${fmt(pos)} / ${fmt(dur)}` : (dur > 0 ? fmt(dur) : t('erec.voicePlay'))}
+              </Text>
+            </View>
+          </View>
+        </View>
       )}
     </View>
   );

@@ -79,9 +79,14 @@ have lead time and one is a live security fix that does not need them at all.
 | **A push provider** | R8 delivery while the app is fully killed | Local notifications already cover the green light and client questions whenever the app is running or backgrounded |
 | **An SMS sender** | R8's 24h auto-reminder | Manual Remind works today; it goes out through the native share sheet, tapped by a person. Nothing automated can reach a homeowner |
 
-**Already applied to production `[2026-07-22]`:** 260 (the cross-tenant read is
-CLOSED), 368 (on-device transcripts upload), 369 + 371 (delete reaches the
-bucket: extras and captures). The remaining twelve above are still queued.
+**ALL MIGRATIONS ARE APPLIED `[2026-07-22]`.** Every file in apps/mobile/sql is
+live in production: 260 closed the cross-tenant read, 368 lets on-device
+transcripts upload, 369+371 make delete reach the bucket, 370 lets a priceless
+extra exist server-side — and the ten between them turned on the roster, EWA,
+approval photos, actor facts, the ledger, discussion, and R6's event timeline.
+The rehearsal above is kept for the NEXT migration, not these. All 14 live SQL
+checks pass, including tenant isolation (CHECK 10b), which failed for the whole
+build-out until 260 landed.
 
 ### Running the worker
 
