@@ -497,6 +497,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     nteCents: c.nte_cents,
     companyName: prof?.company || prof?.name || null,
     approvedRunningCents: approvedCents, changeOrderId: c.id,
+    // Flow terms (375): they ride into the frozen instrument. Null on extras
+    // that predate them — renderCard omits the line rather than inventing one.
+    billingTiming: c.billing_timing, scheduleEffect: c.schedule_effect,
+    scheduleDays: c.schedule_days, exclusions: c.exclusions,
   });
   if (r.ok) {
     // The link is out, so the row says so immediately. The server marks it

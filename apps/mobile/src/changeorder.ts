@@ -537,6 +537,12 @@ export type LedgerRow = {
    * normal extra and must never be blocked (R5c's last AC, mandate #7).
    */
   extra_type: string | null;
+  /** Flow-mock fields (375). Null on extras that predate them — first-class,
+   *  same rule as extra_type; renderCard simply omits the line. */
+  billing_timing: string | null;
+  schedule_effect: string | null;
+  schedule_days: number | null;
+  exclusions: string | null;
 };
 
 /**
@@ -561,9 +567,12 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     amount_cents: number; nte_cents: number | null;
     status: string; is_mini: number; signed_by: string | null;
     created_at_ms: number; pending: number; extra_type: string | null;
+    billing_timing: string | null; schedule_effect: string | null;
+    schedule_days: number | null; exclusions: string | null;
   }>(
     `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.amount_cents, co.nte_cents,
             co.status, co.is_mini, co.signed_by, co.created_at_ms, co.extra_type,
+            co.billing_timing, co.schedule_effect, co.schedule_days, co.exclusions,
             EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending
        FROM change_order co
       WHERE co.project_id = ?
@@ -588,6 +597,8 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
       amount_cents: r.amount_cents,
       created_at_ms: r.created_at_ms, created: createdLabel(r.created_at_ms),
       extra_type: r.extra_type,
+      billing_timing: r.billing_timing, schedule_effect: r.schedule_effect,
+      schedule_days: r.schedule_days, exclusions: r.exclusions,
       // "on this phone" and "in the cloud" are different facts and the sender is
       // entitled to know which one they are looking at.
       synced: r.pending ? 0 : 1,

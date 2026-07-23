@@ -17,7 +17,10 @@
  */
 import { SupabaseClient } from '@supabase/supabase-js';
 import { sha256 } from 'js-sha256';
-import { money } from './changeorder';
+// The explicit .ts extension is load-bearing: confirmations.test.ts runs under
+// node --test, which resolves no extensionless imports (same rule as
+// discussion.ts). Metro and tsc both accept it.
+import { money } from './changeorder.ts';
 
 export type SendKind = 'confirm' | 'acknowledge';
 
@@ -54,10 +57,32 @@ export function renderCard(o: {
   projectName: string; whenMs: number; amountCents?: number | null;
   nteCents?: number | null;
   companyName?: string | null;
+  /** Flow fields (375, FLOW-SIMPLEST-JOBSITE.md phase 2). Absent -> no line:
+   *  an extra that predates them signs the same instrument it always did. */
+  billingTiming?: string | null;
+  scheduleEffect?: string | null;
+  scheduleDays?: number | null;
+  exclusions?: string | null;
 }): string {
   const when = new Date(o.whenMs).toLocaleString();
   const priced = typeof o.amountCents === 'number';
   const asker = o.companyName ? `${o.companyName}\n` : '';
+  // The flow terms, as owner-facing sentences. Pure text: 240's integrity
+  // trigger checks the hash and that the money figures appear verbatim, so
+  // added prose rides through — but these are TERMS in the instrument, worded
+  // for the person signing, not labels for a database.
+  const billing = o.billingTiming === 'next_invoice' ? 'Billed on the next invoice.\n'
+    : o.billingTiming === 'when_completed' ? 'Payment is due when the work is completed.\n'
+    : o.billingTiming === 'other' ? 'Payment timing as discussed.\n' : '';
+  const schedule = o.scheduleEffect === 'no_change' ? 'Schedule: no change.\n'
+    : o.scheduleEffect === 'adds_days'
+      ? (typeof o.scheduleDays === 'number' && o.scheduleDays > 0
+          ? `Schedule: adds ${o.scheduleDays} day${o.scheduleDays === 1 ? '' : 's'}.\n`
+          : 'Schedule: adds days.\n')
+    : o.scheduleEffect === 'not_sure' ? 'Schedule impact: to be confirmed.\n' : '';
+  const excluded = o.exclusions?.trim()
+    ? `Not included: ${o.exclusions.trim()}\n` : '';
+  const flowTerms = excluded + billing + schedule;
   if (priced) {
     // A NOT-TO-EXCEED IS A DIFFERENT CONTRACTUAL INSTRUMENT, AND THIS TEXT IS THE
     // INSTRUMENT. shown_content is what the client reads and signs, frozen at send.
@@ -76,6 +101,7 @@ export function renderCard(o: {
     return `${asker}Approval requested — an extra outside the original scope.\n\n` +
       `${o.value}\n\n` +
       priceBlock +
+      flowTerms +
       `Directed by: ${o.directedBy}\nJob: ${o.projectName}\nDate: ${when}\n\n` +
       `Nothing proceeds until you approve.`;
   }
@@ -117,6 +143,9 @@ export async function sendForConfirmation(
     amountCents?: number | null; nteCents?: number | null;
     companyName?: string | null; approvedRunningCents?: number | null;
     changeOrderId?: string | null;
+    /** Flow fields — rendered into the frozen instrument by renderCard. */
+    billingTiming?: string | null; scheduleEffect?: string | null;
+    scheduleDays?: number | null; exclusions?: string | null;
   }
 ): Promise<SendResult> {
   // REFUSE BEFORE WRITING. Without a link base the url below comes out as the
