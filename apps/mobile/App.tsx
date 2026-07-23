@@ -50,6 +50,7 @@ import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from '
 import { discardCapture, discardExtra, drainServerDiscards, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
 import { startExtraFromCapture, titleExtraIfUntitled } from './src/startextra';
 import { cleanupTestData } from './src/testdatacleanup';
+import { logDiag } from './src/diaglog';
 // The send gate. hadar: "only then it can be sent to the owner for approval —
 // until then we keep the raw data on the device and waiting for processing."
 // Nothing enforced that; openSendPrep had no check of any kind.
@@ -314,21 +315,25 @@ const openThread = async (c: LedgerRow, focusReply = false) => {
 // push tap MUST land in the same place -- the AC says "the same destination as
 // the push deep-link", and two code paths drifting is how that stops being true.
 const openRecord = async (changeOrderId: string) => {
-  const r = await extraRecord(db, changeOrderId);
-  if (r) { recordIdRef.current = changeOrderId; setRecord(r); }
-  setRecordSummary(await decisionSummaryFor(db, changeOrderId));
-  // A SILENT NO-OP WAS THE BUG. extraRecord returns null when the change order
-  // row is gone — deleted on another device, swept by a cleanup, or never
-  // hydrated — and this simply returned. The tap did nothing at all, leaving the
-  // HOME screen on display, which is why hadar reported opening an extra and
-  // getting "a snap+talk button": he was looking at the screen he never left.
-  //
-  // Nothing that swallows a tap is acceptable. Say what happened.
+  // NOTHING SILENT (hadar, 2026-07-22): a tap that opens nothing looks identical to
+  // "still on the job screen", which is exactly what he reported. extraRecord can
+  // BOTH return null (row gone) AND throw (a local-schema mismatch after the
+  // R-series migrations). Surface either, loudly, with the real reason — a silent
+  // no-op is the same unforgivable sin as a silent save failure.
+  let r: ExtraRecord | null;
+  try {
+    r = await extraRecord(db, changeOrderId);
+  } catch (e: any) {
+    setFiled('Could not open this extra: ' + (e?.message ?? String(e)));
+    return;
+  }
   if (!r) {
     setFiled('That extra is no longer here — it may have been deleted.');
     await refresh();
     return;
   }
+  recordIdRef.current = changeOrderId; setRecord(r);
+  try { setRecordSummary(await decisionSummaryFor(db, changeOrderId)); } catch { /* summary is optional */ }
   try {
     const w = await withEventLog(db, connector.client, r);
     setRecord(w); setApproval(w.approval);
@@ -1188,7 +1193,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           if (sd.attempted) console.log('drain discards:', JSON.stringify(sd));
           const nt = await runNotifications(db, projectId);
           if (nt.presented || nt.blocked) console.log('notify:', JSON.stringify(nt));
-        } catch (e: any) { /* offline is normal; backoff already recorded */ }
+        } catch (e: any) {
+          // Offline IS normal — but "offline" and "a bug five drains into the
+          // tick" looked identical here, and that identity cost four diagnosis
+          // rounds today: the tick died mid-list and everything after the
+          // corpse silently never ran, while everything before it worked. The
+          // reason now lands in the flight recorder. Reading diag_log tells you
+          // which; a bare catch never could.
+          void logDiag(db, 'tick.error', String(e?.message ?? e).slice(0, 200));
+        }
       };
       drain();
       const iv = setInterval(drain, 15_000);

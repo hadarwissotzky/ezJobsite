@@ -29,6 +29,7 @@
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { planDiscard, type CaptureRef, type DiscardPlan } from './discard.ts';
+import { logDiag } from './diaglog.ts';
 
 /**
  * expo-file-system is loaded ON DEMAND. A static import makes this module
@@ -356,8 +357,15 @@ export async function drainServerDiscards(
 
   const ids = pending.map((p) => p.capture_id);
   const { data, error } = await client.rpc('discard_captures_own', { p_capture_ids: ids });
-  // Offline, or 371 not applied yet (PGRST202): not a no. The tombstones wait.
-  if (error) return { attempted: ids.length, discarded: 0, kept: 0, missing: 0 };
+  // Offline, or 371 not applied yet (PGRST202): not a no. The tombstones wait —
+  // but the REASON is written down, because "waits forever, silently" and
+  // "works" are indistinguishable from the outside and that has burned us four
+  // times today.
+  if (error) {
+    void logDiag(db, 'ddrain.rpc', String((error as any)?.message ?? error).slice(0, 200));
+    return { attempted: ids.length, discarded: 0, kept: 0, missing: 0 };
+  }
+  void logDiag(db, 'ddrain.ok', JSON.stringify(data ?? {}));
 
   const now = Date.now();
   for (const id of ids) {
