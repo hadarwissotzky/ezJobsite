@@ -400,6 +400,52 @@ export async function runLoopCheck(
     await db.execute(`DELETE FROM decision WHERE subject LIKE ?`, [`extra ${tag}%`]);
   } catch { /* cleanup must never fail the run it is tidying */ }
 
+  // 16 ── THE LIVE PATH, HEADLESS: recorder holding the mic, recognizer
+  // listening beside it, and the phone's own speaker doing the talking.
+  //
+  // "Words over the camera" was filed as needing a human. Its one real open
+  // question is mechanical: does iOS share the microphone between expo-audio's
+  // recorder and SFSpeechRecognizer's tap? So: start a real recording (the mic
+  // is genuinely held), start the live recognizer beside it, then PLAY the
+  // probe file out loud — the mic hears the speaker, the recognizer hears the
+  // mic. Words arriving proves the entire live chain except pixels.
+  //
+  // Graded honestly in two tiers: SHARING is the hard assertion (a handle came
+  // back and no error event fired while both consumers ran); WORDS are
+  // reported when they arrive but not required, because speaker volume,
+  // routing, and a silent switch are environmental, not architectural.
+  try {
+    const { startLive } = await import('./ondevicestt');
+    const { playCapture, stopPlayback } = await import('./annotate');
+    const probe = `${FS.documentDirectory}stt-probe.m4a`;
+    const probeInfo = await FS.getInfoAsync(probe);
+    if (!probeInfo.exists) {
+      t('live mic-sharing', false, 'no probe audio — push stt-probe.m4a first');
+    } else {
+      const rec = await import('./recorder');
+      const recorder = new rec.LoopcheckRecorder();
+      await recorder.start();
+
+      let words = '';
+      const handle = await startLive(db, (tx) => { words = tx; });
+      const shared = handle !== null;
+      if (shared) {
+        await playCapture(probe);
+        await new Promise((r) => setTimeout(r, 9000));
+        stopPlayback();
+        handle!.stop();
+      }
+      await recorder.stopAndDiscard();
+
+      t('live mic-sharing', shared,
+        shared
+          ? `recognizer ran beside the recorder; heard="${words.slice(0, 44)}"`
+          : 'startLive returned null while the recorder held the mic');
+    }
+  } catch (e: any) {
+    t('live mic-sharing', false, String(e?.message ?? e).slice(0, 90));
+  }
+
   const failed = steps.filter((s) => !s.ok).length;
   // THE VERDICT GOES TO THE FLIGHT RECORDER, not only to console: console.log
   // does not exist in a Release build, and this check is about to be the thing

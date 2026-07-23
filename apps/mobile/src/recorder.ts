@@ -35,3 +35,37 @@ export async function readRecordingBytes(uri: string): Promise<Uint8Array> {
 }
 
 export { RecordingPresets, useAudioRecorder, useAudioRecorderState };
+
+
+/**
+ * A recorder that runs OUTSIDE React — for the device check only.
+ *
+ * `useAudioRecorder` is a hook and cannot run in loopcheck's plain async world,
+ * so the live mic-sharing test builds the same native recorder imperatively:
+ * expo-audio's AudioRecorder class, the object the hook wraps. It records to a
+ * scratch file, and `stopAndDiscard` deletes it — a mic-sharing probe must not
+ * mint evidence.
+ */
+export class LoopcheckRecorder {
+  private rec: any = null;
+
+  async start(): Promise<void> {
+    await AudioModule.setAudioModeAsync({
+      allowsRecording: true, playsInSilentMode: true,
+    } as any);
+    this.rec = new (AudioModule as any).AudioRecorder(RecordingPresets.HIGH_QUALITY);
+    await this.rec.prepareToRecordAsync();
+    this.rec.record();
+  }
+
+  async stopAndDiscard(): Promise<void> {
+    try {
+      const uri = this.rec?.uri;
+      await this.rec?.stop();
+      if (uri) {
+        const FS = await import('expo-file-system/legacy');
+        await FS.deleteAsync(uri, { idempotent: true }).catch(() => {});
+      }
+    } catch { /* the probe recording owes nothing to anyone */ }
+  }
+}
