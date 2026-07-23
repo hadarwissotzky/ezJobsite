@@ -64,18 +64,33 @@ export const CHANGE_ORDER_DDL = [
       status        TEXT NOT NULL DEFAULT 'draft'
                       CHECK (status IN ('draft','sent','approved','declined','superseded')),
       signed_by     TEXT,
-      created_at_ms INTEGER NOT NULL
+      created_at_ms INTEGER NOT NULL,
+      -- The Simplest Jobsite Flow (FLOW-SIMPLEST-JOBSITE.md, 2026-07-23):
+      -- billing timing, schedule effect, and exclusions are part of what the
+      -- owner reads and signs. "not_sure" is a legal, honest value (decision 3).
+      billing_timing  TEXT CHECK (billing_timing IS NULL
+                        OR billing_timing IN ('next_invoice','when_completed','other')),
+      schedule_effect TEXT CHECK (schedule_effect IS NULL
+                        OR schedule_effect IN ('no_change','adds_days','not_sure')),
+      schedule_days   INTEGER CHECK (schedule_days IS NULL OR schedule_days > 0),
+      exclusions      TEXT
    ) STRICT`,
 
   // Frozen once it leaves: a sent CO is superseded by a new one, never edited.
   // Mirrors change_order_guard() on the server so the rule does not depend on
-  // which side you are looking from.
+  // which side you are looking from. NOTE: ensureFlowFields() re-creates this
+  // trigger on every launch so existing installs pick up newly-frozen fields —
+  // edit the copy THERE, this one only serves a brand-new install's first run.
   `CREATE TRIGGER IF NOT EXISTS change_order_frozen
      BEFORE UPDATE ON change_order
      WHEN old.status IN ('sent','approved','declined')
       AND (new.amount_cents IS NOT old.amount_cents
            OR new.scope IS NOT old.scope
-           OR new.nte_cents IS NOT old.nte_cents)
+           OR new.nte_cents IS NOT old.nte_cents
+           OR new.billing_timing IS NOT old.billing_timing
+           OR new.schedule_effect IS NOT old.schedule_effect
+           OR new.schedule_days IS NOT old.schedule_days
+           OR new.exclusions IS NOT old.exclusions)
      BEGIN SELECT RAISE(ABORT, 'a sent change order is frozen: supersede it'); END`,
 
   `CREATE TABLE IF NOT EXISTS change_order_outbox (
@@ -95,7 +110,53 @@ export const CHANGE_ORDER_DDL = [
 export async function ensureChangeOrderSchema(db: AbstractPowerSyncDatabase) {
   for (const s of CHANGE_ORDER_DDL) await db.execute(s);
   await makeAmountNullable(db);
+  await ensureFlowFields(db);
 }
+
+/** The flow-mock fields (billing timing / schedule effect / exclusions) on
+ *  EXISTING installs, plus the freeze trigger that covers them.
+ *
+ *  The trigger is dropped and re-created on every launch, deliberately:
+ *  CREATE TRIGGER IF NOT EXISTS pins whatever definition a phone first shipped
+ *  with, and a frozen-fields list that can silently lag behind the schema is
+ *  how a "frozen" record stays editable. Drop+create is idempotent and costs
+ *  nothing measurable at startup. */
+async function ensureFlowFields(db: AbstractPowerSyncDatabase) {
+  const cols = await db.getAll<{ name: string }>(
+    `SELECT name FROM pragma_table_info('change_order')`);
+  const have = new Set(cols.map((c) => c.name));
+  const adds: Array<[string, string]> = [
+    ['billing_timing', `TEXT CHECK (billing_timing IS NULL
+        OR billing_timing IN ('next_invoice','when_completed','other'))`],
+    ['schedule_effect', `TEXT CHECK (schedule_effect IS NULL
+        OR schedule_effect IN ('no_change','adds_days','not_sure'))`],
+    ['schedule_days', `INTEGER CHECK (schedule_days IS NULL OR schedule_days > 0)`],
+    ['exclusions', 'TEXT'],
+  ];
+  for (const [name, ddl] of adds) {
+    if (!have.has(name)) {
+      await db.execute(`ALTER TABLE change_order ADD COLUMN ${name} ${ddl}`);
+    }
+  }
+  await db.execute(`DROP TRIGGER IF EXISTS change_order_frozen`);
+  await db.execute(`CREATE TRIGGER change_order_frozen
+     BEFORE UPDATE ON change_order
+     WHEN old.status IN ('sent','approved','declined')
+      AND (new.amount_cents IS NOT old.amount_cents
+           OR new.scope IS NOT old.scope
+           OR new.nte_cents IS NOT old.nte_cents
+           OR new.billing_timing IS NOT old.billing_timing
+           OR new.schedule_effect IS NOT old.schedule_effect
+           OR new.schedule_days IS NOT old.schedule_days
+           OR new.exclusions IS NOT old.exclusions)
+     BEGIN SELECT RAISE(ABORT, 'a sent change order is frozen: supersede it'); END`);
+}
+
+/** The flow-mock enums, exported once so UI, payloads and checks agree. */
+export const BILLING_TIMINGS = ['next_invoice', 'when_completed', 'other'] as const;
+export type BillingTiming = (typeof BILLING_TIMINGS)[number];
+export const SCHEDULE_EFFECTS = ['no_change', 'adds_days', 'not_sure'] as const;
+export type ScheduleEffect = (typeof SCHEDULE_EFFECTS)[number];
 
 /**
  * EXISTING INSTALLS: drop NOT NULL from change_order.amount_cents.
@@ -287,6 +348,12 @@ export async function createChangeOrder(
     whoDirected: string; refEstimate?: string | null; isMini?: boolean;
     lineItems?: LineItem[];
     numbersConfirmedAt: Date;
+    /** Flow-mock fields (decisions 2-3): billing defaults to when_completed at
+     *  the UI, "not_sure" schedule is legal, exclusions optional. */
+    billingTiming?: BillingTiming | null;
+    scheduleEffect?: ScheduleEffect | null;
+    scheduleDays?: number | null;
+    exclusions?: string | null;
   }
 ): Promise<CreateCOResult> {
   const now = Date.now();
@@ -316,6 +383,10 @@ export async function createChangeOrder(
     is_mini: o.isMini ? 1 : 0, who_directed: o.whoDirected,
     ref_estimate: o.refEstimate ?? null,
     numbers_confirmed_at_ms: confirmedMs, created_at_ms: now,
+    billing_timing: o.billingTiming ?? null,
+    schedule_effect: o.scheduleEffect ?? null,
+    schedule_days: o.scheduleDays ?? null,
+    exclusions: o.exclusions?.trim() || null,
   };
   const payloadJson = JSON.stringify(payload);
 
@@ -324,11 +395,14 @@ export async function createChangeOrder(
       await tx.execute(
         `INSERT INTO change_order (id, decision_id, project_id, owner_id, scope,
            line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate,
-           numbers_confirmed_at_ms, status, created_at_ms)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'draft',?)`,
+           numbers_confirmed_at_ms, status, created_at_ms,
+           billing_timing, schedule_effect, schedule_days, exclusions)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?,?,?,?)`,
         [o.id, o.decisionId, o.projectId, o.ownerId, o.scope.trim(),
          JSON.stringify(lineItems), o.amountCents, o.nteCents ?? null,
-         o.isMini ? 1 : 0, o.whoDirected, o.refEstimate ?? null, confirmedMs, now]
+         o.isMini ? 1 : 0, o.whoDirected, o.refEstimate ?? null, confirmedMs, now,
+         o.billingTiming ?? null, o.scheduleEffect ?? null,
+         o.scheduleDays ?? null, o.exclusions?.trim() || null]
       );
       // Atomic with the record. Never after it.
       await tx.execute(
@@ -386,6 +460,11 @@ export async function drainChangeOrderOutbox(
         p_who_directed: p.who_directed, p_ref_estimate: p.ref_estimate,
         p_numbers_confirmed_at_ms: p.numbers_confirmed_at_ms,
         p_created_at_ms: p.created_at_ms, p_request_sha256: row.payload_sha256,
+        // 375: older payloads carry no flow fields; nulls match the defaults.
+        p_billing_timing: p.billing_timing ?? null,
+        p_schedule_effect: p.schedule_effect ?? null,
+        p_schedule_days: p.schedule_days ?? null,
+        p_exclusions: p.exclusions ?? null,
       });
       if (error) throw error;
       await db.execute(`DELETE FROM change_order_outbox WHERE mutation_id = ?`, [row.mutation_id]);
