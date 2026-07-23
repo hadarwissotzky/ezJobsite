@@ -5,7 +5,7 @@ import { OPSqliteOpenFactory } from '@powersync/op-sqlite';
 import { PowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import React from 'react';
-import { Dimensions, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Dimensions, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
 import { ago, projectCards, staticMapUrl, type ProjectCard } from './src/ui/home';
@@ -130,7 +130,7 @@ import { buildDisputeBundle, buildProgressUpdate, shareBundle, shareLink,
 import { drainOutbox, outboxStatus } from './src/uploader';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
-import { sendForConfirmation } from './src/confirmations';
+import { renderCard, sendForConfirmation } from './src/confirmations';
 import { publishApprovalPhotos } from './src/approvalphotopublish';
 import {
   ensureApproverSchema, drainR5cOutbox, suggestFor, listRoster, addApprover,
@@ -470,6 +470,63 @@ const finishExtraById = async (changeOrderId: string) => {
   });
 };
 
+/**
+ * Step 2 confirmed -> the extra is priced. Updates the capture-draft in place
+ * (existingCoId) or mints the extra (decision/EWA/revision paths), records the
+ * priced actor, settles an EWA link and applies a supersession when relevant.
+ * Returns the change order id, or null after a LOUD refusal. Callers own
+ * closing the screens and refreshing.
+ */
+const confirmPriced = async (): Promise<string | null> => {
+  if (!priced) return null;
+  const cents = centsFromInput(priced.amountText);
+  const nte = centsFromInput(priced.nteText);
+  if (cents === null || validateLines(lines, cents)) return null;
+  const days = parseInt(priced.scheduleDaysText, 10);
+  const { data } = await connector.client.auth.getUser();
+  if (!data?.user) { setUi({ k: 'refused', why: 'not signed in' }); return null; }
+  const flow = {
+    billingTiming: priced.billingTiming,
+    scheduleEffect: priced.scheduleEffect,
+    scheduleDays: priced.scheduleEffect === 'adds_days' && days > 0 ? days : null,
+    exclusions: priced.exclusions,
+  };
+  if (priced.existingCoId) {
+    const fin = await priceDraftExtra(db, {
+      changeOrderId: priced.existingCoId,
+      amountCents: cents, nteCents: nte, lineItems: lines, ...flow,
+      whoDirected: priced.whoDirected.trim() || 'Owner',
+      numbersConfirmedAt: new Date(),
+    });
+    if (!fin.ok) { setUi({ k: 'refused', why: fin.reason }); return null; }
+    await noteActorNow(db, { subjectKind: 'change_order',
+                             subjectId: priced.existingCoId, act: 'priced' });
+    return priced.existingCoId;
+  }
+  const r = await createChangeOrder(db, {
+    id: `co-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    decisionId: priced.decisionId, projectId, ownerId: data.user.id,
+    scope: priced.scope, amountCents: cents, nteCents: nte, ...flow,
+    whoDirected: priced.whoDirected, lineItems: lines,
+    // The read-back happened HERE. This timestamp is the proof, and the DB
+    // refuses the row without it.
+    numbersConfirmedAt: new Date(),
+  });
+  if (!r.ok) { setUi({ k: 'refused', why: r.reason }); return null; }
+  await noteActorNow(db, { subjectKind: 'change_order', subjectId: r.id, act: 'priced' });
+  if (settling) {
+    const lk = await linkPriceToEwa(db, r.id, settling);
+    if (!lk.ok) setUi({ k: 'refused', why: T(lk.reason as any) });
+    setSettling(null);
+  }
+  if (priced.supersedes) {
+    const sup = await supersedeExtra(db,
+      { changeOrderId: priced.supersedes, supersededBy: r.id });
+    if (!sup.ok) setUi({ k: 'refused', why: T('co.supersedeRefused') });
+  }
+  return r.id;
+};
+
 const openSendPrep = async (c: LedgerRow) => {
   const t = (c.extra_type ?? null) as ExtraType | null;
   const { suggestion, roster } = await suggestFor(db, projectId, t);
@@ -662,6 +719,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     scheduleDaysText: string;
     exclusions: string;
   }>(null);
+  // FLOW step 3: the Review & Send screen over the details card. Holds the
+  // company name so the preview renders the same header the owner will read.
+  const [reviewSend, setReviewSend] = React.useState<null | { company: string | null }>(null);
   const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
   // extra id -> weakest state across its captures. Absent means "not computed
   // yet", which the gate treats as NOT ready: an unknown answer must never open
@@ -3268,6 +3328,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         const cents = centsFromInput(priced.amountText);
         const nte = centsFromInput(priced.nteText);
         return (
+          <Modal visible animationType="slide"
+            onRequestClose={() => { setPriced(null); setLines([]); }}>
+          <View style={{ flex: 1, backgroundColor: '#f6f8fa' }}>
+            <View style={[s.detailHead, { paddingTop: 60, paddingHorizontal: 20 }]}>
+              <Pressable style={s.backBtn} onPress={() => { setPriced(null); setLines([]); }}>
+                <Text style={s.backT}>‹ {T('common.back')}</Text>
+              </Pressable>
+              <Text style={s.cardH}>{T('co.detailsTitle')}</Text>
+            </View>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 48 }}>
           <View style={s.money}>
             <Text style={s.cardH}>{T('co.check')}</Text>
             {priced.supersedes && <Text style={s.cardNote}>{T('co.revisingNote')}</Text>}
@@ -3428,74 +3498,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 style={[s.confirm, (cents === null || !!validateLines(lines, cents ?? 0)) && s.btnOff]}
                 disabled={cents === null || !!validateLines(lines, cents ?? 0)}
                 onPress={async () => {
-                  const { data } = await connector.client.auth.getUser();
-                  if (!data?.user) { setUi({k:'refused',why:'not signed in'}); return; }
-                  const days = parseInt(priced.scheduleDaysText, 10);
-                  // FINISHING an existing capture-draft: update it in place —
-                  // no second row, no placeholder to clean up.
-                  if (priced.existingCoId) {
-                    const fin = await priceDraftExtra(db, {
-                      changeOrderId: priced.existingCoId,
-                      amountCents: cents!, nteCents: nte, lineItems: lines,
-                      billingTiming: priced.billingTiming,
-                      scheduleEffect: priced.scheduleEffect,
-                      scheduleDays: priced.scheduleEffect === 'adds_days' && days > 0 ? days : null,
-                      exclusions: priced.exclusions,
-                      whoDirected: priced.whoDirected.trim() || 'Owner',
-                      numbersConfirmedAt: new Date(),
-                    });
-                    if (fin.ok) {
-                      await noteActorNow(db, { subjectKind: 'change_order',
-                                               subjectId: priced.existingCoId, act: 'priced' });
-                      setPriced(null); setLines([]); await refresh();
-                    } else setUi({ k: 'refused', why: fin.reason });
-                    return;
-                  }
-                  const r = await createChangeOrder(db, {
-                    id: `co-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`,
-                    decisionId: priced.decisionId, projectId: projectId, ownerId: data.user.id,
-                    scope: priced.scope, amountCents: cents!, nteCents: nte,
-                    billingTiming: priced.billingTiming,
-                    scheduleEffect: priced.scheduleEffect,
-                    scheduleDays: priced.scheduleEffect === 'adds_days' && days > 0 ? days : null,
-                    exclusions: priced.exclusions,
-                    whoDirected: priced.whoDirected, lineItems: lines,
-                    // The read-back happened HERE. This timestamp is the proof,
-                    // and the DB refuses the row without it.
-                    numbersConfirmedAt: new Date(),
-                  });
-                  if (r.ok) {
-                    // R6b item 3: who priced it, recorded at the read-back moment
-                    // itself. Reading the profile HERE and not at render is the whole
-                    // difference from the bug record.ts documents.
-                    await noteActorNow(db, { subjectKind: 'change_order',
-                                             subjectId: r.id, act: 'priced' });
-                    // R7: retired at PRICE-CONFIRM, not at send. Two answerable prices
-                    // for one piece of work is the contradiction 250_one_live_link
-                    // exists to prevent, and the client could sign the retired one
-                    // while the revision sits unsent in the ledger.
-                    // R3 AC3: step two names its parent, and it does so BEFORE the
-                    // client ever sees it. Linking after send would mean the price
-                    // they signed had its relationship to the authorization decided
-                    // afterwards.
-                    if (settling) {
-                      const lk = await linkPriceToEwa(db, r.id, settling);
-                      if (!lk.ok) setUi({ k: 'refused', why: T(lk.reason as any) });
-                      setSettling(null);
-                    }
-                    if (priced.supersedes) {
-                      const sup = await supersedeExtra(db,
-                        { changeOrderId: priced.supersedes, supersededBy: r.id });
-                      // Refused only when the client answered first. Her answer stands;
-                      // the new extra is still saved, and saying so is the honest
-                      // outcome rather than a silent no-op.
-                      if (!sup.ok) setUi({ k: 'refused', why: T('co.supersedeRefused') });
-                    }
-                    setPriced(null); setLines([]); await refresh();
-                  } else setUi({ k: 'refused', why: r.reason });
+                  // Step 2 -> step 3. Nothing commits here: the price commits on
+                  // Review & Send, where the contractor has seen exactly what
+                  // the owner will read (confirmPriced).
+                  const prof = await getProfile(db);
+                  setReviewSend({ company: prof?.company || prof?.name || null });
                 }}>
                 <Text style={s.confirmT}>
-                  {cents === null ? T('co.enterPrice') : T({ k: 'co.yes', p: { amount: money(cents) } })}
+                  {cents === null ? T('co.enterPrice') : T('co.toReview')}
                 </Text>
               </Pressable>
               <Pressable style={s.later} onPress={() => { setPriced(null); setLines([]); }}>
@@ -3504,6 +3514,75 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             </View>
             <Text style={s.cardNote}>{T('co.nothingSent')}</Text>
           </View>
+            </ScrollView>
+          </View>
+          </Modal>
+        );
+      })()}
+
+      {/* ── FLOW step 3: REVIEW & SEND ─────────────────────────────────────────
+          "This is what the owner will see." The preview IS renderCard — the same
+          function that freezes shown_content at send — so what the contractor
+          reviews and what the owner signs cannot drift (mandate #5). */}
+      {priced && reviewSend && (() => {
+        const cents = centsFromInput(priced.amountText);
+        const nte = centsFromInput(priced.nteText);
+        if (cents === null) return null;
+        const days = parseInt(priced.scheduleDaysText, 10);
+        const instrument = renderCard({
+          kind: 'confirm', subject: priced.scope, value: priced.scope,
+          directedBy: priced.whoDirected.trim() || 'Owner',
+          projectName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
+          whenMs: Date.now(), amountCents: cents, nteCents: nte,
+          companyName: reviewSend.company,
+          billingTiming: priced.billingTiming,
+          scheduleEffect: priced.scheduleEffect,
+          scheduleDays: priced.scheduleEffect === 'adds_days' && days > 0 ? days : null,
+          exclusions: priced.exclusions,
+        });
+        const finish = async (send: boolean) => {
+          const id = await confirmPriced();
+          if (!id) { setReviewSend(null); return; }  // refusal shown; back to details
+          setReviewSend(null); setPriced(null); setLines([]);
+          await refresh();
+          if (send) {
+            const row = coRowsRef.current.find((x) => x.id === id);
+            // R5c still owns the actual send: recipient + reason + final tap.
+            if (row) await openSendPrep(row);
+          }
+        };
+        return (
+          <Modal visible animationType="slide" onRequestClose={() => setReviewSend(null)}>
+            <View style={{ flex: 1, backgroundColor: '#f6f8fa' }}>
+              <View style={[s.detailHead, { paddingTop: 60, paddingHorizontal: 20 }]}>
+                <Pressable style={s.backBtn} onPress={() => setReviewSend(null)}>
+                  <Text style={s.backT}>‹ {T('common.back')}</Text>
+                </Pressable>
+                <Text style={s.cardH}>{T('co.reviewTitle')}</Text>
+              </View>
+              <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 48 }}>
+                <View style={{ backgroundColor: '#dafbe1', borderColor: '#2da44e',
+                  borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                  <Text style={{ color: '#0E5A24', fontSize: 14 }}>{T('co.reviewNote')}</Text>
+                </View>
+                <View style={s.money}>
+                  <Text style={{ fontSize: 15, lineHeight: 23, color: '#1f2328' }}>
+                    {instrument}
+                  </Text>
+                </View>
+                <Text style={s.cardNote}>{T('co.photosAuto')}</Text>
+                <View style={[s.cardBtns, { marginTop: 14 }]}>
+                  <Pressable style={s.confirm} onPress={() => { void finish(true); }}>
+                    <Text style={s.confirmT}>{T('co.sendOwner')}</Text>
+                  </Pressable>
+                  <Pressable style={s.later} onPress={() => { void finish(false); }}>
+                    <Text style={s.laterT}>{T('co.saveDraft')}</Text>
+                  </Pressable>
+                </View>
+                <Text style={s.cardNote}>{T('co.auditNote')}</Text>
+              </ScrollView>
+            </View>
+          </Modal>
         );
       })()}
 
