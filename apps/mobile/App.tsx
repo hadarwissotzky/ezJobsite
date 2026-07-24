@@ -3025,27 +3025,33 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     <View style={absolute
       ? [s.tabBar, { position: 'absolute' as const, left: -20, right: -20, bottom: 0 }]
       : s.tabBar}>
-      <Pressable style={s.tab} accessibilityLabel={T('home.navHome')}
-        onPress={() => { setNav('home'); setJobFilter(null); void refresh(); }}>
-        <Text style={[s.tabIcon, active === 'home' && s.tabIconOn]}>🏠</Text>
-        <Text style={[s.tabLab, active === 'home' && s.tabLabOn]}>{T('home.navHome')}</Text>
-      </Pressable>
-      <Pressable style={s.tab} accessibilityLabel={T('home.navJobs')}
-        onPress={() => { setNav('jobs'); void refresh(); }}>
-        <Text style={[s.tabIcon, active === 'jobs' && s.tabIconOn]}>🗂</Text>
-        <Text style={[s.tabLab, active === 'jobs' && s.tabLabOn]}>{T('home.navJobs')}</Text>
-      </Pressable>
+      {/* Two equal halves flank the FAB so it sits DEAD CENTER (hadar: rebalance).
+          Left half carries Home + Jobs; right half carries Activity. */}
+      <View style={s.tabHalf}>
+        <Pressable style={s.tab} accessibilityLabel={T('home.navHome')}
+          onPress={() => { setNav('home'); setJobFilter(null); void refresh(); }}>
+          <Text style={[s.tabIcon, active === 'home' && s.tabIconOn]}>🏠</Text>
+          <Text style={[s.tabLab, active === 'home' && s.tabLabOn]}>{T('home.navHome')}</Text>
+        </Pressable>
+        <Pressable style={s.tab} accessibilityLabel={T('home.navJobs')}
+          onPress={() => { setNav('jobs'); void refresh(); }}>
+          <Text style={[s.tabIcon, active === 'jobs' && s.tabIconOn]}>🗂</Text>
+          <Text style={[s.tabLab, active === 'jobs' && s.tabLabOn]}>{T('home.navJobs')}</Text>
+        </Pressable>
+      </View>
       <Pressable style={[s.fab, (!!gate || !!initError) && s.btnOff]}
         disabled={!!gate || !!initError} hitSlop={8}
         accessibilityLabel={T('home.recordExtra')}
         onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
         <Text style={s.fabT}>＋</Text>
       </Pressable>
-      <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
-        onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
-        <Text style={[s.tabIcon, active === 'activity' && s.tabIconOn]}>📋</Text>
-        <Text style={[s.tabLab, active === 'activity' && s.tabLabOn]}>{T('home.navActivity')}</Text>
-      </Pressable>
+      <View style={s.tabHalf}>
+        <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
+          onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
+          <Text style={[s.tabIcon, active === 'activity' && s.tabIconOn]}>📋</Text>
+          <Text style={[s.tabLab, active === 'activity' && s.tabLabOn]}>{T('home.navActivity')}</Text>
+        </Pressable>
+      </View>
     </View>
   );
 
@@ -4935,10 +4941,12 @@ const s = StyleSheet.create({
   exBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
   exQuestion: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#E8833A' },
   exDraft: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#2563EB' },
-  tabBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
+  tabBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     borderTopWidth: 1, borderTopColor: '#E9EAE7', backgroundColor: '#fff',
-    paddingTop: 8, paddingBottom: 26 },
-  tab: { alignItems: 'center', justifyContent: 'center', minWidth: 72, gap: 2 },
+    paddingTop: 8, paddingBottom: 26, paddingHorizontal: 8 },
+  // Each half takes equal space on either side of the centered FAB.
+  tabHalf: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' },
+  tab: { alignItems: 'center', justifyContent: 'center', minWidth: 64, gap: 2 },
   tabIcon: { fontSize: 20, opacity: 0.45 },
   tabIconOn: { opacity: 1 },
   tabLab: { fontFamily: 'Barlow_500Medium', fontSize: 11, color: '#8A93A0' },
