@@ -58,23 +58,38 @@ export function DiscussionLog(props: {
   return (
     <View style={T.card}>
       <Text style={label}>{t('r5b.logHeading')}</Text>
-      <View style={{ marginTop: 8, gap: 10 }}>
-        {props.messages.map((m) => (
-          <View key={m.id}>
-            <Text style={{
-              fontFamily: F.dispSemi, fontSize: 11, letterSpacing: 1.1,
-              textTransform: 'uppercase', color: C.steel,
-            }}>
-              {t(m.side === 'contractor' ? 'r5b.fromYou' : 'r5b.fromClient')} · {props.formatAt(m.atMs)}
-            </Text>
-            <Text style={[T.body, { fontSize: 14.5, marginTop: 1 }]}>{m.text}</Text>
-            {m.side === 'contractor' && props.undelivered?.has(m.id) && (
-              <Text style={{ ...T.bodySteel, fontSize: 11.5, marginTop: 2 }}>
-                {t('r5b.notSentYet')}
+      {/* Chat bubbles (hadar, 2026-07-24: "an extra becomes like a chat or slack
+          channel"). Yours on the right, the client's on the left, each with sender
+          and time; undelivered replies say so (mandate #1). */}
+      <View style={{ marginTop: 10, gap: 10 }}>
+        {props.messages.map((m) => {
+          const mine = m.side === 'contractor';
+          return (
+            <View key={m.id} style={{ alignItems: mine ? 'flex-end' : 'flex-start' }}>
+              <Text style={{
+                fontFamily: F.dispSemi, fontSize: 10.5, letterSpacing: 1,
+                textTransform: 'uppercase', color: C.steel, marginBottom: 3,
+                marginRight: mine ? 4 : 0, marginLeft: mine ? 0 : 4,
+              }}>
+                {t(mine ? 'r5b.fromYou' : 'r5b.fromClient')} · {props.formatAt(m.atMs)}
               </Text>
-            )}
-          </View>
-        ))}
+              <View style={{
+                maxWidth: '82%', borderRadius: 16, paddingVertical: 9, paddingHorizontal: 13,
+                backgroundColor: mine ? '#2563EB' : '#EDEFF2',
+                borderBottomRightRadius: mine ? 4 : 16,
+                borderBottomLeftRadius: mine ? 16 : 4,
+              }}>
+                <Text style={[T.body, { fontSize: 14.5, lineHeight: 20,
+                  color: mine ? '#fff' : '#0D0F12' }]}>{m.text}</Text>
+              </View>
+              {mine && props.undelivered?.has(m.id) && (
+                <Text style={{ ...T.bodySteel, fontSize: 11, marginTop: 3, marginRight: 4 }}>
+                  {t('r5b.notSentYet')}
+                </Text>
+              )}
+            </View>
+          );
+        })}
       </View>
       <Text style={{ ...T.bodySteel, fontSize: 11.5, marginTop: 10 }}>
         {t('r5b.partOfRecord')}
@@ -231,8 +246,10 @@ export function ThreadScreen(props: {
           )}
         </View>
 
-        {/* R5b AC4: approving closes the thread. The record stays; the composer goes. */}
-        {!st.open && (
+        {/* The channel closes only when you truly cannot reply (a superseded
+            version — the talk moved to the current one). Approved/declined stay
+            open now (supersedes R5b AC4; hadar, 2026-07-24). */}
+        {!st.canReply && (
           <View style={{
             marginTop: 14, borderRadius: 12, padding: 12,
             backgroundColor: '#F1F3F0', borderWidth: 1, borderColor: C.line,

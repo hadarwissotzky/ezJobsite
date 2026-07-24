@@ -142,9 +142,15 @@ export function threadState(o: {
     unansweredSinceMs,
     awaitingReply:
       open && unansweredSinceMs !== null && o.nowMs - unansweredSinceMs >= after,
-    // A draft has no live link, so there is nobody on the other end to reply TO.
-    // Offering the field would collect a message that could never be delivered.
-    canReply: open && o.coStatus === 'sent',
+    // THE EXTRA IS A CHANNEL (hadar, 2026-07-24: "an extra becomes like a chat or
+    // slack channel"). The conversation stays open once a client is on the other
+    // end — sent, and after the decision (approved/declined) too. This SUPERSEDES
+    // R5b AC4 ("approval closes the thread"): a signed extra is frozen as an
+    // INSTRUMENT, but messages are not the instrument (postReply commits nothing),
+    // so talking after the yes/no changes no record. A draft still has no live link
+    // and no counterparty, and a superseded version is not where the talk happens —
+    // both stay composer-free. Undelivered replies remain flagged (mandate #1).
+    canReply: o.coStatus === 'sent' || o.coStatus === 'approved' || o.coStatus === 'declined',
     // R7's rule, not a copy of it: a draft is edited rather than revised, and a
     // terminal one would rewrite a signed outcome.
     canRevise: canSupersede(o.coStatus),

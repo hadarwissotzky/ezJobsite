@@ -45,17 +45,21 @@ test('a sent extra nobody has asked about is not In Discussion', () => {
   assert.equal(displayStatus('sent', { openQuestions: clientMessageCount([]) }), 'sent');
 });
 
-test('approval closes the thread — R5b AC4', () => {
+test('approval FREEZES the instrument but keeps the channel open (supersedes R5b AC4)', () => {
+  // hadar, 2026-07-24: an extra is a chat channel; the talk continues after the
+  // yes/no. The signed instrument is still frozen (open=false drives the
+  // awaiting/discussion logic), but messages are not the instrument, so canReply
+  // stays true — you can keep talking on an approved extra.
   const s = threadState({
     coStatus: 'approved',
     messages: [client('q1', T0), contractor('r1', T0 + H)],
     nowMs: T0 + 10 * 24 * H,
   });
-  assert.equal(s.open, false, 'an approved extra takes no new messages');
-  assert.equal(s.canReply, false);
+  assert.equal(s.open, false, 'the signed record itself takes no new VERSIONS');
+  assert.equal(s.canReply, true, 'but the conversation channel stays open');
   assert.equal(s.canRevise, false, 'a signed version is never superseded');
   assert.equal(s.awaitingReply, false, 'nobody is waiting once it is signed');
-  assert.equal(s.messages.length, 2, 'the record is preserved, only closed');
+  assert.equal(s.messages.length, 2, 'the record is preserved');
   assert.equal(
     displayStatus('approved', { openQuestions: clientMessageCount(s.messages) }), 'approved');
 });

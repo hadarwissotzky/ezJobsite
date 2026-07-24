@@ -2983,7 +2983,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // Mandate #2: a reply is a MESSAGE. It commits nothing and prices nothing —
         // and it must never move the extra's status. A new PRICE goes through the
         // read-back composer (onRevise), never through a chat box.
-        onReply={record.status === 'sent' ? async (text: string) => {
+        onReply={(record.status === 'sent' || record.status === 'approved' || record.status === 'declined') ? async (text: string) => {
           const pr = await postReply(db, { changeOrderId: record.id, body: text, ownerId: OWNER });
           // postReply reports failure as a value, not a throw. Throwing here is what
           // keeps the typed words in the composer and puts the reason on screen.
