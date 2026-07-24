@@ -315,6 +315,10 @@ export default function App() {
   }>(null);
   const [history, setHistory] = React.useState<any[] | null>(null);
   const [sentLink, setSentLink] = React.useState<{url:string; shown:string} | null>(null);
+  // After a send/finish that BEGAN on an extra's detail page, return to that page
+  // (hadar, 2026-07-24: "after the send button ... take me back to the extra detail
+  // page even if it is a draft"). The change-order id to re-open, or null.
+  const [returnRecordId, setReturnRecordId] = React.useState<string | null>(null);
 
 // Open the preview instead of sending. R5c + mandate #2: the recipient is a
 // SUGGESTION until a human has looked at it.
@@ -2969,12 +2973,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         readinessKey={gate && !gate.ok ? gate.whyKey : undefined}
         // A ready draft can go out from its own record (R6b AC3: the state line
         // says "send it" — the screen must then offer the send).
-        onSend={gate?.ok && row ? () => { closeRecord(); void openSendPrep(row); } : undefined}
+        onSend={gate?.ok && row ? () => { setReturnRecordId(record.id); closeRecord(); void openSendPrep(row); } : undefined}
         // Finish an UNPRICED draft from its own detail page — opens the price/details
-        // composer. Offered only when the draft is not yet ready to send (no onSend),
-        // so tapping an extra always reaches its detail page and can be finished there
-        // (hadar, 2026-07-24).
-        onFinish={record.status === 'draft' && !(gate?.ok && row)
+        // composer. Offered ONLY when the draft has no price yet: a priced draft must
+        // not keep bouncing back to step 3 (hadar, 2026-07-24, "it constantly taking
+        // me to step 3") — it either sends (onSend, when ready) or shows why it isn't.
+        onFinish={record.status === 'draft' && !record.priced
           ? () => { closeRecord(); void finishExtraById(record.id); } : undefined}
         // Mandate #2: a reply is a MESSAGE. It commits nothing and prices nothing —
         // and it must never move the extra's status. A new PRICE goes through the
@@ -3767,9 +3771,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           await refresh();
           if (send) {
             const row = coRowsRef.current.find((x) => x.id === id);
-            // R5c still owns the actual send: recipient + reason + final tap.
-            if (row) await openSendPrep(row);
+            // R5c still owns the actual send: recipient + reason + final tap. After
+            // it lands, return to the extra's detail page (returnRecordId).
+            if (row) { setReturnRecordId(id); await openSendPrep(row); return; }
           }
+          // Saved as a draft (or no row to send): land on the extra's DETAIL page,
+          // not the job screen — the composer is step 3, not a destination.
+          await openRecord(id);
         };
         return (
           <Modal visible animationType="slide"
@@ -4433,7 +4441,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
           {/* Clear the photo note too, or a stale "3 photos are on the client's
               page" from the previous send reappears on the next one. */}
-          <Pressable style={s.later} onPress={() => { setSentLink(null); setPhotoNote(null); }}>
+          <Pressable style={s.later} onPress={() => {
+            setSentLink(null); setPhotoNote(null);
+            // Return to the extra's detail page when the send began there.
+            if (returnRecordId) { const rid = returnRecordId; setReturnRecordId(null); void openRecord(rid); }
+          }}>
             <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
         </View>
