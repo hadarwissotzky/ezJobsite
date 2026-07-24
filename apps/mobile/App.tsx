@@ -236,6 +236,9 @@ export default function App() {
     uris: string[]; secs: number;
     /** The change order behind this walk — filing continues the flow into it. */
     anchorCoId?: string;
+    /** The voice capture (null for photos-only) — the transition after filing polls
+     *  it for the transcript. */
+    anchorCaptureId?: string | null;
   }>(null);
   const [assignQ, setAssignQ] = React.useState('');
   // R1: the Send-to prefill for the walk being filed. Null until prepareSendTo has
@@ -795,13 +798,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // FLOW step 3: the Review & Send screen over the details card. Holds the
   // company name so the preview renders the same header the owner will read.
   const [reviewSend, setReviewSend] = React.useState<null | { company: string | null }>(null);
-  // FLOW step 1.5 — the transition after capture (hadar, 2026-07-23): live,
-  // HONEST stages (each tracks a real signal, never a timer), then the job
-  // sheet; on weak/no connection, a message + Done that parks at home.
+  // FLOW — the processing screen that runs AFTER job selection (hadar, 2026-07-24:
+  // "prompt me to choose a jobsite ... right as you click finish, it cannot upload
+  // before that"). Job selection now comes first; this shows the live, HONEST
+  // stages (each tracks a real signal, never a timer) and then opens the details
+  // for the already-filed change order `coId`. On weak/no connection, a message +
+  // Done that parks at home (the extra stays a filed draft, finished later).
   const [transition, setTransition] = React.useState<null | {
-    ids: string[]; anchorCaptureId: string | null;
-    assign: { ids: string[]; lat: number | null; lng: number | null;
-              uris: string[]; secs: number; anchorCoId?: string };
+    ids: string[]; anchorCaptureId: string | null; coId: string;
     uploaded: boolean; transcribed: boolean; analyzed: boolean; offline: boolean;
   }>(null);
 
@@ -844,7 +848,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           await new Promise((r) => setTimeout(r, 900));
           if (!alive) return;
           setTransition((t) => {
-            if (t) { setAssign(t.assign); }
+            // The job is already picked; open the details for its change order.
+            if (t) { void finishExtraById(t.coId); }
             return null;
           });
           return;
@@ -1817,17 +1822,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           await refresh();
         })().catch(() => { /* the worker's cloud path still covers it */ });
       }
-      // FLOW step 1.5 then 2 — the transition screen watches the real signals
-      // (upload, words, analysis), then hands to the job sheet; the job is
-      // ALWAYS picked by a human (mandate #8 fully applied — GPS only sorts).
+      // JOB SELECTION FIRST (hadar, 2026-07-24): the sheet opens the instant the
+      // recording is saved — before any upload/processing screen — so the human
+      // always picks the job, and nothing is uploaded/processed to a guessed job
+      // first. Filing it (fileAll) then starts the processing transition. The job
+      // is ALWAYS picked by a human (mandate #8 — GPS only pre-sorts the list).
       const anchorCapId = a.audioSegments.length ? ids[a.photos.length] : null;
-      setTransition({
-        ids,
+      setAssign({
+        ids, lat: a.stamp.lat, lng: a.stamp.lng,
+        uris: a.previewUris, secs: a.durationSecs,
+        anchorCoId: anchorCapId ? `co-${anchorCapId}` : `co-${ids[0]}`,
         anchorCaptureId: anchorCapId,
-        assign: { ids, lat: a.stamp.lat, lng: a.stamp.lng,
-                  uris: a.previewUris, secs: a.durationSecs,
-                  anchorCoId: anchorCapId ? `co-${anchorCapId}` : `co-${ids[0]}` },
-        uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
       });
     } catch (e: any) {
       setUi({ k: 'refused', why: e?.message ?? String(e) });
@@ -2800,18 +2805,27 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.address ?? '').toLowerCase().includes(q))
       .sort((a, b) => (a.distM ?? Infinity) - (b.distM ?? Infinity));
     const fileAll = async (projId: string) => {
-      for (const id of assign.ids) {
+      const ids = assign.ids;
+      const anchorCoId = assign.anchorCoId;
+      const anchorCapId = assign.anchorCaptureId ?? null;
+      for (const id of ids) {
         await fileCapture(db, { captureId: id, projectId: projId, by: OWNER });
       }
-      const anchorCoId = assign.anchorCoId;
       setAssign(null); setAssignQ(''); setFiled(null);
       setProjectId(projId);
       // The draft follows the human's pick — captures moved above, the change
       // order (and its queued upload) move here.
       if (anchorCoId) await rehomeDraftExtra(db, anchorCoId, projId);
       await refresh();
-      // Mock step 2 flows into step 3: the job is picked, the questions come up.
-      if (anchorCoId) await finishExtraById(anchorCoId);
+      // Job picked → NOW the processing screen (upload · transcribe · analyze),
+      // which opens the details once the signals are in. Upload/processing happens
+      // HERE, after the job is chosen — never before it (hadar, 2026-07-24).
+      if (anchorCoId) {
+        setTransition({
+          ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
+          uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
+        });
+      }
     };
     const newJobHere = async () => {
       // OPEN the create-job screen, PRE-FILLED from where the user is standing —
