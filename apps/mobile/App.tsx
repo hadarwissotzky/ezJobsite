@@ -941,7 +941,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // CompanyCam-style shell: the app opens on the Projects list; a capture happens
   // INSIDE a project. 'home' = the project list, 'project' = one project's
   // camera-first workspace + capture grid.
-  const [nav, setNav] = React.useState<'home' | 'project' | 'jobs'>('home');
+  const [nav, setNav] = React.useState<'home' | 'project' | 'jobs' | 'activity'>('home');
+  // The Activity page's status tab (hadar, 2026-07-23 mockup): all extras, filtered.
+  const [activityTab, setActivityTab] = React.useState<'all' | 'waiting' | 'approved' | 'needs'>('all');
   const [cards, setCards] = React.useState<ProjectCard[]>([]);
   const [search, setSearch] = React.useState('');
   const [picker, setPicker] = React.useState(false);
@@ -3047,7 +3049,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       </Pressable>
       <View style={s.tabHalf}>
         <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
-          onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
+          onPress={() => { setNav('activity'); void refresh(); }}>
           <Text style={[s.tabIcon, active === 'activity' && s.tabIconOn]}>📋</Text>
           <Text style={[s.tabLab, active === 'activity' && s.tabLabOn]}>{T('home.navActivity')}</Text>
         </Pressable>
@@ -3421,6 +3423,107 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           )}
         </ScrollView>
         {bottomNav('jobs', false)}
+        {(bell || drafts.length > 0) && (
+          <View style={s.homeScrim}>
+            <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}
+              keyboardShouldPersistTaps="handled">
+              {draftsOverlay}
+              {activityOverlay}
+            </ScrollView>
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  // ── ACTIVITY — every extra across jobs, by status, day-grouped (mockup) ─────
+  // "displays major activity around communication - created, sent, approved, in
+  //  communication" (hadar, 2026-07-23). One row per extra; the status IS the
+  //  communication state. Reuses homeExtras (all live extras across every job).
+  if (nav === 'activity') {
+    type Ext = (typeof homeExtras)[number];
+    const stateOf = (e: Ext): 'approved' | 'declined' | 'draft' | 'needs' | 'waiting' =>
+      e.status === 'approved' ? 'approved'
+      : e.status === 'declined' ? 'declined'
+      : e.status === 'draft' ? 'draft'
+      : e.questions > 0 ? 'needs' : 'waiting';
+    const stateColor: Record<string, { bg: string; fg: string; emoji: string; label: string }> = {
+      waiting:  { bg: '#FEF6E7', fg: '#B26A00', emoji: '⏳', label: T('act.chipWaiting') },
+      needs:    { bg: '#E8F0FE', fg: '#1A56DB', emoji: '💬', label: T('act.chipNeeds') },
+      approved: { bg: '#E9F6ED', fg: '#1A7F37', emoji: '✅', label: T('act.chipApproved') },
+      draft:    { bg: '#F1F2F4', fg: '#57606a', emoji: '📝', label: T('act.chipCreated') },
+      declined: { bg: '#FDECEC', fg: '#B42318', emoji: '✋', label: T('act.chipDeclined') },
+    };
+    const tabLabel: Record<typeof activityTab, string> = {
+      all: T('act.tabAll'), waiting: T('act.tabWaiting'),
+      approved: T('act.tabApproved'), needs: T('act.tabNeeds'),
+    };
+    const TABS: Array<typeof activityTab> = ['all', 'waiting', 'approved', 'needs'];
+    const list = homeExtras.filter((e) => activityTab === 'all' || stateOf(e) === activityTab);
+    return (
+      <View style={s.homeC}>
+        <View style={s.dashHdr}>
+          <View style={s.hdrBtn} />
+          <Text style={s.hdrTitle}>{T('home.navActivity')}</Text>
+          <View style={s.hdrBtn} />
+        </View>
+        {/* Status tabs: All · Waiting · Approved · Needs you. */}
+        <View style={s.actTabs}>
+          {TABS.map((t) => (
+            <Pressable key={t} style={[s.actTab, activityTab === t && s.actTabOn]}
+              onPress={() => setActivityTab(t)}>
+              <Text style={[s.actTabT, activityTab === t && s.actTabTOn]} numberOfLines={1}>
+                {tabLabel[t]}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <ScrollView style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}>
+          {(() => {
+            let lastDay = '';
+            const nodes: React.ReactNode[] = [];
+            list.forEach((e) => {
+              const day = new Date(e.created_at_ms).toDateString();
+              if (day !== lastDay) {
+                lastDay = day;
+                nodes.push(
+                  <Text key={`d-${day}`} style={s.actDay}>
+                    {dayLabel(e.created_at_ms).toUpperCase()}
+                  </Text>
+                );
+              }
+              const c = stateColor[stateOf(e)];
+              const dl = dayLabel(e.created_at_ms);
+              const when = dl === 'Today'
+                ? new Date(e.created_at_ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+                : dl;
+              nodes.push(
+                <Pressable key={e.id} style={s.actRow}
+                  onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
+                  <View style={[s.actIcon, { backgroundColor: c.bg }]}>
+                    <Text style={s.actIconT}>{c.emoji}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.actName} numberOfLines={1}>{e.scope}</Text>
+                    {!!e.pname && <Text style={s.actSub} numberOfLines={1}>{e.pname}</Text>}
+                  </View>
+                  <View style={s.actRight}>
+                    <View style={[s.actChip, { backgroundColor: c.bg }]}>
+                      <Text style={[s.actChipT, { color: c.fg }]}>{c.label}</Text>
+                    </View>
+                    <Text style={s.actTime}>{when}</Text>
+                  </View>
+                </Pressable>
+              );
+            });
+            return nodes;
+          })()}
+          {!list.length && (
+            <Text style={s.homeEmpty}>{T('act.empty')}</Text>
+          )}
+        </ScrollView>
+        {bottomNav('activity', false)}
         {(bell || drafts.length > 0) && (
           <View style={s.homeScrim}>
             <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}
@@ -4726,6 +4829,26 @@ const s = StyleSheet.create({
   pillTOkOn: { color: '#1A7F37' },
   pillBadge: { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center',
     justifyContent: 'center', paddingHorizontal: 5 },
+  // ── Activity page (mockup 2026-07-23) ──────────────────────────────────────
+  actTabs: { flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingBottom: 10 },
+  actTab: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 20,
+    borderWidth: 1, borderColor: '#E4E5E1', backgroundColor: '#fff', paddingVertical: 8 },
+  actTabOn: { backgroundColor: '#0D0F12', borderColor: '#0D0F12' },
+  actTabT: { fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#57606a' },
+  actTabTOn: { color: '#fff' },
+  actDay: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12, color: '#8A93A0',
+    letterSpacing: 1.2, marginTop: 16, marginBottom: 8 },
+  actRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff',
+    borderColor: '#EEEFEC', borderWidth: 1, borderRadius: 12, paddingVertical: 11,
+    paddingHorizontal: 12, marginBottom: 8 },
+  actIcon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  actIconT: { fontSize: 18 },
+  actName: { fontFamily: 'Barlow_600SemiBold', fontSize: 15, color: '#0D0F12' },
+  actSub: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#8A93A0', marginTop: 1 },
+  actRight: { alignItems: 'flex-end', gap: 4 },
+  actChip: { borderRadius: 6, paddingVertical: 3, paddingHorizontal: 8 },
+  actChipT: { fontFamily: 'Barlow_600SemiBold', fontSize: 11.5 },
+  actTime: { fontFamily: 'Barlow_400Regular', fontSize: 11.5, color: '#8A93A0' },
   homeTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 18, paddingBottom: 6 },
   brand: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 22, color: '#0D0F12',
