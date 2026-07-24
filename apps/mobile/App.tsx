@@ -273,10 +273,21 @@ export default function App() {
   // The wedge home (prototype c1): extras awaiting a signature, and the money already
   // recovered. Both read from real change_order rows — never invented.
   const [homeTab, setHomeTab] = React.useState<'extras' | 'jobs'>('extras');
+  // The ☰ menu on Home: the jobs list + language now live behind it, because the
+  // dashboard's front page is the money, not navigation (hadar, 2026-07-23 mockup).
+  const [menuOpen, setMenuOpen] = React.useState(false);
   const [waiting, setWaiting] = React.useState<Array<{
     id: string; scope: string; amount_cents: number; status: string;
     project_id: string; pname: string; signed_by: string | null; created_at_ms: number }>>([]);
   const [recovered, setRecovered] = React.useState<{ cents: number; n: number }>({ cents: 0, n: 0 });
+  // The Home dashboard's extras, ACROSS every job (hadar, 2026-07-23 mockup): the
+  // sent extras waiting on a client, each with who directed it, its job, and whether
+  // the client has asked a question. `questions` is the same open-question count the
+  // ledger's "discussing" chip reads — a sent extra with one is the ball in YOUR court.
+  const [homeExtras, setHomeExtras] = React.useState<Array<{
+    id: string; scope: string; amount_cents: number; project_id: string;
+    pname: string; who_directed: string; created_at_ms: number;
+    signed_by: string | null; questions: number }>>([]);
   // The funnel ABOVE change orders — a walkthrough IS an extra in the making, and the
   // Extras tab must show the whole pipeline, not only the signed paperwork at the end.
   const [captured, setCaptured] = React.useState<Array<{
@@ -1085,6 +1096,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           `SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS n
              FROM change_order WHERE status = 'approved'`))[0];
         setRecovered(rec ?? { cents: 0, n: 0 });
+        // The Home dashboard: every SENT extra across all jobs, newest first, with
+        // its open-question count. Sent = awaiting the client, which is exactly the
+        // money the hero totals and the two sections split by "needs your response".
+        setHomeExtras(await db.getAll(
+          `SELECT co.id, co.scope, co.amount_cents, co.project_id,
+                  COALESCE(p.name, '') AS pname, co.who_directed, co.created_at_ms,
+                  co.signed_by,
+                  (SELECT COUNT(*) FROM co_question q WHERE q.change_order_id = co.id) AS questions
+             FROM change_order co LEFT JOIN project p ON p.id = co.project_id
+            WHERE co.status = 'sent'
+            ORDER BY co.created_at_ms DESC`));
         // Stage 1: captured walkthroughs not yet reviewed into a decision.
         const pairRows = await db.getAll<{ pair_id: string; start_ms: number; photos: number; voice_id: string | null }>(
           `SELECT cp.pair_id, MIN(cp.at_ms) AS start_ms,
@@ -2992,6 +3014,84 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     );
   }
 
+  // ── SHARED OVERLAYS ───────────────────────────────────────────────────────
+  // The activity centre and the draft-recovery card must reach the user on HOME,
+  // not only inside a project: Home is the landing now, and a recoverable draft is
+  // the one thing on the phone that can still be LOST (mandate #1). Defined once
+  // and rendered in both the Home and Project trees — the early-return structure
+  // rules out a single shared wrapper without a larger refactor.
+  const activityOverlay = bell ? (
+    <View style={s.card}>
+      <Text style={s.cardH}>{T('r8.activity')}</Text>
+      {notifyPerm && notifyPerm !== 'granted' && (
+        <View style={s.coSendRow}>
+          <Text style={s.cardNote}>{T('r8.pushWhy')}</Text>
+          {notifyPerm === 'denied'
+            ? <Text style={s.dmeta}>{T('r8.pushDenied')}</Text>
+            : <Pressable onPress={async () => setNotifyPerm(await requestNotifyPermission())}>
+                <Text style={s.coNudge}>{T('r8.pushAsk')}</Text>
+              </Pressable>}
+        </View>
+      )}
+      {!activity.length && <Text style={s.cardNote}>{T('r8.nothingYet')}</Text>}
+      {activity.slice(0, 40).map((a) => (
+        <Pressable key={a.id} style={s.coSendRow} onPress={async () => {
+          await markRead(db, [a.id]);
+          await openRecord(a.changeOrderId);
+          setBell(false);
+          await refresh();
+        }}>
+          <Text style={a.read ? s.dval : s.coNudge}>
+            {a.kind === 'question' ? '💬 ' : a.kind === 'unpriced' ? '⏱ ' :
+             a.kind === 'approved' ? '✅ ' : a.kind === 'declined' ? '✋ ' : '→ '}
+            {a.kind === 'unpriced' ? T('r3.unpricedRow') + ' — ' : ''}{a.scope}
+          </Text>
+          <Text style={s.dmeta}>
+            {a.jobName}{a.detail ? ` · ${a.detail}` : ''} · {createdLabel(a.atMs)}
+          </Text>
+        </Pressable>
+      ))}
+      {unreadIds(activity).length > 0 && (
+        <Pressable style={s.later} onPress={async () => {
+          await markRead(db, unreadIds(activity)); await refresh();
+        }}>
+          <Text style={s.laterT}>{T('r8.markAllRead')}</Text>
+        </Pressable>
+      )}
+      <Pressable style={s.later} onPress={() => setBell(false)}>
+        <Text style={s.laterT}>{T('common.close')}</Text>
+      </Pressable>
+    </View>
+  ) : null;
+  const draftsOverlay = drafts.length > 0 ? (
+    <DraftRecoveryCard
+      drafts={drafts}
+      busyId={draftBusy}
+      onKeep={async (d) => {
+        setDraftBusy(d.draftId);
+        try {
+          const a = await readDraftArtifacts(db, d.draftId);
+          await onFusedCapture({
+            photos: a.photos, audioSegments: a.audioSegments, stamp: a.stamp,
+            previewUris: a.previewUris, durationSecs: a.durationSecs,
+          });
+          await closeDraft(db, d.draftId, 'committed');
+        } catch (e: any) {
+          setUi({ k: 'refused', why: String(e?.message ?? e) });
+        } finally {
+          setDraftBusy(null);
+          setDrafts(await recoverableDrafts(db, OWNER));
+        }
+      }}
+      onDiscard={async (d) => {
+        setDraftBusy(d.draftId);
+        await closeDraft(db, d.draftId, 'discarded');
+        setDraftBusy(null);
+        setDrafts(await recoverableDrafts(db, OWNER));
+      }}
+    />
+  ) : null;
+
   // ── PROJECTS HOME ─────────────────────────────────────────────────────────
   // CompanyCam's organising idea: you land on your JOBS, each shown by its most
   // recent photo, and you dive into one to capture. Filing is by GPS underneath,
@@ -3004,193 +3104,194 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       .filter((p) => !q || p.name.toLowerCase().includes(q) ||
                      (p.address ?? '').toLowerCase().includes(q));
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
+    // The dashboard's two lists split the sent extras by "is the ball in MY court":
+    // a client question means yes (needs response), otherwise it is still waiting.
+    // The hero totals ALL of them — that is the money outstanding on the client.
+    const needs = homeExtras.filter((e) => e.questions > 0);
+    const waitingList = homeExtras.filter((e) => e.questions === 0);
+    const outstanding = homeExtras.reduce((sum, e) => sum + e.amount_cents, 0);
+    const startCapture = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
+    const disabled = !!gate || !!initError;
     return (
       <View style={s.homeC}>
-        <View style={s.homeTop}>
-          <Text style={s.brand}>EZ<Text style={s.brandAccent}>changeorder</Text></Text>
-          <View style={s.topRight}>
-            {/* R8: the bell. Its badge counts UNANSWERED QUESTIONS only — a number
-                that also counted approvals would sit at 12 on a healthy job and stop
-                meaning anything, and a count nobody can clear is a count nobody
-                reads. */}
-            <Pressable onPress={async () => {
-              setBell(true);
-              // Read on open, not on mount: the answer changes in Settings while
-              // the app is backgrounded, and a stale "off" would keep offering a
-              // button that does nothing.
-              setNotifyPerm(await notifyPermissionStatus());
-            }}>
-              <Text style={unreadCount(activity) > 0 ? s.bellOn : s.bell}>
-                {unreadCount(activity) > 0 ? `🔔 ${unreadCount(activity)}` : '🔔'}
-              </Text>
-            </Pressable>
-            {inbox > 0 && (
-              <Pressable onPress={async () => {
-                setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true);
-              }}>
-                <Text style={s.chipWait}>{T({ k: 'home.inbox', p: { n: inbox } })}</Text>
-              </Pressable>
+        {/* Header: menu · Home · activity bell (mockup 2026-07-23). */}
+        <View style={s.dashHdr}>
+          <Pressable style={s.hdrBtn} onPress={() => setMenuOpen(true)}
+            accessibilityLabel={T('home.menu')} hitSlop={10}>
+            <Text style={s.hdrIcon}>☰</Text>
+          </Pressable>
+          <Text style={s.hdrTitle}>{T('home.title')}</Text>
+          <Pressable style={s.hdrBtn} hitSlop={10}
+            accessibilityLabel={T('r8.activity')}
+            onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
+            <Text style={s.hdrIcon}>🔔</Text>
+            {unreadCount(activity) > 0 && (
+              <View style={s.hdrBadge}><Text style={s.hdrBadgeT}>{unreadCount(activity)}</Text></View>
             )}
-            <Pressable onPress={() => {
-              const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n);
-            }}>
-              <Text style={s.langPill}>{lang === 'en' ? 'ES' : 'EN'}</Text>
-            </Pressable>
-          </View>
+          </Pressable>
         </View>
 
-        {/* CAPTURE FIRST — the trigger moment is "I need to get this down before it
-            slips", so recording starts before any job is chosen. GPS files it after. */}
-        <View style={s.hero}>
-          <Text style={s.heroH}>{T('home.gotOne')}</Text>
-          <Text style={s.heroSub}>{T('home.sayIt')}</Text>
-          <View style={s.capBigBase}>
-            <Pressable
-              style={[s.capBig, (!!gate || !!initError) && s.btnOff]}
-              disabled={!!gate || !!initError}
-              onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
-              <Text style={s.capBigIcon}>🎙</Text>
-              <Text style={s.capBigT}>{T('home.capture')}</Text>
-            </Pressable>
-          </View>
-          <Text style={s.heroHint}>{T('home.filesItself')}</Text>
-        </View>
-
-        <View style={s.jobsWrap}>
-          {/* Two audiences, two tabs: EXTRAS = the money (latest changes, the
-              green-light moment, the recovered collection); JOBS = navigation. */}
-          <View style={s.homeTabs}>
-            <Pressable style={[s.homeTab, homeTab === 'extras' && s.homeTabOn]}
-              onPress={() => setHomeTab('extras')}>
-              <Text style={[s.homeTabT, homeTab === 'extras' && s.homeTabTOn]}>{T('home.tabExtras')}</Text>
-            </Pressable>
-            <Pressable style={[s.homeTab, homeTab === 'jobs' && s.homeTabOn]}
-              onPress={() => setHomeTab('jobs')}>
-              <Text style={[s.homeTabT, homeTab === 'jobs' && s.homeTabTOn]}>{T('home.tabJobs')}</Text>
-            </Pressable>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+          {/* Hero: the money outstanding on the client, across every job. */}
+          <View style={s.heroWrap}>
+            <View style={s.houseArt} pointerEvents="none">
+              <View style={s.houseRoof} />
+              <View style={s.houseBody} />
+            </View>
+            <Text style={s.heroLabel}>{T('home.awaiting')}</Text>
+            <Text style={s.heroBig}>{money(outstanding)}</Text>
+            <Text style={s.heroSub}>
+              {homeExtras.length === 0 ? T('home.awaitNone')
+                : T({ k: 'home.acrossN', p: { n: homeExtras.length } })}
+            </Text>
           </View>
 
-          {homeTab === 'extras' && (<>
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 16 }}>
-              {/* Stage 1 — captured, not yet reviewed. THIS is what "I already have
-                  extras" means: the walkthrough is the extra, before any paperwork. */}
-              {captured.map((c) => (
-                <Pressable key={c.pair_id} style={[s.waitCard, s.waitCardTodo]}
-                  onPress={async () => {
-                    if (!c.voice_id) return;
-                    const pid = await effectiveProject(db, c.voice_id);
-                    if (pid) setProjectId(pid);
-                    setReview(c.voice_id);
-                  }}>
-                  <View style={s.waitRow1}>
-                    <Text style={s.waitName} numberOfLines={1}>
-                      🎙 {T('home.walkthrough')}{c.photos > 0 ? ` · 📸 ${c.photos}` : ''}
-                    </Text>
-                    <View style={[s.waitChip, s.waitChipTodo]}>
-                      <Text style={s.waitChipT}>{T('home.stReview')}</Text>
-                    </View>
-                  </View>
-                  <View style={s.waitRow2}>
-                    <Text style={s.waitMeta}>{ago(c.start_ms, now)} · {T('home.tapToReview')}</Text>
-                  </View>
-                </Pressable>
-              ))}
-              {/* Stage 2 — reviewed into a decision, no price/send yet. */}
-              {unsent.map((d) => (
-                <Pressable key={d.id} style={s.waitCard}
-                  onPress={() => { setProjectId(d.project_id); setNav('project'); }}>
-                  <View style={s.waitRow1}>
-                    <Text style={s.waitName} numberOfLines={1}>
-                      {d.pname ? d.pname + ' · ' : ''}{d.subject}
-                    </Text>
-                    <View style={[s.waitChip, s.waitChipDraft]}>
-                      <Text style={s.waitChipT}>{T('home.stConfirmed')}</Text>
-                    </View>
-                  </View>
-                  <View style={s.waitRow2}>
-                    <Text style={s.waitMeta}>{ago(d.created_at_ms, now)}</Text>
-                  </View>
-                </Pressable>
-              ))}
-              {waiting.map((w) => {
-                const ok = w.status === 'approved';
-                const sent = w.status === 'sent';
-                const chip = ok ? T('home.stApproved') : sent ? T('home.stSent')
-                  : w.status === 'declined' ? T('home.stDeclined') : T('home.stDraft');
-                return (
-                  <Pressable key={w.id} style={[s.waitCard, ok && s.waitCardOk]}
-                    onPress={() => { setProjectId(w.project_id); void openRecord(w.id); }}>
-                    <View style={s.waitRow1}>
-                      <Text style={[s.waitName, ok && s.waitNameOk]} numberOfLines={1}>
-                        {ok ? '✅ ' + T('home.greenLight') + ' — ' : ''}
-                        {w.pname ? w.pname + ' · ' : ''}{w.scope}
-                      </Text>
-                      <Text style={[s.waitAmt, ok && s.waitNameOk]}>{money(w.amount_cents)}</Text>
-                    </View>
-                    <View style={s.waitRow2}>
-                      <Text style={s.waitMeta} numberOfLines={1}>
-                        {ok && w.signed_by ? T({ k: 'home.signedBy', p: { name: w.signed_by } })
-                          : sent ? T('home.stSent') + ' · ' + ago(w.created_at_ms, now)
-                          : w.status === 'declined' ? T('home.stDeclined')
-                          : T('home.stDraft')}
-                      </Text>
-                      <View style={[s.waitChip,
-                        ok ? s.waitChipOk : sent ? s.waitChipSent
-                           : w.status === 'declined' ? s.waitChipNo : s.waitChipDraft]}>
-                        <Text style={[s.waitChipT, sent && { color: '#0D0F12' }]}>{chip}</Text>
-                      </View>
-                    </View>
-                  </Pressable>
-                );
-              })}
-              {!waiting.length && !captured.length && !unsent.length && (
-                <Text style={s.homeEmpty}>{T('home.emptyExtras')}</Text>
-              )}
-            </ScrollView>
-            {/* Anchored: the scoreboard never scrolls away — the list moves, the goal doesn't. */}
-            <View style={s.recCard}>
-              <View>
-                <Text style={s.recLab}>{T('home.recovered')}</Text>
-                <Text style={s.recVal}>{money(recovered.cents)}</Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={s.recLab}>{T('home.approvedN')}</Text>
-                <Text style={s.recVal}>{recovered.n}</Text>
+          {/* CAPTURE FIRST — the trigger moment is "get this down before it slips",
+              so recording starts before any job is chosen. GPS files it after. */}
+          <Pressable style={[s.ctaCard, disabled && s.btnOff]} disabled={disabled}
+            onPress={startCapture}>
+            <View style={s.ctaIcon}><Text style={s.ctaIconT}>📷</Text></View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.ctaTitle}>{T('home.recordExtra')}</Text>
+              <Text style={s.ctaSub}>{T('home.recordSub')}</Text>
+            </View>
+          </Pressable>
+
+          {/* Needs your response — a client asked a question; the ball is in YOUR court. */}
+          {needs.length > 0 && (<>
+            <View style={s.secHead}>
+              <Text style={s.secLab}>{T('home.needsResponse')}</Text>
+              <View style={[s.secBadge, s.secBadgeWarn]}>
+                <Text style={s.secBadgeT}>{needs.length}</Text>
               </View>
             </View>
-          </>)}
-
-          {homeTab === 'jobs' && (<>
-          <View style={s.jobsHead}>
-            <Text style={s.sectionLab}>{T('home.yourJobs')}</Text>
-            <Pressable onPress={() => setNewJob({ name: '', address: '' })}>
-              <Text style={s.addJob}>＋ {T('home.newProject')}</Text>
-            </Pressable>
-          </View>
-          {cards.length > 4 && (
-            <TextInput style={s.searchIn} value={search} onChangeText={setSearch}
-              placeholder={T('home.search')} placeholderTextColor="#8c959f" />
-          )}
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 28 }}>
-            {shown.map((p) => (
-              <Pressable key={p.id} style={s.jobItem} onPress={() => open(p.id)}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.jobItemName} numberOfLines={1}>{p.name}</Text>
-                  <Text style={s.jobItemMeta} numberOfLines={1}>
-                    {p.address ?? T('home.noAddress')}
-                    {p.lastMs ? ' · ' + ago(p.lastMs, now) : ''}
-                  </Text>
+            {needs.map((e) => (
+              <Pressable key={e.id} style={s.exCard}
+                onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
+                <View style={s.exTop}>
+                  <Text style={s.exName} numberOfLines={1}>{e.scope}</Text>
+                  <Text style={s.exAmt}>{money(e.amount_cents)}</Text>
                 </View>
-                <Text style={s.jobCount}>{p.captureCount}</Text>
-                <Text style={s.chev}>›</Text>
+                <Text style={s.exMeta} numberOfLines={1}>
+                  {e.who_directed}{e.pname ? ' · ' + e.pname : ''}
+                </Text>
+                <View style={s.exBottom}>
+                  <Text style={s.exQuestion}>{T('home.clientQuestion')}</Text>
+                  <Text style={s.chev}>›</Text>
+                </View>
               </Pressable>
             ))}
-            {!shown.length && (
-              <Text style={s.homeEmpty}>{q ? T('home.noMatch') : T('home.noProjects')}</Text>
-            )}
-          </ScrollView>
           </>)}
+
+          {/* Waiting for approval — sent, no question yet: the client still has it. */}
+          {waitingList.length > 0 && (<>
+            <View style={s.secHead}>
+              <Text style={s.secLab}>{T('home.awaiting')}</Text>
+              <View style={[s.secBadge, s.secBadgeInfo]}>
+                <Text style={s.secBadgeT}>{waitingList.length}</Text>
+              </View>
+            </View>
+            {waitingList.map((e) => (
+              <Pressable key={e.id} style={s.exCard}
+                onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
+                <View style={s.exTop}>
+                  <Text style={s.exName} numberOfLines={1}>{e.scope}</Text>
+                  <Text style={s.exAmt}>{money(e.amount_cents)}</Text>
+                </View>
+                <Text style={s.exMeta} numberOfLines={1}>
+                  {T({ k: 'home.sentAgo', p: { ago: ago(e.created_at_ms, now) } })}
+                  {e.who_directed ? ' · ' + e.who_directed : ''}
+                </Text>
+              </Pressable>
+            ))}
+          </>)}
+
+          {homeExtras.length === 0 && (
+            <Text style={s.homeEmpty}>{T('home.emptyDash')}</Text>
+          )}
+        </ScrollView>
+
+        {/* Bottom nav: Home · + (capture) · Activity. */}
+        <View style={s.tabBar}>
+          <Pressable style={s.tab} onPress={() => {}} accessibilityLabel={T('home.navHome')}>
+            <Text style={[s.tabIcon, s.tabIconOn]}>🏠</Text>
+            <Text style={[s.tabLab, s.tabLabOn]}>{T('home.navHome')}</Text>
+          </Pressable>
+          <Pressable style={[s.fab, disabled && s.btnOff]} disabled={disabled}
+            onPress={startCapture} accessibilityLabel={T('home.recordExtra')} hitSlop={8}>
+            <Text style={s.fabT}>＋</Text>
+          </Pressable>
+          <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
+            onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
+            <Text style={s.tabIcon}>📋</Text>
+            <Text style={s.tabLab}>{T('home.navActivity')}</Text>
+          </Pressable>
         </View>
+
+        {/* Overlays float ABOVE the fixed tab bar in a scrim — inline cards would
+            render under the bar and be unreachable. Draft recovery shows itself
+            (mandate #1); the bell and the ☰ menu open on tap. */}
+        {(bell || menuOpen || drafts.length > 0) && (
+          <View style={s.homeScrim}>
+            <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}
+              keyboardShouldPersistTaps="handled">
+            {draftsOverlay}
+            {activityOverlay}
+            {menuOpen && (
+              <View style={s.menuCard}>
+            <Text style={s.cardH}>{T('home.menu')}</Text>
+            <View style={s.jobsHead}>
+              <Text style={s.sectionLab}>{T('home.yourJobs')}</Text>
+              <Pressable onPress={() => { setMenuOpen(false); setNewJob({ name: '', address: '' }); }}>
+                <Text style={s.addJob}>＋ {T('home.newProject')}</Text>
+              </Pressable>
+            </View>
+            {cards.length > 4 && (
+              <TextInput style={s.searchIn} value={search} onChangeText={setSearch}
+                placeholder={T('home.search')} placeholderTextColor="#8c959f" />
+            )}
+            <ScrollView style={{ maxHeight: 320 }}>
+              {shown.map((p) => (
+                <Pressable key={p.id} style={s.jobItem}
+                  onPress={() => { setMenuOpen(false); open(p.id); }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.jobItemName} numberOfLines={1}>{p.name}</Text>
+                    <Text style={s.jobItemMeta} numberOfLines={1}>
+                      {p.address ?? T('home.noAddress')}
+                      {p.lastMs ? ' · ' + ago(p.lastMs, now) : ''}
+                    </Text>
+                  </View>
+                  <Text style={s.jobCount}>{p.captureCount}</Text>
+                  <Text style={s.chev}>›</Text>
+                </Pressable>
+              ))}
+              {!shown.length && (
+                <Text style={s.homeEmpty}>{q ? T('home.noMatch') : T('home.noProjects')}</Text>
+              )}
+            </ScrollView>
+            <View style={s.menuFooter}>
+              <Pressable onPress={() => {
+                const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n);
+              }}>
+                <Text style={s.langPill}>{lang === 'en' ? 'ES' : 'EN'}</Text>
+              </Pressable>
+              {inbox > 0 && (
+                <Pressable onPress={async () => {
+                  setMenuOpen(false);
+                  setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true);
+                }}>
+                  <Text style={s.chipWait}>{T({ k: 'home.inbox', p: { n: inbox } })}</Text>
+                </Pressable>
+              )}
+            </View>
+            <Pressable style={s.later} onPress={() => setMenuOpen(false)}>
+              <Text style={s.laterT}>{T('common.close')}</Text>
+            </Pressable>
+              </View>
+            )}
+            </ScrollView>
+          </View>
+        )}
       </View>
     );
   }
@@ -4014,93 +4115,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       {/* R8 activity centre. Every row deep-links to the item's record (R6b) —
           the same destination the push would open, so an unanswered question is at
           most two taps from anywhere. */}
-      {bell && (
-        <View style={s.card}>
-          <Text style={s.cardH}>{T('r8.activity')}</Text>
-          {/* The only place the OS dialog is raised, and it is behind a tap on
-              purpose: requesting from a tick blocks until a human answers, and
-              once that once hung a whole automated run with nothing to see.
-              'denied' offers no button — iOS will not ask twice, so a button
-              that silently does nothing is worse than the sentence telling you
-              where to go. */}
-          {notifyPerm && notifyPerm !== 'granted' && (
-            <View style={s.coSendRow}>
-              <Text style={s.cardNote}>{T('r8.pushWhy')}</Text>
-              {notifyPerm === 'denied'
-                ? <Text style={s.dmeta}>{T('r8.pushDenied')}</Text>
-                : <Pressable onPress={async () => setNotifyPerm(await requestNotifyPermission())}>
-                    <Text style={s.coNudge}>{T('r8.pushAsk')}</Text>
-                  </Pressable>}
-            </View>
-          )}
-          {!activity.length && <Text style={s.cardNote}>{T('r8.nothingYet')}</Text>}
-          {activity.slice(0, 40).map((a) => (
-            <Pressable key={a.id} style={s.coSendRow} onPress={async () => {
-              // Reading it marks THIS row read, never the whole list: a badge that
-              // clears because you opened the sheet has told you nothing.
-              await markRead(db, [a.id]);
-              await openRecord(a.changeOrderId);
-              setBell(false);
-              await refresh();
-            }}>
-              <Text style={a.read ? s.dval : s.coNudge}>
-                {a.kind === 'question' ? '💬 ' : a.kind === 'unpriced' ? '⏱ ' :
-                 a.kind === 'approved' ? '✅ ' : a.kind === 'declined' ? '✋ ' : '→ '}
-                {a.kind === 'unpriced' ? T('r3.unpricedRow') + ' — ' : ''}{a.scope}
-              </Text>
-              <Text style={s.dmeta}>
-                {a.jobName}{a.detail ? ` · ${a.detail}` : ''} · {createdLabel(a.atMs)}
-              </Text>
-            </Pressable>
-          ))}
-          {unreadIds(activity).length > 0 && (
-            <Pressable style={s.later} onPress={async () => {
-              await markRead(db, unreadIds(activity)); await refresh();
-            }}>
-              <Text style={s.laterT}>{T('r8.markAllRead')}</Text>
-            </Pressable>
-          )}
-          <Pressable style={s.later} onPress={() => setBell(false)}>
-            <Text style={s.laterT}>{T('common.close')}</Text>
-          </Pressable>
-        </View>
-      )}
+      {activityOverlay}
       {/* R1: a walk this phone still holds and never filed. Offered BEFORE anything
           else on the screen, because it is the only thing here that can be lost —
           everything below it is already committed. */}
-      {drafts.length > 0 && (
-        <DraftRecoveryCard
-          drafts={drafts}
-          busyId={draftBusy}
-          onKeep={async (d) => {
-            setDraftBusy(d.draftId);
-            try {
-              const a = await readDraftArtifacts(db, d.draftId);
-              // Straight into the SAME commit path a live capture uses. A second
-              // path would be a second set of bugs, and this one is proven.
-              await onFusedCapture({
-                photos: a.photos, audioSegments: a.audioSegments, stamp: a.stamp,
-                previewUris: a.previewUris, durationSecs: a.durationSecs,
-              });
-              // Closed only AFTER the commit returns. A crash between them leaves the
-              // draft recoverable again — offering a walk twice is recoverable, and
-              // closing a draft whose commit failed is not.
-              await closeDraft(db, d.draftId, 'committed');
-            } catch (e: any) {
-              setUi({ k: 'refused', why: String(e?.message ?? e) });
-            } finally {
-              setDraftBusy(null);
-              setDrafts(await recoverableDrafts(db, OWNER));
-            }
-          }}
-          onDiscard={async (d) => {
-            setDraftBusy(d.draftId);
-            await closeDraft(db, d.draftId, 'discarded');
-            setDraftBusy(null);
-            setDrafts(await recoverableDrafts(db, OWNER));
-          }}
-        />
-      )}
+      {draftsOverlay}
       {sendPrep && (() => {
         const sp = sendPrep;
         const sug = sp.suggestion;
@@ -4683,6 +4702,65 @@ const s = StyleSheet.create({
     paddingHorizontal: 5, paddingVertical: 3, backgroundColor: '#00000099' },
   // ── capture-first home (prototype c1) ──────────────────────────────────────
   homeC: { flex: 1, backgroundColor: '#FAFAF8', paddingTop: 54 },
+  // ── Home dashboard (mockup 2026-07-23): money first, two lists, bottom nav ──
+  dashHdr: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 14, paddingBottom: 6 },
+  hdrBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  hdrIcon: { fontSize: 22, color: '#0D0F12' },
+  hdrTitle: { fontFamily: 'Barlow_600SemiBold', fontSize: 18, color: '#0D0F12' },
+  hdrBadge: { position: 'absolute', top: 3, right: 3, minWidth: 18, height: 18, borderRadius: 9,
+    backgroundColor: '#2563EB', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  hdrBadgeT: { color: '#fff', fontSize: 11, fontFamily: 'Barlow_700Bold' },
+  heroWrap: { paddingHorizontal: 22, paddingTop: 14, paddingBottom: 20 },
+  heroLabel: { fontFamily: 'Barlow_500Medium', fontSize: 14, color: '#6B7280', marginBottom: 2 },
+  heroBig: { fontFamily: 'Barlow_700Bold', fontSize: 46, color: '#0D0F12', letterSpacing: -1 },
+  // House line-art without an SVG dep: a faint roof triangle over a body square.
+  houseArt: { position: 'absolute', right: 20, top: 22, width: 96, height: 74 },
+  houseRoof: { position: 'absolute', top: 0, left: 8, width: 0, height: 0,
+    borderLeftWidth: 40, borderRightWidth: 40, borderBottomWidth: 30,
+    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#DCE0E6' },
+  houseBody: { position: 'absolute', top: 30, left: 18, width: 60, height: 44,
+    borderWidth: 2, borderColor: '#DCE0E6', borderTopWidth: 0 },
+  ctaCard: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#16223D',
+    marginHorizontal: 16, borderRadius: 16, paddingVertical: 18, paddingHorizontal: 18, marginBottom: 22 },
+  ctaIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#24325A',
+    alignItems: 'center', justifyContent: 'center' },
+  ctaIconT: { fontSize: 22 },
+  ctaTitle: { color: '#fff', fontFamily: 'Barlow_700Bold', fontSize: 17 },
+  ctaSub: { color: '#AEB8CC', fontFamily: 'Barlow_400Regular', fontSize: 13, marginTop: 2 },
+  secHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18,
+    marginTop: 6, marginBottom: 10 },
+  secLab: { fontFamily: 'Barlow_600SemiBold', fontSize: 16, color: '#0D0F12' },
+  secBadge: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center',
+    justifyContent: 'center', paddingHorizontal: 6 },
+  secBadgeWarn: { backgroundColor: '#F59E0B' },
+  secBadgeInfo: { backgroundColor: '#2563EB' },
+  secBadgeT: { color: '#fff', fontSize: 12, fontFamily: 'Barlow_700Bold' },
+  exCard: { backgroundColor: '#fff', borderColor: '#E9EAE7', borderWidth: 1, borderRadius: 12,
+    marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 14, paddingVertical: 13 },
+  exTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  exName: { flex: 1, fontFamily: 'Barlow_600SemiBold', fontSize: 15.5, color: '#0D0F12', marginRight: 10 },
+  exAmt: { fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#0D0F12' },
+  exMeta: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#6B7280', marginTop: 4 },
+  exBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
+  exQuestion: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#E8833A' },
+  tabBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
+    borderTopWidth: 1, borderTopColor: '#E9EAE7', backgroundColor: '#fff',
+    paddingTop: 8, paddingBottom: 26 },
+  tab: { alignItems: 'center', justifyContent: 'center', minWidth: 72, gap: 2 },
+  tabIcon: { fontSize: 20, opacity: 0.45 },
+  tabIconOn: { opacity: 1 },
+  tabLab: { fontFamily: 'Barlow_500Medium', fontSize: 11, color: '#8A93A0' },
+  tabLabOn: { color: '#2563EB' },
+  fab: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#2563EB',
+    alignItems: 'center', justifyContent: 'center', marginTop: -18,
+    shadowColor: '#2563EB', shadowOpacity: 0.4, shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+  fabT: { color: '#fff', fontSize: 30, marginTop: -2, fontFamily: 'Barlow_400Regular' },
+  homeScrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(13,15,18,0.45)', paddingHorizontal: 14 },
+  menuCard: { backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 16 },
+  menuFooter: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
   homeTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 18, paddingBottom: 6 },
   brand: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 22, color: '#0D0F12',
