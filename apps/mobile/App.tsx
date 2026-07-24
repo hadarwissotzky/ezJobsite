@@ -4041,223 +4041,68 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                         billingTiming: 'when_completed', scheduleEffect: null,
                         scheduleDaysText: '', exclusions: '' });
           }} />
-          <Text style={s.ledgerHead}>Extras</Text>
-
-          {/* Dark totals card — reads as the summary, not another row. */}
-          <View style={s.totalCard}>
-            <View style={s.tcRow}>
-              <Text style={s.tcRowLabel}>Approved extras ({approved.length})</Text>
-              <Text style={s.tcRowVal}>{money(approvedCents)}</Text>
+          {/* Approved vs awaiting, AGAINST PRICE — the breakdown to keep (hadar,
+              2026-07-24). The flag, progress-update and evidence-bundle tools were
+              removed from here: good features, but they blended into the extras. */}
+          <View style={s.jxTotals}>
+            <View style={s.jxTotCol}>
+              <Text style={s.jxTotLab}>{T('job.totApproved')} · {approved.length}</Text>
+              <Text style={s.jxTotVal}>{money(approvedCents)}</Text>
             </View>
-            <View style={s.tcRow}>
-              <Text style={s.tcRowLabel}>Awaiting approval ({awaiting.length})</Text>
-              <Text style={[s.tcRowVal, s.tcCaution]}>{money(awaitingCents)}</Text>
-            </View>
-            <View style={s.tcGrand}>
-              <Text style={s.tcGrandLabel}>Extras total if approved</Text>
-              <Text style={s.tcGrandVal}>{money(approvedCents + awaitingCents)}</Text>
+            <View style={s.jxTotDiv} />
+            <View style={s.jxTotCol}>
+              <Text style={s.jxTotLab}>{T('job.totAwaiting')} · {awaiting.length}</Text>
+              <Text style={[s.jxTotVal, s.jxTotWait]}>{money(awaitingCents)}</Text>
             </View>
           </View>
 
-          {/* Notation status. HONEST: we know it was sent and is not yet signed.
-              We do NOT claim "viewed 26h ago · 1 reminder sent" like the mockup —
-              that state isn't tracked yet, and a fabricated status is mandate #1's
-              dishonest "saved" wearing a different hat. */}
-          {awaiting.length > 0 && (
-            <View style={s.flag}>
-              <Text style={s.flagT}>
-                ⚑ {awaiting.length} sent, not yet signed — {money(awaitingCents)} awaiting approval.
-              </Text>
-            </View>
-          )}
-
-          {/* REP-2. Telling the client what's happening is the weekly act; the
-              evidence bundle is break-glass. Order reflects that. */}
-          <Pressable style={s.bundleBtn} onPress={async () => {
-            const r = await buildProgressUpdate(connector.client, projectId);
-            if (!r.ok) { setBundling(r.reason); return; }
-            const s2 = await shareProgressUpdate(r.text);
-            if (!s2.ok && s2.reason) setBundling(s2.reason);
-          }}>
-            <Text style={s.bundleT}>{T('rep.send')}</Text>
-          </Pressable>
-          <Pressable style={s.bundleBtn} onPress={async () => {
-            setBundling('Assembling…');
-            const r = await buildDisputeBundle(connector.client, projectId);
-            if (!r.ok) { setBundling(`Could not assemble: ${r.reason}`); return; }
-            const s2 = await shareBundle(r.htmlPath);
-            setBundling(s2.ok
-              ? `Bundle ready — ${(r.json.change_orders ?? []).length} change order(s), ` +
-                `${(r.json.decisions ?? []).length} decision(s), ${(r.json.captures ?? []).length} capture(s)`
-              : s2.reason ?? 'saved');
-          }}>
-            <Text style={s.bundleT}>Export evidence bundle →</Text>
-          </Pressable>
-          {bundling && <Text style={s.dmeta}>{bundling}</Text>}
-
-          {/* Each extra as a card, filtered by the pill above (jobShown). */}
-          {jobShown.map((c) => {
-            // R7: the chip is DERIVED, not read straight off the row. `discussing` is
-            // not a stored status (220_question_path: it is derivable, and a status two
-            // writers can move is a status nobody can rely on).
-            const disp = displayStatus(c.status, { openQuestions: questions[c.id] ?? 0 });
-            const chip = coChip(disp);
-            return (
-              // The card is a View, NOT a Pressable wrapping everything. R6b wants the
-              // row to open the record, but nesting the Send control inside a
-              // full-card Pressable means one tap can fire both: the record opens,
-              // the ledger unmounts, and the async send finishes with its link
-              // nowhere to show. So the open-record target and Send are SIBLINGS.
-              <View key={c.id} style={s.coCard}>
-                <Pressable
-                  accessibilityLabel={`Open record: ${c.scope}`}
-                  // The ONE open-record path (openRecord's header: the bell row, the
-                  // push tap and this row MUST land in the same place). This was an
-                  // inline near-copy of it that predated the helper — it opened
-                  // silently on failure and would have missed each layer added since.
-                  onPress={() => { void openRecord(c.id); }}>
-                  {/* Photo thumbnail (hadar, 2026-07-24): the extra's first photo,
-                      left of the content. Voice-only extras show a document glyph. */}
-                  <View style={s.coHead}>
-                    {c.photo_relpath
-                      ? <Image source={{ uri: FS.documentDirectory + c.photo_relpath }}
-                          style={s.coThumb} resizeMode="cover" />
-                      : <View style={[s.coThumb, s.coThumbEmpty]}>
-                          <Text style={s.coThumbIcon}>🎙</Text>
-                        </View>}
-                    <View style={{ flex: 1 }}>
-                      <View style={s.coR1}>
-                        <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>
-                        <View style={[s.chipBase, chip.bg]}>
-                          <Text style={[s.chipText, chip.dark && s.chipTextDark]}>{chip.label}</Text>
-                        </View>
-                      </View>
-                      {/* The AI's category tag: what KIND of extra this is (hadar,
-                          2026-07-23). The title says the specifics; this says the kind.
-                          Absent until processed — a first-class null, never a blocker. */}
-                      {c.extra_type && isExtraType(c.extra_type) && (
-                        <View style={s.coTag}>
-                          <Text style={s.coTagT}>{typeLabel(c.extra_type)}</Text>
-                        </View>
-                      )}
-                      <View style={s.coR2}>
-                        {/* R3 AC3: an EWA has no price, so "$0.00" would read as "this
-                            extra is free". Show the TERM instead — the cap is exposure. */}
-                        <Text style={s.coAmt}>
-                          {ewaSet.has(c.id)
-                            ? T(ewas.find((e) => e.id === c.id)?.proceed === 'tm_capped'
-                                ? 'ewa.rowTm' : 'ewa.rowHold')
-                            : `${c.amount}${c.is_mini ? ' · mini' : ''}${c.nte ? ` · NTE ${c.nte}` : ''}`}
-                        </Text>
-                        {c.signed_by && <Text style={s.coSub}>Signed by {c.signed_by}</Text>}
-                      </View>
-                    </View>
-                  </View>
-                  {/* PRD R7: the list is ordered by create date, so the row states it —
-                      an order you can't see is an order the user has to take on faith.
-                      This is when the change order was created (the price-confirm
-                      moment), not the capture moment; the record shows both. */}
-                  <Text style={s.coCreated}>Created {c.created}</Text>
-                  {/* The chip is a label; this is the instruction. A client's question
-                      means the ball is in HIS court, and "Discussing" does not say that. */}
-                  {/* R5b: the way in. A question that is visible but unanswerable is
-                      not much better than one that is invisible — the whole finding
-                      was that the app never read confirmation_question at all. */}
-                  {(disp === 'discussing' || (threads.get(c.id)?.length ?? 0) > 0) && (
-                    <Pressable style={s.coSendRow} onPress={() => openThread(c, disp === 'discussing')}>
-                      <Text style={s.coNudge}>
-                        {disp === 'discussing' ? T('co.answerOwed') : T('r5b.openThread')}
-                      </Text>
-                    </Pressable>
+          {/* Grouped sections with photo thumbnails (the mockup). A card shows the
+              photo, title, category and price; tapping it opens the extra's DETAIL
+              page, where send / finish / remind / delete / revise now live. A pill
+              focuses one section; "See all" toggles that focus. */}
+          {(() => {
+            const fg = { waiting: '#B26A00', needs: '#1A56DB', approved: '#1A7F37' } as const;
+            const label = { waiting: T('job.pillWaiting'), needs: T('job.pillNeeds'), approved: T('job.pillApproved') };
+            const card = (c: LedgerRow, bucket: 'waiting' | 'needs' | 'approved') => (
+              <Pressable key={c.id} style={s.jxCard} onPress={() => { void openRecord(c.id); }}>
+                {c.photo_relpath
+                  ? <Image source={{ uri: FS.documentDirectory + c.photo_relpath }}
+                      style={s.jxThumb} resizeMode="cover" />
+                  : <View style={[s.jxThumb, s.coThumbEmpty]}><Text style={s.coThumbIcon}>🎙</Text></View>}
+                <View style={{ flex: 1 }}>
+                  <Text style={s.jxName} numberOfLines={1}>{c.scope}</Text>
+                  {c.extra_type && isExtraType(c.extra_type) && (
+                    <Text style={s.jxSub} numberOfLines={1}>{typeLabel(c.extra_type)}</Text>
                   )}
-                  {!c.synced && <Text style={s.coOnPhone}>On this phone · not backed up yet</Text>}
-                </Pressable>
-                {/* Gate on STATUS, not on signed_by. A declined row has no signer,
-                    so gating on signed_by offered to re-send something the client
-                    had already refused; approved/superseded are equally finished.
-                    Sending again is legitimate only while it is still open, and it
-                    now RETIRES the previous link (250_one_live_link). */}
-                {(c.status === 'draft' || c.status === 'sent') && (() => {
-                  // THE GATE. An extra may not be sent until everything behind it
-                  // has uploaded and been processed — otherwise the client opens a
-                  // link describing work whose evidence is still on the phone and
-                  // may never arrive. A missing entry counts as NOT ready: an
-                  // unknown answer must never open a send.
-                  //
-                  // Resend is exempt. The link already went out and the client may
-                  // be holding it; re-sharing the same link cannot make the record
-                  // any less backed than it already is, and blocking it would strand
-                  // someone mid-conversation.
-                  // FLOW step 3 gate: an unpriced draft's next step is FINISHING
-                  // it, never sending it — an unpriced send would put a
-                  // price-less instrument in front of an owner.
-                  if (c.status === 'draft' && c.amount_cents == null) {
-                    return (
-                      <Pressable style={s.coSendRow} onPress={() => finishExtraById(c.id)}>
-                        <Text style={s.coNudge}>{T('co.finish')}</Text>
-                      </Pressable>
-                    );
-                  }
-                  const gate = c.status === 'sent'
-                    ? { ok: true as const }
-                    : canSendExtra((readiness.get(c.id) ?? 'captured') as any);
-                  if (!gate.ok) {
-                    return (
-                      <View style={s.coSendRow}>
-                        <Text style={s.dmeta}>{T(gate.whyKey!)}</Text>
-                      </View>
-                    );
-                  }
-                  return (
-                    <Pressable style={s.coSendRow} onPress={() => openSendPrep(c)}>
-                      <Text style={s.coNudge}>
-                        {c.status === 'sent' ? 'Resend link →' : 'Send for approval →'}
-                      </Text>
-                    </Pressable>
-                  );
-                })()}
-                {/* Delete, offered ONLY on a draft. The moment a link exists a
-                    client may have opened it and read a frozen price, and that is
-                    theirs too — Revise retires those, this does not touch them.
-                    The tap opens a confirmation; it never deletes. */}
-                {c.status === 'draft' && (
-                  <Pressable style={s.coSendRow} onPress={async () => {
-                    // Same wrap as the record screen's Delete, same reason.
-                    try {
-                      const plan = await previewDiscard(db, c.id);
-                      setDiscard({ co: c, plan });
-                    } catch (e: any) {
-                      setUi({ k: 'refused', why: e?.message ?? String(e) });
-                    }
-                  }}>
-                    <Text style={s.coNudge}>{T('discard.action')}</Text>
-                  </Pressable>
-                )}
-                {/* R8: REMIND, not resend. Resend mints a new token and retires the
-                    one already in the client's messages, so scrolling back to the
-                    original text would give them "This version was replaced" because
-                    they were reminded. This re-shares the SAME link. */}
-                {c.status === 'sent' && (
-                  <Pressable style={s.coSendRow} onPress={async () => {
-                    const r = await remindExtra(c, (questions[c.id] ?? 0) > 0);
-                    if (!r.ok) setUi({ k: 'refused', why: r.why ?? '' });
-                  }}>
-                    <Text style={s.coNudge}>{T('r8.remind')} →</Text>
-                  </Pressable>
-                )}
-                {/* A sent extra is frozen — the local trigger says so in its own error
-                    ("a sent change order is frozen: supersede it"). So the move is a NEW
-                    priced version that retires this one. The price still goes through the
-                    read-back composer: a revision carries a number, and mandate #6 has no
-                    shortcut for the second one. */}
-                {canSupersede(c.status) && (
-                  <Pressable style={s.coSendRow} onPress={() => startRevision(c)}>
-                    <Text style={s.coNudge}>{T('co.revise')}</Text>
-                  </Pressable>
-                )}
-              </View>
+                  {c.amount_cents != null && <Text style={s.jxAmt}>{c.amount}</Text>}
+                </View>
+                <View style={[s.jxChip, { borderColor: fg[bucket] }]}>
+                  <Text style={[s.jxChipT, { color: fg[bucket] }]}>{label[bucket]}</Text>
+                </View>
+              </Pressable>
             );
-          })}
+            const section = (labelKey: string, rows: LedgerRow[], bucket: 'waiting' | 'needs' | 'approved') => {
+              if (rows.length === 0 || (jobFilter !== null && jobFilter !== bucket)) return null;
+              return (
+                <View style={{ marginTop: 8 }}>
+                  <View style={s.jxSecHead}>
+                    <Text style={s.jxSecLab}>{T(labelKey)}</Text>
+                    <Pressable hitSlop={8} onPress={() => setJobFilter(jobFilter === bucket ? null : bucket)}>
+                      <Text style={s.jxSeeAll}>{jobFilter === bucket ? T('job.seeLess') : T('job.seeAll')}</Text>
+                    </Pressable>
+                  </View>
+                  {rows.map((c) => card(c, bucket))}
+                </View>
+              );
+            };
+            return (
+              <>
+                {section('job.secWaiting', jobWaiting, 'waiting')}
+                {section('job.secNeeds', jobNeeds, 'needs')}
+                {section('job.secApproved', jobApproved, 'approved')}
+              </>
+            );
+          })()}
         </>
         );
       })()}
@@ -4881,6 +4726,29 @@ const s = StyleSheet.create({
   pillTOkOn: { color: '#1A7F37' },
   pillBadge: { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center',
     justifyContent: 'center', paddingHorizontal: 5 },
+  // ── Job extras: approved/awaiting breakdown + grouped sections (2026-07-24) ─
+  jxTotals: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
+    borderColor: '#E9EAE7', borderWidth: 1, borderRadius: 14, paddingVertical: 14,
+    marginTop: 4, marginBottom: 4 },
+  jxTotCol: { flex: 1, alignItems: 'center' },
+  jxTotDiv: { width: 1, height: 34, backgroundColor: '#ECEEEA' },
+  jxTotLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 11.5, color: '#6B7280',
+    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 3 },
+  jxTotVal: { fontFamily: 'Barlow_700Bold', fontSize: 20, color: '#1A7F37' },
+  jxTotWait: { color: '#B26A00' },
+  jxSecHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 8, marginTop: 6 },
+  jxSecLab: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 14, color: '#0D0F12',
+    textTransform: 'uppercase', letterSpacing: 0.8 },
+  jxSeeAll: { fontFamily: 'Barlow_500Medium', fontSize: 13, color: '#2563EB' },
+  jxCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff',
+    borderColor: '#E9EAE7', borderWidth: 1, borderRadius: 12, padding: 10, marginBottom: 8 },
+  jxThumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#EDEFF2' },
+  jxName: { fontFamily: 'Barlow_600SemiBold', fontSize: 15.5, color: '#0D0F12' },
+  jxSub: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#8A93A0', marginTop: 1 },
+  jxAmt: { fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#0D0F12', marginTop: 3 },
+  jxChip: { borderRadius: 8, borderWidth: 1, paddingVertical: 5, paddingHorizontal: 10 },
+  jxChipT: { fontFamily: 'Barlow_600SemiBold', fontSize: 12.5 },
   // ── Activity page (mockup 2026-07-23) ──────────────────────────────────────
   actTabs: { flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingBottom: 10 },
   actTab: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 20,
