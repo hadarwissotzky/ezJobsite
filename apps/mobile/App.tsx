@@ -551,6 +551,33 @@ const applyProposalToExtra = async (
 };
 
 /**
+ * File a just-recorded walk to the job the human picked — the SAME path whether the
+ * job already existed or was created on the spot. Files each capture, moves the draft
+ * change order to that job, then starts the processing screen that opens the details.
+ *
+ * ONE function so the two entry points cannot diverge again: creating a new job used
+ * to file the captures but skip the rehome + transition, so the extra "finished" as an
+ * unprocessed draft with nothing uploaded and no next step (hadar, 2026-07-24).
+ */
+const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
+  for (const id of a.ids) {
+    await fileCapture(db, { captureId: id, projectId: projId, by: OWNER });
+  }
+  setAssign(null); setAssignQ(''); setFiled(null);
+  setProjectId(projId);
+  const anchorCoId = a.anchorCoId;
+  const anchorCapId = a.anchorCaptureId ?? null;
+  if (anchorCoId) await rehomeDraftExtra(db, anchorCoId, projId);
+  await refresh();
+  if (anchorCoId) {
+    setTransition({
+      ids: a.ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
+      uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
+    });
+  }
+};
+
+/**
  * Step 2 confirmed -> the extra is priced. Updates the capture-draft in place
  * (existingCoId) or mints the extra (decision/EWA/revision paths), records the
  * priced actor, settles an EWA link and applies a supersession when relevant.
@@ -2496,16 +2523,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               setProjects(await listProjects(db));
               setNewJob(null); setPicker(false);
               // If we got here FROM the post-recording assign flow, the walk's
-              // captures were waiting on a job — file them to the one just created,
-              // then close the assign sheet. The extra now HAS a job (mandate #8).
-              if (assign) {
-                for (const id of assign.ids) {
-                  await fileCapture(db, { captureId: id, projectId: r.id, by: OWNER });
-                }
-                setAssign(null); setAssignQ(''); setFiled(null);
-                await refresh();
-                return;
-              }
+              // captures were waiting on a job — file them to the one just created
+              // through the SAME path a picked job uses, so the draft rehomes and the
+              // processing screen opens the details (hadar, 2026-07-24: this branch
+              // used to file and stop, leaving an unprocessed draft).
+              if (assign) { await fileWalkTo(assign, r.id); return; }
               // CompanyCam: creating a job drops you into it, ready to capture.
               setNav('project');
               await refresh();
@@ -2808,29 +2830,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       }))
       .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.address ?? '').toLowerCase().includes(q))
       .sort((a, b) => (a.distM ?? Infinity) - (b.distM ?? Infinity));
-    const fileAll = async (projId: string) => {
-      const ids = assign.ids;
-      const anchorCoId = assign.anchorCoId;
-      const anchorCapId = assign.anchorCaptureId ?? null;
-      for (const id of ids) {
-        await fileCapture(db, { captureId: id, projectId: projId, by: OWNER });
-      }
-      setAssign(null); setAssignQ(''); setFiled(null);
-      setProjectId(projId);
-      // The draft follows the human's pick — captures moved above, the change
-      // order (and its queued upload) move here.
-      if (anchorCoId) await rehomeDraftExtra(db, anchorCoId, projId);
-      await refresh();
-      // Job picked → NOW the processing screen (upload · transcribe · analyze),
-      // which opens the details once the signals are in. Upload/processing happens
-      // HERE, after the job is chosen — never before it (hadar, 2026-07-24).
-      if (anchorCoId) {
-        setTransition({
-          ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
-          uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
-        });
-      }
-    };
+    // Picking an existing job and creating a new one now share ONE path (fileWalkTo):
+    // file the captures, rehome the draft, then start the processing screen.
+    const fileAll = (projId: string) => fileWalkTo(assign, projId);
     const newJobHere = async () => {
       // OPEN the create-job screen, PRE-FILLED from where the user is standing —
       // reverse-geocoded address when reachable, blank-but-editable when not, GPS
