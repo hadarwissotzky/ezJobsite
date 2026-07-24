@@ -276,6 +276,8 @@ export default function App() {
   // The ☰ menu on Home: the jobs list + language now live behind it, because the
   // dashboard's front page is the money, not navigation (hadar, 2026-07-23 mockup).
   const [menuOpen, setMenuOpen] = React.useState(false);
+  // The Job screen's pill filter (hadar, 2026-07-23 mockup): null = all extras.
+  const [jobFilter, setJobFilter] = React.useState<null | 'needs' | 'waiting' | 'approved'>(null);
   const [waiting, setWaiting] = React.useState<Array<{
     id: string; scope: string; amount_cents: number; status: string;
     project_id: string; pname: string; signed_by: string | null; created_at_ms: number }>>([]);
@@ -3350,40 +3352,90 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     );
   }
 
-  // ── PROJECT DETAIL (camera-first workspace) ───────────────────────────────
+  // ── PROJECT DETAIL — the Job screen (mockup 2026-07-23) ───────────────────
+  // One outer ScrollView wraps the whole body; the photo grid below is a plain
+  // View (NOT a nested ScrollView — that was the tangle that broke the last
+  // attempt); the bottom nav is absolutely positioned so no inline overlay can
+  // shove it. The capture-workspace tools survive inside the same scroll.
+  const jobProj = projects.find((p) => p.id === projectId);
+  const jobBucket = (c: LedgerRow): 'needs' | 'waiting' | 'approved' => {
+    if (c.status === 'approved') return 'approved';
+    if (c.status === 'draft') return 'needs';
+    const disp = displayStatus(c.status, { openQuestions: questions[c.id] ?? 0 });
+    return disp === 'discussing' ? 'needs' : 'waiting';
+  };
+  const jobNeeds = coRows.filter((c) => jobBucket(c) === 'needs');
+  const jobWaiting = coRows.filter((c) => jobBucket(c) === 'waiting');
+  const jobApproved = coRows.filter((c) => jobBucket(c) === 'approved');
+  const jobTotal = coRows.reduce((n, c) => n + (c.amount_cents ?? 0), 0);
+  const jobShown = jobFilter === 'needs' ? jobNeeds
+    : jobFilter === 'waiting' ? jobWaiting
+    : jobFilter === 'approved' ? jobApproved : coRows;
+  const jobMapUrl = jobProj ? staticMapUrl(jobProj.lat, jobProj.lng) : null;
+  const startCaptureJob = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
   return (
     <View style={s.c}>
-      <View style={s.detailHead}>
-        <Pressable style={s.backBtn} onPress={() => { setNav('home'); void refresh(); }}>
-          <Text style={s.backT}>‹ {T('home.projects')}</Text>
+      {/* Header: back · Job · bell (mockup 2026-07-23). Fixed above the scroll. */}
+      <View style={s.dashHdr}>
+        <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('common.back')}
+          onPress={() => { setNav('home'); setJobFilter(null); void refresh(); }}>
+          <Text style={s.hdrIcon}>‹</Text>
         </Pressable>
-        <Pressable onPress={() => { const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n); }}>
-          <Text style={s.langPill}>{lang === 'en' ? 'ES' : 'EN'}</Text>
+        <Text style={s.hdrTitle}>{T('job.title')}</Text>
+        <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('r8.activity')}
+          onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
+          <Text style={s.hdrIcon}>🔔</Text>
+          {unreadCount(activity) > 0 && (
+            <View style={s.hdrBadge}><Text style={s.hdrBadgeT}>{unreadCount(activity)}</Text></View>
+          )}
         </Pressable>
       </View>
 
-      {/* The project you're in. Tapping it still opens the switcher — the back
-          arrow is the primary way home, the title is the quick jump. */}
-      <Pressable style={s.jobBar} onPress={() => setPicker(true)}>
-        <View style={{ flex: 1 }}>
-          <Text style={s.jobBarT} numberOfLines={1}>
-            {projects.find((p) => p.id === projectId)?.name ?? T('job.pick')}
-          </Text>
-          <Text style={s.jobBarAddr} numberOfLines={1}>
-            {projects.find((p) => p.id === projectId)?.address ?? T('home.noAddress')}
-          </Text>
-        </View>
-        <Text style={s.jobBarS}>{T('job.change')}</Text>
-      </Pressable>
+      {/* ONE outer ScrollView for the whole body (fixes the old overflow). The
+          bottom nav floats absolutely below, so nothing here can displace it. */}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 96 }}>
+        {/* Job card: map · name · address · total. Tap to switch jobs. */}
+        <Pressable style={s.jobCard} onPress={() => setPicker(true)}>
+          {jobMapUrl
+            ? <Image source={{ uri: jobMapUrl }} style={s.jobCardMap} resizeMode="cover" />
+            : <View style={[s.jobCardMap, s.jobCardMapEmpty]}><Text style={s.jobCardPin}>📍</Text></View>}
+          <View style={{ flex: 1 }}>
+            <Text style={s.jobCardName} numberOfLines={1}>{jobProj?.name ?? T('job.pick')}</Text>
+            <Text style={s.jobCardAddr} numberOfLines={2}>{jobProj?.address ?? T('home.noAddress')}</Text>
+            <Text style={s.jobCardTotal}>{money(jobTotal)}</Text>
+            <Text style={s.jobCardSub}>{T({ k: 'job.acrossReq', p: { n: coRows.length } })}</Text>
+          </View>
+        </Pressable>
 
-      {/* REQ-MAP1: a static map of the job location, when pinned + configured. */}
-      {(() => {
-        const proj = projects.find((p) => p.id === projectId);
-        const url = proj ? staticMapUrl(proj.lat, proj.lng) : null;
-        return url ? (
-          <Image source={{ uri: url }} style={s.detailMap} resizeMode="cover" />
-        ) : null;
-      })()}
+        {/* RECORD EXTRA WORK — the one capture entry. */}
+        <Pressable style={[s.ctaCard, { marginHorizontal: 0 },
+            (!ready || !!gate || !!initError) && s.btnOff]}
+          disabled={!ready || !!gate || !!initError} onPress={startCaptureJob}>
+          <View style={s.ctaIcon}><Text style={s.ctaIconT}>📷</Text></View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.ctaTitle}>{T('home.recordExtra')}</Text>
+            <Text style={s.ctaSub}>{T('job.recordSub')}</Text>
+          </View>
+        </Pressable>
+
+        {/* Filter pills: Needs you · Waiting · Approved. Tap to filter, tap again clears. */}
+        <View style={s.pillRow}>
+          <Pressable style={[s.pill, jobFilter === 'needs' && s.pillNeedsOn]}
+            onPress={() => setJobFilter(jobFilter === 'needs' ? null : 'needs')}>
+            <Text style={[s.pillT, jobFilter === 'needs' && s.pillTOn]}>{T('job.pillNeeds')}</Text>
+            <View style={[s.pillBadge, s.secBadgeMuted]}><Text style={s.secBadgeT}>{jobNeeds.length}</Text></View>
+          </Pressable>
+          <Pressable style={[s.pill, jobFilter === 'waiting' && s.pillWaitOn]}
+            onPress={() => setJobFilter(jobFilter === 'waiting' ? null : 'waiting')}>
+            <Text style={[s.pillT, jobFilter === 'waiting' && s.pillTWaitOn]}>{T('job.pillWaiting')}</Text>
+            <View style={[s.pillBadge, s.secBadgeWarn]}><Text style={s.secBadgeT}>{jobWaiting.length}</Text></View>
+          </Pressable>
+          <Pressable style={[s.pill, jobFilter === 'approved' && s.pillOkOn]}
+            onPress={() => setJobFilter(jobFilter === 'approved' ? null : 'approved')}>
+            <Text style={[s.pillT, jobFilter === 'approved' && s.pillTOkOn]}>{T('job.pillApproved')}</Text>
+            <View style={[s.pillBadge, s.secBadgeOk]}><Text style={s.secBadgeT}>{jobApproved.length}</Text></View>
+          </Pressable>
+        </View>
 
       {/* REQ-VAL7's way in. Only when there IS a gap: a boundary nobody owns is
           the expensive one, and a link that only appears when it matters is not
@@ -4003,8 +4055,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           </Pressable>
           {bundling && <Text style={s.dmeta}>{bundling}</Text>}
 
-          {/* Each extra as a c4 card, its status the angled-ish chip = notation status. */}
-          {coRows.map((c) => {
+          {/* Each extra as a card, filtered by the pill above (jobShown). */}
+          {jobShown.map((c) => {
             // R7: the chip is DERIVED, not read straight off the row. `discussing` is
             // not a stored status (220_question_path: it is derivable, and a status two
             // writers can move is a status nobody can rely on).
@@ -4384,7 +4436,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           labelled tile. One tap opens the full evidence viewer (REQ-EVID1). The
           per-item state is a quiet corner dot, not a shouted line — the one
           status banner up top already carries what needs doing (REQ-X3). */}
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={s.grid}>
+      <View style={s.grid}>
         {/* REQ-GAL1: reverse-chron, DATE-GROUPED. `saved` is newest-first; a
             full-width header emitted at each day boundary forces a flex-wrap break,
             so tiles group cleanly under their day. Tap a tile → the swipe viewer at
@@ -4440,7 +4492,28 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         {!saved.length && (
           <Text style={s.homeEmpty}>{T('detail.noCaptures')}</Text>
         )}
+      </View>
       </ScrollView>
+
+      {/* Bottom nav: Home · + (capture) · Activity. ABSOLUTE, so no inline overlay
+          in the scroll can push it (the bug that broke the first attempt). */}
+      <View style={[s.tabBar, { position: 'absolute', left: -20, right: -20, bottom: 0 }]}>
+        <Pressable style={s.tab} accessibilityLabel={T('home.navHome')}
+          onPress={() => { setNav('home'); setJobFilter(null); void refresh(); }}>
+          <Text style={s.tabIcon}>🏠</Text>
+          <Text style={s.tabLab}>{T('home.navHome')}</Text>
+        </Pressable>
+        <Pressable style={[s.fab, (!ready || !!gate || !!initError) && s.btnOff]}
+          disabled={!ready || !!gate || !!initError} hitSlop={8}
+          onPress={startCaptureJob} accessibilityLabel={T('home.recordExtra')}>
+          <Text style={s.fabT}>＋</Text>
+        </Pressable>
+        <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
+          onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
+          <Text style={s.tabIcon}>📋</Text>
+          <Text style={s.tabLab}>{T('home.navActivity')}</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -4818,6 +4891,29 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(13,15,18,0.45)', paddingHorizontal: 14 },
   menuCard: { backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 16 },
   menuFooter: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
+  // ── Job screen (per-job detail, mockup 2026-07-23) ─────────────────────────
+  jobCard: { flexDirection: 'row', gap: 14, backgroundColor: '#fff', borderColor: '#E9EAE7',
+    borderWidth: 1, borderRadius: 16, padding: 14, marginTop: 6, marginBottom: 16 },
+  jobCardMap: { width: 96, height: 96, borderRadius: 12, backgroundColor: '#EDEFF2' },
+  jobCardMapEmpty: { alignItems: 'center', justifyContent: 'center' },
+  jobCardPin: { fontSize: 30 },
+  jobCardName: { fontFamily: 'Barlow_700Bold', fontSize: 20, color: '#0D0F12' },
+  jobCardAddr: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#6B7280', marginTop: 1 },
+  jobCardTotal: { fontFamily: 'Barlow_700Bold', fontSize: 30, color: '#0D0F12', marginTop: 6, letterSpacing: -0.5 },
+  jobCardSub: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#6B7280' },
+  pillRow: { flexDirection: 'row', gap: 8, marginBottom: 18 },
+  pill: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    borderRadius: 10, borderWidth: 1, borderColor: '#E9EAE7', backgroundColor: '#fff',
+    paddingVertical: 10, paddingHorizontal: 6 },
+  pillNeedsOn: { borderColor: '#6B7280', backgroundColor: '#F1F2F4' },
+  pillWaitOn: { borderColor: '#F59E0B', backgroundColor: '#FEF6E7' },
+  pillOkOn: { borderColor: '#2DA44E', backgroundColor: '#E9F6ED' },
+  pillT: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#57606a' },
+  pillTOn: { color: '#0D0F12' },
+  pillTWaitOn: { color: '#B26A00' },
+  pillTOkOn: { color: '#1A7F37' },
+  pillBadge: { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center',
+    justifyContent: 'center', paddingHorizontal: 5 },
   homeTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 18, paddingBottom: 6 },
   brand: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 22, color: '#0D0F12',
