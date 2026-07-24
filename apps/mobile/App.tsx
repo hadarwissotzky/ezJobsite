@@ -285,8 +285,8 @@ export default function App() {
   // the client has asked a question. `questions` is the same open-question count the
   // ledger's "discussing" chip reads — a sent extra with one is the ball in YOUR court.
   const [homeExtras, setHomeExtras] = React.useState<Array<{
-    id: string; scope: string; amount_cents: number; project_id: string;
-    pname: string; who_directed: string; created_at_ms: number;
+    id: string; scope: string; amount_cents: number | null; status: string;
+    project_id: string; pname: string; who_directed: string; created_at_ms: number;
     signed_by: string | null; questions: number }>>([]);
   // The funnel ABOVE change orders — a walkthrough IS an extra in the making, and the
   // Extras tab must show the whole pipeline, not only the signed paperwork at the end.
@@ -1096,16 +1096,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           `SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS n
              FROM change_order WHERE status = 'approved'`))[0];
         setRecovered(rec ?? { cents: 0, n: 0 });
-        // The Home dashboard: every SENT extra across all jobs, newest first, with
-        // its open-question count. Sent = awaiting the client, which is exactly the
-        // money the hero totals and the two sections split by "needs your response".
+        // The Home dashboard: every LIVE extra across all jobs (superseded ones are
+        // history), newest first, with its open-question count. Drafts belong here
+        // too — they are the creator's unfinished work, private until sent (hadar,
+        // 2026-07-23), and a Home that hid them showed nothing at all.
         setHomeExtras(await db.getAll(
-          `SELECT co.id, co.scope, co.amount_cents, co.project_id,
+          `SELECT co.id, co.scope, co.amount_cents, co.status, co.project_id,
                   COALESCE(p.name, '') AS pname, co.who_directed, co.created_at_ms,
                   co.signed_by,
                   (SELECT COUNT(*) FROM co_question q WHERE q.change_order_id = co.id) AS questions
              FROM change_order co LEFT JOIN project p ON p.id = co.project_id
-            WHERE co.status = 'sent'
+            WHERE co.status != 'superseded'
             ORDER BY co.created_at_ms DESC`));
         // Stage 1: captured walkthroughs not yet reviewed into a decision.
         const pairRows = await db.getAll<{ pair_id: string; start_ms: number; photos: number; voice_id: string | null }>(
@@ -3104,12 +3105,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       .filter((p) => !q || p.name.toLowerCase().includes(q) ||
                      (p.address ?? '').toLowerCase().includes(q));
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
-    // The dashboard's two lists split the sent extras by "is the ball in MY court":
-    // a client question means yes (needs response), otherwise it is still waiting.
-    // The hero totals ALL of them — that is the money outstanding on the client.
-    const needs = homeExtras.filter((e) => e.questions > 0);
-    const waitingList = homeExtras.filter((e) => e.questions === 0);
-    const outstanding = homeExtras.reduce((sum, e) => sum + e.amount_cents, 0);
+    // Buckets by "whose court is the ball in": a draft is YOURS to finish and send;
+    // a sent extra with a client question is YOURS to answer; a sent extra with none
+    // is the client's to approve; approved is done. The hero totals the money still
+    // OUT on the client (sent, either kind) — that is "waiting for approval".
+    const draftList = homeExtras.filter((e) => e.status === 'draft');
+    const needs = homeExtras.filter((e) => e.status === 'sent' && e.questions > 0);
+    const waitingList = homeExtras.filter((e) => e.status === 'sent' && e.questions === 0);
+    const approvedList = homeExtras.filter((e) => e.status === 'approved');
+    const outstanding = [...needs, ...waitingList].reduce((sum, e) => sum + (e.amount_cents ?? 0), 0);
+    const outstandingN = needs.length + waitingList.length;
     const startCapture = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
     const disabled = !!gate || !!initError;
     return (
@@ -3141,8 +3146,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <Text style={s.heroLabel}>{T('home.awaiting')}</Text>
             <Text style={s.heroBig}>{money(outstanding)}</Text>
             <Text style={s.heroSub}>
-              {homeExtras.length === 0 ? T('home.awaitNone')
-                : T({ k: 'home.acrossN', p: { n: homeExtras.length } })}
+              {outstandingN === 0 ? T('home.awaitNone')
+                : T({ k: 'home.acrossN', p: { n: outstandingN } })}
             </Text>
           </View>
 
@@ -3156,6 +3161,30 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               <Text style={s.ctaSub}>{T('home.recordSub')}</Text>
             </View>
           </Pressable>
+
+          {/* Drafts — the creator's unfinished extras, private until sent. Tapping
+              one resumes it in the finishing composer (price → send). */}
+          {draftList.length > 0 && (<>
+            <View style={s.secHead}>
+              <Text style={s.secLab}>{T('home.draftsSec')}</Text>
+              <View style={[s.secBadge, s.secBadgeMuted]}>
+                <Text style={s.secBadgeT}>{draftList.length}</Text>
+              </View>
+            </View>
+            {draftList.map((e) => (
+              <Pressable key={e.id} style={s.exCard}
+                onPress={() => { void finishExtraById(e.id); }}>
+                <View style={s.exTop}>
+                  <Text style={s.exName} numberOfLines={1}>{e.scope}</Text>
+                  <Text style={s.exAmt}>{e.amount_cents == null ? '' : money(e.amount_cents)}</Text>
+                </View>
+                <View style={s.exBottom}>
+                  <Text style={s.exDraft}>{T('home.finishSend')}</Text>
+                  <Text style={s.chev}>›</Text>
+                </View>
+              </Pressable>
+            ))}
+          </>)}
 
           {/* Needs your response — a client asked a question; the ball is in YOUR court. */}
           {needs.length > 0 && (<>
@@ -3201,6 +3230,31 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 <Text style={s.exMeta} numberOfLines={1}>
                   {T({ k: 'home.sentAgo', p: { ago: ago(e.created_at_ms, now) } })}
                   {e.who_directed ? ' · ' + e.who_directed : ''}
+                </Text>
+              </Pressable>
+            ))}
+          </>)}
+
+          {/* Approved — done and signed. Kept on Home as the running win. */}
+          {approvedList.length > 0 && (<>
+            <View style={s.secHead}>
+              <Text style={s.secLab}>{T('home.approvedSec')}</Text>
+              <View style={[s.secBadge, s.secBadgeOk]}>
+                <Text style={s.secBadgeT}>{approvedList.length}</Text>
+              </View>
+            </View>
+            {approvedList.map((e) => (
+              <Pressable key={e.id} style={s.exCard}
+                onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
+                <View style={s.exTop}>
+                  <Text style={s.exName} numberOfLines={1}>{e.scope}</Text>
+                  <Text style={s.exAmt}>{money(e.amount_cents)}</Text>
+                </View>
+                <Text style={s.exMeta} numberOfLines={1}>
+                  {e.signed_by
+                    ? T({ k: 'home.signedBy', p: { name: e.signed_by } })
+                    : T('home.approvedSec')}
+                  {e.pname ? ' · ' + e.pname : ''}
                 </Text>
               </Pressable>
             ))}
@@ -4735,6 +4789,8 @@ const s = StyleSheet.create({
     justifyContent: 'center', paddingHorizontal: 6 },
   secBadgeWarn: { backgroundColor: '#F59E0B' },
   secBadgeInfo: { backgroundColor: '#2563EB' },
+  secBadgeMuted: { backgroundColor: '#6B7280' },
+  secBadgeOk: { backgroundColor: '#2DA44E' },
   secBadgeT: { color: '#fff', fontSize: 12, fontFamily: 'Barlow_700Bold' },
   exCard: { backgroundColor: '#fff', borderColor: '#E9EAE7', borderWidth: 1, borderRadius: 12,
     marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 14, paddingVertical: 13 },
@@ -4744,6 +4800,7 @@ const s = StyleSheet.create({
   exMeta: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#6B7280', marginTop: 4 },
   exBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
   exQuestion: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#E8833A' },
+  exDraft: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#2563EB' },
   tabBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
     borderTopWidth: 1, borderTopColor: '#E9EAE7', backgroundColor: '#fff',
     paddingTop: 8, paddingBottom: 26 },
