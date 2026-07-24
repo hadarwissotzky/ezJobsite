@@ -147,7 +147,7 @@ import {
 } from './src/approverrouting';
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
-         createdLabel, markLocalSent, money, parseMoney, validateLines,
+         createdLabel, markLocalSent, money, parseMoney, validateLines, CO_PHOTO_SUBQUERY,
          type LineItem, type LedgerRow, priceDraftExtra, rehomeDraftExtra,
          type BillingTiming, type ScheduleEffect } from './src/changeorder';
 import { displayStatus, canSupersede, type LedgerStatus } from './src/extrastatus';
@@ -289,7 +289,7 @@ export default function App() {
   const [homeExtras, setHomeExtras] = React.useState<Array<{
     id: string; scope: string; amount_cents: number | null; status: string;
     project_id: string; pname: string; who_directed: string; created_at_ms: number;
-    signed_by: string | null; questions: number }>>([]);
+    signed_by: string | null; questions: number; photo_relpath: string | null }>>([]);
   // The funnel ABOVE change orders — a walkthrough IS an extra in the making, and the
   // Extras tab must show the whole pipeline, not only the signed paperwork at the end.
   const [captured, setCaptured] = React.useState<Array<{
@@ -1108,6 +1108,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           `SELECT co.id, co.scope, co.amount_cents, co.status, co.project_id,
                   COALESCE(p.name, '') AS pname, co.who_directed, co.created_at_ms,
                   co.signed_by,
+                  ${CO_PHOTO_SUBQUERY} AS photo_relpath,
                   (SELECT COUNT(*) FROM co_question q WHERE q.change_order_id = co.id) AS questions
              FROM change_order co LEFT JOIN project p ON p.id = co.project_id
             WHERE co.status != 'superseded'
@@ -3501,9 +3502,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               nodes.push(
                 <Pressable key={e.id} style={s.actRow}
                   onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
-                  <View style={[s.actIcon, { backgroundColor: c.bg }]}>
-                    <Text style={s.actIconT}>{c.emoji}</Text>
-                  </View>
+                  {e.photo_relpath
+                    ? <Image source={{ uri: FS.documentDirectory + e.photo_relpath }}
+                        style={s.actIcon} resizeMode="cover" />
+                    : <View style={[s.actIcon, { backgroundColor: c.bg }]}>
+                        <Text style={s.actIconT}>{c.emoji}</Text>
+                      </View>}
                   <View style={{ flex: 1 }}>
                     <Text style={s.actName} numberOfLines={1}>{e.scope}</Text>
                     {!!e.pname && <Text style={s.actSub} numberOfLines={1}>{e.pname}</Text>}
@@ -4082,32 +4086,42 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   // inline near-copy of it that predated the helper — it opened
                   // silently on failure and would have missed each layer added since.
                   onPress={() => { void openRecord(c.id); }}>
-                  <View style={s.coR1}>
-                    <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>
-                    <View style={[s.chipBase, chip.bg]}>
-                      <Text style={[s.chipText, chip.dark && s.chipTextDark]}>{chip.label}</Text>
+                  {/* Photo thumbnail (hadar, 2026-07-24): the extra's first photo,
+                      left of the content. Voice-only extras show a document glyph. */}
+                  <View style={s.coHead}>
+                    {c.photo_relpath
+                      ? <Image source={{ uri: FS.documentDirectory + c.photo_relpath }}
+                          style={s.coThumb} resizeMode="cover" />
+                      : <View style={[s.coThumb, s.coThumbEmpty]}>
+                          <Text style={s.coThumbIcon}>🎙</Text>
+                        </View>}
+                    <View style={{ flex: 1 }}>
+                      <View style={s.coR1}>
+                        <Text style={s.coNm} numberOfLines={2}>{c.scope}</Text>
+                        <View style={[s.chipBase, chip.bg]}>
+                          <Text style={[s.chipText, chip.dark && s.chipTextDark]}>{chip.label}</Text>
+                        </View>
+                      </View>
+                      {/* The AI's category tag: what KIND of extra this is (hadar,
+                          2026-07-23). The title says the specifics; this says the kind.
+                          Absent until processed — a first-class null, never a blocker. */}
+                      {c.extra_type && isExtraType(c.extra_type) && (
+                        <View style={s.coTag}>
+                          <Text style={s.coTagT}>{typeLabel(c.extra_type)}</Text>
+                        </View>
+                      )}
+                      <View style={s.coR2}>
+                        {/* R3 AC3: an EWA has no price, so "$0.00" would read as "this
+                            extra is free". Show the TERM instead — the cap is exposure. */}
+                        <Text style={s.coAmt}>
+                          {ewaSet.has(c.id)
+                            ? T(ewas.find((e) => e.id === c.id)?.proceed === 'tm_capped'
+                                ? 'ewa.rowTm' : 'ewa.rowHold')
+                            : `${c.amount}${c.is_mini ? ' · mini' : ''}${c.nte ? ` · NTE ${c.nte}` : ''}`}
+                        </Text>
+                        {c.signed_by && <Text style={s.coSub}>Signed by {c.signed_by}</Text>}
+                      </View>
                     </View>
-                  </View>
-                  {/* The AI's category tag: what KIND of extra this is, so the list
-                      reads at a glance (hadar, 2026-07-23). The title says the
-                      specifics; this says the kind. Absent until processed — a
-                      first-class null, never a blocker. */}
-                  {c.extra_type && isExtraType(c.extra_type) && (
-                    <View style={s.coTag}>
-                      <Text style={s.coTagT}>{typeLabel(c.extra_type)}</Text>
-                    </View>
-                  )}
-                  <View style={s.coR2}>
-                    {/* R3 AC3: an EWA has no price, so "$0.00" would read as "this
-                        extra is free". Show the TERM instead — the cap is exposure,
-                        not a charge. */}
-                    <Text style={s.coAmt}>
-                      {ewaSet.has(c.id)
-                        ? T(ewas.find((e) => e.id === c.id)?.proceed === 'tm_capped'
-                            ? 'ewa.rowTm' : 'ewa.rowHold')
-                        : `${c.amount}${c.is_mini ? ' · mini' : ''}${c.nte ? ` · NTE ${c.nte}` : ''}`}
-                    </Text>
-                    {c.signed_by && <Text style={s.coSub}>Signed by {c.signed_by}</Text>}
                   </View>
                   {/* PRD R7: the list is ordered by create date, so the row states it —
                       an order you can't see is an order the user has to take on faith.
@@ -4532,6 +4546,10 @@ const s = StyleSheet.create({
   flagT: { color: '#6B5300', fontFamily: 'Barlow_500Medium', fontSize: 13 },
   coCard: { backgroundColor: '#fff', borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 14,
     paddingVertical: 13, paddingHorizontal: 14, marginBottom: 9 },
+  coHead: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+  coThumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#EDEFF2' },
+  coThumbEmpty: { alignItems: 'center', justifyContent: 'center' },
+  coThumbIcon: { fontSize: 24, opacity: 0.5 },
   coR1: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   coNm: { flex: 1, color: '#0D0F12', fontFamily: 'Barlow_600SemiBold', fontSize: 15.5 },
   coR2: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 7 },

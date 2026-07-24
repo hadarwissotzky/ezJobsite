@@ -543,7 +543,34 @@ export type LedgerRow = {
   schedule_effect: string | null;
   schedule_days: number | null;
   exclusions: string | null;
+  /** Relpath of the extra's first PHOTO (for a thumbnail), or null when it has no
+   *  photo (voice-only). Joined FS.documentDirectory-relative, same as the grid. */
+  photo_relpath: string | null;
 };
+
+/**
+ * The earliest PHOTO relpath behind an extra `co`, as a correlated subquery — null
+ * when the extra is voice-only. Covers BOTH the anchor capture being a photo and the
+ * photo siblings paired to the voice narration (the fused-capture shape). Exported so
+ * the cross-job Home/Activity query can reuse the exact same rule (one definition, no
+ * drift). Assumes the outer query aliases change_order as `co`.
+ */
+export const CO_PHOTO_SUBQUERY = `(
+  SELECT cc.media_relpath FROM capture_commit cc
+   WHERE cc.modality = 'photo' AND cc.capture_id IN (
+     SELECT dv.capture_id FROM decision_version dv
+      WHERE dv.decision_id = co.decision_id AND dv.capture_id IS NOT NULL
+     UNION
+     SELECT p2.capture_id FROM capture_pair p2
+      WHERE p2.pair_id IN (
+        SELECT p1.pair_id FROM capture_pair p1
+         WHERE p1.capture_id IN (
+           SELECT dv.capture_id FROM decision_version dv WHERE dv.decision_id = co.decision_id
+         )
+      )
+   )
+   ORDER BY cc.captured_at_ms LIMIT 1
+)`;
 
 /**
  * "Jul 20 · 2:14 pm" — a stored moment as a row or record shows it.
@@ -569,10 +596,12 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     created_at_ms: number; pending: number; extra_type: string | null;
     billing_timing: string | null; schedule_effect: string | null;
     schedule_days: number | null; exclusions: string | null;
+    photo_relpath: string | null;
   }>(
     `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.amount_cents, co.nte_cents,
             co.status, co.is_mini, co.signed_by, co.created_at_ms, co.extra_type,
             co.billing_timing, co.schedule_effect, co.schedule_days, co.exclusions,
+            ${CO_PHOTO_SUBQUERY} AS photo_relpath,
             EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending
        FROM change_order co
       WHERE co.project_id = ?
@@ -599,6 +628,7 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
       extra_type: r.extra_type,
       billing_timing: r.billing_timing, schedule_effect: r.schedule_effect,
       schedule_days: r.schedule_days, exclusions: r.exclusions,
+      photo_relpath: r.photo_relpath,
       // "on this phone" and "in the cloud" are different facts and the sender is
       // entitled to know which one they are looking at.
       synced: r.pending ? 0 : 1,
