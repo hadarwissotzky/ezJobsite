@@ -2975,7 +2975,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         readinessKey={gate && !gate.ok ? gate.whyKey : undefined}
         // A ready draft can go out from its own record (R6b AC3: the state line
         // says "send it" — the screen must then offer the send).
-        onSend={gate?.ok && row ? () => { setReturnRecordId(record.id); closeRecord(); void openSendPrep(row); } : undefined}
+        onSend={gate?.ok && row ? () => {
+          // Land on the JOB screen (where the send-preview Modal mounts) and remember
+          // to return to this extra's detail page after the send (hadar, 2026-07-24:
+          // the button used to just close the record because the preview never showed).
+          setReturnRecordId(record.id); setNav('project'); closeRecord(); void openSendPrep(row);
+        } : undefined}
         // Finish an UNPRICED draft from its own detail page — opens the price/details
         // composer. Offered ONLY when the draft has no price yet: a priced draft must
         // not keep bouncing back to step 3 (hadar, 2026-07-24, "it constantly taking
@@ -4132,6 +4137,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           : sp.roster.find((r) => r.id === suggested?.id) ?? null;
         const unconfirmed = !sp.chosenId && sug?.kind === 'suggested' && !sug.bindsMoney;
         return (
+          <Modal visible transparent animationType="slide"
+            onRequestClose={() => setSendPrep(null)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(13,15,18,0.45)' }}>
+          <ScrollView contentContainerStyle={{ padding: 14, paddingTop: 64, paddingBottom: 40 }}
+            keyboardShouldPersistTaps="handled">
           <View style={s.money}>
             <Text style={s.cardH}>{T('r5c.sendTo')}</Text>
             <Text style={s.moneyScope}>{sp.co.scope} · {sp.co.amount}</Text>
@@ -4257,10 +4267,20 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               </>
             )}
           </View>
+          </ScrollView>
+          </View>
+          </Modal>
         );
       })()}
 
       {sentLink && (
+        <Modal visible transparent animationType="slide"
+          onRequestClose={() => {
+            setSentLink(null); setPhotoNote(null);
+            if (returnRecordId) { const rid = returnRecordId; setReturnRecordId(null); void openRecord(rid); }
+          }}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(13,15,18,0.45)' }}>
+        <ScrollView contentContainerStyle={{ padding: 14, paddingTop: 64, paddingBottom: 40 }}>
         <View style={s.card}>
           <Text style={s.cardH}>{T('conf.created')}</Text>
           <Text style={s.frozen}>{sentLink.shown}</Text>
@@ -4296,6 +4316,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <Text style={s.laterT}>{T('common.close')}</Text>
           </Pressable>
         </View>
+        </ScrollView>
+        </View>
+        </Modal>
       )}
 
       {history && (
