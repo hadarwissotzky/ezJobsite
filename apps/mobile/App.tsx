@@ -2970,6 +2970,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // A ready draft can go out from its own record (R6b AC3: the state line
         // says "send it" — the screen must then offer the send).
         onSend={gate?.ok && row ? () => { closeRecord(); void openSendPrep(row); } : undefined}
+        // Finish an UNPRICED draft from its own detail page — opens the price/details
+        // composer. Offered only when the draft is not yet ready to send (no onSend),
+        // so tapping an extra always reaches its detail page and can be finished there
+        // (hadar, 2026-07-24).
+        onFinish={record.status === 'draft' && !(gate?.ok && row)
+          ? () => { closeRecord(); void finishExtraById(record.id); } : undefined}
         // Mandate #2: a reply is a MESSAGE. It commits nothing and prices nothing —
         // and it must never move the extra's status. A new PRICE goes through the
         // read-back composer (onRevise), never through a chat box.
@@ -3220,7 +3226,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           </Pressable>
 
           {/* Drafts — the creator's unfinished extras, private until sent. Tapping
-              one resumes it in the finishing composer (price → send). */}
+              one opens its DETAIL page (the record), like every other extra; the
+              record's "Finish this extra" button opens the price composer (hadar,
+              2026-07-24: a tap must reach the extra detail, not the job page). */}
           {draftList.length > 0 && (<>
             <View style={s.secHead}>
               <Text style={s.secLab}>{T('home.draftsSec')}</Text>
@@ -3230,7 +3238,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             </View>
             {draftList.map((e) => (
               <Pressable key={e.id} style={s.exCard}
-                onPress={() => { void finishExtraById(e.id); }}>
+                onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
                 <View style={s.exTop}>
                   <Text style={s.exName} numberOfLines={1}>{e.scope}</Text>
                   <Text style={s.exAmt}>{e.amount_cents == null ? '' : money(e.amount_cents)}</Text>

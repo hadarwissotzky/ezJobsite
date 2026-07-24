@@ -90,6 +90,11 @@ export function RecordScreen(props: {
   /** Send a ready draft for approval (opens the R5c send preview). Passed only
    *  when the draft's readiness gate is green. */
   onSend?: () => void;
+  /** Finish an UNPRICED draft — opens the price/details composer. Passed only for a
+   *  draft that is not yet ready to send, so the extra detail page is never a
+   *  dead-end (hadar, 2026-07-24: tapping an extra must reach its detail page, and
+   *  from there be finishable). */
+  onFinish?: () => void;
   /** On a superseded record: open the version that replaced it. */
   onOpenCurrent?: () => void;
   /** Offered ONLY while the extra is a draft — App.tsx passes undefined once it
@@ -359,7 +364,7 @@ export function RecordScreen(props: {
           the primary is Remind; a question makes the reply the primary path; a
           terminal record's primary is its evidence bundle. A static button pair
           cannot serve a screen whose job is "where does this stand". */}
-      {(composer || props.onSend || props.onRemind || props.onRevise
+      {(composer || props.onSend || props.onFinish || props.onRemind || props.onRevise
         || props.onOpenCurrent || (terminal && props.onShare)) && (
         <View
           onLayout={(e) => setBarH(e.nativeEvent.layout.height)}
@@ -402,6 +407,12 @@ export function RecordScreen(props: {
               <Pressable onPress={props.onSend} accessibilityLabel={t('erec.send')}
                 style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
                 <Text style={T.btnText}>{t('erec.send')}</Text>
+              </Pressable>
+            )}
+            {shown === 'draft' && !props.onSend && props.onFinish && (
+              <Pressable onPress={props.onFinish} accessibilityLabel={t('co.finish')}
+                style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
+                <Text style={T.btnText}>{t('co.finish')}</Text>
               </Pressable>
             )}
             {shown === 'sent' && props.onRemind && (
