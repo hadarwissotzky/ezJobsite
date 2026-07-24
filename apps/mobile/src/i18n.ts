@@ -174,13 +174,6 @@ const EN: Record<string, string> = {
   // --- jobs ---
   'job.pick': 'No job — tap to pick',
   'job.change': 'tap to change',
-  // Job screen (mockup 2026-07-23)
-  'job.title': 'Job',
-  'job.acrossReq': 'across {n} requests',
-  'job.recordSub': 'Snap it. Say it. Send it.',
-  'job.pillNeeds': 'Needs you',
-  'job.pillWaiting': 'Waiting',
-  'job.pillApproved': 'Approved',
   'job.which': 'Which job?',
   'job.new': '+ NEW JOB',
   'home.projects': 'Jobs',
@@ -872,13 +865,6 @@ const ES: Record<string, string> = {
 
   'job.pick': 'Sin trabajo — toca para elegir',
   'job.change': 'toca para cambiar',
-  // Pantalla de trabajo (maqueta 2026-07-23)
-  'job.title': 'Trabajo',
-  'job.acrossReq': 'en {n} solicitudes',
-  'job.recordSub': 'Tómala. Dila. Envíala.',
-  'job.pillNeeds': 'Te necesita',
-  'job.pillWaiting': 'Esperando',
-  'job.pillApproved': 'Aprobado',
   'home.projects': 'Trabajos',
   'home.search': 'Buscar trabajos',
   'home.newProject': 'Nuevo trabajo',
