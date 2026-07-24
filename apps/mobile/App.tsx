@@ -941,7 +941,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // CompanyCam-style shell: the app opens on the Projects list; a capture happens
   // INSIDE a project. 'home' = the project list, 'project' = one project's
   // camera-first workspace + capture grid.
-  const [nav, setNav] = React.useState<'home' | 'project'>('home');
+  const [nav, setNav] = React.useState<'home' | 'project' | 'jobs'>('home');
   const [cards, setCards] = React.useState<ProjectCard[]>([]);
   const [search, setSearch] = React.useState('');
   const [picker, setPicker] = React.useState(false);
@@ -3017,6 +3017,38 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     );
   }
 
+  // ── THE ONE BOTTOM NAV ────────────────────────────────────────────────────
+  // Home · Jobs · + (capture) · Activity. Defined once so the four screens that
+  // show it (Home, Jobs, Job) can never drift. `absolute` pins it over a plain-View
+  // screen (the Job screen); Home/Jobs use it as a flex child at the column's foot.
+  const bottomNav = (active: 'home' | 'jobs' | 'activity' | null, absolute: boolean) => (
+    <View style={absolute
+      ? [s.tabBar, { position: 'absolute' as const, left: -20, right: -20, bottom: 0 }]
+      : s.tabBar}>
+      <Pressable style={s.tab} accessibilityLabel={T('home.navHome')}
+        onPress={() => { setNav('home'); setJobFilter(null); void refresh(); }}>
+        <Text style={[s.tabIcon, active === 'home' && s.tabIconOn]}>🏠</Text>
+        <Text style={[s.tabLab, active === 'home' && s.tabLabOn]}>{T('home.navHome')}</Text>
+      </Pressable>
+      <Pressable style={s.tab} accessibilityLabel={T('home.navJobs')}
+        onPress={() => { setNav('jobs'); void refresh(); }}>
+        <Text style={[s.tabIcon, active === 'jobs' && s.tabIconOn]}>🗂</Text>
+        <Text style={[s.tabLab, active === 'jobs' && s.tabLabOn]}>{T('home.navJobs')}</Text>
+      </Pressable>
+      <Pressable style={[s.fab, (!!gate || !!initError) && s.btnOff]}
+        disabled={!!gate || !!initError} hitSlop={8}
+        accessibilityLabel={T('home.recordExtra')}
+        onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
+        <Text style={s.fabT}>＋</Text>
+      </Pressable>
+      <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
+        onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
+        <Text style={[s.tabIcon, active === 'activity' && s.tabIconOn]}>📋</Text>
+        <Text style={[s.tabLab, active === 'activity' && s.tabLabOn]}>{T('home.navActivity')}</Text>
+      </Pressable>
+    </View>
+  );
+
   // ── SHARED OVERLAYS ───────────────────────────────────────────────────────
   // The activity centre and the draft-recovery card must reach the user on HOME,
   // not only inside a project: Home is the landing now, and a recoverable draft is
@@ -3267,22 +3299,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           )}
         </ScrollView>
 
-        {/* Bottom nav: Home · + (capture) · Activity. */}
-        <View style={s.tabBar}>
-          <Pressable style={s.tab} onPress={() => {}} accessibilityLabel={T('home.navHome')}>
-            <Text style={[s.tabIcon, s.tabIconOn]}>🏠</Text>
-            <Text style={[s.tabLab, s.tabLabOn]}>{T('home.navHome')}</Text>
-          </Pressable>
-          <Pressable style={[s.fab, disabled && s.btnOff]} disabled={disabled}
-            onPress={startCapture} accessibilityLabel={T('home.recordExtra')} hitSlop={8}>
-            <Text style={s.fabT}>＋</Text>
-          </Pressable>
-          <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
-            onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
-            <Text style={s.tabIcon}>📋</Text>
-            <Text style={s.tabLab}>{T('home.navActivity')}</Text>
-          </Pressable>
-        </View>
+        {/* The one bottom nav (Home active here). */}
+        {bottomNav('home', false)}
 
         {/* Overlays float ABOVE the fixed tab bar in a scrim — inline cards would
             render under the bar and be unreachable. Draft recovery shows itself
@@ -3345,6 +3363,64 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             </Pressable>
               </View>
             )}
+            </ScrollView>
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  // ── JOBS — the full list, its own bottom-nav destination (hadar, 2026-07-23) ──
+  if (nav === 'jobs') {
+    const now = Date.now();
+    const q = search.trim().toLowerCase();
+    const shown = cards
+      .filter((p) => p.id !== INBOX_ID)
+      .filter((p) => !q || p.name.toLowerCase().includes(q) ||
+                     (p.address ?? '').toLowerCase().includes(q));
+    const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
+    return (
+      <View style={s.homeC}>
+        {/* Header: title · new job (the ＋ opens the create-job screen, an early
+            return, so it works from here). */}
+        <View style={s.dashHdr}>
+          <View style={s.hdrBtn} />
+          <Text style={s.hdrTitle}>{T('home.navJobs')}</Text>
+          <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('home.newProject')}
+            onPress={() => setNewJob({ name: '', address: '' })}>
+            <Text style={s.hdrIcon}>＋</Text>
+          </Pressable>
+        </View>
+        <ScrollView style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}>
+          {cards.length > 4 && (
+            <TextInput style={s.searchIn} value={search} onChangeText={setSearch}
+              placeholder={T('home.search')} placeholderTextColor="#8c959f" />
+          )}
+          {shown.map((p) => (
+            <Pressable key={p.id} style={s.jobItem} onPress={() => open(p.id)}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.jobItemName} numberOfLines={1}>{p.name}</Text>
+                <Text style={s.jobItemMeta} numberOfLines={1}>
+                  {p.address ?? T('home.noAddress')}
+                  {p.lastMs ? ' · ' + ago(p.lastMs, now) : ''}
+                </Text>
+              </View>
+              <Text style={s.jobCount}>{p.captureCount}</Text>
+              <Text style={s.chev}>›</Text>
+            </Pressable>
+          ))}
+          {!shown.length && (
+            <Text style={s.homeEmpty}>{q ? T('home.noMatch') : T('home.noProjects')}</Text>
+          )}
+        </ScrollView>
+        {bottomNav('jobs', false)}
+        {(bell || drafts.length > 0) && (
+          <View style={s.homeScrim}>
+            <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}
+              keyboardShouldPersistTaps="handled">
+              {draftsOverlay}
+              {activityOverlay}
             </ScrollView>
           </View>
         )}
@@ -4495,25 +4571,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       </View>
       </ScrollView>
 
-      {/* Bottom nav: Home · + (capture) · Activity. ABSOLUTE, so no inline overlay
-          in the scroll can push it (the bug that broke the first attempt). */}
-      <View style={[s.tabBar, { position: 'absolute', left: -20, right: -20, bottom: 0 }]}>
-        <Pressable style={s.tab} accessibilityLabel={T('home.navHome')}
-          onPress={() => { setNav('home'); setJobFilter(null); void refresh(); }}>
-          <Text style={s.tabIcon}>🏠</Text>
-          <Text style={s.tabLab}>{T('home.navHome')}</Text>
-        </Pressable>
-        <Pressable style={[s.fab, (!ready || !!gate || !!initError) && s.btnOff]}
-          disabled={!ready || !!gate || !!initError} hitSlop={8}
-          onPress={startCaptureJob} accessibilityLabel={T('home.recordExtra')}>
-          <Text style={s.fabT}>＋</Text>
-        </Pressable>
-        <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
-          onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
-          <Text style={s.tabIcon}>📋</Text>
-          <Text style={s.tabLab}>{T('home.navActivity')}</Text>
-        </Pressable>
-      </View>
+      {/* The one bottom nav — ABSOLUTE here, so no inline overlay in the scroll can
+          push it (the bug that broke the first attempt). No tab is "active": we are
+          inside a job, not on one of the three destinations. */}
+      {bottomNav(null, true)}
     </View>
   );
 }
