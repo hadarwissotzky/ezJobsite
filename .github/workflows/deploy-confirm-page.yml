@@ -53,9 +53,11 @@ jobs:
           # exists so the number rendered here is provably the number in the signed
           # document; over HTTP anyone on the same wifi can rewrite that number in
           # transit, and the signature would be genuine on a document nobody wrote.
-          # A custom domain on THIS repo overrides the inherited one and GitHub
-          # provisions a Let's Encrypt certificate for it automatically.
-          echo 'approve.ezchangeorder.com' > _site/CNAME
+          # CUSTOM DOMAIN DROPPED (hadar, 2026-07-24): approve.ezchangeorder.com has
+          # no DNS record, so the CNAME made the site unreachable at every URL. Serve
+          # at the default github.io URL for now; re-add the line and point DNS
+          # (approve.ezchangeorder.com CNAME -> hadarwissotzky.github.io) for prod.
+          # echo 'approve.ezchangeorder.com' > _site/CNAME
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
