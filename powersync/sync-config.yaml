@@ -11,16 +11,22 @@ streams:
   # one bucket means one checkpoint to observe).
   bakeoff:
     with:
-      # Q7 windowing, half 1: "Active projects".
-      # NOTE for Q7: the "last-N-days" half is NOT expressible here — Sync
-      # Streams have no server-side now()/current_date. Time windowing must be
-      # driven by a client-supplied parameter (which the client can lie about)
-      # or a server-maintained flag column. Recorded as a real Q7 fit finding.
+      # COMPANY-WIDE VISIBILITY (376_company_membership; hadar 2026-07-25). A device
+      # downloads the projects of every company it is an ACTIVE member of — not just
+      # the ones it owns. Two steps: the caller's companies, then those companies'
+      # active projects. The membership/role authority is the server; a client that
+      # lies about auth.user_id() cannot (it is signed into the JWT).
+      my_companies: |
+        SELECT company_id FROM company_member
+        WHERE user_id = auth.user_id() AND status = 'active'
       active_projects: |
         SELECT id FROM project
-        WHERE owner_id = auth.user_id() AND status = 'active'
+        WHERE company_id IN my_companies AND status = 'active'
     auto_subscribe: true
     queries:
+      # Membership + company rows so the roster and "my company" resolve on-device.
+      - SELECT * FROM company           WHERE id         IN my_companies
+      - SELECT * FROM company_member     WHERE company_id IN my_companies
       - SELECT * FROM project           WHERE id         IN active_projects
       - SELECT * FROM capture           WHERE project_id IN active_projects
       - SELECT * FROM capture_op_state  WHERE project_id IN active_projects
