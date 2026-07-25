@@ -130,6 +130,7 @@ import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
 import { buildDisputeBundle, buildProgressUpdate, shareBundle, shareLink,
          shareProgressUpdate } from './src/bundle';
 import { drainOutbox, outboxStatus } from './src/uploader';
+import * as Network from 'expo-network';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
 import { renderCard, sendForConfirmation } from './src/confirmations';
@@ -887,15 +888,36 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // The transition's watcher. Polls the real signals: capture_outbox emptying
   // (uploaded), voice_transcript_cache (written down — works OFFLINE, it is
   // on-device), capture_structured (analyzed, best-effort network read).
-  // Advances to the job sheet when upload + words are in; flips to the offline
-  // message when the outbox has not moved by ~8s.
+  //
+  // TWO THINGS THIS FIXES (hadar, 2026-07-24: "full signal and wifi" still hit
+  // the offline branch):
+  //   1. It now DRIVES the upload — kicks drainOutbox on entry and every few
+  //      seconds while waiting — instead of only watching it. The background
+  //      drain runs on a 15s timer, so a fresh capture could sit un-pushed for
+  //      up to 15s and the screen would call that "offline".
+  //   2. "Offline" is a NETWORK fact, not a stopwatch. A slow-but-connected
+  //      upload (photos over wifi) is not offline; only a real disconnect is.
+  //      When connected but still uploading past ~20s, open the details and let
+  //      the upload finish in the background — the send gate blocks the extra
+  //      until every byte is up, so nothing goes out early.
   React.useEffect(() => {
     if (!transition) return;
     let alive = true;
     const marks = transition.ids.map(() => '?').join(',');
     let firstCount = -1;
+    const kickDrain = async () => {
+      try {
+        const { data } = await connector.client.auth.getUser();
+        if (data?.user) await drainOutbox(db, connector.client, data.user.id);
+      } catch { /* the capture is safe locally; a failed push just retries */ }
+    };
+    const isOffline = async () => {
+      try { return !(await Network.getNetworkStateAsync()).isConnected; }
+      catch { return false; }  // can't tell → don't cry offline
+    };
     (async () => {
-      for (let tick = 0; alive && tick < 30; tick++) {
+      void kickDrain();  // start the upload NOW, don't wait for the 15s timer
+      for (let tick = 0; alive && tick < 60; tick++) {
         let up = false, tr = transition.anchorCaptureId === null, an = false;
         try {
           const n = (await db.getAll<{ n: number }>(
@@ -915,10 +937,22 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           }
         } catch { /* schema races: poll again */ }
         if (!alive) return;
-        const offline = !up && tick >= 8 && firstCount > 0;
+
+        // Only ask the radio once we've actually waited a beat and still nothing
+        // has uploaded — and if we're online, re-kick the push.
+        let offline = false;
+        if (!up && tick >= 8 && firstCount > 0) {
+          offline = await isOffline();
+          if (!alive) return;
+          if (!offline && tick % 5 === 0) void kickDrain();
+        }
         setTransition((t) => t && { ...t, uploaded: up, transcribed: tr,
                                     analyzed: an || t.analyzed, offline });
-        if (up && tr) {
+
+        // Advance when upload + words are in — or, if the words are down and
+        // we're merely slow-while-connected, after ~20s open the details and let
+        // the upload finish behind us.
+        if ((up && tr) || (tr && !offline && tick >= 20)) {
           // A beat so the checkmarks are SEEN — a flash reads as a glitch.
           await new Promise((r) => setTimeout(r, 900));
           if (!alive) return;
@@ -931,9 +965,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         }
         await new Promise((r) => setTimeout(r, 1000));
       }
-      // 30s and still short: if the words are down but upload is stuck, the
-      // offline message + Done is already showing. If neither, show it too.
-      if (alive) setTransition((t) => t && { ...t, offline: true });
+      // 60s and still stuck: if the words are down, open the details anyway (the
+      // upload keeps retrying in the background). Otherwise show the offline escape.
+      if (alive) setTransition((t) => {
+        if (!t) return null;
+        if (t.transcribed) { void finishExtraById(t.coId); return null; }
+        return { ...t, offline: true };
+      });
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
