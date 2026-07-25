@@ -27,6 +27,7 @@ import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } fr
 import { photoCapture, pickFromLibrary, recordVideo, textCapture, voiceCapture } from './src/modality';
 import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
 import { ensurePairSchema, linkPair } from './src/pair';
+import { ensureAugmentSchema, noteAugment } from './src/augmentlog';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
@@ -228,6 +229,9 @@ export default function App() {
   });
   const [ui, setUi] = React.useState<UiState>({ k: 'idle' });
   const [showCapture, setShowCapture] = React.useState(false);   // REQ-CAP-FUSED screen
+  // When set, the capture screen AUGMENTS this existing extra (adds photos/voice as
+  // appended evidence) instead of minting a new extra (hadar, 2026-07-25).
+  const [augmentCoId, setAugmentCoId] = React.useState<string | null>(null);
   // REQ-PROC8: the capture whose AI proposal is being reviewed, or null.
   const [review, setReview] = React.useState<string | null>(null);
   // Walkthrough saved to the Inbox and awaiting a job: a change order MUST belong to a
@@ -1593,6 +1597,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       await ensureExtraActorSchema(db);
       await ensureConsentSchema(db);
       await ensurePairSchema(db);
+      await ensureAugmentSchema(db);
       // R2: the device's own copy of transcripts, so the price read-back keeps
       // working in a basement (mandate #7). Fetching is opportunistic; a miss is an
       // empty, flagged price field, never a blocked screen.
@@ -2013,6 +2018,79 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       setUi({ k: 'refused', why: e?.message ?? String(e) });
     } finally {
       await refresh();
+    }
+  };
+
+  // AUGMENT an existing extra with more photos/voice (hadar, 2026-07-25). Same
+  // capture machinery as onFusedCapture, but the captures attach to THIS extra's
+  // pair instead of minting a new decision/CO — and the priced scope, the amount
+  // and any signed instrument are left untouched (chosen behaviour: append as
+  // evidence). A history note records the addition. No job pick (it inherits the
+  // extra's project), no step-3, no processing transition: it appends and returns.
+  const onAugmentCapture = async (coId: string, a: FusedArtifacts) => {
+    setShowCapture(false); setAugmentCoId(null);
+    setUi({ k: 'saving' });
+    try {
+      const co = (await db.getAll<{ decision_id: string; project_id: string }>(
+        `SELECT decision_id, project_id FROM change_order WHERE id = ?`, [coId]))[0];
+      if (!co) { setUi({ k: 'refused', why: 'that extra is no longer here' }); return; }
+
+      // Reach the extra's captures, then their pair. New captures join THAT pair so
+      // the photo walk (CO_PHOTO_SUBQUERY) reaches them. If the anchor was never
+      // paired (a voice-only extra), mint a pair and pull the anchor in first.
+      const anchors = await db.getAll<{ capture_id: string; modality: string | null }>(
+        `SELECT dv.capture_id, cc.modality FROM decision_version dv
+           LEFT JOIN capture_commit cc ON cc.capture_id = dv.capture_id
+          WHERE dv.decision_id = ? AND dv.capture_id IS NOT NULL`, [co.decision_id]);
+      let pairId: string | null = null;
+      if (anchors.length) {
+        const marks = anchors.map(() => '?').join(',');
+        pairId = (await db.getAll<{ pair_id: string }>(
+          `SELECT pair_id FROM capture_pair WHERE capture_id IN (${marks}) LIMIT 1`,
+          anchors.map((x) => x.capture_id)))[0]?.pair_id ?? null;
+      }
+      if (!pairId) {
+        pairId = `pair-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        for (const an of anchors) {
+          await linkPair(db, pairId, an.capture_id, an.modality === 'photo' ? 'photo' : 'voice', Date.now());
+        }
+      }
+
+      let photoN = 0, voiceN = 0;
+      for (const ph of a.photos) {
+        const pr = await performCapture(db, {
+          ownerId: OWNER, projectId: co.project_id,
+          input: photoCapture(ph.bytes, ph.mime),
+          stamp: { ...a.stamp, capturedAtMs: ph.atMs },
+        });
+        if (!pr.ok) { setUi({ k: 'refused', why: pr.reason }); return; }
+        await linkPair(db, pairId, pr.captureId, 'photo', ph.atMs);
+        await noteCapturedBy(db, pr.captureId);
+        photoN++;
+      }
+      for (const seg of a.audioSegments) {
+        const vr = await performCapture(db, {
+          ownerId: OWNER, projectId: co.project_id,
+          input: voiceCapture(seg.bytes, seg.mime),
+          stamp: { ...a.stamp, capturedAtMs: seg.startedAtMs },
+        });
+        if (!vr.ok) { setUi({ k: 'refused', why: `some saved; audio did not: ${vr.reason}` }); return; }
+        await linkPair(db, pairId, vr.captureId, 'voice', seg.startedAtMs);
+        await noteCapturedBy(db, vr.captureId);
+        voiceN++;
+      }
+      if (!photoN && !voiceN) { setUi({ k: 'refused', why: 'nothing to save' }); return; }
+
+      // The note in the history — explicit, not inferred from a timestamp margin.
+      const prof = await getProfile(db);
+      const now = Date.now();
+      if (photoN) await noteAugment(db, { changeOrderId: coId, kind: 'photo', n: photoN, atMs: now, byName: prof?.name ?? null });
+      if (voiceN) await noteAugment(db, { changeOrderId: coId, kind: 'voice', n: voiceN, atMs: now, byName: prof?.name ?? null });
+      setUi({ k: 'saved', id: coId });
+      await refresh();
+      await openRecord(coId);
+    } catch (e: any) {
+      setUi({ k: 'refused', why: e?.message ?? String(e) });
     }
   };
 
@@ -3230,19 +3308,31 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           closeRecord();
           setShowCapture(true);
         }}
+        // Add more photos/voice to THIS extra (append as evidence). Same capture
+        // screen, but augmentCoId routes the result to onAugmentCapture, which
+        // attaches to this extra and reopens it — never a new extra (hadar 2026-07-25).
+        onAugment={() => {
+          if (!terms) { openTerms(); return; }
+          setAugmentCoId(record.id);
+          closeRecord();
+          setShowCapture(true);
+        }}
       />
     );
   }
 
   // REQ-CAP-FUSED: the fused photo+voice capture screen overlays everything when open.
   if (showCapture) {
+    // Augment mode: the captures attach to an existing extra and never mint a new
+    // one. Everything else about the screen is identical.
+    const augId = augmentCoId;
     return (
       <FusedCapture
         db={db}
         ownerId={OWNER}
         projectName={projects.find((p) => p.id === projectId)?.name ?? 'EZchangeorder'}
-        onCapture={onFusedCapture}
-        onClose={() => setShowCapture(false)}
+        onCapture={augId ? (a) => onAugmentCapture(augId, a) : onFusedCapture}
+        onClose={() => { setShowCapture(false); setAugmentCoId(null); }}
         resolveLabel={resolveStampLabel}
       />
     );

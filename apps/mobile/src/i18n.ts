@@ -427,9 +427,13 @@ const EN: Record<string, string> = {
   // here too and is gone: the price-confirmed moment is an event, and the history
   // already says it with `erec.evPriced`, which carries the amount.
   'erec.capturedAt': 'Captured on site',
+  'erec.addPhoto': 'Add photo',
+  'erec.addVoice': 'Add a voice note',
   // History
   'erec.evCreated': 'Extra created',
   'erec.evPriced': 'Price confirmed — {amount}',
+  'erec.evAddedPhotos': 'Added {n} photo(s)',
+  'erec.evAddedVoice': 'Added a voice note',
   'erec.evSent': 'Sent for approval',
   'erec.evSigned': 'Signed by {name}',
   'erec.evDeclined': 'Declined',
@@ -1147,8 +1151,12 @@ const ES: Record<string, string> = {
   'erec.directedBy': 'Pidió este extra',
   'erec.signedBy': 'Firmó la aprobación',
   'erec.capturedAt': 'Grabado en la obra',
+  'erec.addPhoto': 'Agregar foto',
+  'erec.addVoice': 'Agregar nota de voz',
   'erec.evCreated': 'Se creó el extra',
   'erec.evPriced': 'Precio confirmado — {amount}',
+  'erec.evAddedPhotos': 'Se agregó(aron) {n} foto(s)',
+  'erec.evAddedVoice': 'Se agregó una nota de voz',
   'erec.evSent': 'Enviado para aprobación',
   'erec.evSigned': 'Firmado por {name}',
   'erec.evDeclined': 'Rechazado',

@@ -76,6 +76,9 @@ export function RecordScreen(props: {
   revision?: { priorAmount: string; newAmount: string } | null;
   onBack: () => void;
   onCapture?: () => void;
+  /** Add more photos / voice to THIS extra as appended evidence (hadar 2026-07-25).
+   *  Opens the capture screen in augment mode; the priced scope is never rewritten. */
+  onAugment?: () => void;
   /** R6 / R5b AC3 — write the approval document and open the share sheet. */
   onShare?: () => void;
   /** R5b reply, straight from the record (prototype c5's reply bar). A reply is a
@@ -251,6 +254,12 @@ export function RecordScreen(props: {
             <Text style={{ ...T.bodySteel, fontSize: 13.5, marginTop: 6 }}>
               {t('erec.noPhotos')}
             </Text>
+            {props.onAugment && (
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                <AddPhotoTile onPress={props.onAugment} />
+              </View>
+            )}
+            {props.onAugment && <AddVoiceButton onPress={props.onAugment} />}
           </View>
         )}
         {!props.narration && rec.photos.length > 0 && (
@@ -291,12 +300,14 @@ export function RecordScreen(props: {
                   <Text style={{ ...T.bodySteel, fontSize: 10, marginTop: 3 }}>{p.at}</Text>
                 </View>
               ))}
+              {props.onAugment && <AddPhotoTile onPress={props.onAugment} />}
             </View>
             {rec.photosTruncated > 0 && (
               <Text style={{ ...T.bodySteel, fontSize: 12, marginTop: 8 }}>
                 {t({ k: 'erec.evidenceMore', p: { n: rec.photosTruncated } } as any)}
               </Text>
             )}
+            {props.onAugment && <AddVoiceButton onPress={props.onAugment} />}
           </View>
         )}
 
@@ -516,6 +527,37 @@ export function RecordScreen(props: {
         </Pressable>
       </Modal>
     </View>
+  );
+}
+
+/** "Add photo" — the dashed tile that sits at the end of the evidence grid, sized
+ *  to match a thumbnail (hadar, 2026-07-25 mockup). Opens the capture screen to
+ *  augment THIS extra; the priced scope is never touched. */
+function AddPhotoTile({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} accessibilityLabel={t('erec.addPhoto')}
+      style={{
+        width: 86, height: 86, borderRadius: 10, borderWidth: 1.5, borderColor: C.line,
+        borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 3,
+      }}>
+      <Text style={{ fontSize: 20 }}>📷</Text>
+      <Text style={{ fontFamily: F.body, fontSize: 10.5, color: C.steel }}>{t('erec.addPhoto')}</Text>
+    </Pressable>
+  );
+}
+
+/** "Add voice" — a full-width button under the grid. Same augment action; the
+ *  capture screen records a clip that appends as evidence. */
+function AddVoiceButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} accessibilityLabel={t('erec.addVoice')}
+      style={{
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+        marginTop: 12, minHeight: 46, borderRadius: 10, borderWidth: 1, borderColor: C.line,
+      }}>
+      <Text style={{ fontSize: 15 }}>🎙️</Text>
+      <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.inkSoft }}>{t('erec.addVoice')}</Text>
+    </Pressable>
   );
 }
 

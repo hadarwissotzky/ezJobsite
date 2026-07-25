@@ -30,6 +30,7 @@
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import { createdLabel, money } from './changeorder';
+import { augmentEventsFor } from './augmentlog';
 import { getLang, t } from './i18n';
 
 /** Hard caps. A ten-year job must not be able to hang the screen or blow SQLite's
@@ -272,6 +273,20 @@ export async function extraRecord(
       what: t({ k: 'erec.evPriced', p: { amount: money(co.amount_cents) } } as any),
     });
   }
+  // Additions made after the fact — "Added 2 photos", "Added a voice note" — the
+  // explicit note the augment feature records (hadar, 2026-07-25). Timestamped, so
+  // they sort into place with the rest. A hint, never load-bearing: its absence
+  // never breaks the record.
+  try {
+    for (const ev of await augmentEventsFor(db, changeOrderId)) {
+      stamped.push({
+        atMs: ev.atMs, at: createdLabel(ev.atMs),
+        what: ev.kind === 'photo'
+          ? t({ k: 'erec.evAddedPhotos', p: { n: ev.n } } as any)
+          : t('erec.evAddedVoice'),
+      });
+    }
+  } catch { /* the augment log is optional */ }
   stamped.sort((a, b) => (a.atMs ?? 0) - (b.atMs ?? 0));
 
   // Events we know happened but hold no time for. Marked, never given a fake slot.
