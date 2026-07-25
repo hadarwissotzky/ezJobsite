@@ -320,7 +320,10 @@ export default function App() {
     url: string; shown: string;
     // For the "Sent for approval" screen (hadar, 2026-07-24 mockup).
     scope?: string; amount?: string; jobName?: string;
-    sentTo?: string | null; atMs?: number } | null>(null);
+    // `shared` = the contractor actually handed the link off (shareLink completed).
+    // Until then this is a request that EXISTS but has not reached the client, and
+    // the screen must not claim "Sent / Waiting for a yes" (Codex P1, mandate #1).
+    sentTo?: string | null; atMs?: number; shared?: boolean } | null>(null);
   // After a send/finish that BEGAN on an extra's detail page, return to that page
   // (hadar, 2026-07-24: "after the send button ... take me back to the extra detail
   // page even if it is a draft"). The change-order id to re-open, or null.
@@ -580,6 +583,7 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
       ids: a.ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
       uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
       stalled: false, uploadDone: 0, uploadTotal: a.ids.length, lastError: null,
+      blocked: false,
     });
   }
 };
@@ -718,7 +722,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     if (to) await markApproverUsed(db, to.id);
     setSendPrep(null);
     setSentLink({ url: re.url, shown: re.shownContent,
-      scope: c.scope, amount: c.amount,
+      // No amount for an EWA: it is stored with amount_cents = 0, so `c.amount` is
+      // "$0.00" — and the EWA contract states NO price. Showing $0.00 misrepresents
+      // it (Codex P2). Its terms (rate/cap) live in the frozen instrument itself.
+      scope: c.scope, amount: undefined,
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
       sentTo: to?.name ?? c.who_directed ?? null, atMs: Date.now() });
     await refresh();
@@ -885,7 +892,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     ids: string[]; anchorCaptureId: string | null; coId: string;
     uploaded: boolean; transcribed: boolean; analyzed: boolean; offline: boolean;
     stalled: boolean; uploadDone: number; uploadTotal: number;
-    lastError: string | null;
+    lastError: string | null; blocked: boolean;
   }>(null);
 
   // The transition's watcher. Polls the real signals: capture_outbox emptying
@@ -915,6 +922,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     // (a text-only extra) means nothing to transcribe or analyse — mirror the
     // `transcribed` initializer above.
     let analyzedSeen = transition.anchorCaptureId === null;
+    // Latches true if drainOutbox refuses to upload on POLICY (on cellular with
+    // cellular-upload off — the default). That is not offline and not slow: it will
+    // never finish here, so surface the Wi-Fi escape at once (Codex P2).
+    let blockedSeen = false;
     const kickDrain = async () => {
       try {
         // getSession() is LOCAL — no network round-trip. getUser() validates the
@@ -922,7 +933,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // this screen; we only need the id to trigger the drain (review #6).
         const { data } = await connector.client.auth.getSession();
         const uid = data?.session?.user?.id;
-        if (uid) await drainOutbox(db, connector.client, uid);
+        if (uid) {
+          const r = await drainOutbox(db, connector.client, uid);
+          if (r.blocked) blockedSeen = true;
+        }
       } catch { /* the capture is safe locally; a failed push just retries */ }
     };
     const isOffline = async () => {
@@ -995,7 +1009,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         }
         setTransition((t) => t && { ...t, uploaded: up, transcribed: tr,
                                     analyzed: analyzedSeen, offline,
-                                    uploadDone, uploadTotal, lastError });
+                                    uploadDone, uploadTotal, lastError,
+                                    blocked: blockedSeen });
 
         // THE gate: uploaded + words down + AI has written title/tag/price.
         if (ready) {
@@ -2903,7 +2918,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         <Text style={{ color: '#fff', fontSize: 26, fontWeight: '700' }}>
           {T('cap.transTitle')}
         </Text>
-        {!(t.offline || t.stalled) && (
+        {!(t.offline || t.stalled || t.blocked) && (
           <Text style={{ color: '#8c959f', fontSize: 15, lineHeight: 21, marginTop: 8 }}>
             {T('cap.transSub')}
           </Text>
@@ -2931,12 +2946,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           {t.anchorCaptureId !== null && row(t.transcribed, 'cap.transStt', 'cap.transSttDone')}
           {row(t.analyzed, 'cap.transAnalyze', 'cap.transAnalyzed')}
         </View>
-        {(t.offline || t.stalled) && (
+        {(t.offline || t.stalled || t.blocked) && (
           <>
             <View style={{ backgroundColor: '#3a2c00', borderColor: '#d4a72c', borderWidth: 1,
               borderRadius: 12, padding: 14, marginTop: 26 }}>
               <Text style={{ color: '#f5d76a', fontSize: 15, lineHeight: 22 }}>
-                {T(t.offline ? 'cap.transOffline' : 'cap.transStalled')}
+                {T(t.blocked ? 'cap.transBlocked' : t.offline ? 'cap.transOffline' : 'cap.transStalled')}
               </Text>
               {t.lastError && (
                 <Text style={{ color: '#c9a227', fontSize: 12.5, lineHeight: 18, marginTop: 10,
@@ -3150,7 +3165,24 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               const dr = await drainOutbox(db, connector.client, OWNER);
               await refresh();
               await openRecord(record.id);
-              if (dr.blocked) setFiled('Waiting for Wi-Fi to upload — connect to Wi-Fi or turn on cellular upload in settings.');
+              if (dr.blocked) { setFiled('Waiting for Wi-Fi to upload — connect to Wi-Fi or turn on cellular upload in settings.'); return; }
+              // drainOutbox returns when the bytes are INGESTED; the server pipeline
+              // (transcribe → structure) then finishes ASYNCHRONOUSLY, and the Send
+              // button only appears once the readiness gate turns green. Nothing else
+              // re-checks after capture_op_state syncs back, so the button would sit
+              // on "Upload & process" until the user tapped again (Codex P2). Poll the
+              // gate and refresh() when it opens — refresh() recomputes readiness.
+              const did = row?.decision_id;
+              if (!did) return;
+              void (async () => {
+                for (let i = 0; i < 24; i++) {
+                  await new Promise((r) => setTimeout(r, 2500));
+                  let sendable = false;
+                  try { sendable = canSendExtra(extraProcState(await captureStatesForExtra(db, did))).ok; }
+                  catch { /* schema race; try again next tick */ }
+                  if (sendable) { await refresh(); return; }
+                }
+              })();
             } : undefined}
         // Mandate #2: a reply is a MESSAGE. It commits nothing and prices nothing —
         // and it must never move the extra's status. A new PRICE goes through the
@@ -4461,9 +4493,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           }}>
             <Text style={s.sentCloseT}>✕</Text>
           </Pressable>
-          <View style={s.sentBadge}><Text style={s.sentBadgeIcon}>✓</Text></View>
-          <Text style={s.sentH}>{T('sent.title')}</Text>
-          <Text style={s.sentSub}>{T('sent.waiting')}</Text>
+          <View style={s.sentBadge}><Text style={s.sentBadgeIcon}>{sentLink.shared ? '✓' : '↗'}</Text></View>
+          <Text style={s.sentH}>{T(sentLink.shared ? 'sent.title' : 'sent.readyTitle')}</Text>
+          <Text style={s.sentSub}>{T(sentLink.shared ? 'sent.waiting' : 'sent.readySub')}</Text>
 
           <View style={s.sentRows}>
             {!!sentLink.jobName && (<View style={s.sentRow}>
@@ -4486,7 +4518,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             </View>)}
             <View style={s.sentRow}>
               <Text style={s.sentLab}>{T('sent.status')}</Text>
-              <View style={s.sentChip}><Text style={s.sentChipT}>{T('sent.waitingChip')}</Text></View>
+              <View style={s.sentChip}><Text style={s.sentChipT}>
+                {T(sentLink.shared ? 'sent.waitingChip' : 'sent.notSentChip')}</Text></View>
             </View>
           </View>
 
@@ -4498,8 +4531,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           <Pressable style={s.confirmWide} onPress={async () => {
             const r = await shareLink(sentLink.url, sentLink.shown);
             if (!r.ok) setUi({ k: 'refused', why: r.reason ?? 'could not share' });
+            // Only NOW has the link reached the client — flip to the sent state.
+            else setSentLink((sl) => sl && { ...sl, shared: true });
           }}>
-            <Text style={s.confirmT}>{T('sent.share')}</Text>
+            <Text style={s.confirmT}>{T(sentLink.shared ? 'sent.shareAgain' : 'sent.share')}</Text>
           </Pressable>
 
           <Text style={s.sentFoot}>{T('sent.foot')}</Text>

@@ -49,6 +49,16 @@ export function RecordApproval({ approval }: { approval: ApprovalPanel | null })
         </View>
       )}
 
+      {/* `signal` (the chase line) is null once the client has ANSWERED — but an
+          approved/declined record still has an opening history, and "last opened"
+          was disappearing exactly on answered records (Codex P2). Render it on its
+          own when there is no signal box to host it. */}
+      {!signal && approval.lastOpenedMs != null && (
+        <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.steel, marginTop: 12 }}>
+          {t({ k: 'erec.lastOpened', p: { at: createdLabel(approval.lastOpenedMs) } } as any)}
+        </Text>
+      )}
+
       {snapshot && (
         <View style={T.card}>
           <Text style={label}>{t('erec.snapshot')}</Text>
