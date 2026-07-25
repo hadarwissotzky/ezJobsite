@@ -130,7 +130,7 @@ import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
          setTermsAccepted } from './src/consent';
 import { buildDisputeBundle, buildProgressUpdate, shareBundle, shareLink,
          shareProgressUpdate } from './src/bundle';
-import { drainOutbox, outboxStatus } from './src/uploader';
+import { drainOutbox, outboxStatus, redriveParkedCaptures } from './src/uploader';
 import * as Network from 'expo-network';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, recordDecision, type DecisionRow } from './src/decisions';
@@ -1571,6 +1571,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       //    deliberately discarded capture must never upload afterwards.
       const rd = await redriveParked(db, ['23502']);
       if (rd) console.log('redrive:', rd);
+      //  - captures parked on 23503 because their PROJECT had not reached the
+      //    server (the project sync lagged/stalled) get freed: the drain now pushes
+      //    the project itself and retries, so these can finally land (hadar,
+      //    2026-07-25 — nothing had uploaded since the project queue wedged).
+      const rdc = await redriveParkedCaptures(db, ['23503']);
+      if (rdc) console.log('redrive captures:', rdc);
       await db.execute(
         `DELETE FROM capture_outbox WHERE capture_id IN
            (SELECT capture_id FROM capture_discarded)`);

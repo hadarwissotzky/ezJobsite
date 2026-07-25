@@ -194,6 +194,23 @@ export async function drainOutbox(
       if (data?.status === 'already_applied') r.alreadyApplied++; else r.uploaded++;
     } catch (e: any) {
       const code = e?.code ?? e?.error_code;
+      // THE CAPTURE'S PROJECT HAS NOT REACHED THE SERVER YET. ingest_capture_v1's
+      // only foreign key is capture_project_id_fkey, so a 23503 here is always the
+      // project: it is a PowerSync-managed row, and if that sync is lagging or has
+      // stalled (its queue wedged on one poison row), the capture would park FOREVER
+      // — a capture lost to a mutable-row timing problem, which mandate #1 forbids.
+      // The project split (CLAUDE.md §5) made captures depend on a project row a
+      // different transport delivers; this is where that dependency is repaired.
+      // Push the project ourselves from the local table and let the capture retry.
+      // Evidence must never be held hostage to the project sync.
+      if (code === '23503') {
+        const pushed = await pushProjectRow(db, supabase, payload.project_id);
+        // On success the FK is now satisfiable, so leave the row schedulable and the
+        // next drain lands it. On failure, back off so we do not spin.
+        if (!pushed) await backoff(db, row, code, e?.message ?? String(e));
+        r.retryable++;
+        continue;
+      }
       if (PERMANENT.has(code)) {
         // Park it. Do NOT delete: the capture is still committed locally and the
         // user must not be told it is backed up when it is not.
@@ -206,6 +223,50 @@ export async function drainOutbox(
     }
   }
   return r;
+}
+
+/**
+ * One-time recovery: free captures that PARKED on a now-fixable code (23503 — a
+ * project that had not reached the server) so the next drain re-attempts them with
+ * the project-push repair above. Without this, captures that parked BEFORE the fix
+ * stay parked forever (next_attempt_at_ms is set to the year 275760). Returns how
+ * many were freed. Idempotent: once they succeed and leave the outbox, there is
+ * nothing left to free.
+ */
+export async function redriveParkedCaptures(
+  db: AbstractPowerSyncDatabase, codes: readonly string[]
+): Promise<number> {
+  if (!codes.length) return 0;
+  const marks = codes.map(() => '?').join(',');
+  const r = await db.execute(
+    `UPDATE capture_outbox
+        SET attempt_count = 0, next_attempt_at_ms = 0,
+            last_error_code = NULL, last_error_text = NULL
+      WHERE last_error_code IN (${marks})`, [...codes]);
+  return r.rowsAffected ?? 0;
+}
+
+/**
+ * Push a project row straight to the server from the local PowerSync table, the
+ * same shape the connector's uploadData sends: every synced column except `status`,
+ * which the server owns (its column-level grant refuses a client write, and the
+ * connector strips it for exactly this reason). Best-effort — a capture retry is
+ * the backstop, so a failed push here just means "try again next drain".
+ */
+async function pushProjectRow(
+  db: AbstractPowerSyncDatabase, supabase: SupabaseClient, projectId: string | undefined
+): Promise<boolean> {
+  if (!projectId) return false;
+  try {
+    const rows = await db.getAll<Record<string, any>>(
+      `SELECT * FROM project WHERE id = ?`, [projectId]);
+    if (!rows.length) return false;
+    const { status, ...data } = rows[0];
+    const { error } = await supabase.from('project').upsert(data);
+    return !error;
+  } catch {
+    return false;
+  }
 }
 
 /** Permanent failure: record it, stop retrying, keep the row forever. */
