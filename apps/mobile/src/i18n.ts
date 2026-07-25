@@ -320,6 +320,16 @@ const EN: Record<string, string> = {
   'dec.alreadySaved': 'Already saved either way — this just says what it means.',
   'dec.confirm': 'CONFIRM',
   'conf.created': 'Confirm request created',
+  // Sent-for-approval screen (mockup 2026-07-24)
+  'sent.title': 'Sent for approval',
+  'sent.waiting': 'Waiting for a yes.',
+  'sent.job': 'Job',
+  'sent.request': 'Request',
+  'sent.to': 'Sent to',
+  'sent.status': 'Status',
+  'sent.waitingChip': 'Waiting for a yes',
+  'sent.share': 'Send by text →',
+  'sent.foot': 'You’ll get a notification when the homeowner responds.',
   'conf.send': 'SEND IT →',
   'conf.noLogin': 'No login needed — anyone with this link can answer it.',
 
@@ -1034,6 +1044,16 @@ const ES: Record<string, string> = {
   'dec.alreadySaved': 'Ya está guardado de todas formas — esto solo dice lo que significa.',
   'dec.confirm': 'CONFIRMAR',
   'conf.created': 'Solicitud de confirmación creada',
+  // Pantalla de enviado para aprobación (maqueta 2026-07-24)
+  'sent.title': 'Enviado para aprobación',
+  'sent.waiting': 'Esperando un sí.',
+  'sent.job': 'Trabajo',
+  'sent.request': 'Solicitud',
+  'sent.to': 'Enviado a',
+  'sent.status': 'Estado',
+  'sent.waitingChip': 'Esperando un sí',
+  'sent.share': 'Enviar por texto →',
+  'sent.foot': 'Recibirás una notificación cuando el propietario responda.',
   'conf.send': 'MANDARLO →',
   'conf.noLogin': 'No necesita cuenta — cualquiera con este enlace puede responder.',
 

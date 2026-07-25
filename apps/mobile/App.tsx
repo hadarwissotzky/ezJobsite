@@ -315,7 +315,11 @@ export default function App() {
     captureId: string; subject: string; value: string; directedBy: string; scope: 'project'|'party';
   }>(null);
   const [history, setHistory] = React.useState<any[] | null>(null);
-  const [sentLink, setSentLink] = React.useState<{url:string; shown:string} | null>(null);
+  const [sentLink, setSentLink] = React.useState<{
+    url: string; shown: string;
+    // For the "Sent for approval" screen (hadar, 2026-07-24 mockup).
+    scope?: string; amount?: string; jobName?: string;
+    sentTo?: string | null; atMs?: number } | null>(null);
   // After a send/finish that BEGAN on an extra's detail page, return to that page
   // (hadar, 2026-07-24: "after the send button ... take me back to the extra detail
   // page even if it is a draft"). The change-order id to re-open, or null.
@@ -711,7 +715,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     await markLocalSent(db, c.id);
     if (to) await markApproverUsed(db, to.id);
     setSendPrep(null);
-    setSentLink({ url: re.url, shown: re.shownContent });
+    setSentLink({ url: re.url, shown: re.shownContent,
+      scope: c.scope, amount: c.amount,
+      jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
+      sentTo: to?.name ?? c.who_directed ?? null, atMs: Date.now() });
     await refresh();
     return;
   }
@@ -810,7 +817,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                                name: to.name, role: to.role, atMs: sentAtMs });
     }
     setSendPrep(null);
-    setSentLink({ url: r.url, shown: r.shownContent });
+    setSentLink({ url: r.url, shown: r.shownContent,
+      scope: c.scope, amount: c.amount,
+      jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
+      sentTo: to?.name ?? c.who_directed ?? null, atMs: sentAtMs });
     await refresh();
   } else setUi({ k: 'refused', why: r.reason });
 };
@@ -4312,40 +4322,55 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           }}>
         <View style={{ flex: 1, backgroundColor: 'rgba(13,15,18,0.45)' }}>
         <ScrollView contentContainerStyle={{ padding: 14, paddingTop: 64, paddingBottom: 40 }}>
-        <View style={s.card}>
-          <Text style={s.cardH}>{T('conf.created')}</Text>
-          <Text style={s.frozen}>{sentLink.shown}</Text>
-          <Text style={s.cardNote}>
-            These exact words are frozen — if the decision changes later, this still
-            shows what they were asked. It is the binding record.
-          </Text>
-          <Text style={s.link}>{sentLink.url}</Text>
-          <Text style={s.cardNote}>{T('conf.noLogin')}</Text>
+        <View style={s.sentCard}>
+          <Pressable style={s.sentClose} hitSlop={12} onPress={() => {
+            setSentLink(null); setPhotoNote(null);
+            if (returnRecordId) { const rid = returnRecordId; setReturnRecordId(null); void openRecord(rid); }
+          }}>
+            <Text style={s.sentCloseT}>✕</Text>
+          </Pressable>
+          <View style={s.sentBadge}><Text style={s.sentBadgeIcon}>✓</Text></View>
+          <Text style={s.sentH}>{T('sent.title')}</Text>
+          <Text style={s.sentSub}>{T('sent.waiting')}</Text>
+
+          <View style={s.sentRows}>
+            {!!sentLink.jobName && (<View style={s.sentRow}>
+              <Text style={s.sentLab}>{T('sent.job')}</Text>
+              <Text style={s.sentVal} numberOfLines={1}>{sentLink.jobName}</Text>
+            </View>)}
+            {!!sentLink.scope && (<View style={s.sentRow}>
+              <Text style={s.sentLab}>{T('sent.request')}</Text>
+              <Text style={s.sentVal} numberOfLines={1}>
+                {sentLink.scope}{sentLink.amount ? ` · ${sentLink.amount}` : ''}
+              </Text>
+            </View>)}
+            {!!sentLink.sentTo && (<View style={s.sentRow}>
+              <Text style={s.sentLab}>{T('sent.to')}</Text>
+              <Text style={s.sentVal} numberOfLines={1}>
+                {sentLink.sentTo}{sentLink.atMs
+                  ? ` · ${new Date(sentLink.atMs).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+                  : ''}
+              </Text>
+            </View>)}
+            <View style={s.sentRow}>
+              <Text style={s.sentLab}>{T('sent.status')}</Text>
+              <View style={s.sentChip}><Text style={s.sentChipT}>{T('sent.waitingChip')}</Text></View>
+            </View>
+          </View>
+
           {photoNote && <Text style={s.cardNote}>{photoNote}</Text>}
 
-          {/* REQ-VAL8, delivered.
-              We do NOT need an email provider. The user is a solo operator with
-              2-10 employees who ALREADY texts this client -- their phone has
-              iMessage, WhatsApp, email and every channel their client actually
-              reads. A link they send themselves arrives from a number the client
-              recognises; one we send lands in spam from a stranger. The share
-              sheet is not a stopgap here, it is the better answer. */}
+          {/* The link goes to the client by TEXT — a link the contractor sends
+              themselves arrives from a number the client recognises, not spam
+              (REQ-VAL8). This is the actual delivery. */}
           <Pressable style={s.confirmWide} onPress={async () => {
             const r = await shareLink(sentLink.url, sentLink.shown);
             if (!r.ok) setUi({ k: 'refused', why: r.reason ?? 'could not share' });
           }}>
-            <Text style={s.confirmT}>{T('conf.send')}</Text>
+            <Text style={s.confirmT}>{T('sent.share')}</Text>
           </Pressable>
 
-          {/* Clear the photo note too, or a stale "3 photos are on the client's
-              page" from the previous send reappears on the next one. */}
-          <Pressable style={s.later} onPress={() => {
-            setSentLink(null); setPhotoNote(null);
-            // Return to the extra's detail page when the send began there.
-            if (returnRecordId) { const rid = returnRecordId; setReturnRecordId(null); void openRecord(rid); }
-          }}>
-            <Text style={s.laterT}>{T('common.close')}</Text>
-          </Pressable>
+          <Text style={s.sentFoot}>{T('sent.foot')}</Text>
         </View>
         </ScrollView>
         </View>
@@ -4431,6 +4456,28 @@ const s = StyleSheet.create({
   rowT: { color: '#57606a', fontSize: 13, fontFamily: 'Menlo' },
   rowS: { color: '#8c959f', fontSize: 11, fontFamily: 'Menlo', marginTop: 2 },
   card: { backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16 },
+  // ── "Sent for approval" screen (mockup 2026-07-24) ─────────────────────────
+  sentCard: { backgroundColor: '#fff', borderRadius: 18, padding: 20, paddingTop: 44, alignItems: 'center' },
+  sentClose: { position: 'absolute', top: 12, right: 14, width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  sentCloseT: { fontSize: 18, color: '#8A93A0' },
+  sentBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#E9F6ED',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  sentBadgeIcon: { fontSize: 30, color: '#1A7F37', fontFamily: 'Barlow_700Bold' },
+  sentH: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 22, color: '#0D0F12',
+    textTransform: 'uppercase', letterSpacing: 0.5 },
+  sentSub: { fontFamily: 'Barlow_400Regular', fontSize: 15, color: '#6B7280', marginTop: 2, marginBottom: 16 },
+  sentRows: { alignSelf: 'stretch', borderWidth: 1, borderColor: '#EEEFEC', borderRadius: 12, marginBottom: 16 },
+  sentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#F2F3F0' },
+  sentLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, color: '#8A93A0',
+    textTransform: 'uppercase', letterSpacing: 0.8 },
+  sentVal: { flex: 1, textAlign: 'right', marginLeft: 12, fontFamily: 'Barlow_600SemiBold',
+    fontSize: 14.5, color: '#0D0F12' },
+  sentChip: { borderRadius: 8, borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FEF6E7',
+    paddingVertical: 4, paddingHorizontal: 10 },
+  sentChipT: { fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#B26A00' },
+  sentFoot: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#8A93A0',
+    textAlign: 'center', marginTop: 12, lineHeight: 18 },
   cardH: { color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
   cardV: { color: '#0D0F12', fontSize: 17, lineHeight: 23, marginBottom: 10 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
