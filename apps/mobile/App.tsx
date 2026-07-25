@@ -3031,6 +3031,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // me to step 3") — it either sends (onSend, when ready) or shows why it isn't.
         onFinish={record.status === 'draft' && !record.priced
           ? () => { closeRecord(); void finishExtraById(record.id); } : undefined}
+        // Upload & process a PRICED draft that isn't ready to send yet: force the
+        // capture upload now; the server pipeline then processes it, and the send
+        // button appears once it's 'processed' (hadar, 2026-07-24). Shown only when
+        // it is priced but the readiness gate is not green.
+        onProcess={record.status === 'draft' && record.priced && !(gate?.ok && row)
+          ? async () => {
+              const dr = await drainOutbox(db, connector.client, OWNER);
+              await refresh();
+              await openRecord(record.id);
+              if (dr.blocked) setFiled('Waiting for Wi-Fi to upload — connect to Wi-Fi or turn on cellular upload in settings.');
+            } : undefined}
         // Mandate #2: a reply is a MESSAGE. It commits nothing and prices nothing —
         // and it must never move the extra's status. A new PRICE goes through the
         // read-back composer (onRevise), never through a chat box.
@@ -3822,6 +3833,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           await refresh();
           if (send) {
             const row = coRowsRef.current.find((x) => x.id === id);
+            // MUST BE PROCESSED FIRST (hadar, 2026-07-24): the evidence has to be
+            // uploaded and the pipeline done before a client gets a link — otherwise
+            // they open a request whose photos/transcript are still on the phone.
+            // This path used to skip that gate, so an unprocessed extra could go out.
+            const st = row ? extraProcState(await captureStatesForExtra(db, row.decision_id)) : 'captured';
+            if (!canSendExtra(st as any).ok) {
+              // Not ready — land on the extra's detail page, where the processing
+              // status and the "Upload & process" button live.
+              await openRecord(id);
+              return;
+            }
             // R5c still owns the actual send: recipient + reason + final tap. After
             // it lands, return to the extra's detail page (returnRecordId).
             if (row) { setReturnRecordId(id); await openSendPrep(row); return; }

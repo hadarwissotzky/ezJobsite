@@ -95,6 +95,10 @@ export function RecordScreen(props: {
    *  dead-end (hadar, 2026-07-24: tapping an extra must reach its detail page, and
    *  from there be finishable). */
   onFinish?: () => void;
+  /** Force the upload + processing of a PRICED draft that isn't ready to send yet,
+   *  so the evidence is on the server before a client gets a link (hadar,
+   *  2026-07-24: "we need an upload and process button before the send"). */
+  onProcess?: () => Promise<void> | void;
   /** On a superseded record: open the version that replaced it. */
   onOpenCurrent?: () => void;
   /** Offered ONLY while the extra is a draft — App.tsx passes undefined once it
@@ -121,6 +125,7 @@ export function RecordScreen(props: {
   // only after the write resolved; a failed write keeps the words).
   const [draft, setDraft] = React.useState('');
   const [busy, setBusy] = React.useState(false);
+  const [procBusy, setProcBusy] = React.useState(false);
   // A refused action's reason. This screen has no other status surface, and a
   // button that silently does nothing is the failure this repo names most often.
   const [actionNote, setActionNote] = React.useState<string | null>(null);
@@ -364,7 +369,7 @@ export function RecordScreen(props: {
           the primary is Remind; a question makes the reply the primary path; a
           terminal record's primary is its evidence bundle. A static button pair
           cannot serve a screen whose job is "where does this stand". */}
-      {(composer || props.onSend || props.onFinish || props.onRemind || props.onRevise
+      {(composer || props.onSend || props.onFinish || props.onProcess || props.onRemind || props.onRevise
         || props.onOpenCurrent || (terminal && props.onShare)) && (
         <View
           onLayout={(e) => setBarH(e.nativeEvent.layout.height)}
@@ -413,6 +418,13 @@ export function RecordScreen(props: {
               <Pressable onPress={props.onFinish} accessibilityLabel={t('co.finish')}
                 style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
                 <Text style={T.btnText}>{t('co.finish')}</Text>
+              </Pressable>
+            )}
+            {shown === 'draft' && !props.onSend && !props.onFinish && props.onProcess && (
+              <Pressable disabled={procBusy} accessibilityLabel={t('erec.process')}
+                onPress={async () => { setProcBusy(true); try { await props.onProcess!(); } finally { setProcBusy(false); } }}
+                style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }, procBusy && T.btnOff]}>
+                <Text style={T.btnText}>{procBusy ? t('erec.processing') : t('erec.process')}</Text>
               </Pressable>
             )}
             {shown === 'sent' && props.onRemind && (

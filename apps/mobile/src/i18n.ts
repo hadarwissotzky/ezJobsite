@@ -747,6 +747,8 @@ const EN: Record<string, string> = {
   // The record's action bar (design prototype c5). Labels only — the flows they
   // open (remind, revise, send, share) each keep their own strings.
   'erec.send': 'Send for approval',
+  'erec.process': 'Upload & process',
+  'erec.processing': 'Uploading…',
   'erec.share': 'Share the record',
   'erec.viewCurrent': 'See the current version',
 
@@ -1443,6 +1445,8 @@ const ES: Record<string, string> = {
   'erec.kindDecision': 'Decisión',
   'erec.priceToCome': 'Todavía sin precio',
   'erec.send': 'Enviar para aprobación',
+  'erec.process': 'Subir y procesar',
+  'erec.processing': 'Subiendo…',
   'erec.share': 'Compartir el registro',
   'erec.viewCurrent': 'Ver la versión actual',
 
