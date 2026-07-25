@@ -93,6 +93,9 @@ export async function ensureEventLogSchema(db: AbstractPowerSyncDatabase) {
 export type ApprovalPanel = {
   /** "Opened 3 times · no answer yet" — R6's actionable signal. Null when silent. */
   signal: { k: string; p?: Record<string, string | number> } | null;
+  /** The newest open's timestamp (ms), or null if never opened — "when was the
+   *  last time" (hadar, 2026-07-24). Rendered as a relative time on the record. */
+  lastOpenedMs: number | null;
   snapshot: {
     /** The binding instrument, verbatim. Never re-rendered. */
     content: string;
@@ -266,6 +269,10 @@ export async function withEventLog<R extends ExtraRecord>(
     history,
     approval: {
       signal: openSignal(events, rec.status),
+      // WHEN it was last opened — R6's "when was the last time" (hadar, 2026-07-24).
+      // The newest 'opened' event, or null if the client has not opened it yet.
+      lastOpenedMs: events.reduce(
+        (m, e) => (e.kind === 'opened' && e.atMs > m ? e.atMs : m), 0) || null,
       snapshot: snapshot ? {
         content: snapshot.content,
         // Hashing the copy we are about to display. This catches a truncated

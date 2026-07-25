@@ -22,6 +22,7 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 import type { ApprovalPanel } from '../eventlog';
+import { createdLabel } from '../changeorder.ts';
 import { t } from '../i18n';
 import { C, F, T, label } from './theme';
 
@@ -40,6 +41,11 @@ export function RecordApproval({ approval }: { approval: ApprovalPanel | null })
           <Text style={{ fontFamily: F.bodySemi, fontSize: 14.5, color: C.inkSoft }}>
             {t({ k: signal.k, p: signal.p } as any)}
           </Text>
+          {approval.lastOpenedMs != null && (
+            <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.steel, marginTop: 3 }}>
+              {t({ k: 'erec.lastOpened', p: { at: createdLabel(approval.lastOpenedMs) } } as any)}
+            </Text>
+          )}
         </View>
       )}
 
