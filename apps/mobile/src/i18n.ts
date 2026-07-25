@@ -482,6 +482,7 @@ const EN: Record<string, string> = {
   // The flow-mock questions (phase 3). Answers become terms the owner signs.
   'co.finish': 'Finish this extra →',
   'cap.transTitle': 'Getting your extra ready',
+  'cap.transTitleAug': 'Adding to your extra',
   'cap.transSub': 'One moment — next you’ll pick the job and check the details.',
   'cap.transSaved': 'Saved on this phone',
   'cap.transUpload': 'Backing it up online…',
@@ -1201,6 +1202,7 @@ const ES: Record<string, string> = {
   'co.revise': 'Revisar precio →',
   'co.finish': 'Terminar este extra →',
   'cap.transTitle': 'Preparando tu extra',
+  'cap.transTitleAug': 'Agregando a tu extra',
   'cap.transSub': 'Un momento — luego eliges el trabajo y revisas los detalles.',
   'cap.transSaved': 'Guardado en este teléfono',
   'cap.transUpload': 'Respaldando en línea…',

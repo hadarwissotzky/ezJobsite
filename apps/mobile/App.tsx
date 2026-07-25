@@ -587,7 +587,7 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
       ids: a.ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
       uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
       stalled: false, uploadDone: 0, uploadTotal: a.ids.length, lastError: null,
-      blocked: false,
+      blocked: false, isAugment: false,
     });
   }
 };
@@ -897,6 +897,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     uploaded: boolean; transcribed: boolean; analyzed: boolean; offline: boolean;
     stalled: boolean; uploadDone: number; uploadTotal: number;
     lastError: string | null; blocked: boolean;
+    // Augment mode: this transition is backing up ADDED evidence on an existing
+    // extra, not a new one. It gates on UPLOAD only (no AI re-processing — that is
+    // the deferred re-summarize/re-price feature) and, when the bytes are up, opens
+    // the extra's record instead of the priced composer (hadar 2026-07-25).
+    isAugment: boolean;
   }>(null);
 
   // The transition's watcher. Polls the real signals: capture_outbox emptying
@@ -983,7 +988,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         } catch { /* schema races: poll again */ }
         if (!alive) return;
 
-        const ready = up && tr && analyzedSeen;
+        // Augmenting adds evidence and re-processes nothing yet, so it is ready the
+        // moment the bytes are up; a new extra also needs its words + the AI pass.
+        const ready = transition.isAugment ? up : (up && tr && analyzedSeen);
         // Only ask the radio once we've actually waited a beat and are still not
         // ready — and if we're online, re-kick the push.
         let offline = false;
@@ -1016,14 +1023,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                                     uploadDone, uploadTotal, lastError,
                                     blocked: blockedSeen });
 
-        // THE gate: uploaded + words down + AI has written title/tag/price.
+        // THE gate: uploaded + words down + AI has written title/tag/price (or, when
+        // augmenting, just uploaded).
         if (ready) {
           // A beat so the checkmarks are SEEN — a flash reads as a glitch.
           await new Promise((r) => setTimeout(r, 900));
           if (!alive) return;
           setTransition((t) => {
-            // The job is already picked; open the details for its change order.
-            if (t) { void finishExtraById(t.coId); }
+            // New extra → open the priced composer; augment → reopen the extra with
+            // its new evidence attached.
+            if (t) { if (t.isAugment) void openRecord(t.coId); else void finishExtraById(t.coId); }
             return null;
           });
           return;
@@ -1939,7 +1948,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // ask the human where it belongs. Holding bytes in memory while a sheet waits for a
   // tap is how a phone call destroys a walkthrough.
   const onFusedCapture = async (a: FusedArtifacts) => {
-    setShowCapture(false);
+    // DO NOT close the capture screen here. It shows its own "saving" state while
+    // this runs; closing it now drops to Home for the ~1–2s commit before the job
+    // sheet is ready — the flash hadar saw (2026-07-25). The job sheet (assign) is
+    // checked BEFORE showCapture in the render, so it takes over the instant it is
+    // set; showCapture is cleared in the finally as cleanup, causing no flash.
     setUi({ k: 'saving' });
     try {
       const res = await resolveFor(a.stamp);
@@ -2023,6 +2036,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     } catch (e: any) {
       setUi({ k: 'refused', why: e?.message ?? String(e) });
     } finally {
+      // Cleanup only — the job sheet (or a refusal) already owns the screen by now,
+      // so this never shows Home. Kept out of the top so the capture screen stays up
+      // through the commit.
+      setShowCapture(false);
       await refresh();
     }
   };
@@ -2034,8 +2051,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // evidence). A history note records the addition. No job pick (it inherits the
   // extra's project), no step-3, no processing transition: it appends and returns.
   const onAugmentCapture = async (coId: string, a: FusedArtifacts) => {
-    setShowCapture(false); setAugmentCoId(null);
+    // Keep the capture screen up through the commit (it shows its own "saving"); the
+    // augment transition takes over when set — no drop to Home (hadar 2026-07-25).
+    // showCapture + augmentCoId are cleared in the finally as cleanup.
     setUi({ k: 'saving' });
+    const newIds: string[] = [];
     try {
       const co = (await db.getAll<{ decision_id: string; project_id: string }>(
         `SELECT decision_id, project_id FROM change_order WHERE id = ?`, [coId]))[0];
@@ -2072,6 +2092,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         if (!pr.ok) { setUi({ k: 'refused', why: pr.reason }); return; }
         await linkPair(db, pairId, pr.captureId, 'photo', ph.atMs);
         await noteCapturedBy(db, pr.captureId);
+        newIds.push(pr.captureId);
         photoN++;
       }
       for (const seg of a.audioSegments) {
@@ -2083,6 +2104,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         if (!vr.ok) { setUi({ k: 'refused', why: `some saved; audio did not: ${vr.reason}` }); return; }
         await linkPair(db, pairId, vr.captureId, 'voice', seg.startedAtMs);
         await noteCapturedBy(db, vr.captureId);
+        newIds.push(vr.captureId);
         voiceN++;
       }
       if (!photoN && !voiceN) { setUi({ k: 'refused', why: 'nothing to save' }); return; }
@@ -2094,9 +2116,21 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       if (voiceN) await noteAugment(db, { changeOrderId: coId, kind: 'voice', n: voiceN, atMs: now, byName: prof?.name ?? null });
       setUi({ k: 'saved', id: coId });
       await refresh();
-      await openRecord(coId);
+      // The upload-processing screen for an EDIT (hadar 2026-07-25: "to the
+      // notification upload processing screen if it's an edit"): watch the added
+      // evidence back up, then reopen the extra. Upload-only (isAugment) — the priced
+      // scope is untouched; AI re-processing is the deferred feature.
+      setTransition({
+        ids: newIds, anchorCaptureId: null, coId,
+        uploaded: false, transcribed: true, analyzed: true, offline: false,
+        stalled: false, uploadDone: 0, uploadTotal: newIds.length, lastError: null,
+        blocked: false, isAugment: true,
+      });
     } catch (e: any) {
       setUi({ k: 'refused', why: e?.message ?? String(e) });
+    } finally {
+      // Cleanup only — the transition (or a refusal) already owns the screen.
+      setShowCapture(false); setAugmentCoId(null);
     }
   };
 
@@ -3000,7 +3034,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     return (
       <View style={{ flex: 1, backgroundColor: '#0D0F12', paddingTop: 90, paddingHorizontal: 28 }}>
         <Text style={{ color: '#fff', fontSize: 26, fontWeight: '700' }}>
-          {T('cap.transTitle')}
+          {T(t.isAugment ? 'cap.transTitleAug' : 'cap.transTitle')}
         </Text>
         {!(t.offline || t.stalled || t.blocked) && (
           <Text style={{ color: '#8c959f', fontSize: 15, lineHeight: 21, marginTop: 8 }}>
@@ -3028,7 +3062,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             </Text>
           )}
           {t.anchorCaptureId !== null && row(t.transcribed, 'cap.transStt', 'cap.transSttDone')}
-          {row(t.analyzed, 'cap.transAnalyze', 'cap.transAnalyzed')}
+          {/* The AI pass belongs to a NEW extra (title/scope/price). An augment
+              appends evidence and re-processes nothing yet, so it does not claim a
+              "details sorted" step it did not do. */}
+          {!t.isAugment && row(t.analyzed, 'cap.transAnalyze', 'cap.transAnalyzed')}
         </View>
         {(t.offline || t.stalled || t.blocked) && (
           <>
@@ -3045,7 +3082,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               )}
             </View>
             <Pressable
-              onPress={() => setTransition(null)}
+              onPress={() => {
+                // Augment came FROM an extra, so Done returns to it — not Home (the
+                // added evidence is saved and backs up on Wi-Fi). A new extra parks
+                // at Home as a draft.
+                if (t.isAugment) { const cid = t.coId; setTransition(null); void openRecord(cid); }
+                else setTransition(null);
+              }}
               style={{ marginTop: 18, minHeight: 60, borderRadius: 12, backgroundColor: '#fff',
                        alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: 17, fontWeight: '600', color: '#0D0F12' }}>
