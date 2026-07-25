@@ -3019,10 +3019,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         readinessKey={gate && !gate.ok ? gate.whyKey : undefined}
         // A ready draft can go out from its own record (R6b AC3: the state line
         // says "send it" — the screen must then offer the send).
-        onSend={gate?.ok && row ? () => {
-          // Land on the JOB screen (where the send-preview Modal mounts) and remember
-          // to return to this extra's detail page after the send (hadar, 2026-07-24:
-          // the button used to just close the record because the preview never showed).
+        onSend={gate?.ok && row && record.priced ? () => {
+          // PRICED + processed only. An unpriced draft must NOT show Send — it would
+          // send a price-less instrument (mandate #6). It shows "Finish this extra"
+          // instead (hadar, 2026-07-24: an unpriced, unprocessed extra was offering
+          // Send for approval). Land on the JOB screen (where the send-preview Modal
+          // mounts) and return to this detail page after the send (returnRecordId).
           setReturnRecordId(record.id); setNav('project'); closeRecord(); void openSendPrep(row);
         } : undefined}
         // Finish an UNPRICED draft from its own detail page — opens the price/details

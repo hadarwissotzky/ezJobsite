@@ -48,7 +48,32 @@ export async function captureStatesForExtra(
       GROUP BY dv.capture_id`,
     [decisionId]
   );
-  return rows.map((r) => procState({
+  const states = rows.map((r) => procState({
     pendingUpload: !!r.pending, serverState: r.server_state,
   }));
+
+  // The rows above only cover the anchor/voice capture. The PHOTOS shot during the
+  // walk are paired to it via capture_pair and never appear on decision_version, so
+  // an extra whose transcript processed but whose photos are still on the phone used
+  // to read as ready — a client would open a link for evidence that had not left the
+  // device (hadar, 2026-07-24). Photos have no AI stage, so they can't join the
+  // procState fold as 'processed'; instead, ANY capture behind this extra (voice OR
+  // paired photo) still queued for upload holds the whole extra at 'queued'.
+  const pendingEvidence = (await db.getAll<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM capture_outbox o
+      WHERE o.capture_id IN (
+        SELECT dv.capture_id FROM decision_version dv
+         WHERE dv.decision_id = ? AND dv.capture_id IS NOT NULL
+        UNION
+        SELECT p2.capture_id FROM capture_pair p2
+         WHERE p2.pair_id IN (
+           SELECT p1.pair_id FROM capture_pair p1
+            WHERE p1.capture_id IN (
+              SELECT dv.capture_id FROM decision_version dv WHERE dv.decision_id = ?
+            )
+         )
+      )`, [decisionId, decisionId]))[0]?.n ?? 0;
+  if (pendingEvidence > 0) states.push('queued');
+
+  return states.length ? states : ['captured'];
 }
