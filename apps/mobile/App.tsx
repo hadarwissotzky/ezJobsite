@@ -48,7 +48,7 @@ import { sendEwa } from './src/ewasend';
 // filled preview before he stands up. The worker still re-transcribes via the
 // cloud and supersedes this under 150's newest-wins.
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
-import { fetchProposal, fetchLatestProposalForCaptures, type Proposal } from './src/proposals';
+import { fetchLatestProposalForCaptures, type Proposal } from './src/proposals';
 import { discardCapture, discardExtra, drainServerDiscards, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
 import { startExtraFromCapture, titleExtraIfUntitled, retitleDraft } from './src/startextra';
 import { cleanupTestData } from './src/testdatacleanup';
@@ -910,29 +910,39 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     let alive = true;
     const marks = transition.ids.map(() => '?').join(',');
     let firstCount = -1;
+    let lastN = -1;  // last successful outbox count — the progress fallback if a poll throws
     // Latches true once the AI has written its structured row. No anchor capture
     // (a text-only extra) means nothing to transcribe or analyse — mirror the
     // `transcribed` initializer above.
     let analyzedSeen = transition.anchorCaptureId === null;
     const kickDrain = async () => {
       try {
-        const { data } = await connector.client.auth.getUser();
-        if (data?.user) await drainOutbox(db, connector.client, data.user.id);
+        // getSession() is LOCAL — no network round-trip. getUser() validates the
+        // JWT against the server, which is exactly the thing that may be failing on
+        // this screen; we only need the id to trigger the drain (review #6).
+        const { data } = await connector.client.auth.getSession();
+        const uid = data?.session?.user?.id;
+        if (uid) await drainOutbox(db, connector.client, uid);
       } catch { /* the capture is safe locally; a failed push just retries */ }
     };
     const isOffline = async () => {
-      try { return !(await Network.getNetworkStateAsync()).isConnected; }
+      // Only OFFLINE when the radio says so explicitly — undefined isConnected is
+      // "unknown", not "offline" (review #2).
+      try { return (await Network.getNetworkStateAsync()).isConnected === false; }
       catch { return false; }  // can't tell → don't cry offline
     };
     (async () => {
       void kickDrain();  // start the upload NOW, don't wait for the 15s timer
       for (let tick = 0; alive && tick < 90; tick++) {
         let up = false, tr = transition.anchorCaptureId === null;
-        let n = firstCount < 0 ? 0 : firstCount;  // last known count if this poll throws
+        // Fall back to the last SUCCESSFUL count, not firstCount, so a transient
+        // poll error doesn't snap the progress bar back to 0 (review #5).
+        let n = lastN >= 0 ? lastN : (firstCount < 0 ? 0 : firstCount);
         try {
           n = (await db.getAll<{ n: number }>(
             `SELECT count(*) AS n FROM capture_outbox WHERE capture_id IN (${marks})`,
             transition.ids))[0]?.n ?? 0;
+          lastN = n;
           if (firstCount < 0) firstCount = n;
           up = n === 0;
           if (!tr) {
@@ -941,10 +951,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               [transition.anchorCaptureId]))[0];
           }
           // Once the bytes are up, the only thing left is the cloud AI pass. Poll
-          // it EVERY tick until it lands — it is the gate, not a bonus.
+          // it EVERY tick until it lands — it is the gate, not a bonus. Look across
+          // ALL of this extra's captures, not just the anchor: only the voice one
+          // ever gets a structured row, and it may not be the anchor (review #1) —
+          // this is the same lookup finishExtraById uses.
           if (up && !analyzedSeen && transition.anchorCaptureId) {
             try {
-              if (await fetchProposal(connector.client, transition.anchorCaptureId)) {
+              if (await fetchLatestProposalForCaptures(connector.client, transition.ids)) {
                 analyzedSeen = true;
               }
             } catch { /* best-effort read; try again next tick */ }
@@ -966,17 +979,20 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         const uploadTotal = firstCount < 0 ? 0 : firstCount;
         const uploadDone = firstCount < 0 ? 0 : Math.max(0, firstCount - n);
         // The outbox records WHY a push failed (park() / backoff() store it so it
-        // is "surfaced in the UI, never silently dropped"). If any of this extra's
-        // files carries an error, carry it up so the escape box can name it —
+        // is "surfaced in the UI, never silently dropped"). Only read it once the
+        // upload has had a beat to try and hasn't finished (review #3: don't run
+        // this SELECT on the happy path). Carry it up so the screen can name it —
         // "Backing it up online…" that never finishes must say what went wrong.
         let lastError: string | null = null;
-        try {
-          const er = (await db.getAll<{ last_error_code: string | null; last_error_text: string | null }>(
-            `SELECT last_error_code, last_error_text FROM capture_outbox
-              WHERE capture_id IN (${marks}) AND last_error_text IS NOT NULL
-              ORDER BY last_attempt_at_ms DESC LIMIT 1`, transition.ids))[0];
-          if (er) lastError = [er.last_error_code, er.last_error_text].filter(Boolean).join(': ');
-        } catch { /* diagnostic only */ }
+        if (!up && tick >= 2) {
+          try {
+            const er = (await db.getAll<{ last_error_code: string | null; last_error_text: string | null }>(
+              `SELECT last_error_code, last_error_text FROM capture_outbox
+                WHERE capture_id IN (${marks}) AND last_error_text IS NOT NULL
+                ORDER BY last_attempt_at_ms DESC LIMIT 1`, transition.ids))[0];
+            if (er) lastError = [er.last_error_code, er.last_error_text].filter(Boolean).join(': ');
+          } catch { /* diagnostic only */ }
+        }
         setTransition((t) => t && { ...t, uploaded: up, transcribed: tr,
                                     analyzed: analyzedSeen, offline,
                                     uploadDone, uploadTotal, lastError });
@@ -2905,6 +2921,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 {T({ k: 'cap.transUploadProg', p: { done: t.uploadDone, total: t.uploadTotal } } as any)}
               </Text>
             </View>
+          )}
+          {!t.uploaded && t.lastError && (
+            <Text style={{ color: '#f0883e', fontSize: 12.5, lineHeight: 18, marginLeft: 34,
+                           marginTop: 6, fontFamily: 'Menlo' }}>
+              {t.lastError}
+            </Text>
           )}
           {t.anchorCaptureId !== null && row(t.transcribed, 'cap.transStt', 'cap.transSttDone')}
           {row(t.analyzed, 'cap.transAnalyze', 'cap.transAnalyzed')}
