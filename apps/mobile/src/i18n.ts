@@ -701,6 +701,8 @@ const EN: Record<string, string> = {
   'r5c.whoApproves': 'Who approves this?',
   'r5c.addApprover': 'Add someone',
   'r5c.namePlaceholder': 'Their name',
+  'r5c.phonePlaceholder': 'Phone number',
+  'r5c.fromContacts': '＋ Pick from contacts',
   'r5c.noRoster': 'Nobody on this job yet. Add whoever signs off.',
   'erec.deliveryNote':
     'Delivery channel and state are recorded on the server and appear in the evidence bundle.',
@@ -1389,6 +1391,8 @@ const ES: Record<string, string> = {
   'r5c.whoApproves': '¿Quién aprueba esto?',
   'r5c.addApprover': 'Agregar a alguien',
   'r5c.namePlaceholder': 'Su nombre',
+  'r5c.phonePlaceholder': 'Número de teléfono',
+  'r5c.fromContacts': '＋ Elegir de contactos',
   'r5c.noRoster': 'Nadie en esta obra todavía. Agregue quien autoriza.',
   'erec.deliveryNote':
     'El canal y el estado de entrega quedan en el servidor y salen en el paquete de evidencia.',

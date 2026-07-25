@@ -4,6 +4,7 @@ import 'react-native-get-random-values';
 import { OPSqliteOpenFactory } from '@powersync/op-sqlite';
 import { PowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
+import * as Contacts from 'expo-contacts';
 import React from 'react';
 import { Dimensions, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -641,6 +642,24 @@ const openSendPrep = async (c: LedgerRow) => {
                 chosenId: null, picking: false, adding: null, busy: false });
 };
 
+// Fill the add-someone form from the device's contacts. The native picker is
+// user-mediated (no contacts permission prompt, like the photo picker) and returns
+// only the one contact the user taps. iOS has NO call-history API, so this is the
+// source (hadar, 2026-07-24).
+const pickContact = async () => {
+  try {
+    const c = await Contacts.presentContactPickerAsync();
+    if (!c) return;
+    const name = (c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || '').trim();
+    const phone = c.phoneNumbers?.[0]?.number ?? '';
+    setSendPrep((p) => p && p.adding
+      ? { ...p, adding: { ...p.adding, name: name || p.adding.name, phone: phone || p.adding.phone } }
+      : p);
+  } catch (e: any) {
+    setUi({ k: 'refused', why: e?.message ?? String(e) });
+  }
+};
+
 // Re-derive the suggestion whenever the type changes. The whole point of the
 // type is that it moves the recipient; a picker that did not would be theatre.
 const changeType = async (t: ExtraType | null) => {
@@ -795,7 +814,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     roster: RosterMember[];
     chosenId: string | null;     // null = take the suggestion
     picking: boolean;            // showing the full roster to override
-    adding: null | { name: string; role: ApproverRole };
+    adding: null | { name: string; role: ApproverRole; phone: string };
     busy: boolean;
   } | null>(null);
 
@@ -4146,37 +4165,33 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <Text style={s.cardH}>{T('r5c.sendTo')}</Text>
             <Text style={s.moneyScope}>{sp.co.scope} · {sp.co.amount}</Text>
 
-            {/* ── what kind of extra ── */}
-            <Text style={s.cardH}>{T('r5c.whatKind')}</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-              {EXTRA_TYPES.map((t) => (
-                <Pressable key={t} onPress={() => changeType(t)}
-                  style={[s.chip, sp.type === t && s.chipOn]}>
-                  <Text style={[s.chip, sp.type === t && s.chipOn,
-                                { borderWidth: 0, paddingHorizontal: 0, paddingVertical: 0 }]}>
-                    {typeLabel(t)}
-                  </Text>
-                </Pressable>
-              ))}
-              {/* Untyped is a real choice, not the absence of one (R5c's offline AC). */}
-              <Pressable onPress={() => changeType(null)}
-                style={[s.chip, sp.type === null && s.chipOn]}>
-                <Text style={[s.chip, sp.type === null && s.chipOn,
-                              { borderWidth: 0, paddingHorizontal: 0, paddingVertical: 0 }]}>
-                  {T('r5c.untyped')}
-                </Text>
-              </Pressable>
-            </View>
+            {/* The extra's KIND is set by the AI on processing (hadar, 2026-07-24:
+                "i don't want the user to tag it"); the manual type picker was
+                removed. sp.type still carries the AI's category for approver
+                routing — it just isn't asked here. */}
 
             {/* ── who approves ── */}
             {sp.adding ? (
               <View>
                 <Text style={s.cardH}>{T('r5c.whoApproves')}</Text>
+                {/* Pull the person + number straight from the phone's contacts —
+                    the native picker needs no permission prompt (hadar, 2026-07-24:
+                    "add someone ... a phone number and associate it with a person").
+                    iOS exposes no call history, so Contacts is the source. */}
+                <Pressable style={s.contactBtn} onPress={pickContact}>
+                  <Text style={s.contactBtnT}>{T('r5c.fromContacts')}</Text>
+                </Pressable>
                 <TextInput
                   style={s.input} placeholder={T('r5c.namePlaceholder')}
                   value={sp.adding.name}
                   onChangeText={(v) => setSendPrep((p) => p && p.adding
                     ? { ...p, adding: { ...p.adding, name: v } } : p)}
+                />
+                <TextInput
+                  style={s.input} placeholder={T('r5c.phonePlaceholder')}
+                  keyboardType="phone-pad" value={sp.adding.phone}
+                  onChangeText={(v) => setSendPrep((p) => p && p.adding
+                    ? { ...p, adding: { ...p.adding, phone: v } } : p)}
                 />
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 8 }}>
                   {APPROVER_ROLES.map((role) => (
@@ -4196,6 +4211,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     const a = sp.adding!;
                     const id = await addApprover(db, {
                       projectId, name: a.name.trim(), role: a.role,
+                      phone: a.phone.trim() || null,
                     });
                     const roster = await listRoster(db, projectId);
                     // Chosen explicitly: they were just added FOR this send, so
@@ -4217,7 +4233,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 ))}
                 <Pressable style={s.coSendRow}
                   onPress={() => setSendPrep((p) => p && { ...p, picking: false,
-                    adding: { name: '', role: 'owner' } })}>
+                    adding: { name: '', role: 'owner', phone: '' } })}>
                   <Text style={s.coNudge}>{T('r5c.addApprover')} →</Text>
                 </Pressable>
               </View>
@@ -4242,7 +4258,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 <Text style={s.warn}>{T('r5c.noRoster')}</Text>
                 <Pressable style={s.coSendRow}
                   onPress={() => setSendPrep((p) => p && { ...p,
-                    adding: { name: '', role: (sug && sug.kind === 'needs_approver'
+                    adding: { name: '', phone: '', role: (sug && sug.kind === 'needs_approver'
                       && sug.wantedRole) ? sug.wantedRole : 'owner' } })}>
                   <Text style={s.coNudge}>{T('r5c.addApprover')} →</Text>
                 </Pressable>
@@ -4604,6 +4620,9 @@ const s = StyleSheet.create({
   input: { flex: 1, backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
            borderRadius: 10, color: '#0D0F12', padding: 12, minHeight: 54, fontSize: 15 },
   save: { backgroundColor: '#FF5A00', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center' },
+  contactBtn: { borderWidth: 1.5, borderColor: '#2563EB', borderRadius: 10, paddingVertical: 12,
+    alignItems: 'center', marginBottom: 8, marginTop: 4 },
+  contactBtnT: { color: '#2563EB', fontFamily: 'Barlow_600SemiBold', fontSize: 15 },
   saveT: { color: '#fff', fontWeight: '800', letterSpacing: 1 },
   gate: { backgroundColor: '#ffebe9', borderColor: '#C6281C', borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 18 },
   gateT: { color: '#C6281C', fontWeight: '700', marginBottom: 6 },
