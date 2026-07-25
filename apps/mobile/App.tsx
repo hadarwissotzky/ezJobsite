@@ -579,6 +579,7 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
     setTransition({
       ids: a.ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
       uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
+      stalled: false,
     });
   }
 };
@@ -883,28 +884,35 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const [transition, setTransition] = React.useState<null | {
     ids: string[]; anchorCaptureId: string | null; coId: string;
     uploaded: boolean; transcribed: boolean; analyzed: boolean; offline: boolean;
+    stalled: boolean;
   }>(null);
 
   // The transition's watcher. Polls the real signals: capture_outbox emptying
   // (uploaded), voice_transcript_cache (written down — works OFFLINE, it is
-  // on-device), capture_structured (analyzed, best-effort network read).
+  // on-device), capture_structured (analyzed — the CLOUD AI pass that writes the
+  // title, tag and price).
   //
-  // TWO THINGS THIS FIXES (hadar, 2026-07-24: "full signal and wifi" still hit
-  // the offline branch):
-  //   1. It now DRIVES the upload — kicks drainOutbox on entry and every few
-  //      seconds while waiting — instead of only watching it. The background
-  //      drain runs on a 15s timer, so a fresh capture could sit un-pushed for
-  //      up to 15s and the screen would call that "offline".
-  //   2. "Offline" is a NETWORK fact, not a stopwatch. A slow-but-connected
-  //      upload (photos over wifi) is not offline; only a real disconnect is.
-  //      When connected but still uploading past ~20s, open the details and let
-  //      the upload finish in the background — the send gate blocks the extra
-  //      until every byte is up, so nothing goes out early.
+  // THE GATE (hadar, 2026-07-24): "check the numbers" must NOT open until the
+  // file is uploaded AND processed, because the title, the tag and the price all
+  // come from the online AI pass. So we advance only on upload + words + analyzed
+  // — never on a stopwatch, never before the AI has spoken. A half-processed
+  // step 3 (wrong title, no price) is the exact bug this closes.
+  //
+  // AND (same day, "full signal and wifi" still hit the offline branch): the
+  // screen now DRIVES the upload — kicks drainOutbox on entry and every ~5s —
+  // instead of only watching it (the background drain runs on a 15s timer, so a
+  // fresh capture could sit un-pushed while the screen cried offline). "Offline"
+  // is a NETWORK fact (isConnected), asked only after we've waited and are still
+  // not ready — a slow-but-connected pipeline is never called offline.
   React.useEffect(() => {
     if (!transition) return;
     let alive = true;
     const marks = transition.ids.map(() => '?').join(',');
     let firstCount = -1;
+    // Latches true once the AI has written its structured row. No anchor capture
+    // (a text-only extra) means nothing to transcribe or analyse — mirror the
+    // `transcribed` initializer above.
+    let analyzedSeen = transition.anchorCaptureId === null;
     const kickDrain = async () => {
       try {
         const { data } = await connector.client.auth.getUser();
@@ -917,8 +925,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     };
     (async () => {
       void kickDrain();  // start the upload NOW, don't wait for the 15s timer
-      for (let tick = 0; alive && tick < 60; tick++) {
-        let up = false, tr = transition.anchorCaptureId === null, an = false;
+      for (let tick = 0; alive && tick < 90; tick++) {
+        let up = false, tr = transition.anchorCaptureId === null;
         try {
           const n = (await db.getAll<{ n: number }>(
             `SELECT count(*) AS n FROM capture_outbox WHERE capture_id IN (${marks})`,
@@ -930,29 +938,32 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               `SELECT 1 FROM voice_transcript_cache WHERE capture_id = ?`,
               [transition.anchorCaptureId]))[0];
           }
-          if (up && transition.anchorCaptureId && tick % 3 === 0) {
+          // Once the bytes are up, the only thing left is the cloud AI pass. Poll
+          // it EVERY tick until it lands — it is the gate, not a bonus.
+          if (up && !analyzedSeen && transition.anchorCaptureId) {
             try {
-              an = !!(await fetchProposal(connector.client, transition.anchorCaptureId));
-            } catch { /* analysis is a bonus, never a gate */ }
+              if (await fetchProposal(connector.client, transition.anchorCaptureId)) {
+                analyzedSeen = true;
+              }
+            } catch { /* best-effort read; try again next tick */ }
           }
         } catch { /* schema races: poll again */ }
         if (!alive) return;
 
-        // Only ask the radio once we've actually waited a beat and still nothing
-        // has uploaded — and if we're online, re-kick the push.
+        const ready = up && tr && analyzedSeen;
+        // Only ask the radio once we've actually waited a beat and are still not
+        // ready — and if we're online, re-kick the push.
         let offline = false;
-        if (!up && tick >= 8 && firstCount > 0) {
+        if (!ready && tick >= 8 && firstCount > 0) {
           offline = await isOffline();
           if (!alive) return;
           if (!offline && tick % 5 === 0) void kickDrain();
         }
         setTransition((t) => t && { ...t, uploaded: up, transcribed: tr,
-                                    analyzed: an || t.analyzed, offline });
+                                    analyzed: analyzedSeen, offline });
 
-        // Advance when upload + words are in — or, if the words are down and
-        // we're merely slow-while-connected, after ~20s open the details and let
-        // the upload finish behind us.
-        if ((up && tr) || (tr && !offline && tick >= 20)) {
+        // THE gate: uploaded + words down + AI has written title/tag/price.
+        if (ready) {
           // A beat so the checkmarks are SEEN — a flash reads as a glitch.
           await new Promise((r) => setTimeout(r, 900));
           if (!alive) return;
@@ -965,13 +976,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         }
         await new Promise((r) => setTimeout(r, 1000));
       }
-      // 60s and still stuck: if the words are down, open the details anyway (the
-      // upload keeps retrying in the background). Otherwise show the offline escape.
-      if (alive) setTransition((t) => {
-        if (!t) return null;
-        if (t.transcribed) { void finishExtraById(t.coId); return null; }
-        return { ...t, offline: true };
-      });
+      // 90s and still not fully ready. NEVER dump into an empty step 3 — keep the
+      // extra as a draft at home and tell the truth: offline if the phone really
+      // is disconnected, else "still finishing" (the pipeline is slow, not you).
+      if (alive) {
+        const off = await isOffline();
+        if (!alive) return;
+        setTransition((t) => t && { ...t, offline: off, stalled: !off });
+      }
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2856,7 +2868,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         <Text style={{ color: '#fff', fontSize: 26, fontWeight: '700' }}>
           {T('cap.transTitle')}
         </Text>
-        {!t.offline && (
+        {!(t.offline || t.stalled) && (
           <Text style={{ color: '#8c959f', fontSize: 15, lineHeight: 21, marginTop: 8 }}>
             {T('cap.transSub')}
           </Text>
@@ -2867,12 +2879,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           {t.anchorCaptureId !== null && row(t.transcribed, 'cap.transStt', 'cap.transSttDone')}
           {row(t.analyzed, 'cap.transAnalyze', 'cap.transAnalyzed')}
         </View>
-        {t.offline && (
+        {(t.offline || t.stalled) && (
           <>
             <View style={{ backgroundColor: '#3a2c00', borderColor: '#d4a72c', borderWidth: 1,
               borderRadius: 12, padding: 14, marginTop: 26 }}>
               <Text style={{ color: '#f5d76a', fontSize: 15, lineHeight: 22 }}>
-                {T('cap.transOffline')}
+                {T(t.offline ? 'cap.transOffline' : 'cap.transStalled')}
               </Text>
             </View>
             <Pressable
