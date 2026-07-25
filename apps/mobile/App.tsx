@@ -648,13 +648,28 @@ const openSendPrep = async (c: LedgerRow) => {
 // source (hadar, 2026-07-24).
 const pickContact = async () => {
   try {
-    const c = await Contacts.presentContactPickerAsync();
-    if (!c) return;
-    const name = (c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || '').trim();
-    const phone = c.phoneNumbers?.[0]?.number ?? '';
+    const picked = await Contacts.presentContactPickerAsync();
+    if (!picked) return;
+    let phones = picked.phoneNumbers ?? [];
+    // The picker can hand back a stub without numbers; fetch the full contact by id.
+    if (!phones.length && picked.id) {
+      const perm = await Contacts.requestPermissionsAsync();
+      if (perm.status === 'granted') {
+        const full = await Contacts.getContactByIdAsync(picked.id,
+          [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers]);
+        phones = full?.phoneNumbers ?? [];
+      }
+    }
+    // ALWAYS prefer the MOBILE line — the approval goes out by SMS (hadar,
+    // 2026-07-24). Fall back to the first number if none is labelled mobile.
+    const mobile = phones.find((p) => /mobile|cell|iphone|móvil|celular/i.test(p.label ?? ''))
+      ?? phones[0];
+    const phone = (mobile?.number ?? mobile?.digits ?? '').trim();
+    const name = (picked.name || [picked.firstName, picked.lastName].filter(Boolean).join(' ') || '').trim();
     setSendPrep((p) => p && p.adding
       ? { ...p, adding: { ...p.adding, name: name || p.adding.name, phone: phone || p.adding.phone } }
       : p);
+    if (!phone) setFiled('That contact has no phone number — type it in.');
   } catch (e: any) {
     setUi({ k: 'refused', why: e?.message ?? String(e) });
   }

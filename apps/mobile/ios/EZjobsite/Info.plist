@@ -46,6 +46,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>EZjobsite uses the camera so you can snap a photo of a jobsite decision instead of writing it up.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>EZjobsite reads a contact you pick so it can text the approval to the right person by SMS.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your location</string>
 	<key>NSLocationAlwaysUsageDescription</key>
