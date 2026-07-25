@@ -32,6 +32,8 @@ import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { RecordScreen } from './src/ui/recordscreen';
+import { SettingsScreen } from './src/ui/settingsscreen';
+import { ensureOwnCompany } from './src/company';
 import { extraRecord, type ExtraRecord } from './src/record';
 import { DiscussionLog, ThreadScreen } from './src/ui/threadscreen';
 import { parseThreadLink, threadState, type ThreadMessage } from './src/discussion';
@@ -229,6 +231,8 @@ export default function App() {
   });
   const [ui, setUi] = React.useState<UiState>({ k: 'idle' });
   const [showCapture, setShowCapture] = React.useState(false);   // REQ-CAP-FUSED screen
+  const [showSettings, setShowSettings] = React.useState(false); // Settings/Team screen
+  const [settingsProfile, setSettingsProfile] = React.useState<import('./src/profile').Profile | null>(null);
   // When set, the capture screen AUGMENTS this existing extra (adds photos/voice as
   // appended evidence) instead of minting a new extra (hadar, 2026-07-25).
   const [augmentCoId, setAugmentCoId] = React.useState<string | null>(null);
@@ -412,6 +416,18 @@ const closeRecord = () => {
   setRecord(null); setRecordSummary(null); setApproval(null); setNarration(null);
   setRecordThread(null); setRecordUndelivered(new Set());
   setRecordRevision(null); setRecordNextId(null);
+};
+
+// Open Settings/Team. Loads the profile and, for a company profile, promotes the
+// stored company NAME into a real tenant (idempotent) so the Team roster works.
+const openSettings = async () => {
+  const p = (await getProfile(db)) ?? { name: '', isSolo: true, company: null, trade: null };
+  if (!p.isSolo && (p.company ?? '').trim()) {
+    try { await ensureOwnCompany(connector.client, (p.company as string).trim()); await refresh(); }
+    catch { /* offline — the promote retries next time Settings opens */ }
+  }
+  setSettingsProfile(p);
+  setShowSettings(true);
 };
 
 /**
@@ -3372,6 +3388,19 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     );
   }
 
+  // Settings / Team — profile editing + company membership (hadar 2026-07-25).
+  if (showSettings && settingsProfile) {
+    return (
+      <SettingsScreen
+        db={db} supabase={connector.client} userId={OWNER} profile={settingsProfile}
+        lang={lang} confirmBase={CONFIRM_BASE}
+        onSaveProfile={async (p) => { await saveProfile(connector, db, p); setSettingsProfile(p); await refresh(); }}
+        onSetLang={async (l) => { setLang(l); setLangState(l); await saveLang(db, l); }}
+        onBack={() => setShowSettings(false)}
+      />
+    );
+  }
+
   // REQ-CAP-FUSED: the fused photo+voice capture screen overlays everything when open.
   if (showCapture) {
     // Augment mode: the captures attach to an existing extra and never mint a new
@@ -3728,6 +3757,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n);
               }}>
                 <Text style={s.langPill}>{lang === 'en' ? 'ES' : 'EN'}</Text>
+              </Pressable>
+              <Pressable onPress={() => { setMenuOpen(false); void openSettings(); }}>
+                <Text style={s.langPill}>⚙︎ {T('set.title')}</Text>
               </Pressable>
               {inbox > 0 && (
                 <Pressable onPress={async () => {
