@@ -579,7 +579,7 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
     setTransition({
       ids: a.ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
       uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
-      stalled: false, uploadDone: 0, uploadTotal: a.ids.length,
+      stalled: false, uploadDone: 0, uploadTotal: a.ids.length, lastError: null,
     });
   }
 };
@@ -885,6 +885,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     ids: string[]; anchorCaptureId: string | null; coId: string;
     uploaded: boolean; transcribed: boolean; analyzed: boolean; offline: boolean;
     stalled: boolean; uploadDone: number; uploadTotal: number;
+    lastError: string | null;
   }>(null);
 
   // The transition's watcher. Polls the real signals: capture_outbox emptying
@@ -964,9 +965,21 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // is what was queued when we started, done is how many have drained.
         const uploadTotal = firstCount < 0 ? 0 : firstCount;
         const uploadDone = firstCount < 0 ? 0 : Math.max(0, firstCount - n);
+        // The outbox records WHY a push failed (park() / backoff() store it so it
+        // is "surfaced in the UI, never silently dropped"). If any of this extra's
+        // files carries an error, carry it up so the escape box can name it —
+        // "Backing it up online…" that never finishes must say what went wrong.
+        let lastError: string | null = null;
+        try {
+          const er = (await db.getAll<{ last_error_code: string | null; last_error_text: string | null }>(
+            `SELECT last_error_code, last_error_text FROM capture_outbox
+              WHERE capture_id IN (${marks}) AND last_error_text IS NOT NULL
+              ORDER BY last_attempt_at_ms DESC LIMIT 1`, transition.ids))[0];
+          if (er) lastError = [er.last_error_code, er.last_error_text].filter(Boolean).join(': ');
+        } catch { /* diagnostic only */ }
         setTransition((t) => t && { ...t, uploaded: up, transcribed: tr,
                                     analyzed: analyzedSeen, offline,
-                                    uploadDone, uploadTotal });
+                                    uploadDone, uploadTotal, lastError });
 
         // THE gate: uploaded + words down + AI has written title/tag/price.
         if (ready) {
@@ -2903,6 +2916,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               <Text style={{ color: '#f5d76a', fontSize: 15, lineHeight: 22 }}>
                 {T(t.offline ? 'cap.transOffline' : 'cap.transStalled')}
               </Text>
+              {t.lastError && (
+                <Text style={{ color: '#c9a227', fontSize: 12.5, lineHeight: 18, marginTop: 10,
+                               fontFamily: 'Menlo' }}>
+                  {t.lastError}
+                </Text>
+              )}
             </View>
             <Pressable
               onPress={() => setTransition(null)}
