@@ -33,3 +33,9 @@ This log records the **decisions** made while building out the PRD autonomously,
 ## Decisions
 
 *(appended as they are made)*
+
+### 2026-07-25 — decisions
+
+- **DEC-1 (SMS, REQ-VAL8).** Real SMS via a Twilio Edge Function (`supabase/functions/send-sms`), not the client — credentials stay in Edge secrets. The client's automatic "Text it now" is an UPGRADE over the manual OS-share, never a replacement: if the function isn't deployed/configured, the manual "Send by text" is still there, so a link can always reach the client. Default country +1 (US ICP) when a number has no country code. **Needs from hadar:** `supabase functions deploy send-sms` + `supabase secrets set TWILIO_ACCOUNT_SID=… TWILIO_AUTH_TOKEN=… TWILIO_FROM=…` (an E.164 number or an `MG…` Messaging Service SID).
+- **DEC-2 (company visibility).** Chose company-wide (every member reads all company projects) over per-project crew scoping for v1 — simplest sync/RLS, matches "owner sees all"; per-project scoping is a later refinement. Writes stay owner-only.
+- **DEC-3 (labels).** Will use a SINGLE color label per project (companycam's primary pattern; simplest for the ICP) rather than a many-labels join table; filter by that one label. Multi-label is a follow-up. *(pending build)*

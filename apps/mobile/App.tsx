@@ -28,6 +28,7 @@ import { photoCapture, pickFromLibrary, recordVideo, textCapture, voiceCapture }
 import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
 import { ensurePairSchema, linkPair } from './src/pair';
 import { ensureAugmentSchema, noteAugment } from './src/augmentlog';
+import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
@@ -331,7 +332,10 @@ export default function App() {
     // `shared` = the contractor actually handed the link off (shareLink completed).
     // Until then this is a request that EXISTS but has not reached the client, and
     // the screen must not claim "Sent / Waiting for a yes" (Codex P1, mandate #1).
-    sentTo?: string | null; atMs?: number; shared?: boolean } | null>(null);
+    sentTo?: string | null; atMs?: number; shared?: boolean;
+    // The recipient's phone, when known — enables one-tap automatic SMS (Twilio via
+    // the send-sms Edge Function). Null falls back to the manual OS share.
+    phone?: string | null } | null>(null);
   // After a send/finish that BEGAN on an extra's detail page, return to that page
   // (hadar, 2026-07-24: "after the send button ... take me back to the extra detail
   // page even if it is a draft"). The change-order id to re-open, or null.
@@ -747,7 +751,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // it (Codex P2). Its terms (rate/cap) live in the frozen instrument itself.
       scope: c.scope, amount: undefined,
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
-      sentTo: to?.name ?? c.who_directed ?? null, atMs: Date.now() });
+      sentTo: to?.name ?? c.who_directed ?? null, atMs: Date.now(), phone: to?.phone ?? null });
     await refresh();
     return;
   }
@@ -849,7 +853,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     setSentLink({ url: r.url, shown: r.shownContent,
       scope: c.scope, amount: c.amount,
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
-      sentTo: to?.name ?? c.who_directed ?? null, atMs: sentAtMs });
+      sentTo: to?.name ?? c.who_directed ?? null, atMs: sentAtMs, phone: to?.phone ?? null });
     await refresh();
   } else setUi({ k: 'refused', why: r.reason });
 };
@@ -4698,16 +4702,30 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
           {photoNote && <Text style={s.cardNote}>{photoNote}</Text>}
 
+          {/* AUTOMATIC SMS (REQ-VAL8) — one tap texts the link via Twilio when we
+              have the recipient's number. Falls back to the manual share below if it
+              is not configured/deployed, so the link can ALWAYS reach the client. */}
+          {!!sentLink.phone && sentLink.url && (
+            <Pressable style={s.confirmWide} onPress={async () => {
+              const r = await sendSms(connector.client, sentLink.phone as string,
+                `${sentLink.shown}\n\n${sentLink.url}`);
+              if (!r.ok) { setUi({ k: 'refused', why: `Couldn’t text it automatically (${r.reason}). Use “Send by text” below.` }); return; }
+              setSentLink((sl) => sl && { ...sl, shared: true });
+            }}>
+              <Text style={s.confirmT}>{T({ k: 'sent.textAuto', p: { name: sentLink.sentTo ?? '' } } as any)}</Text>
+            </Pressable>
+          )}
+
           {/* The link goes to the client by TEXT — a link the contractor sends
               themselves arrives from a number the client recognises, not spam
-              (REQ-VAL8). This is the actual delivery. */}
-          <Pressable style={s.confirmWide} onPress={async () => {
+              (REQ-VAL8). The always-works manual path. */}
+          <Pressable style={sentLink.phone ? s.coSendRow : s.confirmWide} onPress={async () => {
             const r = await shareLink(sentLink.url, sentLink.shown);
             if (!r.ok) setUi({ k: 'refused', why: r.reason ?? 'could not share' });
             // Only NOW has the link reached the client — flip to the sent state.
             else setSentLink((sl) => sl && { ...sl, shared: true });
           }}>
-            <Text style={s.confirmT}>{T(sentLink.shared ? 'sent.shareAgain' : 'sent.share')}</Text>
+            <Text style={sentLink.phone ? s.dmeta : s.confirmT}>{T(sentLink.shared ? 'sent.shareAgain' : 'sent.share')}</Text>
           </Pressable>
 
           <Text style={s.sentFoot}>{T('sent.foot')}</Text>
