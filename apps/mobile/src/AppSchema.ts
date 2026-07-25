@@ -36,7 +36,31 @@ const project = new Table({
   consent_jurisdiction: column.text,
   consent_decided_at_ms: column.integer,
   consent_decided_by: column.text,
+  // The tenant this project belongs to (376_company_membership). Company members
+  // read it; the sync rules use it to decide what downloads.
+  company_id: column.text,
 });
+
+// The COMPANY tenant + its roster (376). Both sync DOWN (read-only on the client;
+// writes go through the server RPCs). company_invite is NOT synced — the owner reads
+// invites over PostgREST and hands the token off immediately.
+const company = new Table({
+  name: column.text,
+  owner_id: column.text,
+  created_at: column.text,
+});
+
+const company_member = new Table(
+  {
+    company_id: column.text,
+    user_id: column.text,
+    role: column.text,     // owner · crew · sub
+    status: column.text,   // active · revoked
+    invited_by: column.text,
+    joined_at: column.text,
+  },
+  { indexes: { by_company: ['company_id'] } }
+);
 
 const capture = new Table(
   {
@@ -76,5 +100,5 @@ const attachment = new Table({
   state: column.text,
 });
 
-export const AppSchema = new Schema({ project, capture, capture_op_state, attachment });
+export const AppSchema = new Schema({ project, capture, capture_op_state, attachment, company, company_member });
 export type Database = (typeof AppSchema)['types'];
