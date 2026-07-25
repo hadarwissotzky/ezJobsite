@@ -3307,16 +3307,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           }
         } : undefined}
         onBack={closeRecord}
-        // R1: capture stays one tap away on secondary screens. Leaving the record to
-        // capture is the point — a new extra should never require going home first.
+        // Capturing FROM an extra means adding TO it — so BOTH the capture FAB and
+        // the Add photo/voice buttons AUGMENT this extra: no job prompt, no new extra,
+        // no "Getting your extra ready" (hadar 2026-07-25: "it wanted me to select a
+        // job but this is an augmentation to an existing extra ... it is confusing").
+        // A brand-new, unrelated extra is captured from Home/Jobs, never from inside
+        // one. onCapture and onAugment are the same act here, deliberately.
         onCapture={() => {
           if (!terms) { openTerms(); return; }
+          setAugmentCoId(record.id);
           closeRecord();
           setShowCapture(true);
         }}
-        // Add more photos/voice to THIS extra (append as evidence). Same capture
-        // screen, but augmentCoId routes the result to onAugmentCapture, which
-        // attaches to this extra and reopens it — never a new extra (hadar 2026-07-25).
         onAugment={() => {
           if (!terms) { openTerms(); return; }
           setAugmentCoId(record.id);
