@@ -173,6 +173,11 @@ export async function drainNoteOutbox(
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 
 let player: AudioPlayer | null = null;
+// WHICH clip the one shared player is on. With multiple voice notes on one record
+// (hadar, 2026-07-25), every VoicePlayer polls this same player; without knowing the
+// source they would all mirror whichever clip is sounding. Each player compares this
+// to its own uri to know if IT is the one playing (annotate is one-player by design).
+let currentUri: string | null = null;
 
 export type Playback = { ok: true; durationSec: number } | { ok: false; reason: string };
 
@@ -183,6 +188,7 @@ export async function playCapture(uri: string): Promise<Playback> {
     await setAudioModeAsync({ playsInSilentMode: true });
     stopPlayback();
     player = createAudioPlayer({ uri });
+    currentUri = uri;
     player.play();
     // duration is 0 until the asset loads; the caller polls if it needs it.
     return { ok: true, durationSec: player.duration ?? 0 };
@@ -200,12 +206,14 @@ export function stopPlayback() {
   try { player?.pause(); } catch { /* already gone */ }
   try { player?.remove(); } catch { /* already gone */ }
   player = null;
+  currentUri = null;
 }
 
-export function playbackState(): { playing: boolean; positionSec: number; durationSec: number } {
+export function playbackState(): { playing: boolean; positionSec: number; durationSec: number; uri: string | null } {
   return {
     playing: !!player?.playing,
     positionSec: player?.currentTime ?? 0,
     durationSec: player?.duration ?? 0,
+    uri: currentUri,
   };
 }

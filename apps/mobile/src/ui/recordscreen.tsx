@@ -235,9 +235,12 @@ export function RecordScreen(props: {
           <Text style={[T.body, { marginTop: 6 }]}>{rec.description}</Text>
         </View>
 
-        {/* The voice narration — the source of the extra, with its own metadata and
-            playback. The transcript (in the summary/description) is derived from it. */}
-        {rec.voice && <VoicePlayer voice={rec.voice} />}
+        {/* The voice narrations — the source of the extra plus any voice notes added
+            later, each its own player, stacked oldest-first (hadar 2026-07-25). The
+            transcript (in the summary/description) is derived from the original. */}
+        {rec.voices.map((v, i) => (
+          <VoicePlayer key={v.captureId} voice={v} ordinal={rec.voices.length > 1 ? i + 1 : 0} />
+        ))}
 
         {/* Evidence. Mandate #1: a file the row promises but the device does not
             have is SHOWN as missing. A blank tile would be silent loss. */}
@@ -565,7 +568,7 @@ function AddVoiceButton({ onPress }: { onPress: () => void }) {
  *  is derived from it), so it gets a real player, not just a transcript. Uses the
  *  app's shared expo-audio player (annotate.ts) — one player, so starting a second
  *  clip stops the first, and leaving the screen stops playback. */
-function VoicePlayer({ voice }: { voice: RecordVoice }) {
+function VoicePlayer({ voice, ordinal = 0 }: { voice: RecordVoice; ordinal?: number }) {
   const [playing, setPlaying] = React.useState(false);
   const [pos, setPos] = React.useState(0);
   const [dur, setDur] = React.useState(0);
@@ -576,13 +579,16 @@ function VoicePlayer({ voice }: { voice: RecordVoice }) {
     if (!playing) return;
     const id = setInterval(() => {
       const st = playbackState();
+      // Another clip took the one shared player — this one is no longer sounding, so
+      // drop its progress UI (hadar 2026-07-25, multiple voice notes).
+      if (st.uri !== voice.uri) { setPlaying(false); setPos(0); return; }
       if (st.durationSec > 0) setDur(st.durationSec);
       setPos(st.positionSec);
       // expo-audio flips `playing` false at the tail; treat that as ended and reset.
       if (!st.playing && st.positionSec > 0) { stopPlayback(); setPlaying(false); setPos(0); }
     }, 250);
     return () => clearInterval(id);
-  }, [playing]);
+  }, [playing, voice.uri]);
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -596,7 +602,9 @@ function VoicePlayer({ voice }: { voice: RecordVoice }) {
 
   return (
     <View style={T.card}>
-      <Text style={label}>{t('erec.voice')}</Text>
+      <Text style={label}>
+        {ordinal > 0 ? t({ k: 'erec.voiceN', p: { n: ordinal } } as any) : t('erec.voice')}
+      </Text>
       {!voice.present ? (
         <Text style={{ ...T.body, fontSize: 13.5, color: C.danger, marginTop: 6 }}>
           {t('erec.voiceMissing')}

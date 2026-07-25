@@ -107,9 +107,10 @@ export type ExtraRecord = {
   photos: RecordPhoto[];
   /** True when photos were dropped by the render cap. */
   photosTruncated: number;
-  /** The paired voice narration, playable on the record screen. Null when the
-   *  extra has no voice (typed decision, or voice-less walk). */
-  voice: RecordVoice | null;
+  /** The voice narrations behind the extra, playable on the record screen, oldest
+   *  first. The first is the original; the rest are voice notes ADDED later (hadar,
+   *  2026-07-25 — "multiple voice notes"). Empty when the extra has no voice. */
+  voices: RecordVoice[];
   history: RecordEvent[];
   synced: boolean;
 };
@@ -169,7 +170,7 @@ export async function extraRecord(
 
   let photos: RecordPhoto[] = [];
   let photosTruncated = 0;
-  let voice: RecordVoice | null = null;
+  let voices: RecordVoice[] = [];
   let capturedAtMs: number | null = null;
 
   if (captureIds.length) {
@@ -213,19 +214,20 @@ export async function extraRecord(
       })
     );
 
-    // The voice behind the extra — the same fetch already has it; the visual grid
-    // just dropped it. It IS the record (the transcript is derived), so surface it
-    // with its own metadata and make it playable.
-    const voiceCap = caps.find((c) => c.modality === 'voice');
-    if (voiceCap) {
-      const uri = FS.documentDirectory + voiceCap.media_relpath;
+    // EVERY voice behind the extra — the original plus any added later — each its
+    // own playable clip (hadar, 2026-07-25). The voice IS the record (the transcript
+    // is derived), so a voice note added to the extra gets a real player, not a
+    // dead tile. Oldest first; `caps` is already ordered by captured_at_ms.
+    const voiceCaps = caps.filter((c) => c.modality === 'voice');
+    voices = await Promise.all(voiceCaps.map(async (vc) => {
+      const uri = FS.documentDirectory + vc.media_relpath;
       let present = false;
       try { present = !!(await FS.getInfoAsync(uri)).exists; } catch { present = false; }
-      voice = {
-        captureId: voiceCap.capture_id, uri, at: createdLabel(voiceCap.captured_at_ms),
-        capturedAtMs: voiceCap.captured_at_ms, present,
+      return {
+        captureId: vc.capture_id, uri, at: createdLabel(vc.captured_at_ms),
+        capturedAtMs: vc.captured_at_ms, present,
       };
-    }
+    }));
   }
 
   // ---- People: only roles we actually store -------------------------------
@@ -337,7 +339,7 @@ export async function extraRecord(
     description: co.scope,
     photos,
     photosTruncated,
-    voice,
+    voices,
     history: [...stamped, ...unstamped],
     synced,
   };
