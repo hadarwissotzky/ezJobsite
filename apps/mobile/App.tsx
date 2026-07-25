@@ -579,7 +579,7 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
     setTransition({
       ids: a.ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
       uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
-      stalled: false,
+      stalled: false, uploadDone: 0, uploadTotal: a.ids.length,
     });
   }
 };
@@ -884,7 +884,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const [transition, setTransition] = React.useState<null | {
     ids: string[]; anchorCaptureId: string | null; coId: string;
     uploaded: boolean; transcribed: boolean; analyzed: boolean; offline: boolean;
-    stalled: boolean;
+    stalled: boolean; uploadDone: number; uploadTotal: number;
   }>(null);
 
   // The transition's watcher. Polls the real signals: capture_outbox emptying
@@ -927,8 +927,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       void kickDrain();  // start the upload NOW, don't wait for the 15s timer
       for (let tick = 0; alive && tick < 90; tick++) {
         let up = false, tr = transition.anchorCaptureId === null;
+        let n = firstCount < 0 ? 0 : firstCount;  // last known count if this poll throws
         try {
-          const n = (await db.getAll<{ n: number }>(
+          n = (await db.getAll<{ n: number }>(
             `SELECT count(*) AS n FROM capture_outbox WHERE capture_id IN (${marks})`,
             transition.ids))[0]?.n ?? 0;
           if (firstCount < 0) firstCount = n;
@@ -959,8 +960,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           if (!alive) return;
           if (!offline && tick % 5 === 0) void kickDrain();
         }
+        // Per-file upload progress (audio + each photo is one outbox row): total
+        // is what was queued when we started, done is how many have drained.
+        const uploadTotal = firstCount < 0 ? 0 : firstCount;
+        const uploadDone = firstCount < 0 ? 0 : Math.max(0, firstCount - n);
         setTransition((t) => t && { ...t, uploaded: up, transcribed: tr,
-                                    analyzed: analyzedSeen, offline });
+                                    analyzed: analyzedSeen, offline,
+                                    uploadDone, uploadTotal });
 
         // THE gate: uploaded + words down + AI has written title/tag/price.
         if (ready) {
@@ -2876,6 +2882,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         <View style={{ marginTop: 18 }}>
           {row(true, 'cap.transSaved', 'cap.transSaved')}
           {row(t.uploaded, 'cap.transUpload', 'cap.transUploaded')}
+          {!t.uploaded && t.uploadTotal > 0 && (
+            <View style={{ marginLeft: 34, marginTop: 8 }}>
+              <View style={{ height: 6, borderRadius: 3, backgroundColor: '#21262d', overflow: 'hidden' }}>
+                <View style={{ height: 6, borderRadius: 3, backgroundColor: '#2da44e',
+                  width: `${Math.round((t.uploadDone / Math.max(1, t.uploadTotal)) * 100)}%` }} />
+              </View>
+              <Text style={{ color: '#8c959f', fontSize: 13, marginTop: 6 }}>
+                {T({ k: 'cap.transUploadProg', p: { done: t.uploadDone, total: t.uploadTotal } } as any)}
+              </Text>
+            </View>
+          )}
           {t.anchorCaptureId !== null && row(t.transcribed, 'cap.transStt', 'cap.transSttDone')}
           {row(t.analyzed, 'cap.transAnalyze', 'cap.transAnalyzed')}
         </View>
