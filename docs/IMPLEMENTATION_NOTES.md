@@ -570,3 +570,49 @@ Re-verified against the live database, rolled back, 0 rows left:
 Pre-flight: **0** existing confirmed rows were unsigned, so no historical evidence sits
 on the wrong side of the new rule. Existing rows are never re-validated (BEFORE INSERT)
 — they are evidence of what happened, and rewriting them would be its own dishonesty.
+
+### 2026-07-26 — Codex full-app review (gpt-5.6-sol) + reconciliation
+
+Ran `codex exec` (high effort, read-only) over the whole app + workflows (capture
+lifecycle, quota/paywall entitlement, notifications, today's design passes). Codex
+returned 9 P1 + 9 P2. Negotiated to convergence (session 019fa01c). AGREED disposition:
+
+CONFIRMED REAL, converged:
+- **P1 — stale projectId closure** (App.tsx drain setInterval). `refresh` is a stable
+  useCallback reading `projectIdRef.current`, but the 15s drain closes over the raw
+  `projectId` (=INBOX_ID at mount) and never re-subscribes, so pullThreads /
+  hydrateChangeOrders / hydrateQuestions / runNotifications all query the Inbox forever.
+  Approvals + questions for the OPEN job never hydrate via the tick. VERIFIED. Fix:
+  read projectIdRef.current in the tick (or hydrate company-wide). **Fix first.**
+- **P1 flow-consistency (capture SAFE, not byte-loss — Codex agreed the reframe):**
+  #2 fire-and-forget extra vs rehome race (extra + captures can land on different jobs);
+  #3 decision/CO non-atomic (kill between recordDecision and createChangeOrder strands a
+  decision, hides the walk from promotion); #5 send-before-durable-intent (kill after the
+  remote send but before markLocalSent → live link while app shows draft → double-send).
+  All preserve capture_commit + bytes; fix = await/atomicity + idempotent send intent.
+- **P1 recoverySweep orphan-delete** (capture.ts:480-487): docstring promises "surfaced
+  to keep or discard, never silently dropped" but orphans (media, no commit row) are
+  silently deleted. Mitigated by session draft-banking (DraftRecoveryCard) for the live
+  case, so defense-in-depth; both agree fix = QUARANTINE not delete.
+- **P1 quota not company-scoped** (quota.ts): best-plan-among-companies removed the
+  nondeterminism but jobCount still sums across companies + reads an unscoped plan.
+  Latent (billing stubbed). Fix = scope by target companyId. 
+- **P1 cold-start remote tap** (App.tsx/379): cold-start handler reads data.url, remote
+  payload carries changeOrderId → deep-link dropped on cold-start-from-remote.
+- **P1→revised connector discard** (Codex HELD, better wording): the bug is not "these
+  codes are fatal" but "ambiguous failures (PGRST204 stale-cache-after-migration, 23503
+  parent-lag) are irreversibly DISCARDED without a replayable payload." Agreed rule:
+  bounded retry → durable app-owned repair outbox (park) → redrive on schema/app-version
+  change or after the parent lands; complete the PowerSync tx so later writes aren't
+  blocked; mark terminal only when proven incompatible/parent-deleted. Not infinite-block,
+  not discard.
+- **P2 (all real):** celebration watermark seeded before initial sync (can celebrate
+  history) — TODAY'S code; registerPushToken REQUESTS permission at startup, undercutting
+  the intended first-send prompt — TODAY'S wiring; worker counts failed Expo sends as
+  sent; audio/x-wav local≠upload MIME mismatch; worker drain starved by processing
+  backlog; non-atomic job-quota; decisionsPerJob:15 unenforced (known-deferred);
+  379 first-open race; token-registration not retried after grant; upsert error ignored.
+
+DROPPED (Codex CONCEDED): #8 paywall "cannot purchase" — the RevenueCat stub is
+intentional + honestly labeled (DEC-11); a release blocker only once IAP is declared
+live, not a correctness defect. No 376/381/382 signature conflict (382 replaces).

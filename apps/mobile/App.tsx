@@ -1843,6 +1843,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         try {
           const { data } = await connector.client.auth.getUser();
           if (!data?.user) return;             // not signed in -> nothing to do
+          // THE CURRENT project, read fresh each tick. This interval is created ONCE
+          // (refresh is a stable useCallback), so the closed-over `projectId` is frozen
+          // at INBOX_ID from mount — using it made every hydrate/notify query the Inbox
+          // forever, so approvals + questions for the OPEN job never landed (Codex P1,
+          // 2026-07-26). The ref tracks the live project; use it, never the closure.
+          const pid = projectIdRef.current;
           const r = await drainOutbox(db, connector.client, data.user.id);
           if (r.attempted) console.log('drain captures:', JSON.stringify(r));
           // Decisions drain on the same tick but through their own queue. They are
@@ -1876,7 +1882,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           if (br.attempted) console.log('drain r5b:', JSON.stringify(br));
           const er = await drainEwaOutbox(db, connector.client, data.user.id);
           if (er.attempted) console.log('drain ewa:', JSON.stringify(er));
-          const pt = await pullThreads(db, connector.client, projectId);
+          const pt = await pullThreads(db, connector.client, pid);
           if (pt.pulled || pt.revisions) { console.log('threads:', JSON.stringify(pt)); await refresh(); }
           // R6b actor facts. Same reason as the roster: a fact that only ever lives
           // on the phone that wrote it is lost with that phone, and "who recorded
@@ -1888,13 +1894,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // Tie walkthrough photos to the sentences spoken over them, once the
           // transcript (with segments) has landed server-side. Idempotent per pair.
           try { await runAutoTags(db, connector.client); } catch { /* offline is normal */ }
-          const hy = await hydrateChangeOrders(db, connector.client, projectId, data.user.id);
+          const hy = await hydrateChangeOrders(db, connector.client, pid, data.user.id);
           // MUST follow the hydrate. hydrateChangeOrders adopts the server's status for
           // any row with no change_order_outbox entry; a supersession queues in
           // co_supersession, a DIFFERENT table, so an un-uploaded revision would be
           // walked back to 'sent' and the retired extra would reappear as live.
           await reassertSupersessions(db);
-          const qz = await hydrateQuestions(db, connector.client, projectId);
+          const qz = await hydrateQuestions(db, connector.client, pid);
           if (hy.pulled || hy.statusUpdated || qz.pulled) {
             console.log('hydrate:', JSON.stringify({ ...hy, questions: qz.pulled }));
             await refresh();
@@ -1914,7 +1920,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // with it" — this is what makes that true past the handset.
           const sd = await drainServerDiscards(db, connector.client);
           if (sd.attempted) console.log('drain discards:', JSON.stringify(sd));
-          const nt = await runNotifications(db, projectId);
+          const nt = await runNotifications(db, pid);
           if (nt.presented || nt.blocked) console.log('notify:', JSON.stringify(nt));
         } catch (e: any) {
           // Offline IS normal — but "offline" and "a bug five drains into the
