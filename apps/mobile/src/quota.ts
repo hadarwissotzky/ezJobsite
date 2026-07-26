@@ -30,13 +30,37 @@
  */
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { listProjects, INBOX_ID } from './projects.ts';
-
-export const FREE_LIMITS = { members: 2, jobs: 2 } as const;
+import { planLimits, asPlanId, type PlanId } from './plans.ts';
 
 export type QuotaKind = 'members' | 'jobs';
 export type QuotaResult =
   | { ok: true }
   | { ok: false; kind: QuotaKind; limit: number; current: number };
+
+const PLAN_RANK: Record<PlanId, number> = { free: 0, core: 1, crew: 2, enterprise: 3 };
+
+/**
+ * The plan that governs this user (382). The owner pays; crew inherit it. A device can
+ * hold MORE THAN ONE company row (the cross-company Crew tier syncs every company the
+ * user is an active member of), so we return the BEST plan among them rather than an
+ * arbitrary one (review 2026-07-26 — the old unscoped `LIMIT 1` was non-deterministic
+ * and could cap a paying user or uncap a free one). Best-plan-wins is deterministic
+ * and user-favourable: a member of any paid company gets the paid experience, which is
+ * exactly "crew inherit the plan". Solo/no-company reads 'free'.
+ */
+export async function currentPlan(db: AbstractPowerSyncDatabase): Promise<PlanId> {
+  try {
+    const rows = await db.getAll<{ plan: string | null }>(`SELECT plan FROM company`);
+    let best: PlanId = 'free';
+    for (const r of rows) {
+      const p = asPlanId(r.plan);
+      if (PLAN_RANK[p] > PLAN_RANK[best]) best = p;
+    }
+    return best;
+  } catch {
+    return 'free';  // pre-migration schema / not synced yet → treat as free
+  }
+}
 
 /** Active jobs (excludes the Inbox sentinel and archived projects — archiving frees a slot). */
 export async function jobCount(db: AbstractPowerSyncDatabase): Promise<number> {
@@ -45,19 +69,17 @@ export async function jobCount(db: AbstractPowerSyncDatabase): Promise<number> {
 }
 
 export async function checkJobs(db: AbstractPowerSyncDatabase): Promise<QuotaResult> {
+  const limit = planLimits(await currentPlan(db)).jobs;   // Infinity on paid → never blocks
   const n = await jobCount(db);
-  return n >= FREE_LIMITS.jobs
-    ? { ok: false, kind: 'jobs', limit: FREE_LIMITS.jobs, current: n } : { ok: true };
+  return n >= limit ? { ok: false, kind: 'jobs', limit, current: n } : { ok: true };
 }
 
 /**
- * Active members of a company (owner included). This is the CLIENT-SIDE UX check —
- * it counts what the device can see (company_member is synced; company_invite is NOT,
- * so pending invites are invisible here). It stops the common case (an owner already
- * at the cap tapping Invite) but CANNOT stop the real bypass — several outstanding
- * invites each accepted on their own device. That is why the actual wall lives in the
- * accept-invite RPC (sql/381), which re-counts at the only device-independent moment:
- * when a membership is actually minted.
+ * Active members of a company (owner included). Crew are FREE today, so the members
+ * limit is Infinity and this gate never fires — but the SEAM is intact: set
+ * planLimits().members to a number (and re-add the server cap noted in sql/382) and
+ * the invite flow starts blocking, no new code. "Field crew may not be free moving
+ * forward" (hadar 2026-07-26).
  */
 export async function memberCount(
   db: AbstractPowerSyncDatabase, companyId: string,
@@ -71,7 +93,7 @@ export async function memberCount(
 export async function checkMembers(
   db: AbstractPowerSyncDatabase, companyId: string,
 ): Promise<QuotaResult> {
+  const limit = planLimits(await currentPlan(db)).members;  // Infinity today → never blocks
   const n = await memberCount(db, companyId);
-  return n >= FREE_LIMITS.members
-    ? { ok: false, kind: 'members', limit: FREE_LIMITS.members, current: n } : { ok: true };
+  return n >= limit ? { ok: false, kind: 'members', limit, current: n } : { ok: true };
 }

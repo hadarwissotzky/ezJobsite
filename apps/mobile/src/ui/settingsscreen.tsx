@@ -48,6 +48,7 @@ export function SettingsScreen(props: {
   onSaveProfile: (p: Profile) => Promise<void>;
   onSetLang: (l: Lang) => Promise<void>;
   onSignOut: () => Promise<void>;
+  onOpenPlans: () => void;
   onBack: () => void;
 }) {
   const { db, supabase, userId } = props;
@@ -306,9 +307,9 @@ export function SettingsScreen(props: {
         <Text style={label}>{t('set.plan')}</Text>
         <Row title={t('set.planName')} value={t('set.planPilot')} />
         <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 8 }}>{t('set.planNote')}</Text>
-        <Pressable onPress={() => mailTo('EZchangeorder — upgrade / plans')}
+        <Pressable onPress={props.onOpenPlans}
           style={{ ...saveBtn, backgroundColor: C.ink, marginTop: 12 }}>
-          <Text style={saveBtnT}>{t('set.planContact')}</Text>
+          <Text style={saveBtnT}>{t('quota.seePlans')}</Text>
         </Pressable>
       </View>
 
@@ -341,7 +342,7 @@ export function SettingsScreen(props: {
       {quotaHit && (
         <QuotaModal kind={quotaHit.kind} limit={quotaHit.limit}
           onClose={() => setQuotaHit(null)}
-          onSeePlans={() => { setQuotaHit(null); mailTo('EZchangeorder — upgrade / plans'); }} />
+          onSeePlans={() => { setQuotaHit(null); props.onOpenPlans(); }} />
       )}
     </ScrollView>
   );

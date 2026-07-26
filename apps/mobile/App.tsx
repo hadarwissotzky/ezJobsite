@@ -6,7 +6,7 @@ import { PowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import * as Contacts from 'expo-contacts';
 import React from 'react';
-import { Dimensions, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Dimensions, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
 import { ago, projectCards, staticMapUrl, type ProjectCard } from './src/ui/home';
@@ -25,8 +25,10 @@ import { readCapture,
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { photoCapture, pickFromLibrary, textCapture, voiceCapture } from './src/modality';
-import { checkJobs, type QuotaKind } from './src/quota';
+import { checkJobs, currentPlan, type QuotaKind } from './src/quota';
 import { QuotaModal } from './src/ui/quotamodal';
+import { PaywallScreen } from './src/ui/paywallscreen';
+import { type PlanId } from './src/plans';
 import { Icon } from './src/ui/icon';
 import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
 import { ensurePairSchema, linkPair } from './src/pair';
@@ -263,6 +265,8 @@ export default function App() {
   const [showCapture, setShowCapture] = React.useState(false);   // REQ-CAP-FUSED screen
   const [showSettings, setShowSettings] = React.useState(false); // Settings/Team screen
   const [quota, setQuota] = React.useState<{ kind: QuotaKind; limit: number } | null>(null); // free-tier cap hit
+  const [showPaywall, setShowPaywall] = React.useState(false);
+  const [paywallPlan, setPaywallPlan] = React.useState<PlanId>('free');
   const [showFeed, setShowFeed] = React.useState(false);         // REQ-PM9 Company feed
   const [feedItems, setFeedItems] = React.useState<FeedItem[]>([]);
   const feedOpenRef = React.useRef(false);      // feed is showing → refresh() reloads it
@@ -503,6 +507,12 @@ const openSettings = async () => {
   }
   setSettingsProfile(p);
   setShowSettings(true);
+};
+
+// Open the paywall, reading the company's current plan so it marks "Your plan".
+const openPaywall = async () => {
+  setPaywallPlan(await currentPlan(db));
+  setShowPaywall(true);
 };
 
 // Translate an RPC error code to a human, localized message — never the raw Postgres
@@ -2900,8 +2910,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const quotaEl = quota ? (
     <QuotaModal kind={quota.kind} limit={quota.limit}
       onClose={() => setQuota(null)}
-      onSeePlans={() => { setQuota(null); setNewJob(null); setAssign(null); void openSettings(); }} />
+      onSeePlans={() => { setQuota(null); void openPaywall(); }} />
   ) : null;
+
+  // The paywall (DEC-11) — a Modal, so mounted beside quotaEl in each early-return
+  // screen; `visible` toggles it. Opened from a hit cap ("See plans") or Settings.
+  const paywallEl = (
+    <PaywallScreen visible={showPaywall} currentPlan={paywallPlan}
+      onClose={() => setShowPaywall(false)}
+      onContact={() => Linking.openURL('mailto:support@ezchangeorder.com?subject=' + encodeURIComponent('EZchangeorder — plans')).catch(() => {})} />
+  );
 
   // The win overlay (gap #1) — mounted in each early-return screen so it floats over
   // whatever the user is looking at when a "yes" lands. Tap or wait to dismiss.
@@ -2925,6 +2943,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       <View style={s.c}>
         {quotaEl}
         {celebrateEl}
+        {paywallEl}
         <Text style={s.h}>EZchangeorder</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('job.newTitle')}</Text>
@@ -3323,6 +3342,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       <View style={s.assignC}>
         {quotaEl}
         {celebrateEl}
+        {paywallEl}
         <View style={s.assignReceipt}>
           <Text style={s.assignSaved}>✓ {T('assign.saved')}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
@@ -3619,6 +3639,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         onSaveProfile={async (p) => { await saveProfile(connector, db, p); setSettingsProfile(p); await refresh(); }}
         onSetLang={async (l) => { setLang(l); setLangState(l); await saveLang(db, l); }}
         onSignOut={async () => { setShowSettings(false); await connector.signOut(); }}
+        onOpenPlans={() => { setShowSettings(false); void openPaywall(); }}
         onBack={() => setShowSettings(false)}
       />
     );
@@ -4051,6 +4072,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       <View style={s.homeC}>
         {quotaEl}
         {celebrateEl}
+        {paywallEl}
         {/* Header: title · new job (the ＋ opens the create-job screen, an early
             return, so it works from here). */}
         <View style={s.dashHdr}>
@@ -4295,6 +4317,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     <View style={s.c}>
       {quotaEl}
       {celebrateEl}
+      {paywallEl}
       {/* Header: back · Job · bell (mockup 2026-07-23). Fixed above the scroll. */}
       <View style={s.dashHdr}>
         <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('common.back')}

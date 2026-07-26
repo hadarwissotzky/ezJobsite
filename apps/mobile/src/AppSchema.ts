@@ -50,6 +50,8 @@ const company = new Table({
   name: column.text,
   owner_id: column.text,
   created_at: column.text,
+  // Subscription tier (382). Client READS to lift caps; the store webhook WRITES it.
+  plan: column.text,
 });
 
 const company_member = new Table(
