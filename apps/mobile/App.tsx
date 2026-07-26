@@ -128,7 +128,7 @@ import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
          tagMap, tagsFor } from './src/tags';
 import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
          INBOX_ID, listProjects, resolveProject, touchProject, distanceM, effectiveProject,
-         setProjectLabel, type Project } from './src/projects';
+         setProjectLabel, setProjectStatus, type Project } from './src/projects';
 import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
          getCellularConsent, getTermsAccepted, setCellularConsent,
          setTermsAccepted } from './src/consent';
@@ -294,6 +294,8 @@ export default function App() {
   // The Job screen's pill filter (hadar, 2026-07-23 mockup): null = all extras.
   const [jobFilter, setJobFilter] = React.useState<null | 'needs' | 'waiting' | 'approved'>(null);
   const [labelFilter, setLabelFilter] = React.useState<string | null>(null); // REQ-PM14 Jobs-list filter
+  const [jobsArchived, setJobsArchived] = React.useState(false);             // REQ-PM4 Jobs-list archived view
+  const [archivedCards, setArchivedCards] = React.useState<ProjectCard[]>([]);
   const [waiting, setWaiting] = React.useState<Array<{
     id: string; scope: string; amount_cents: number; status: string;
     project_id: string; pname: string; signed_by: string | null; created_at_ms: number }>>([]);
@@ -435,6 +437,11 @@ const openSettings = async () => {
   setSettingsProfile(p);
   setShowSettings(true);
 };
+
+// Translate an RPC error code to a human, localized message — never the raw Postgres
+// string (review 2026-07-25: the ICP may run in Spanish and can't act on 'not allowed').
+const statusErr = (code: string): string =>
+  code === '42501' ? T('pm4.errPermission') : T('pm4.errGeneric');
 
 /**
  * R8 manual remind — ONE implementation for the ledger row and the record screen.
@@ -3796,12 +3803,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   if (nav === 'jobs') {
     const now = Date.now();
     const q = search.trim().toLowerCase();
-    const usedLabels = LABELS.filter((l) => cards.some((p) => p.label === l.key));
+    const jobsSrc = jobsArchived ? archivedCards : cards;
+    const usedLabels = LABELS.filter((l) => jobsSrc.some((p) => p.label === l.key));
     // The filter's controls live inside the usedLabels block, which unmounts when a
     // color stops being used — so a raw labelFilter could freeze the list empty with
     // no reset (review 2026-07-25, QA lens). Ignore a filter whose color is gone.
     const activeLabel = usedLabels.some((l) => l.key === labelFilter) ? labelFilter : null;
-    const shown = cards
+    const loadArchived = async () => setArchivedCards(await projectCards(db, await listProjects(db, 'archived')));
+    const shown = jobsSrc
       .filter((p) => p.id !== INBOX_ID)
       .filter((p) => !q || p.name.toLowerCase().includes(q) ||
                      (p.address ?? '').toLowerCase().includes(q))
@@ -3821,7 +3830,20 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         </View>
         <ScrollView style={{ flex: 1 }}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}>
-          {cards.length > 4 && (
+          {/* REQ-PM4 — Active vs Archived. Archived jobs are retained, out of the way. */}
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 2 }}>
+            <Pressable hitSlop={6} onPress={() => setJobsArchived(false)}
+              style={{ minHeight: 38, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 19, borderWidth: !jobsArchived ? 2 : 1,
+                borderColor: !jobsArchived ? '#0D0F12' : '#E4E5E1', backgroundColor: !jobsArchived ? '#0D0F12' : '#fff' }}>
+              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: !jobsArchived ? '#fff' : '#5C6570' }}>{T('pm4.activeJobs')}</Text>
+            </Pressable>
+            <Pressable hitSlop={6} onPress={async () => { setJobsArchived(true); await loadArchived(); }}
+              style={{ minHeight: 38, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 19, borderWidth: jobsArchived ? 2 : 1,
+                borderColor: jobsArchived ? '#0D0F12' : '#E4E5E1', backgroundColor: jobsArchived ? '#0D0F12' : '#fff' }}>
+              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: jobsArchived ? '#fff' : '#5C6570' }}>{T('pm4.archived')}</Text>
+            </Pressable>
+          </View>
+          {jobsSrc.length > 4 && (
             <TextInput style={s.searchIn} value={search} onChangeText={setSearch}
               placeholder={T('home.search')} placeholderTextColor="#8c959f" />
           )}
@@ -3852,7 +3874,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             </View>
           )}
           {shown.map((p) => (
-            <Pressable key={p.id} style={s.jobItem} onPress={() => open(p.id)}>
+            <Pressable key={p.id} style={s.jobItem}
+              onPress={() => {
+                // Archived rows OPEN read-only (retention view). They are not in the
+                // active `projects` state, so add the tapped one so the Job screen
+                // resolves it (review 2026-07-25: don't dead-tap the row).
+                if (jobsArchived) setProjects((ps) => ps.some((x) => x.id === p.id) ? ps : [...ps, p]);
+                open(p.id);
+              }}>
               {labelHex(p.label) && (
                 <View style={{ width: 10, height: 10, borderRadius: 5, marginRight: 10,
                   backgroundColor: labelHex(p.label) as string }} />
@@ -3865,11 +3894,22 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 </Text>
               </View>
               <Text style={s.jobCount}>{p.captureCount}</Text>
-              <Text style={s.chev}>›</Text>
+              {jobsArchived ? (
+                <Pressable hitSlop={10}
+                  style={{ minHeight: 44, paddingHorizontal: 10, justifyContent: 'center' }}
+                  onPress={async () => {
+                    const r = await setProjectStatus(connector.client, db, p.id, 'in_progress');
+                    if (r.ok) { await refresh(); await loadArchived(); } else setFiled(statusErr(r.code));
+                  }}>
+                  <Text style={{ color: '#3E63DD', fontFamily: 'Barlow_600SemiBold', fontSize: 13 }}>{T('pm4.unarchive')}</Text>
+                </Pressable>
+              ) : <Text style={s.chev}>›</Text>}
             </Pressable>
           ))}
           {!shown.length && (
-            <Text style={s.homeEmpty}>{q ? T('home.noMatch') : T('home.noProjects')}</Text>
+            <Text style={s.homeEmpty}>
+              {jobsArchived ? T('pm4.noArchived') : q ? T('home.noMatch') : T('home.noProjects')}
+            </Text>
           )}
         </ScrollView>
         {bottomNav('jobs', false)}
@@ -4082,6 +4122,38 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 {T(('label.' + jobProj.label) as any)}
               </Text>
             )}
+          </View>
+        )}
+
+        {/* REQ-PM4 — lifecycle. Set where the job is; Archive takes it out of the
+            working list (kept for warranty/dispute). Archiving returns to Home. */}
+        {jobProj && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8, marginBottom: 4 }}>
+            {(['lead', 'in_progress', 'complete'] as const).map((st) => {
+              const on = jobProj.status === st;
+              return (
+                <Pressable key={st} hitSlop={6}
+                  onPress={async () => {
+                    const r = await setProjectStatus(connector.client, db, jobProj.id, st);
+                    if (r.ok) await refresh(); else setFiled(statusErr(r.code));
+                  }}
+                  style={{ minHeight: 36, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 18, borderWidth: on ? 2 : 1,
+                    borderColor: on ? '#0D0F12' : '#E4E5E1', backgroundColor: on ? '#0D0F12' : '#fff' }}>
+                  <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: on ? '#fff' : '#5C6570' }}>
+                    {T(('pm4.' + st) as any)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+            {/* Archive is the SAFE, reversible path — neutral styling, not alarm-red. */}
+            <Pressable hitSlop={6}
+              onPress={async () => {
+                const r = await setProjectStatus(connector.client, db, jobProj.id, 'archived');
+                if (r.ok) { setNav('home'); await refresh(); } else setFiled(statusErr(r.code));
+              }}
+              style={{ minHeight: 36, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: '#E4E5E1' }}>
+              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#5C6570' }}>{T('pm4.archive')}</Text>
+            </Pressable>
           </View>
         )}
 

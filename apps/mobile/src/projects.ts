@@ -29,6 +29,7 @@
  *    nullable column that every later query would have to remember to handle.
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { sha256 } from 'js-sha256';
 import { msg, type Msg } from './i18n';
 
@@ -89,13 +90,22 @@ export type Project = {
  * REQ-EVID2: "findable by job and recency ... in ≤2 actions."
  * Most-recently-used first, because the job you touched last is the one you want.
  */
-export async function listProjects(db: AbstractPowerSyncDatabase): Promise<Project[]> {
+export async function listProjects(
+  db: AbstractPowerSyncDatabase,
+  scope: 'active' | 'archived' | 'all' = 'active',
+): Promise<Project[]> {
+  // "active" is the COLLAPSE of lead+in_progress+complete (REQ-PM4); archived is
+  // retained but hidden from the working list. Legacy 'active' rows read as active.
+  const where = scope === 'archived'
+    ? `COALESCE(status,'in_progress') = 'archived'`
+    : scope === 'all' ? '1=1'
+    : `COALESCE(status,'in_progress') <> 'archived'`;
   return db.getAll<Project>(
     `SELECT id, name, address, lat, lng,
             COALESCE(geofence_m, 150) AS geofence_m,
-            client_ref, COALESCE(status,'active') AS status, last_used_ms, label
+            client_ref, COALESCE(status,'in_progress') AS status, last_used_ms, label
        FROM project
-      WHERE COALESCE(status,'active') = 'active'
+      WHERE ${where}
       ORDER BY COALESCE(last_used_ms, created_at_ms, 0) DESC`
   );
 }
@@ -106,6 +116,32 @@ export async function setProjectLabel(
 ): Promise<void> {
   await db.execute(`UPDATE project SET label = ? WHERE id = ?`, [label, projectId]);
 }
+
+/**
+ * REQ-PM4 — change a project's lifecycle status. status is SERVER-OWNED, so the
+ * authority is the RPC; on success we also write the local row for instant feedback
+ * (the connector strips status from the upload, and PowerSync converges from the
+ * server change). Returns the failure reason so the caller can surface it.
+ */
+export type ProjectStatus = 'active' | 'lead' | 'in_progress' | 'complete' | 'archived';
+
+export async function setProjectStatus(
+  supabase: SupabaseClient, db: AbstractPowerSyncDatabase,
+  projectId: string, status: ProjectStatus,
+): Promise<{ ok: true } | { ok: false; code: string; reason: string }> {
+  const { error } = await supabase.rpc('set_project_status', { p_project_id: projectId, p_status: status });
+  if (error) return { ok: false, code: (error as any).code ?? '', reason: error.message };
+  // Optimistic local echo for instant feedback. status is server-owned so the connector
+  // strips it on upload (and now DROPS the resulting empty PATCH), and PowerSync
+  // converges from the server change — no divergence, no queue op.
+  await db.execute(`UPDATE project SET status = ? WHERE id = ?`, [status, projectId]);
+  return { ok: true };
+}
+// NOTE: project DELETE was intentionally NOT built here. project_id lives on a dozen
+// evidence tables (decision, scope_boundary, project_party, extra_work_authorization,
+// …) with no FK on most, so a point-in-time "empty" check is a TOCTOU that can orphan
+// append-only evidence (review 2026-07-25). A safe delete needs ON DELETE RESTRICT FKs
+// first — a separate deliberate change. Archive is the retention-safe path for now.
 
 /**
  * REQ-SET1 + REQ-PROC7: "a project can be created ... with no signal".

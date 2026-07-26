@@ -177,6 +177,15 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
         const data = stripServerOwned(op.table, op.opData);
         let result: any;
 
+        // A PATCH that touched ONLY server-owned columns (e.g. a local status echo,
+        // where status is stripped) has nothing left to send. Issuing `.update({})`
+        // is a no-op whose PostgREST response is not in our fatal set — it would
+        // `throw` and STALL the whole queue (review 2026-07-25). There is genuinely
+        // nothing to upload, so drop the op cleanly.
+        if (op.op === UpdateType.PATCH && (!data || Object.keys(data).length === 0)) {
+          continue;
+        }
+
         switch (op.op) {
           case UpdateType.PUT:
             result = await table.upsert({ ...data, id: op.id });

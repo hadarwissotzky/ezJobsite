@@ -49,3 +49,23 @@ panel** over the uncommitted diff BEFORE committing — parallel expert lenses:
 subset relevant to each change). Blocker/major findings are fixed and re-verified;
 the feature is committed only after the panel is clean. Implemented via the Workflow
 tool (`review-before-commit`). No feature is committed unreviewed.
+
+### 2026-07-25 — lifecycle (REQ-PM4) review outcome
+
+The first pass shipped a broken migration; the specialist panel caught 3 BLOCKERS
+pre-commit (would have halted all sync + stopped project creation in prod). Fixes +
+design changes, re-verified clean by the database + backend-security lenses:
+- **DEC-4.** Keep `'active'` IN the status enum (verified live default + constraint =
+  active/archived). The enum WIDENS to active·lead·in_progress·complete·archived
+  rather than replacing 'active' — so the DEFAULT, createProject, and ingest_project_v1
+  keep working. Dropped the REAL constraint name `project_status_check`.
+- **DEC-5.** DROP project delete entirely for now. `project_id` sits on ~12 evidence
+  tables (decision, scope_boundary, project_party, extra_work_authorization, …) with no
+  FK on most; a point-in-time "empty" check is a TOCTOU that can orphan append-only
+  evidence. Safe delete needs ON DELETE RESTRICT FKs first — a separate change. Archive
+  is the retention-safe path.
+- **DEC-6.** Sync ALL company projects (drop the status filter in sync-config), filter
+  active/archived on the client — so archived rows stay on-device (the Archived tab
+  needs them) and no status literal can empty a sync bucket.
+- Hardened the connector: a PATCH that is empty after stripping server-owned columns is
+  now skipped (the status local-echo can't become a queue-stalling empty update).

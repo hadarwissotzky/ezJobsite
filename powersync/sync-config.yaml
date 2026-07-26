@@ -19,15 +19,19 @@ streams:
       my_companies: |
         SELECT company_id FROM company_member
         WHERE user_id = auth.user_id() AND status = 'active'
-      active_projects: |
-        SELECT id FROM project
-        WHERE company_id IN my_companies AND status = 'active'
+      # ALL of the company's projects, NOT filtered by status. REQ-PM4's Archived tab
+      # needs archived rows ON the device (and status is a moving enum — filtering the
+      # bucket on a status literal purges rows and can halt sync, review 2026-07-25).
+      # The client (listProjects scope) decides active-vs-archived; the bucket carries
+      # everything so nothing vanishes from the device when a job is archived.
+      company_projects: |
+        SELECT id FROM project WHERE company_id IN my_companies
     auto_subscribe: true
     queries:
       # Membership + company rows so the roster and "my company" resolve on-device.
       - SELECT * FROM company           WHERE id         IN my_companies
       - SELECT * FROM company_member     WHERE company_id IN my_companies
-      - SELECT * FROM project           WHERE id         IN active_projects
-      - SELECT * FROM capture           WHERE project_id IN active_projects
-      - SELECT * FROM capture_op_state  WHERE project_id IN active_projects
-      - SELECT * FROM attachment        WHERE project_id IN active_projects
+      - SELECT * FROM project           WHERE id         IN company_projects
+      - SELECT * FROM capture           WHERE project_id IN company_projects
+      - SELECT * FROM capture_op_state  WHERE project_id IN company_projects
+      - SELECT * FROM attachment        WHERE project_id IN company_projects
