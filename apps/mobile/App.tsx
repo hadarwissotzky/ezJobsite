@@ -3504,6 +3504,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         lang={lang} confirmBase={CONFIRM_BASE}
         onSaveProfile={async (p) => { await saveProfile(connector, db, p); setSettingsProfile(p); await refresh(); }}
         onSetLang={async (l) => { setLang(l); setLangState(l); await saveLang(db, l); }}
+        onSignOut={async () => { setShowSettings(false); await connector.signOut(); }}
         onBack={() => setShowSettings(false)}
       />
     );

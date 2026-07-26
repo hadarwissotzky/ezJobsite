@@ -103,3 +103,35 @@ Panel found a blocker + 3 majors; fixed:
 - **DEPLOY (logged):** apply 379; the WORKER (already needed for AI) drains the outbox
   and sends via Expo (free, no key). Push is off until EAS is configured; everything
   else works. pg_net is unavailable, which is why this is worker-drained, not a trigger→edge.
+
+### 2026-07-25 — Account & Settings hub (menu: profile/settings/notifications/subscription/support/version)
+
+hadar asked (with a Timemark drawer screenshot) to make sure the app has a proper
+account menu — profile, settings, version, support — and to handle language, accounts,
+payments. Restructured the existing Settings screen (`settingsscreen.tsx`) into the
+standard field-app settings hub, top→bottom: identity header (avatar+name+company+role)
+→ Profile → Team → **Preferences** (notifications, reflects real OS permission) →
+**Subscription** (plan status) → **Support** (contact/feedback mailto) → **About**
+(version from app.json, terms, privacy, sign out). Entry point stays the ☰ → Settings.
+
+- **DEC-8 (payments):** v1 does NOT process payments (CLAUDE.md §5). The Subscription
+  card states the pilot plan plainly and routes "upgrade" to a contact email — no fake
+  checkout that cannot charge. Honest over impressive.
+- **Language** already lived in Profile; kept there (one save), surfaced role/company in
+  the new identity header.
+- **Version** single-sourced from `app.json` (expo.version) via JSON import — no manual
+  duplication, no new native dep (avoided expo-constants; a rebuild is needed anyway).
+
+Review panel (mobile-ux + correctness + i18n/a11y, each finding adversarially verified)
+confirmed 6, all fixed before commit:
+- **major:** sign-out fired on one tap → Alert confirm (destructive style).
+- **major:** teammate Remove was a sub-floor text target that revoked instantly →
+  Alert confirm + 44pt target.
+- **major:** trade chips/join below the gloves touch floor → chip minHeight 44, join 48.
+- **minor:** identity role re-derived from a possibly-empty members list → use the
+  always-present `MyCompany.role`.
+- **minor:** company identity line rendered the literal word "Company" → empty-state
+  prompt "Add your company name".
+- **minor:** notification "Enable" no-op'd when the module was unavailable → 'unknown'/
+  'denied' route to Open Settings (OS), only 'undetermined' offers in-app enable.
+- Verify gate green: tsc clean, i18n 720/720 (EN=ES), 296 tests pass. No new migration.
