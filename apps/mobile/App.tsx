@@ -3675,12 +3675,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       <View style={s.tabHalf}>
         <Pressable style={s.tab} accessibilityLabel={T('home.navHome')}
           onPress={() => { setNav('home'); setJobFilter(null); void refresh(); }}>
-          <Text style={[s.tabIcon, active === 'home' && s.tabIconOn]}>🏠</Text>
+          <Icon name="home" size={22} color={active === 'home' ? '#151A1E' : '#8A93A0'} />
           <Text style={[s.tabLab, active === 'home' && s.tabLabOn]}>{T('home.navHome')}</Text>
         </Pressable>
         <Pressable style={s.tab} accessibilityLabel={T('home.navJobs')}
           onPress={() => { setNav('jobs'); void refresh(); }}>
-          <Text style={[s.tabIcon, active === 'jobs' && s.tabIconOn]}>🗂</Text>
+          <Icon name="job" size={22} color={active === 'jobs' ? '#151A1E' : '#8A93A0'} />
           <Text style={[s.tabLab, active === 'jobs' && s.tabLabOn]}>{T('home.navJobs')}</Text>
         </Pressable>
       </View>
@@ -3688,12 +3688,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         disabled={!!gate || !!initError} hitSlop={8}
         accessibilityLabel={T('home.recordExtra')}
         onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
-        <Text style={s.fabT}>＋</Text>
+        <Icon name="extra" size={26} color="#fff" />
       </Pressable>
       <View style={s.tabHalf}>
         <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
           onPress={() => { setNav('activity'); void refresh(); }}>
-          <Text style={[s.tabIcon, active === 'activity' && s.tabIconOn]}>📋</Text>
+          <Icon name="people" size={22} color={active === 'activity' ? '#151A1E' : '#8A93A0'} />
           <Text style={[s.tabLab, active === 'activity' && s.tabLabOn]}>{T('home.navActivity')}</Text>
         </Pressable>
       </View>
@@ -3814,7 +3814,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           <Pressable style={s.hdrBtn} hitSlop={10}
             accessibilityLabel={T('r8.activity')}
             onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
-            <Text style={s.hdrIcon}>🔔</Text>
+            <Icon name="remind" size={22} color="#151A1E" />
             {unreadCount(activity) > 0 && (
               <View style={s.hdrBadge}><Text style={s.hdrBadgeT}>{unreadCount(activity)}</Text></View>
             )}
@@ -3851,7 +3851,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               so recording starts before any job is chosen. GPS files it after. */}
           <Pressable style={[s.ctaCard, disabled && s.btnOff]} disabled={disabled}
             onPress={startCapture}>
-            <View style={s.ctaIcon}><Text style={s.ctaIconT}>📷</Text></View>
+            <View style={s.ctaIcon}><Icon name="camera" size={22} color="#fff" /></View>
             <View style={{ flex: 1 }}>
               <Text style={s.ctaTitle}>{T('home.recordExtra')}</Text>
               <Text style={s.ctaSub}>{T('home.recordSub')}</Text>
@@ -4327,7 +4327,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         <Text style={s.hdrTitle}>{T('job.title')}</Text>
         <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('r8.activity')}
           onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
-          <Text style={s.hdrIcon}>🔔</Text>
+          <Icon name="remind" size={22} color="#151A1E" />
           {unreadCount(activity) > 0 && (
             <View style={s.hdrBadge}><Text style={s.hdrBadgeT}>{unreadCount(activity)}</Text></View>
           )}
@@ -4341,7 +4341,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         <Pressable style={s.jobCard} onPress={() => setPicker(true)}>
           {jobMapUrl
             ? <Image source={{ uri: jobMapUrl }} style={s.jobCardMap} resizeMode="cover" />
-            : <View style={[s.jobCardMap, s.jobCardMapEmpty]}><Text style={s.jobCardPin}>📍</Text></View>}
+            : <View style={[s.jobCardMap, s.jobCardMapEmpty]}><Icon name="mapPin" size={26} color="#8A93A0" /></View>}
           <View style={{ flex: 1 }}>
             <Text style={s.jobCardName} numberOfLines={1}>{jobProj?.name ?? T('job.pick')}</Text>
             <Text style={s.jobCardAddr} numberOfLines={2}>{jobProj?.address ?? T('home.noAddress')}</Text>
@@ -4426,7 +4426,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         <Pressable style={[s.ctaCard, { marginHorizontal: 0 },
             (!ready || !!gate || !!initError) && s.btnOff]}
           disabled={!ready || !!gate || !!initError} onPress={startCaptureJob}>
-          <View style={s.ctaIcon}><Text style={s.ctaIconT}>📷</Text></View>
+          <View style={s.ctaIcon}><Icon name="camera" size={22} color="#fff" /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.ctaTitle}>{T('home.recordExtra')}</Text>
             <Text style={s.ctaSub}>{T('job.recordSub')}</Text>
@@ -5555,7 +5555,7 @@ const s = StyleSheet.create({
     borderWidth: 2, borderColor: '#DCE0E6', borderTopWidth: 0 },
   ctaCard: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#16223D',
     marginHorizontal: 16, borderRadius: 16, paddingVertical: 18, paddingHorizontal: 18, marginBottom: 22 },
-  ctaIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#24325A',
+  ctaIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: "#4E6243",
     alignItems: 'center', justifyContent: 'center' },
   ctaIconT: { fontSize: 22 },
   ctaTitle: { color: '#fff', fontFamily: 'Barlow_700Bold', fontSize: 17 },
