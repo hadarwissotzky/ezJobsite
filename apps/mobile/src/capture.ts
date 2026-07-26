@@ -179,6 +179,10 @@ async function migrateAppOwnedSchema(db: AbstractPowerSyncDatabase): Promise<voi
 
 const MEDIA_DIR = FS.documentDirectory + 'capture-media/';
 const TMP_DIR = FS.documentDirectory + 'capture-tmp/';
+// Where crash-orphaned media goes instead of being deleted — bytes that reached final
+// storage but lost their commit row (never acknowledged as "saved"). Retained, not
+// destroyed, per REQ-CAP6's "never silently dropped" (Codex P1, 2026-07-26).
+const QUARANTINE_DIR = FS.documentDirectory + 'capture-quarantine/';
 
 /** SHA-256 over EXACT bytes. Never over a base64 or utf8 re-encoding of them. */
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -467,23 +471,43 @@ export async function exportCapture(
  *   and surfaced to keep or discard, never silently dropped.
  */
 export async function recoverySweep(db: AbstractPowerSyncDatabase): Promise<{
-  tmpDeleted: number; orphansDeleted: number; integrityErrors: string[];
+  tmpDeleted: number; orphansDeleted: number; orphansQuarantined: number; integrityErrors: string[];
 }> {
-  let tmpDeleted = 0, orphansDeleted = 0;
+  let tmpDeleted = 0, orphansDeleted = 0, orphansQuarantined = 0;
   const integrityErrors: string[] = [];
 
-  // Temp file, no commitment -> delete.
+  // Temp file, no commitment -> delete. These are partial .part writes, never evidence.
   for (const f of await FS.readDirectoryAsync(TMP_DIR).catch(() => [] as string[])) {
     await FS.deleteAsync(TMP_DIR + f, { idempotent: true }); tmpDeleted++;
   }
 
-  // Installed final file with no commitment referencing it -> orphan, delete.
+  // Installed final file with no capture_commit row referencing it. Two reasons:
+  //  (a) the user DISCARDED it (tombstoned in capture_discarded) -> delete frees space.
+  //  (b) a crash landed the media but the commit row never wrote -> NOT acknowledged
+  //      ("saved" never fired), but silently DELETING it breaks this function's own
+  //      "never silently dropped" contract (REQ-CAP6) + mandate #1's ethos.
+  // Rule (Codex P1, 2026-07-26): DELETE only when we can PROVE the discard (a tombstone);
+  // otherwise QUARANTINE — worst case retained bytes, NEVER destroyed evidence.
+  const discarded = new Set<string>(
+    (await db.getAll<{ capture_id: string }>(`SELECT capture_id FROM capture_discarded`)
+      .catch(() => [] as { capture_id: string }[])).map((r) => r.capture_id));
   const committed = await db.getAll<{ media_relpath: string }>(`SELECT media_relpath FROM capture_commit`);
   const keep = new Set(committed.map((c) => c.media_relpath));
   for (const dir of await FS.readDirectoryAsync(MEDIA_DIR).catch(() => [] as string[])) {
     for (const f of await FS.readDirectoryAsync(MEDIA_DIR + dir).catch(() => [] as string[])) {
-      if (!keep.has(`capture-media/${dir}/${f}`)) {
-        await FS.deleteAsync(`${MEDIA_DIR}${dir}/${f}`, { idempotent: true }); orphansDeleted++;
+      if (keep.has(`capture-media/${dir}/${f}`)) continue;
+      const from = `${MEDIA_DIR}${dir}/${f}`;
+      if (discarded.has(dir)) {                 // `dir` is the capture_id — proven discard
+        await FS.deleteAsync(from, { idempotent: true }); orphansDeleted++;
+      } else {                                  // crash orphan -> quarantine, never lose
+        try {
+          await FS.makeDirectoryAsync(`${QUARANTINE_DIR}${dir}/`, { intermediates: true });
+          await FS.moveAsync({ from, to: `${QUARANTINE_DIR}${dir}/${f}` });
+          orphansQuarantined++;
+        } catch {
+          // Move failed (dest exists / fs error) -> LEAVE it in place, do not delete.
+          // Retaining beats destroying un-acknowledged evidence; next sweep retries.
+        }
       }
     }
   }
@@ -496,7 +520,7 @@ export async function recoverySweep(db: AbstractPowerSyncDatabase): Promise<{
     const { hex, bytes } = await hashFileFromDisk(src);
     if (hex !== c.media_sha256 || bytes !== c.media_bytes) integrityErrors.push(c.capture_id);
   }
-  return { tmpDeleted, orphansDeleted, integrityErrors };
+  return { tmpDeleted, orphansDeleted, orphansQuarantined, integrityErrors };
 }
 
 
