@@ -508,7 +508,7 @@ export function FusedCapture({
         {/* The prototype's signature exit: a full-width white stop bar nobody can miss. */}
         <Pressable style={[st.stopBar, (!shots.length && !spoke) && st.stopDim]}
           onPress={finish} disabled={saving}>
-          {saving ? <ActivityIndicator color="#0D0F12" /> : (
+          {saving ? <ActivityIndicator color="#151A1E" /> : (
             <>
               <View style={st.stopSq} />
               <Text style={st.stopT}>{T('cap.doneBuild')}</Text>
@@ -532,7 +532,7 @@ const st = StyleSheet.create({
   fill: { ...StyleSheet.absoluteFillObject },
   center: { alignItems: 'center', justifyContent: 'center', padding: 28 },
   msg: { color: '#fff', fontSize: 18, textAlign: 'center', marginBottom: 22, lineHeight: 25 },
-  btn: { backgroundColor: '#FF5A00', borderRadius: 12, paddingVertical: 18, paddingHorizontal: 40 },
+  btn: { backgroundColor: '#4E6243', borderRadius: 12, paddingVertical: 18, paddingHorizontal: 40 },
   btnT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, textTransform: 'uppercase', letterSpacing: 1 },
   link: { paddingVertical: 16 }, linkT: { color: '#adbac7', fontSize: 15 },
 
@@ -545,7 +545,7 @@ const st = StyleSheet.create({
   topIcon: { fontSize: 20, color: '#fff' },
   topLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 10.5, color: '#D7DBDF',
     textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 1 },
-  topLabOn: { color: '#F5B000' },
+  topLabOn: { color: '#A47A3F' },
   project: { color: '#fff', fontFamily: 'Barlow_600SemiBold', fontSize: 15, flex: 1,
     textAlign: 'center', marginHorizontal: 8, marginTop: 14 },
 
@@ -559,8 +559,8 @@ const st = StyleSheet.create({
   interruptBox: { backgroundColor: 'rgba(198,40,28,0.94)' },
   interruptT: { color: '#fff', fontFamily: 'Barlow_700Bold', fontSize: 16 },
   interruptS: { color: '#FFD9D4', fontFamily: 'Barlow_400Regular', fontSize: 14, marginTop: 4 },
-  warnBox: { backgroundColor: 'rgba(245,176,0,0.95)' },
-  warnT: { color: '#0D0F12', fontFamily: 'Barlow_700Bold', fontSize: 15, lineHeight: 21 },
+  warnBox: { backgroundColor: 'rgba(164,122,63,0.95)' },
+  warnT: { color: '#151A1E', fontFamily: 'Barlow_700Bold', fontSize: 15, lineHeight: 21 },
 
   liveBox: { position: 'absolute', left: 16, right: 16, bottom: 360,
     backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10, padding: 10 },
@@ -572,17 +572,17 @@ const st = StyleSheet.create({
   stampWhere: { color: '#e6edf3', fontFamily: 'Barlow_400Regular', fontSize: 14, marginTop: 2 },
 
   recPill: { position: 'absolute', top: 112, alignSelf: 'center', flexDirection: 'row',
-    alignItems: 'center', backgroundColor: '#C6281C', borderRadius: 999,
+    alignItems: 'center', backgroundColor: '#8B5148', borderRadius: 999,
     paddingHorizontal: 14, paddingVertical: 7 },
   recPillPaused: { backgroundColor: 'rgba(0,0,0,0.55)' },
   recPillDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', marginRight: 8 },
   recPillDotDim: { opacity: 0.25 },
   recPillT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 17, letterSpacing: 1.5 },
   meterRow: { position: 'absolute', left: 16, right: 16, bottom: 272, flexDirection: 'row', alignItems: 'center' },
-  recDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#C6281C', marginRight: 10 },
-  recDotOff: { backgroundColor: '#5C6570' },
+  recDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#8B5148', marginRight: 10 },
+  recDotOff: { backgroundColor: '#5E666E' },
   waveRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, height: 32 },
-  waveBar: { flex: 1, minHeight: 4, borderRadius: 2, backgroundColor: '#FF5A00' },
+  waveBar: { flex: 1, minHeight: 4, borderRadius: 2, backgroundColor: '#4E6243' },
   timer: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 16, marginLeft: 10 },
   count: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 15, marginLeft: 8 },
 
@@ -602,13 +602,13 @@ const st = StyleSheet.create({
   shutterOuter: { width: 82, height: 82, borderRadius: 41, borderWidth: 5, borderColor: '#fff',
     alignItems: 'center', justifyContent: 'center' },
   shutterInner: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#fff' },
-  shutterRec: { backgroundColor: '#FF5A00' },
+  shutterRec: { backgroundColor: '#4E6243' },
   stopBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
     backgroundColor: '#fff', borderRadius: 16, minHeight: 62, marginTop: 12,
     marginHorizontal: 18, alignSelf: 'stretch' },
   stopDim: { opacity: 0.6 },
-  stopSq: { width: 15, height: 15, borderRadius: 3, backgroundColor: '#C6281C' },
-  stopT: { color: '#0D0F12', fontFamily: 'BarlowCondensed_700Bold', fontSize: 20,
+  stopSq: { width: 15, height: 15, borderRadius: 3, backgroundColor: '#8B5148' },
+  stopT: { color: '#151A1E', fontFamily: 'BarlowCondensed_700Bold', fontSize: 20,
     textTransform: 'uppercase', letterSpacing: 1.4 },
   savingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)',
     alignItems: 'center', justifyContent: 'center' },

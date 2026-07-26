@@ -3115,7 +3115,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       </View>
     );
     return (
-      <View style={{ flex: 1, backgroundColor: '#0D0F12', paddingTop: 90, paddingHorizontal: 28 }}>
+      <View style={{ flex: 1, backgroundColor: '#151A1E', paddingTop: 90, paddingHorizontal: 28 }}>
         <Text style={{ color: '#fff', fontSize: 26, fontWeight: '700' }}>
           {T(t.isAugment ? 'cap.transTitleAug' : 'cap.transTitle')}
         </Text>
@@ -3174,7 +3174,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               }}
               style={{ marginTop: 18, minHeight: 60, borderRadius: 12, backgroundColor: '#fff',
                        alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ fontSize: 17, fontWeight: '600', color: '#0D0F12' }}>
+              <Text style={{ fontSize: 17, fontWeight: '600', color: '#151A1E' }}>
                 {T('cap.transDone')}
               </Text>
             </Pressable>
@@ -3498,10 +3498,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   )}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
                     {f.amountCents != null && (
-                      <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#0D0F12' }}>{money(f.amountCents)}</Text>
+                      <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#151A1E' }}>{money(f.amountCents)}</Text>
                     )}
                     <View style={[{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }, chip.bg]}>
-                      <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 10.5, color: chip.dark ? '#0D0F12' : '#fff' }}>
+                      <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 10.5, color: chip.dark ? '#151A1E' : '#fff' }}>
                         {chip.label}
                       </Text>
                     </View>
@@ -3960,13 +3960,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 2 }}>
             <Pressable hitSlop={6} onPress={() => setJobsArchived(false)}
               style={{ minHeight: 38, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 19, borderWidth: !jobsArchived ? 2 : 1,
-                borderColor: !jobsArchived ? '#0D0F12' : '#E4E5E1', backgroundColor: !jobsArchived ? '#0D0F12' : '#fff' }}>
-              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: !jobsArchived ? '#fff' : '#5C6570' }}>{T('pm4.activeJobs')}</Text>
+                borderColor: !jobsArchived ? '#151A1E' : '#D5D0C7', backgroundColor: !jobsArchived ? '#151A1E' : '#fff' }}>
+              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: !jobsArchived ? '#fff' : '#5E666E' }}>{T('pm4.activeJobs')}</Text>
             </Pressable>
             <Pressable hitSlop={6} onPress={async () => { setJobsArchived(true); await loadArchived(); }}
               style={{ minHeight: 38, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 19, borderWidth: jobsArchived ? 2 : 1,
-                borderColor: jobsArchived ? '#0D0F12' : '#E4E5E1', backgroundColor: jobsArchived ? '#0D0F12' : '#fff' }}>
-              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: jobsArchived ? '#fff' : '#5C6570' }}>{T('pm4.archived')}</Text>
+                borderColor: jobsArchived ? '#151A1E' : '#D5D0C7', backgroundColor: jobsArchived ? '#151A1E' : '#fff' }}>
+              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: jobsArchived ? '#fff' : '#5E666E' }}>{T('pm4.archived')}</Text>
             </Pressable>
           </View>
           {jobsSrc.length > 4 && (
@@ -3979,10 +3979,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 10, flexWrap: 'wrap' }}>
               <Pressable onPress={() => setLabelFilter(null)} hitSlop={6}
                 style={{ minHeight: 40, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 20, borderWidth: 1,
-                  borderColor: activeLabel === null ? '#0D0F12' : '#E4E5E1',
-                  backgroundColor: activeLabel === null ? '#0D0F12' : '#fff' }}>
+                  borderColor: activeLabel === null ? '#151A1E' : '#D5D0C7',
+                  backgroundColor: activeLabel === null ? '#151A1E' : '#fff' }}>
                 <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13,
-                  color: activeLabel === null ? '#fff' : '#5C6570' }}>{T('label.all')}</Text>
+                  color: activeLabel === null ? '#fff' : '#5E666E' }}>{T('label.all')}</Text>
               </Pressable>
               {usedLabels.map((l) => {
                 const on = activeLabel === l.key;
@@ -3990,10 +3990,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   <Pressable key={l.key} onPress={() => setLabelFilter(on ? null : l.key)} hitSlop={6}
                     style={{ minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 7,
                       paddingHorizontal: 12, borderRadius: 20, borderWidth: on ? 2 : 1,
-                      borderColor: on ? '#0D0F12' : '#E4E5E1', backgroundColor: '#fff' }}>
+                      borderColor: on ? '#151A1E' : '#D5D0C7', backgroundColor: '#fff' }}>
                     <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: l.hex }} />
                     <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13,
-                      color: on ? '#0D0F12' : '#5C6570' }}>{T(('label.' + l.key) as any)}</Text>
+                      color: on ? '#151A1E' : '#5E666E' }}>{T(('label.' + l.key) as any)}</Text>
                   </Pressable>
                 );
               })}
@@ -4031,7 +4031,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     const r = await setProjectStatus(connector.client, db, p.id, 'in_progress');
                     if (r.ok) { await refresh(); await loadArchived(); } else setFiled(statusErr(r.code));
                   }}>
-                  <Text style={{ color: '#3E63DD', fontFamily: 'Barlow_600SemiBold', fontSize: 13 }}>{T('pm4.unarchive')}</Text>
+                  <Text style={{ color: '#4E6243', fontFamily: 'Barlow_600SemiBold', fontSize: 13 }}>{T('pm4.unarchive')}</Text>
                 </Pressable>
               ) : <Text style={s.chev}>›</Text>}
             </Pressable>
@@ -4222,7 +4222,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         {jobProj && (
           <View style={{ marginTop: 4, marginBottom: 2 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
-              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#5C6570', marginRight: 6 }}>
+              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#5E666E', marginRight: 6 }}>
                 {T('label.title')}
               </Text>
               {/* Clear */}
@@ -4230,8 +4230,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 onPress={async () => { await setProjectLabel(db, jobProj.id, null); await refresh(); }}
                 style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
                 <View style={{ width: 26, height: 26, borderRadius: 13, borderWidth: 1.5,
-                  borderColor: jobProj.label ? '#E4E5E1' : '#0D0F12', alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: 13, color: jobProj.label ? '#8c959f' : '#0D0F12' }}>✕</Text>
+                  borderColor: jobProj.label ? '#D5D0C7' : '#151A1E', alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ fontSize: 13, color: jobProj.label ? '#8c959f' : '#151A1E' }}>✕</Text>
                 </View>
               </Pressable>
               {LABELS.map((l) => {
@@ -4241,7 +4241,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     onPress={async () => { await setProjectLabel(db, jobProj.id, on ? null : l.key); await refresh(); }}
                     style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
                     <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: l.hex,
-                      borderWidth: on ? 2 : 0, borderColor: '#0D0F12', alignItems: 'center', justifyContent: 'center' }}>
+                      borderWidth: on ? 2 : 0, borderColor: '#151A1E', alignItems: 'center', justifyContent: 'center' }}>
                       {on && <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>✓</Text>}
                     </View>
                   </Pressable>
@@ -4249,7 +4249,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               })}
             </View>
             {labelHex(jobProj.label) && (
-              <Text style={{ fontFamily: 'Barlow_400Regular', fontSize: 12, color: '#5C6570', marginLeft: 2, marginTop: 2 }}>
+              <Text style={{ fontFamily: 'Barlow_400Regular', fontSize: 12, color: '#5E666E', marginLeft: 2, marginTop: 2 }}>
                 {T(('label.' + jobProj.label) as any)}
               </Text>
             )}
@@ -4269,8 +4269,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     if (r.ok) await refresh(); else setFiled(statusErr(r.code));
                   }}
                   style={{ minHeight: 36, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 18, borderWidth: on ? 2 : 1,
-                    borderColor: on ? '#0D0F12' : '#E4E5E1', backgroundColor: on ? '#0D0F12' : '#fff' }}>
-                  <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: on ? '#fff' : '#5C6570' }}>
+                    borderColor: on ? '#151A1E' : '#D5D0C7', backgroundColor: on ? '#151A1E' : '#fff' }}>
+                  <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: on ? '#fff' : '#5E666E' }}>
                     {T(('pm4.' + st) as any)}
                   </Text>
                 </Pressable>
@@ -4282,8 +4282,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 const r = await setProjectStatus(connector.client, db, jobProj.id, 'archived');
                 if (r.ok) { setNav('home'); await refresh(); } else setFiled(statusErr(r.code));
               }}
-              style={{ minHeight: 36, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: '#E4E5E1' }}>
-              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#5C6570' }}>{T('pm4.archive')}</Text>
+              style={{ minHeight: 36, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: '#D5D0C7' }}>
+              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#5E666E' }}>{T('pm4.archive')}</Text>
             </Pressable>
           </View>
         )}
@@ -5048,10 +5048,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   );
 }
 
-/** Change-order status → its notation chip (prototype c4). Caution-yellow needs
+/** Change-order status → its notation chip (prototype c4). Muted ochre (pending) needs
     dark text to stay legible; everything else is white-on-colour. */
-/** Change-order status → its notation chip (prototype c4). Caution-yellow needs dark
- *  text to stay legible; everything else is white-on-colour.
+/** Change-order status → its notation chip (prototype c4). Muted ochre (pending) needs
+ *  dark text to stay legible; everything else is white-on-colour.
  *  Takes a DERIVED status (extrastatus.ts), never the stored one — `discussing` does
  *  not appear in change_order.status and never should: a status two writers can move
  *  is a status nobody can rely on (220_question_path). */
@@ -5074,28 +5074,28 @@ function coChip(status: LedgerStatus): { label: string; bg: any; dark: boolean }
 // blue #0969da, amber #9a6700, red #cf222e. Overlays that sit ON photos keep a dark
 // translucent backing so their text reads over any image.
 const s = StyleSheet.create({
-  c: { flex: 1, paddingTop: 72, paddingHorizontal: 20, backgroundColor: '#FAFAF8' },
-  h: { color: '#0D0F12', fontFamily: 'BarlowCondensed_700Bold', fontSize: 30, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 18 },
-  btn: { backgroundColor: '#0D0F12', paddingVertical: 28, borderRadius: 18, alignItems: 'center' },
-  btnRec: { backgroundColor: '#C6281C' },
-  fusedBtn: { backgroundColor: '#FF5A00', paddingVertical: 24, borderRadius: 18,
+  c: { flex: 1, paddingTop: 72, paddingHorizontal: 20, backgroundColor: '#F7F4EE' },
+  h: { color: '#151A1E', fontFamily: 'BarlowCondensed_700Bold', fontSize: 30, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 18 },
+  btn: { backgroundColor: '#151A1E', paddingVertical: 28, borderRadius: 18, alignItems: 'center' },
+  btnRec: { backgroundColor: '#8B5148' },
+  fusedBtn: { backgroundColor: '#4E6243', paddingVertical: 24, borderRadius: 18,
     alignItems: 'center', marginBottom: 12 },
   fusedT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 23, textTransform: 'uppercase', letterSpacing: 1.2 },
   // REQ-PROC8 entry — the accent, because reviewing the proposal is the next real move.
-  reviewBtn: { alignSelf: 'center', backgroundColor: '#FFF1E8', borderColor: '#FF5A00',
+  reviewBtn: { alignSelf: 'center', backgroundColor: '#FFF1E8', borderColor: '#4E6243',
     borderWidth: 1.5, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 22, marginTop: 10 },
-  reviewT: { color: '#FF5A00', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18, textTransform: 'uppercase', letterSpacing: 1 },
+  reviewT: { color: '#4E6243', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18, textTransform: 'uppercase', letterSpacing: 1 },
   btnOff: { backgroundColor: '#c4cdd5' },
   mediaRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
   media: { flex: 1, backgroundColor: '#ffffff', borderRadius: 12, paddingVertical: 16,
-    alignItems: 'center', borderWidth: 1, borderColor: '#E4E5E1' },
+    alignItems: 'center', borderWidth: 1, borderColor: '#D5D0C7' },
   mediaIcon: { fontSize: 26, marginBottom: 4 },
-  mediaT: { color: '#0D0F12', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1.2 },
+  mediaT: { color: '#151A1E', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1.2 },
   stamp: { color: '#8c959f', fontSize: 10 },
   btnT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 25, textTransform: 'uppercase', letterSpacing: 1.2 },
-  state: { color: '#5C6570', fontFamily: 'Barlow_400Regular', fontSize: 15, marginTop: 14, marginBottom: 22, textAlign: 'center' },
-  sub: { color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
-  row: { borderTopWidth: 1, borderTopColor: '#E4E5E1', paddingVertical: 10 },
+  state: { color: '#5E666E', fontFamily: 'Barlow_400Regular', fontSize: 15, marginTop: 14, marginBottom: 22, textAlign: 'center' },
+  sub: { color: '#5E666E', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
+  row: { borderTopWidth: 1, borderTopColor: '#D5D0C7', paddingVertical: 10 },
   rowT: { color: '#57606a', fontSize: 13, fontFamily: 'Menlo' },
   rowS: { color: '#8c959f', fontSize: 11, fontFamily: 'Menlo', marginTop: 2 },
   card: { backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16 },
@@ -5106,7 +5106,7 @@ const s = StyleSheet.create({
   sentBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#E9F6ED',
     alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   sentBadgeIcon: { fontSize: 30, color: '#1A7F37', fontFamily: 'Barlow_700Bold' },
-  sentH: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 22, color: '#0D0F12',
+  sentH: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 22, color: '#151A1E',
     textTransform: 'uppercase', letterSpacing: 0.5 },
   sentSub: { fontFamily: 'Barlow_400Regular', fontSize: 15, color: '#6B7280', marginTop: 2, marginBottom: 16 },
   sentRows: { alignSelf: 'stretch', borderWidth: 1, borderColor: '#EEEFEC', borderRadius: 12, marginBottom: 16 },
@@ -5115,14 +5115,14 @@ const s = StyleSheet.create({
   sentLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, color: '#8A93A0',
     textTransform: 'uppercase', letterSpacing: 0.8 },
   sentVal: { flex: 1, textAlign: 'right', marginLeft: 12, fontFamily: 'Barlow_600SemiBold',
-    fontSize: 14.5, color: '#0D0F12' },
+    fontSize: 14.5, color: '#151A1E' },
   sentChip: { borderRadius: 8, borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FEF6E7',
     paddingVertical: 4, paddingHorizontal: 10 },
   sentChipT: { fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#B26A00' },
   sentFoot: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#8A93A0',
     textAlign: 'center', marginTop: 12, lineHeight: 18 },
-  cardH: { color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
-  cardV: { color: '#0D0F12', fontSize: 17, lineHeight: 23, marginBottom: 10 },
+  cardH: { color: '#5E666E', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
+  cardV: { color: '#151A1E', fontSize: 17, lineHeight: 23, marginBottom: 10 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
   // Flow-mock question chips (phase 3). 48px minimum: these are answered on a
   // jobsite, and the field-UX floor applies to every interactive element.
@@ -5133,64 +5133,64 @@ const s = StyleSheet.create({
   qChipOn: { borderColor: '#1f2328', backgroundColor: '#1f2328' },
   qChipT: { fontSize: 15, color: '#1f2328' },
   qChipTOn: { color: '#ffffff' },
-  chip: { color: '#0E8A4C', backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1,
+  chip: { color: '#536B49', backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1,
           borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, fontSize: 12, overflow: 'hidden' },
-  chipDim: { color: '#8c959f', borderColor: '#E4E5E1', backgroundColor: 'transparent' },
-  chipOn: { color: '#fff', backgroundColor: '#0D0F12', borderColor: '#0D0F12' },
+  chipDim: { color: '#8c959f', borderColor: '#D5D0C7', backgroundColor: 'transparent' },
+  chipOn: { color: '#fff', backgroundColor: '#151A1E', borderColor: '#151A1E' },
   cardBtns: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  confirm: { flex: 1, backgroundColor: '#0D0F12', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  confirm: { flex: 1, backgroundColor: '#151A1E', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
   // Standalone (not inside s.cardBtns): must NOT use flex:1 -- see above.
-  confirmWide: { alignSelf: 'stretch', backgroundColor: '#0D0F12', borderRadius: 10,
+  confirmWide: { alignSelf: 'stretch', backgroundColor: '#151A1E', borderRadius: 10,
     paddingVertical: 16, alignItems: 'center', marginBottom: 10 },
   confirmT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18, textTransform: 'uppercase', letterSpacing: 1.2 },
   later: { paddingHorizontal: 12, paddingVertical: 14 },
   laterT: { color: '#57606a', fontSize: 13 },
-  cardNote: { color: '#5C6570', fontFamily: 'Barlow_400Regular', fontSize: 13, lineHeight: 19, marginTop: 8 },
-  drow: { borderTopWidth: 1, borderTopColor: '#E4E5E1', paddingVertical: 10 },
+  cardNote: { color: '#5E666E', fontFamily: 'Barlow_400Regular', fontSize: 13, lineHeight: 19, marginTop: 8 },
+  drow: { borderTopWidth: 1, borderTopColor: '#D5D0C7', paddingVertical: 10 },
   dsub: { color: '#57606a', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 },
-  dval: { color: '#0D0F12', fontSize: 15, marginTop: 2 },
-  dmeta: { color: '#5C6570', fontFamily: 'Barlow_400Regular', fontSize: 12.5, marginTop: 3 },
+  dval: { color: '#151A1E', fontSize: 15, marginTop: 2 },
+  dmeta: { color: '#5E666E', fontFamily: 'Barlow_400Regular', fontSize: 12.5, marginTop: 3 },
 
   // ── THE LEDGER (prototype c4) ──────────────────────────────────────────────
-  ledgerHead: { color: '#0D0F12', fontFamily: 'BarlowCondensed_700Bold', fontSize: 24,
+  ledgerHead: { color: '#151A1E', fontFamily: 'BarlowCondensed_700Bold', fontSize: 24,
     textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 6, marginBottom: 10 },
-  totalCard: { backgroundColor: '#0D0F12', borderRadius: 18, padding: 16, marginBottom: 8 },
+  totalCard: { backgroundColor: '#151A1E', borderRadius: 18, padding: 16, marginBottom: 8 },
   tcRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3 },
   tcRowLabel: { color: '#AEB4BD', fontFamily: 'Barlow_500Medium', fontSize: 14.5 },
   tcRowVal: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18,
     fontVariant: ['tabular-nums'] },
-  tcCaution: { color: '#F5B000' },
+  tcCaution: { color: '#A47A3F' },
   tcGrand: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline',
     borderTopWidth: 1, borderTopColor: '#2A2E35', marginTop: 9, paddingTop: 9 },
-  tcGrandLabel: { color: '#FF5A00', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 14,
+  tcGrandLabel: { color: '#E7ECDD', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 14,
     textTransform: 'uppercase', letterSpacing: 1.6 },
   tcGrandVal: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 30,
     fontVariant: ['tabular-nums'] },
   flag: { backgroundColor: '#FFF7E0', borderColor: '#F0DE9E', borderWidth: 1, borderRadius: 12,
     paddingVertical: 10, paddingHorizontal: 12, marginBottom: 8 },
   flagT: { color: '#6B5300', fontFamily: 'Barlow_500Medium', fontSize: 13 },
-  coCard: { backgroundColor: '#fff', borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 14,
+  coCard: { backgroundColor: '#fff', borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 14,
     paddingVertical: 13, paddingHorizontal: 14, marginBottom: 9 },
   coHead: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
-  coThumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#EDEFF2' },
+  coThumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#EFEBE3' },
   coThumbEmpty: { alignItems: 'center', justifyContent: 'center' },
   coThumbIcon: { fontSize: 24, opacity: 0.5 },
   coR1: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  coNm: { flex: 1, color: '#0D0F12', fontFamily: 'Barlow_600SemiBold', fontSize: 15.5 },
+  coNm: { flex: 1, color: '#151A1E', fontFamily: 'Barlow_600SemiBold', fontSize: 15.5 },
   coR2: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 7 },
-  coAmt: { color: '#0D0F12', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18,
+  coAmt: { color: '#151A1E', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18,
     fontVariant: ['tabular-nums'] },
-  coSub: { color: '#5C6570', fontFamily: 'Barlow_400Regular', fontSize: 12.5, flexShrink: 1,
+  coSub: { color: '#5E666E', fontFamily: 'Barlow_400Regular', fontSize: 12.5, flexShrink: 1,
     textAlign: 'right' },
-  coNudge: { color: '#FF5A00', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13,
+  coNudge: { color: '#4E6243', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13,
     textTransform: 'uppercase', letterSpacing: 0.6 },
   coOnPhone: { color: '#8c959f', fontFamily: 'Barlow_400Regular', fontSize: 11.5, marginTop: 5 },
   // Create date on each ledger row (PRD R7). Hairline above it so it reads as the
   // row's footer rather than another fact competing with the money.
   coCreated: {
-    color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 11,
+    color: '#5E666E', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 11,
     textTransform: 'uppercase', letterSpacing: 1, marginTop: 6, paddingTop: 6,
-    borderTopWidth: 1, borderTopColor: '#E4E5E1',
+    borderTopWidth: 1, borderTopColor: '#D5D0C7',
   },
   // Send sits OUTSIDE the open-record Pressable (see the card above). Its own row,
   // with a real tap target rather than a text hitbox.
@@ -5203,7 +5203,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 8, borderWidth: 1, borderColor: '#D0D7DE', backgroundColor: '#F6F8FA',
   },
   coTagT: {
-    color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 11.5,
+    color: '#5E666E', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 11.5,
     textTransform: 'uppercase', letterSpacing: 0.8,
   },
   // Chips = the notation status. Rounded (not clip-path angled): a clean pill reads
@@ -5211,50 +5211,50 @@ const s = StyleSheet.create({
   chipBase: { borderRadius: 6, paddingVertical: 3, paddingHorizontal: 10 },
   chipText: { color: '#fff', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5,
     textTransform: 'uppercase', letterSpacing: 0.9 },
-  chipTextDark: { color: '#0D0F12' },
-  chipApproved: { backgroundColor: '#0E8A4C' },
-  chipPending: { backgroundColor: '#F5B000' },
-  chipDeclined: { backgroundColor: '#C6281C' },
-  chipRevised: { backgroundColor: '#0D0F12' },
+  chipTextDark: { color: '#151A1E' },
+  chipApproved: { backgroundColor: '#536B49' },
+  chipPending: { backgroundColor: '#A47A3F' },
+  chipDeclined: { backgroundColor: '#8B5148' },
+  chipRevised: { backgroundColor: '#151A1E' },
   // R7 'discussing'. Orange = "this is the one to act on", which is exactly what an
   // unanswered client question is. NOT ink — chipRevised already owns ink, and two
   // statuses that look identical defeat the point of a chip.
-  chipDiscussing: { backgroundColor: '#FF5A00' },
+  chipDiscussing: { backgroundColor: '#4E6243' },
   bell: { fontSize: 17, opacity: 0.55, paddingHorizontal: 6 },
-  bellOn: { fontSize: 15, color: '#fff', backgroundColor: '#FF5A00', overflow: 'hidden',
+  bellOn: { fontSize: 15, color: '#fff', backgroundColor: '#4E6243', overflow: 'hidden',
             borderRadius: 11, paddingHorizontal: 8, paddingVertical: 2,
             fontFamily: 'BarlowCondensed_700Bold' },
-  chipDraft: { backgroundColor: '#5C6570' },
+  chipDraft: { backgroundColor: '#5E666E' },
 
-  hNow: { color: '#0E8A4C', fontSize: 14, marginBottom: 4 },
+  hNow: { color: '#536B49', fontSize: 14, marginBottom: 4 },
   hOld: { color: '#8c959f', fontSize: 13, marginBottom: 4, textDecorationLine: 'line-through' },
-  money: { backgroundColor: '#fff8c5', borderColor: '#F5B000', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
+  money: { backgroundColor: '#fff8c5', borderColor: '#A47A3F', borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 16 },
   moneyScope: { color: '#57606a', fontSize: 14, marginBottom: 10 },
   bigMoney: { color: '#9a6700', fontSize: 44, fontWeight: '800', textAlign: 'center', marginVertical: 6 },
-  viewImg: { width: '100%', height: 260, borderRadius: 8, backgroundColor: '#E4E5E1',
+  viewImg: { width: '100%', height: 260, borderRadius: 8, backgroundColor: '#D5D0C7',
     marginBottom: 10 },
-  evid: { color: '#0D0F12', fontSize: 15, marginBottom: 10 },
+  evid: { color: '#151A1E', fontSize: 15, marginBottom: 10 },
   hash: { color: '#57606a', fontSize: 11, fontFamily: 'Menlo', marginBottom: 8 },
-  capNote: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E4E5E1' },
-  capNoteBody: { color: '#0D0F12', fontSize: 14 },
+  capNote: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#D5D0C7' },
+  capNoteBody: { color: '#151A1E', fontSize: 14 },
   capNoteMeta: { color: '#8c959f', fontSize: 11, marginTop: 2 },
-  inboxItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#E4E5E1' },
+  inboxItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#D5D0C7' },
   inboxWhat: { color: '#57606a', fontSize: 12, marginBottom: 6 },
   inboxJobs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   inboxJob: { backgroundColor: '#ffffff', borderRadius: 8, paddingHorizontal: 12,
-    paddingVertical: 10, borderWidth: 1, borderColor: '#E4E5E1' },
-  inboxJobT: { color: '#0D0F12', fontSize: 13, fontWeight: '600' },
+    paddingVertical: 10, borderWidth: 1, borderColor: '#D5D0C7' },
+  inboxJobT: { color: '#151A1E', fontSize: 13, fontWeight: '600' },
   langT: { color: '#8c959f', fontSize: 13, fontWeight: '400' },
   scopeLink: { paddingVertical: 8, marginBottom: 6 },
   scopeLinkT: { color: '#9a6700', fontSize: 13, fontWeight: '600' },
-  bndRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#E4E5E1' },
-  bndSubject: { color: '#0D0F12', fontSize: 15 },
-  bndOwner: { color: '#0E8A4C', fontSize: 12, marginTop: 2 },
+  bndRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#D5D0C7' },
+  bndSubject: { color: '#151A1E', fontSize: 15 },
+  bndOwner: { color: '#536B49', fontSize: 12, marginTop: 2 },
   bndGap: { color: '#9a6700', fontSize: 12, marginTop: 2, fontWeight: '700' },
   bndJobs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  p5: { backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
+  p5: { backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
     borderRadius: 10, padding: 12, marginBottom: 12 },
-  p5T: { color: '#0D0F12', fontWeight: '700', fontSize: 15, marginBottom: 2 },
+  p5T: { color: '#151A1E', fontWeight: '700', fontSize: 15, marginBottom: 2 },
   p5S: { color: '#57606a', fontSize: 12, marginBottom: 10 },
   oneStatus: { borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 },
   oneStatusT: { fontWeight: '700', fontSize: 14 },
@@ -5263,100 +5263,100 @@ const s = StyleSheet.create({
   // wearing gloves when they do it.
   // Language toggle inside the profile form (folded in 2026-07-20). Each option in
   // its own name so it needs no reading; the selected one fills with ink.
-  frLangLab: { color: '#5C6570', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5,
+  frLangLab: { color: '#5E666E', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5,
     textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
   frLangRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
-  frLangChip: { flex: 1, backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
+  frLangChip: { flex: 1, backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
     borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  frLangChipOn: { backgroundColor: '#0D0F12', borderColor: '#0D0F12' },
-  frLangChipT: { color: '#0D0F12', fontFamily: 'Barlow_700Bold', fontSize: 17 },
+  frLangChipOn: { backgroundColor: '#151A1E', borderColor: '#151A1E' },
+  frLangChipT: { color: '#151A1E', fontFamily: 'Barlow_700Bold', fontSize: 17 },
   frLangChipTOn: { color: '#ffffff' },
   // first-run progress dots
   frDots: { flexDirection: 'row', justifyContent: 'center', marginBottom: 8, marginTop: 2 },
-  frDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#E4E5E1', marginHorizontal: 4 },
-  frDotOn: { backgroundColor: '#0D0F12', width: 20 },
+  frDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D5D0C7', marginHorizontal: 4 },
+  frDotOn: { backgroundColor: '#151A1E', width: 20 },
   // profile pick buttons (solo/company) — big touch targets (research: 48dp+, gloves)
-  pickWide: { alignSelf: 'stretch', backgroundColor: '#ffffff', borderColor: '#E4E5E1',
+  pickWide: { alignSelf: 'stretch', backgroundColor: '#ffffff', borderColor: '#D5D0C7',
     borderWidth: 1, borderRadius: 12, paddingVertical: 18, alignItems: 'center', marginBottom: 10 },
-  pickOn: { borderColor: '#0D0F12', backgroundColor: '#eafaf0', borderWidth: 2 },
-  pickT: { color: '#0D0F12', fontSize: 18, fontWeight: '700' },
-  pickTOn: { color: '#0E8A4C' },
+  pickOn: { borderColor: '#151A1E', backgroundColor: '#eafaf0', borderWidth: 2 },
+  pickT: { color: '#151A1E', fontSize: 18, fontWeight: '700' },
+  pickTOn: { color: '#536B49' },
   // trade grid — 2-up big cells
   tradeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 6 },
-  tradeCell: { width: '48%', backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
+  tradeCell: { width: '48%', backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
     borderRadius: 12, paddingVertical: 20, alignItems: 'center', marginBottom: 10 },
-  tradeCellT: { color: '#0D0F12', fontSize: 16, fontWeight: '700' },
+  tradeCellT: { color: '#151A1E', fontSize: 16, fontWeight: '700' },
   jobBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
+    backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
     borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
-  jobBarT: { color: '#0D0F12', fontWeight: '700', fontSize: 15, flex: 1 },
+  jobBarT: { color: '#151A1E', fontWeight: '700', fontSize: 15, flex: 1 },
   jobBarS: { color: '#8c959f', fontSize: 11 },
-  jobRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E4E5E1' },
-  jobName: { color: '#0D0F12', fontSize: 16 },
-  jobNameOn: { color: '#0E8A4C', fontSize: 16, fontWeight: '700' },
+  jobRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#D5D0C7' },
+  jobName: { color: '#151A1E', fontSize: 16 },
+  jobNameOn: { color: '#536B49', fontSize: 16, fontWeight: '700' },
   jobMeta: { color: '#8c959f', fontSize: 12, marginTop: 2 },
-  consentBanner: { backgroundColor: '#fff8c5', borderColor: '#F5B000', borderWidth: 1,
+  consentBanner: { backgroundColor: '#fff8c5', borderColor: '#A47A3F', borderWidth: 1,
     borderRadius: 10, padding: 12, marginBottom: 14 },
   consentT: { color: '#9a6700', fontWeight: '700', fontSize: 14, marginBottom: 3 },
   consentS: { color: '#7d5e00', fontSize: 12, lineHeight: 17 },
   bundleBtn: { paddingVertical: 8 },
-  bundleT: { color: '#FF5A00', fontSize: 14, fontWeight: '600' },
+  bundleT: { color: '#4E6243', fontSize: 14, fontWeight: '600' },
   lineRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6,
-    borderBottomWidth: 1, borderBottomColor: '#E4E5E1' },
-  lineDesc: { color: '#0D0F12', fontSize: 14, flex: 1 },
+    borderBottomWidth: 1, borderBottomColor: '#D5D0C7' },
+  lineDesc: { color: '#151A1E', fontSize: 14, flex: 1 },
   lineMath: { color: '#57606a', fontSize: 12 },
   lineX: { color: '#8c959f', fontSize: 16, paddingHorizontal: 6 },
   lineAdd: { flexDirection: 'row', gap: 6, marginTop: 10, marginBottom: 4 },
-  lineIn: { flex: 1, backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
-    borderRadius: 8, color: '#0D0F12', paddingHorizontal: 8, paddingVertical: 10, fontSize: 13 },
-  linePlus: { backgroundColor: '#E4E5E1', borderRadius: 8, paddingHorizontal: 14,
+  lineIn: { flex: 1, backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
+    borderRadius: 8, color: '#151A1E', paddingHorizontal: 8, paddingVertical: 10, fontSize: 13 },
+  linePlus: { backgroundColor: '#D5D0C7', borderRadius: 8, paddingHorizontal: 14,
     justifyContent: 'center' },
-  linePlusT: { color: '#0D0F12', fontSize: 20, fontWeight: '800' },
-  moneyInput: { backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 8,
-                color: '#0D0F12', padding: 12, fontSize: 18, marginBottom: 10, textAlign: 'center' },
-  ok: { color: '#0E8A4C', fontSize: 14, marginBottom: 8 },
+  linePlusT: { color: '#151A1E', fontSize: 20, fontWeight: '800' },
+  moneyInput: { backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 8,
+                color: '#151A1E', padding: 12, fontSize: 18, marginBottom: 10, textAlign: 'center' },
+  ok: { color: '#536B49', fontSize: 14, marginBottom: 8 },
   warn: { color: '#9a6700', fontSize: 12, marginBottom: 6 },
   ask: { marginTop: 8 },
-  askT: { color: '#FF5A00', fontSize: 13, fontWeight: '600' },
-  frozen: { color: '#0D0F12', fontSize: 14, lineHeight: 20, backgroundColor: '#ffffff',
-            borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 8 },
-  link: { color: '#FF5A00', fontFamily: 'Menlo', fontSize: 11, marginVertical: 6 },
+  askT: { color: '#4E6243', fontSize: 13, fontWeight: '600' },
+  frozen: { color: '#151A1E', fontSize: 14, lineHeight: 20, backgroundColor: '#ffffff',
+            borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 8 },
+  link: { color: '#4E6243', fontFamily: 'Menlo', fontSize: 11, marginVertical: 6 },
   noteRow: { flexDirection: 'row', gap: 8, marginBottom: 22 },
-  input: { flex: 1, backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
-           borderRadius: 10, color: '#0D0F12', padding: 12, minHeight: 54, fontSize: 15 },
-  save: { backgroundColor: '#FF5A00', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center' },
-  contactBtn: { borderWidth: 1.5, borderColor: '#2563EB', borderRadius: 10, paddingVertical: 12,
+  input: { flex: 1, backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
+           borderRadius: 10, color: '#151A1E', padding: 12, minHeight: 54, fontSize: 15 },
+  save: { backgroundColor: '#4E6243', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center' },
+  contactBtn: { borderWidth: 1.5, borderColor: '#4E6243', borderRadius: 10, paddingVertical: 12,
     alignItems: 'center', marginBottom: 8, marginTop: 4 },
-  contactBtnT: { color: '#2563EB', fontFamily: 'Barlow_600SemiBold', fontSize: 15 },
+  contactBtnT: { color: '#4E6243', fontFamily: 'Barlow_600SemiBold', fontSize: 15 },
   saveT: { color: '#fff', fontWeight: '800', letterSpacing: 1 },
-  gate: { backgroundColor: '#ffebe9', borderColor: '#C6281C', borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 18 },
-  gateT: { color: '#C6281C', fontWeight: '700', marginBottom: 6 },
+  gate: { backgroundColor: '#ffebe9', borderColor: '#8B5148', borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 18 },
+  gateT: { color: '#8B5148', fontWeight: '700', marginBottom: 6 },
   gateS: { color: '#57606a', fontSize: 13, lineHeight: 18 },
   mono: { color: '#57606a', fontFamily: 'Menlo', fontSize: 10, marginTop: 8 },
 
   // ── Projects home ──────────────────────────────────────────────────────
   homeHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   langPill: { color: '#57606a', fontSize: 12, fontWeight: '700', borderWidth: 1,
-    borderColor: '#E4E5E1', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
-  searchIn: { backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
-    borderRadius: 10, color: '#0D0F12', paddingHorizontal: 14, paddingVertical: 12,
+    borderColor: '#D5D0C7', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  searchIn: { backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
+    borderRadius: 10, color: '#151A1E', paddingHorizontal: 14, paddingVertical: 12,
     fontSize: 15, marginBottom: 12 },
-  newProjBtn: { backgroundColor: '#0D0F12', borderRadius: 12, paddingVertical: 16,
+  newProjBtn: { backgroundColor: '#151A1E', borderRadius: 12, paddingVertical: 16,
     alignItems: 'center', marginBottom: 14 },
   newProjT: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.5 },
   inboxCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff8c5',
-    borderColor: '#F5B000', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 14 },
+    borderColor: '#A47A3F', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 14 },
   inboxCardIcon: { fontSize: 22 },
   inboxCardT: { color: '#9a6700', fontWeight: '700', fontSize: 15 },
   inboxCardS: { color: '#7d5e00', fontSize: 12, marginTop: 2 },
   chev: { color: '#9a6700', fontSize: 26, fontWeight: '300' },
-  projCard: { backgroundColor: '#ffffff', borderColor: '#E4E5E1', borderWidth: 1,
+  projCard: { backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
     borderRadius: 14, overflow: 'hidden', marginBottom: 14 },
-  projCover: { width: '100%', height: 150, backgroundColor: '#E4E5E1' },
+  projCover: { width: '100%', height: 150, backgroundColor: '#D5D0C7' },
   projCoverEmpty: { alignItems: 'center', justifyContent: 'center' },
   projCoverEmptyT: { color: '#afb8c1', fontSize: 64, fontWeight: '800' },
   projBody: { padding: 14 },
-  projName: { color: '#0D0F12', fontSize: 18, fontWeight: '700' },
+  projName: { color: '#151A1E', fontSize: 18, fontWeight: '700' },
   projMeta: { color: '#57606a', fontSize: 13, marginTop: 3 },
   projStats: { color: '#8c959f', fontSize: 12, marginTop: 8 },
   homeEmpty: { color: '#8c959f', fontSize: 14, textAlign: 'center', marginTop: 40, width: '100%' },
@@ -5365,14 +5365,14 @@ const s = StyleSheet.create({
   detailHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     marginBottom: 12 },
   backBtn: { paddingVertical: 4, paddingRight: 12 },
-  backT: { color: '#FF5A00', fontSize: 16, fontWeight: '600' },
+  backT: { color: '#4E6243', fontSize: 16, fontWeight: '600' },
   jobBarAddr: { color: '#8c959f', fontSize: 12, marginTop: 2 },
-  detailMap: { width: '100%', height: 120, borderRadius: 10, marginBottom: 12, backgroundColor: '#E4E5E1' },
+  detailMap: { width: '100%', height: 120, borderRadius: 10, marginBottom: 12, backgroundColor: '#D5D0C7' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingBottom: 40 },
   gridDate: { width: '100%', color: '#57606a', fontSize: 12, fontWeight: '700',
     textTransform: 'uppercase', letterSpacing: 1, marginTop: 12, marginBottom: 2 },
   tile: { width: '31.8%', aspectRatio: 1, backgroundColor: '#ffffff', borderRadius: 10,
-    overflow: 'hidden', borderWidth: 1, borderColor: '#E4E5E1' },
+    overflow: 'hidden', borderWidth: 1, borderColor: '#D5D0C7' },
   tileImg: { width: '100%', height: '100%' },
   tileIcon: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#dafbe1' },
   tileIconT: { fontSize: 34 },
@@ -5387,19 +5387,19 @@ const s = StyleSheet.create({
   tileMeta: { position: 'absolute', bottom: 0, left: 0, right: 0, color: '#fff', fontSize: 10,
     paddingHorizontal: 5, paddingVertical: 3, backgroundColor: '#00000099' },
   // ── capture-first home (prototype c1) ──────────────────────────────────────
-  homeC: { flex: 1, backgroundColor: '#FAFAF8', paddingTop: 54 },
+  homeC: { flex: 1, backgroundColor: '#F7F4EE', paddingTop: 54 },
   // ── Home dashboard (mockup 2026-07-23): money first, two lists, bottom nav ──
   dashHdr: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 14, paddingBottom: 6 },
   hdrBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  hdrIcon: { fontSize: 22, color: '#0D0F12' },
-  hdrTitle: { fontFamily: 'Barlow_600SemiBold', fontSize: 18, color: '#0D0F12' },
+  hdrIcon: { fontSize: 22, color: '#151A1E' },
+  hdrTitle: { fontFamily: 'Barlow_600SemiBold', fontSize: 18, color: '#151A1E' },
   hdrBadge: { position: 'absolute', top: 3, right: 3, minWidth: 18, height: 18, borderRadius: 9,
-    backgroundColor: '#2563EB', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+    backgroundColor: '#4E6243', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   hdrBadgeT: { color: '#fff', fontSize: 11, fontFamily: 'Barlow_700Bold' },
   heroWrap: { paddingHorizontal: 22, paddingTop: 14, paddingBottom: 20 },
   heroLabel: { fontFamily: 'Barlow_500Medium', fontSize: 14, color: '#6B7280', marginBottom: 2 },
-  heroBig: { fontFamily: 'Barlow_700Bold', fontSize: 46, color: '#0D0F12', letterSpacing: -1 },
+  heroBig: { fontFamily: 'Barlow_700Bold', fontSize: 46, color: '#151A1E', letterSpacing: -1 },
   // House line-art without an SVG dep: a faint roof triangle over a body square.
   houseArt: { position: 'absolute', right: 20, top: 22, width: 96, height: 74 },
   houseRoof: { position: 'absolute', top: 0, left: 8, width: 0, height: 0,
@@ -5416,23 +5416,23 @@ const s = StyleSheet.create({
   ctaSub: { color: '#AEB8CC', fontFamily: 'Barlow_400Regular', fontSize: 13, marginTop: 2 },
   secHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18,
     marginTop: 6, marginBottom: 10 },
-  secLab: { fontFamily: 'Barlow_600SemiBold', fontSize: 16, color: '#0D0F12' },
+  secLab: { fontFamily: 'Barlow_600SemiBold', fontSize: 16, color: '#151A1E' },
   secBadge: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center',
     justifyContent: 'center', paddingHorizontal: 6 },
   secBadgeWarn: { backgroundColor: '#F59E0B' },
-  secBadgeInfo: { backgroundColor: '#2563EB' },
+  secBadgeInfo: { backgroundColor: '#4E6243' },
   secBadgeMuted: { backgroundColor: '#6B7280' },
   secBadgeOk: { backgroundColor: '#2DA44E' },
   secBadgeT: { color: '#fff', fontSize: 12, fontFamily: 'Barlow_700Bold' },
   exCard: { backgroundColor: '#fff', borderColor: '#E9EAE7', borderWidth: 1, borderRadius: 12,
     marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 14, paddingVertical: 13 },
   exTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  exName: { flex: 1, fontFamily: 'Barlow_600SemiBold', fontSize: 15.5, color: '#0D0F12', marginRight: 10 },
-  exAmt: { fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#0D0F12' },
+  exName: { flex: 1, fontFamily: 'Barlow_600SemiBold', fontSize: 15.5, color: '#151A1E', marginRight: 10 },
+  exAmt: { fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#151A1E' },
   exMeta: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#6B7280', marginTop: 4 },
   exBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
   exQuestion: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#E8833A' },
-  exDraft: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#2563EB' },
+  exDraft: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#4E6243' },
   tabBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     borderTopWidth: 1, borderTopColor: '#E9EAE7', backgroundColor: '#fff',
     paddingTop: 8, paddingBottom: 26, paddingHorizontal: 8 },
@@ -5442,10 +5442,10 @@ const s = StyleSheet.create({
   tabIcon: { fontSize: 20, opacity: 0.45 },
   tabIconOn: { opacity: 1 },
   tabLab: { fontFamily: 'Barlow_500Medium', fontSize: 11, color: '#8A93A0' },
-  tabLabOn: { color: '#2563EB' },
-  fab: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#2563EB',
+  tabLabOn: { color: '#151A1E' },
+  fab: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#151A1E',
     alignItems: 'center', justifyContent: 'center', marginTop: -18,
-    shadowColor: '#2563EB', shadowOpacity: 0.4, shadowRadius: 8,
+    shadowColor: '#151A1E', shadowOpacity: 0.4, shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 }, elevation: 6 },
   fabT: { color: '#fff', fontSize: 30, marginTop: -2, fontFamily: 'Barlow_400Regular' },
   homeScrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
@@ -5455,12 +5455,12 @@ const s = StyleSheet.create({
   // ── Job screen (per-job detail, mockup 2026-07-23) ─────────────────────────
   jobCard: { flexDirection: 'row', gap: 14, backgroundColor: '#fff', borderColor: '#E9EAE7',
     borderWidth: 1, borderRadius: 16, padding: 14, marginTop: 6, marginBottom: 16 },
-  jobCardMap: { width: 96, height: 96, borderRadius: 12, backgroundColor: '#EDEFF2' },
+  jobCardMap: { width: 96, height: 96, borderRadius: 12, backgroundColor: '#EFEBE3' },
   jobCardMapEmpty: { alignItems: 'center', justifyContent: 'center' },
   jobCardPin: { fontSize: 30 },
-  jobCardName: { fontFamily: 'Barlow_700Bold', fontSize: 20, color: '#0D0F12' },
+  jobCardName: { fontFamily: 'Barlow_700Bold', fontSize: 20, color: '#151A1E' },
   jobCardAddr: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#6B7280', marginTop: 1 },
-  jobCardTotal: { fontFamily: 'Barlow_700Bold', fontSize: 30, color: '#0D0F12', marginTop: 6, letterSpacing: -0.5 },
+  jobCardTotal: { fontFamily: 'Barlow_700Bold', fontSize: 30, color: '#151A1E', marginTop: 6, letterSpacing: -0.5 },
   jobCardSub: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#6B7280' },
   pillRow: { flexDirection: 'row', gap: 8, marginBottom: 18 },
   pill: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -5470,7 +5470,7 @@ const s = StyleSheet.create({
   pillWaitOn: { borderColor: '#F59E0B', backgroundColor: '#FEF6E7' },
   pillOkOn: { borderColor: '#2DA44E', backgroundColor: '#E9F6ED' },
   pillT: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#57606a' },
-  pillTOn: { color: '#0D0F12' },
+  pillTOn: { color: '#151A1E' },
   pillTWaitOn: { color: '#B26A00' },
   pillTOkOn: { color: '#1A7F37' },
   pillBadge: { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center',
@@ -5487,22 +5487,22 @@ const s = StyleSheet.create({
   jxTotWait: { color: '#B26A00' },
   jxSecHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     marginBottom: 8, marginTop: 6 },
-  jxSecLab: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 14, color: '#0D0F12',
+  jxSecLab: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 14, color: '#151A1E',
     textTransform: 'uppercase', letterSpacing: 0.8 },
-  jxSeeAll: { fontFamily: 'Barlow_500Medium', fontSize: 13, color: '#2563EB' },
+  jxSeeAll: { fontFamily: 'Barlow_500Medium', fontSize: 13, color: '#4E6243' },
   jxCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff',
     borderColor: '#E9EAE7', borderWidth: 1, borderRadius: 12, padding: 10, marginBottom: 8 },
-  jxThumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#EDEFF2' },
-  jxName: { fontFamily: 'Barlow_600SemiBold', fontSize: 15.5, color: '#0D0F12' },
+  jxThumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#EFEBE3' },
+  jxName: { fontFamily: 'Barlow_600SemiBold', fontSize: 15.5, color: '#151A1E' },
   jxSub: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#8A93A0', marginTop: 1 },
-  jxAmt: { fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#0D0F12', marginTop: 3 },
+  jxAmt: { fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#151A1E', marginTop: 3 },
   jxChip: { borderRadius: 8, borderWidth: 1, paddingVertical: 5, paddingHorizontal: 10 },
   jxChipT: { fontFamily: 'Barlow_600SemiBold', fontSize: 12.5 },
   // ── Activity page (mockup 2026-07-23) ──────────────────────────────────────
   actTabs: { flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingBottom: 10 },
   actTab: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 20,
-    borderWidth: 1, borderColor: '#E4E5E1', backgroundColor: '#fff', paddingVertical: 8 },
-  actTabOn: { backgroundColor: '#0D0F12', borderColor: '#0D0F12' },
+    borderWidth: 1, borderColor: '#D5D0C7', backgroundColor: '#fff', paddingVertical: 8 },
+  actTabOn: { backgroundColor: '#151A1E', borderColor: '#151A1E' },
   actTabT: { fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#57606a' },
   actTabTOn: { color: '#fff' },
   actDay: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12, color: '#8A93A0',
@@ -5512,7 +5512,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 12, marginBottom: 8 },
   actIcon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   actIconT: { fontSize: 18 },
-  actName: { fontFamily: 'Barlow_600SemiBold', fontSize: 15, color: '#0D0F12' },
+  actName: { fontFamily: 'Barlow_600SemiBold', fontSize: 15, color: '#151A1E' },
   actSub: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#8A93A0', marginTop: 1 },
   actRight: { alignItems: 'flex-end', gap: 4 },
   actChip: { borderRadius: 6, paddingVertical: 3, paddingHorizontal: 8 },
@@ -5520,54 +5520,54 @@ const s = StyleSheet.create({
   actTime: { fontFamily: 'Barlow_400Regular', fontSize: 11.5, color: '#8A93A0' },
   homeTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 18, paddingBottom: 6 },
-  brand: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 22, color: '#0D0F12',
+  brand: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 22, color: '#151A1E',
     textTransform: 'uppercase', letterSpacing: 0.6 },
-  brandAccent: { color: '#FF5A00' },
+  brandAccent: { color: '#4E6243' },
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  chipWait: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, color: '#0D0F12',
-    backgroundColor: '#F5B000', textTransform: 'uppercase', letterSpacing: 1.2,
+  chipWait: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, color: '#151A1E',
+    backgroundColor: '#A47A3F', textTransform: 'uppercase', letterSpacing: 1.2,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4, overflow: 'hidden' },
   hero: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 26, paddingVertical: 16 },
-  heroH: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 34, color: '#0D0F12',
+  heroH: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 34, color: '#151A1E',
     textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center' },
-  heroSub: { fontFamily: 'Barlow_400Regular', fontSize: 15, color: '#5C6570',
+  heroSub: { fontFamily: 'Barlow_400Regular', fontSize: 15, color: '#5E666E',
     marginTop: 6, marginBottom: 20, textAlign: 'center' },
-  capBig: { width: 140, height: 140, borderRadius: 70, backgroundColor: '#FF5A00',
-    alignItems: 'center', justifyContent: 'center', shadowColor: '#FF5A00', shadowOpacity: 0.35,
+  capBig: { width: 140, height: 140, borderRadius: 70, backgroundColor: '#4E6243',
+    alignItems: 'center', justifyContent: 'center', shadowColor: '#4E6243', shadowOpacity: 0.35,
     shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
   capBigIcon: { fontSize: 40, marginBottom: 2 },
   capBigT: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 18, color: '#fff',
     textTransform: 'uppercase', letterSpacing: 1.6 },
-  heroHint: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#5C6570',
+  heroHint: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#5E666E',
     marginTop: 12, textAlign: 'center' },
-  capBigBase: { borderRadius: 74, backgroundColor: '#E04E00', paddingBottom: 7 },
-  waitCard: { backgroundColor: '#fff', borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 14,
+  capBigBase: { borderRadius: 74, backgroundColor: '#34412E', paddingBottom: 7 },
+  waitCard: { backgroundColor: '#fff', borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 14,
     padding: 13, marginBottom: 8 },
   waitRow1: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 },
-  waitName: { flex: 1, fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#0D0F12' },
-  waitAmt: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, color: '#0D0F12' },
+  waitName: { flex: 1, fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#151A1E' },
+  waitAmt: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, color: '#151A1E' },
   waitRow2: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
-  waitMeta: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#5C6570' },
+  waitMeta: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#5E666E' },
   homeTabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  homeTab: { flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: '#E4E5E1',
+  homeTab: { flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: '#D5D0C7',
     backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  homeTabOn: { backgroundColor: '#0D0F12', borderColor: '#0D0F12' },
-  homeTabT: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 16, color: '#5C6570',
+  homeTabOn: { backgroundColor: '#151A1E', borderColor: '#151A1E' },
+  homeTabT: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 16, color: '#5E666E',
     textTransform: 'uppercase', letterSpacing: 1.4 },
   homeTabTOn: { color: '#fff' },
   waitCardTodo: { borderColor: '#FFD9C2', backgroundColor: '#FFF7F2' },
-  waitChipTodo: { backgroundColor: '#FF5A00' },
+  waitChipTodo: { backgroundColor: '#4E6243' },
   waitCardOk: { backgroundColor: '#F3FAF5', borderColor: '#BFE3CD' },
-  waitNameOk: { color: '#0E8A4C' },
-  waitChipOk: { backgroundColor: '#0E8A4C' },
-  waitChipNo: { backgroundColor: '#C6281C' },
+  waitNameOk: { color: '#536B49' },
+  waitChipOk: { backgroundColor: '#536B49' },
+  waitChipNo: { backgroundColor: '#8B5148' },
   waitChip: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 2,
     transform: [{ skewX: '-10deg' }] },
-  waitChipSent: { backgroundColor: '#F5B000' },
-  waitChipDraft: { backgroundColor: '#0D0F12' },
+  waitChipSent: { backgroundColor: '#A47A3F' },
+  waitChipDraft: { backgroundColor: '#151A1E' },
   waitChipT: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12, color: '#fff',
     textTransform: 'uppercase', letterSpacing: 1 },
-  recCard: { backgroundColor: '#0D0F12', borderRadius: 16, padding: 15, marginBottom: 12,
+  recCard: { backgroundColor: '#151A1E', borderRadius: 16, padding: 15, marginBottom: 12,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   recLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12, color: '#9BA2AB',
     textTransform: 'uppercase', letterSpacing: 1.4 },
@@ -5575,11 +5575,11 @@ const s = StyleSheet.create({
   jobsWrap: { flex: 1, paddingHorizontal: 18, paddingTop: 4 },
   jobsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     marginBottom: 8 },
-  sectionLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, color: '#5C6570',
+  sectionLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, color: '#5E666E',
     textTransform: 'uppercase', letterSpacing: 1.8 },
-  addJob: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 14, color: '#FF5A00',
+  addJob: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 14, color: '#4E6243',
     textTransform: 'uppercase', letterSpacing: 1 },
-  assignC: { flex: 1, backgroundColor: '#0D0F12', paddingTop: 54 },
+  assignC: { flex: 1, backgroundColor: '#151A1E', paddingTop: 54 },
   assignReceipt: { marginHorizontal: 18, backgroundColor: '#15271C', borderColor: '#1E5236',
     borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 16 },
   assignSaved: { color: '#3fb950', fontFamily: 'BarlowCondensed_700Bold', fontSize: 19,
@@ -5597,15 +5597,15 @@ const s = StyleSheet.create({
     paddingVertical: 15, marginBottom: 8 },
   assignRowName: { color: '#fff', fontFamily: 'Barlow_600SemiBold', fontSize: 16.5 },
   assignRowMeta: { color: '#8A9099', fontFamily: 'Barlow_400Regular', fontSize: 13.5, marginTop: 2 },
-  assignChev: { color: '#5C6570', fontSize: 22, marginLeft: 8 },
-  assignNew: { backgroundColor: '#FF5A00', borderRadius: 14, minHeight: 56, alignItems: 'center',
+  assignChev: { color: '#5E666E', fontSize: 22, marginLeft: 8 },
+  assignNew: { backgroundColor: '#4E6243', borderRadius: 14, minHeight: 56, alignItems: 'center',
     justifyContent: 'center', marginBottom: 12 },
   assignNewT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 18,
     textTransform: 'uppercase', letterSpacing: 1 },
   jobItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 14, paddingHorizontal: 14,
+    borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 14, paddingHorizontal: 14,
     paddingVertical: 14, marginBottom: 8 },
-  jobItemName: { fontFamily: 'Barlow_600SemiBold', fontSize: 16.5, color: '#0D0F12' },
-  jobItemMeta: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#5C6570', marginTop: 2 },
-  jobCount: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, color: '#0D0F12', marginRight: 8 },
+  jobItemName: { fontFamily: 'Barlow_600SemiBold', fontSize: 16.5, color: '#151A1E' },
+  jobItemMeta: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#5E666E', marginTop: 2 },
+  jobCount: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, color: '#151A1E', marginRight: 8 },
 });

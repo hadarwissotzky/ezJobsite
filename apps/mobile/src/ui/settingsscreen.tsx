@@ -240,7 +240,7 @@ export function SettingsScreen(props: {
               <View key={m.memberId} style={{ flexDirection: 'row', alignItems: 'center',
                 justifyContent: 'space-between', marginTop: 10 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: '#EDEFF2',
+                  <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: '#EFEBE3',
                     alignItems: 'center', justifyContent: 'center' }}>
                     <Text style={{ fontFamily: F.dispSemi, color: C.steel }}>{m.isMe ? '★' : '•'}</Text>
                   </View>

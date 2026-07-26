@@ -75,12 +75,12 @@ export function DiscussionLog(props: {
               </Text>
               <View style={{
                 maxWidth: '82%', borderRadius: 16, paddingVertical: 9, paddingHorizontal: 13,
-                backgroundColor: mine ? '#2563EB' : '#EDEFF2',
+                backgroundColor: mine ? '#4E6243' : '#EFEBE3',
                 borderBottomRightRadius: mine ? 4 : 16,
                 borderBottomLeftRadius: mine ? 16 : 4,
               }}>
                 <Text style={[T.body, { fontSize: 14.5, lineHeight: 20,
-                  color: mine ? '#fff' : '#0D0F12' }]}>{m.text}</Text>
+                  color: mine ? '#fff' : '#151A1E' }]}>{m.text}</Text>
               </View>
               {mine && props.undelivered?.has(m.id) && (
                 <Text style={{ ...T.bodySteel, fontSize: 11, marginTop: 3, marginRight: 4 }}>

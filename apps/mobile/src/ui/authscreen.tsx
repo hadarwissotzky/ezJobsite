@@ -91,19 +91,19 @@ export function AuthScreen({ connector }: { connector: SupabaseConnector }) {
 }
 
 const st = StyleSheet.create({
-  c: { flex: 1, backgroundColor: '#FAFAF8' },
+  c: { flex: 1, backgroundColor: '#F7F4EE' },
   inner: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
-  brand: { fontSize: 30, fontWeight: '900', color: '#FF5A00', textAlign: 'center', marginBottom: 8 },
-  h: { fontSize: 20, fontWeight: '700', color: '#0D0F12', textAlign: 'center', marginBottom: 28 },
+  brand: { fontSize: 30, fontWeight: '900', color: '#4E6243', textAlign: 'center', marginBottom: 8 },
+  h: { fontSize: 20, fontWeight: '700', color: '#151A1E', textAlign: 'center', marginBottom: 28 },
   input: {
-    backgroundColor: '#fff', borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 12,
-    paddingHorizontal: 16, paddingVertical: 15, fontSize: 17, color: '#0D0F12', marginBottom: 12,
+    backgroundColor: '#fff', borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 12,
+    paddingHorizontal: 16, paddingVertical: 15, fontSize: 17, color: '#151A1E', marginBottom: 12,
   },
-  err: { color: '#C6281C', fontSize: 15, marginBottom: 10, textAlign: 'center' },
-  notice: { color: '#0E8A4C', fontSize: 15, marginBottom: 10, textAlign: 'center' },
-  btn: { backgroundColor: '#FF5A00', borderRadius: 12, paddingVertical: 17, alignItems: 'center', marginTop: 6 },
+  err: { color: '#8B5148', fontSize: 15, marginBottom: 10, textAlign: 'center' },
+  notice: { color: '#536B49', fontSize: 15, marginBottom: 10, textAlign: 'center' },
+  btn: { backgroundColor: '#4E6243', borderRadius: 12, paddingVertical: 17, alignItems: 'center', marginTop: 6 },
   btnOff: { opacity: 0.45 },
   btnT: { color: '#fff', fontSize: 18, fontWeight: '800' },
   toggle: { alignItems: 'center', paddingVertical: 18 },
-  toggleT: { color: '#FF5A00', fontSize: 15, fontWeight: '600' },
+  toggleT: { color: '#4E6243', fontSize: 15, fontWeight: '600' },
 });

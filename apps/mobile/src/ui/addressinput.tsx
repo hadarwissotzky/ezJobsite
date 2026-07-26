@@ -67,7 +67,7 @@ export function AddressInput({
         autoCapitalize="words"
       />
       <Pressable style={st.hereBtn} onPress={useHere} disabled={locating}>
-        {locating ? <ActivityIndicator color="#FF5A00" />
+        {locating ? <ActivityIndicator color="#4E6243" />
           : <Text style={st.hereT}>📍 {T('addr.useLocation')}</Text>}
       </Pressable>
       {open && (
@@ -85,14 +85,14 @@ export function AddressInput({
 
 const st = StyleSheet.create({
   input: {
-    backgroundColor: '#fff', borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 14, fontSize: 17, color: '#0D0F12',
+    backgroundColor: '#fff', borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 14, fontSize: 17, color: '#151A1E',
   },
   hereBtn: { alignSelf: 'flex-start', paddingVertical: 10, paddingHorizontal: 2 },
-  hereT: { color: '#FF5A00', fontSize: 15, fontWeight: '700' },
-  list: { backgroundColor: '#fff', borderColor: '#E4E5E1', borderWidth: 1, borderRadius: 10,
+  hereT: { color: '#4E6243', fontSize: 15, fontWeight: '700' },
+  list: { backgroundColor: '#fff', borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 10,
     marginTop: 2, overflow: 'hidden' },
   row: { paddingHorizontal: 14, paddingVertical: 13 },
-  rowDivider: { borderBottomColor: '#E4E5E1', borderBottomWidth: 1 },
-  rowT: { color: '#0D0F12', fontSize: 15 },
+  rowDivider: { borderBottomColor: '#D5D0C7', borderBottomWidth: 1 },
+  rowT: { color: '#151A1E', fontSize: 15 },
 });
