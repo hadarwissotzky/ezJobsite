@@ -51,11 +51,17 @@ export const F = {
   bodyBold: 'Barlow_700Bold',
 } as const;
 
-/** Display text: uppercase + letterspacing is the look; don't hand-roll it. */
+/**
+ * Heading text: sentence-case, heavy, humanist (Barlow bold) — friendlier and more
+ * readable for the ICP (a non-technical tradesperson, often reading in a second
+ * language). ALL-CAPS is reserved for small labels (`label`) and the one hero capture
+ * action, not titles. Expert type direction, 2026-07-26 — sentence-case beats caps
+ * for approachability and comprehension when the reader scans, not reads paragraphs.
+ */
 export function display(size: number, color = C.ink): TextStyle {
   return {
-    fontFamily: F.disp, fontSize: size, color,
-    textTransform: 'uppercase', letterSpacing: size > 24 ? 0.5 : 1,
+    fontFamily: F.bodyBold, fontSize: size, color,
+    letterSpacing: size > 24 ? -0.4 : -0.2,
   };
 }
 
@@ -83,8 +89,10 @@ export const T = StyleSheet.create({
   btnApprove: { backgroundColor: C.approve },
   btnGhost: { backgroundColor: 'transparent', minHeight: 50 },
   btnOff: { opacity: 0.4 },
-  btnText: { fontFamily: F.disp, fontSize: 19, color: '#fff', textTransform: 'uppercase', letterSpacing: 1 },
-  btnGhostText: { fontFamily: F.dispSemi, fontSize: 16, color: C.steel, textTransform: 'uppercase', letterSpacing: 1 },
+  // Buttons read as a person wrote them ("Record extra work"), Barlow bold sentence-
+  // case — the kit's own onboarding buttons do this. Caps stays for tiny labels only.
+  btnText: { fontFamily: F.bodyBold, fontSize: 17, color: '#fff', letterSpacing: 0.2 },
+  btnGhostText: { fontFamily: F.bodySemi, fontSize: 15.5, color: C.steel, letterSpacing: 0.2 },
   // Status chip — the angled cut is the prototype's signature (a cut ticket edge).
   chip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 },
   chipText: { fontFamily: F.dispSemi, fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.2, color: '#fff' },

@@ -533,7 +533,7 @@ const st = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center', padding: 28 },
   msg: { color: '#fff', fontSize: 18, textAlign: 'center', marginBottom: 22, lineHeight: 25 },
   btn: { backgroundColor: '#4E6243', borderRadius: 12, paddingVertical: 18, paddingHorizontal: 40 },
-  btnT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, textTransform: 'uppercase', letterSpacing: 1 },
+  btnT: { color: '#fff', fontFamily: 'Barlow_700Bold', fontSize: 19, letterSpacing: -0.2 },
   link: { paddingVertical: 16 }, linkT: { color: '#adbac7', fontSize: 15 },
 
   topBar: { position: 'absolute', top: 52, left: 12, right: 12, flexDirection: 'row',
