@@ -24,7 +24,7 @@ import { readCapture,
   recoverySweep,
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
-import { photoCapture, pickFromLibrary, recordVideo, textCapture, voiceCapture } from './src/modality';
+import { photoCapture, pickFromLibrary, textCapture, voiceCapture } from './src/modality';
 import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
 import { ensurePairSchema, linkPair } from './src/pair';
 import { ensureAugmentSchema, noteAugment } from './src/augmentlog';
@@ -1958,8 +1958,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   };
 
   /**
-   * REQ-CAP2 photo/video. Same commit path, same durability gate, new producer --
-   * capture.ts did not change to accommodate them.
+   * REQ-CAP2 photo. Same commit path, same durability gate, new producer --
+   * capture.ts did not change to accommodate it.
    *
    * The GPS fix STARTS WITH THE CAMERA and is awaited after the shutter. The user
    * spends a second or two framing the shot; the fix costs nothing because it
@@ -2437,7 +2437,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               ) : (
                 <View style={[s.viewImg, s.tileIcon, { width: W - 40, height: 260 }]}>
                   <Text style={{ fontSize: 72 }}>
-                    {c.modality === 'video' ? '🎥' : c.modality === 'voice' ? '🎙' : '📝'}
+                    {c.modality === 'voice' ? '🎙' : '📝'}
                   </Text>
                 </View>
               )}
@@ -2456,7 +2456,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             ) : (
               <>
                 {v.text !== undefined && <Text style={s.frozen}>{v.text}</Text>}
-                {(v.modality === 'voice' || v.modality === 'video') && (
+                {v.modality === 'voice' && (
                   <>
                     <Pressable style={s.confirmWide} onPress={async () => {
                       if (playing) { stopPlayback(); setPlaying(false); return; }
@@ -2468,12 +2468,6 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     </Pressable>
                     {playErr && <Text style={s.warn}>{T({ k: 'ev.playFailed', p: { why: playErr } })}</Text>}
                   </>
-                )}
-                {v.modality === 'video' && (
-                  <Text style={s.cardNote}>
-                    Video · {(v.bytes / 1024 / 1024).toFixed(1)} MB. Raw video isn’t
-                    retained — the audio and stills are the evidence (REQ-TL4).
-                  </Text>
                 )}
                 <Text style={s.sub}>{T('ev.recorded')}</Text>
                 <Text style={s.evid}>{new Date(v.capturedAtMs).toLocaleString()}</Text>

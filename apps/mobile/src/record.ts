@@ -193,7 +193,7 @@ export async function extraRecord(
     // The real capture moment — the earliest committed capture behind this extra.
     if (caps.length) capturedAtMs = caps[0].captured_at_ms;
 
-    const visual = caps.filter((c) => c.modality === 'photo' || c.modality === 'video');
+    const visual = caps.filter((c) => c.modality === 'photo');
     photosTruncated = Math.max(0, visual.length - MAX_PHOTOS_RENDERED);
 
     photos = await Promise.all(

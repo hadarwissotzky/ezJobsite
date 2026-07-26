@@ -6,7 +6,7 @@
  *   CON2 = may we SPEND the user's cellular data? -> a money question
  * They have different owners, different defaults and different failure modes. One
  * "allow?" switch covering both is how a contractor ends up either committing a
- * crime or paying for a 400 MB video upload on a hotspot.
+ * crime or paying for a big photo upload on a hotspot.
  *
  * ============ REQ-CON1 ============
  * "A jurisdiction-aware recording-consent state is recorded ONCE, at project
@@ -20,7 +20,7 @@
  * whoever set the job up, and the record button never asks.
  *
  * The gate is therefore at ARMING, not at prompting: if a project has no consent
- * state, voice/video is simply not available on that job and says why. Refusing
+ * state, voice is simply not available on that job and says why. Refusing
  * loudly is mandate #1's rule and it applies here too -- what we must never do is
  * record first and ask later, because by then the recording exists.
  *
@@ -42,7 +42,7 @@ export type RecordingConsent =
   | 'all_party'    // everyone recorded has agreed. Strictest, always lawful-ish.
   | 'one_party'    // the user is party to the conversation and their state allows it
   | 'no_recording' // this job does not permit audio. Text/photo still work.
-  | null;          // NOT SET -> voice/video unavailable. Never "probably fine".
+  | null;          // NOT SET -> voice unavailable. Never "probably fine".
 
 export const CONSENT_DDL = [
   // CON2 only. It is a DEVICE setting, not a project one: it is about THIS phone's
@@ -83,7 +83,7 @@ export function consentBasisText(c: RecordingConsent, jurisdiction: string | nul
     case 'one_party':
       return `You are part of the conversations you record, and ${jurisdiction ?? 'your state'} allows that.`;
     case 'no_recording':
-      return `No audio or video recording on this job. Photos and typed notes still work.`;
+      return `No audio recording on this job. Photos and typed notes still work.`;
     default:
       return '';
   }
@@ -125,7 +125,7 @@ export async function getRecordingConsent(
 export type ArmCheck = { allowed: true } | { allowed: false; why: Msg };
 
 /**
- * May this job record audio/video RIGHT NOW?
+ * May this job record audio RIGHT NOW?
  *
  * Called before ARMING, never as a prompt. The answer is already known -- it was
  * decided at setup -- so this is a lookup, not a question. The record button is
@@ -188,8 +188,8 @@ export async function setTermsAccepted(db: AbstractPowerSyncDatabase): Promise<v
 // "Uploading over cell requires an explicit cellular-consent setting."
 //
 // This protects MONEY, and it defaults OFF for the same reason CON1 defaults
-// strict: the failure is silent and lands on someone else. A 200 MB walkthrough
-// video pushed over a hotspot is a bill the contractor never agreed to, and he
+// strict: the failure is silent and lands on someone else. A batch of full-res
+// photos pushed over a hotspot is a bill the contractor never agreed to, and he
 // finds out at the end of the month. Wi-Fi-only by default; he can turn it on.
 //
 // Capture is NEVER affected by this. Mandate #7: the network is opportunistic,

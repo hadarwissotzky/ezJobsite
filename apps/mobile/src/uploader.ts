@@ -134,8 +134,6 @@ export async function drainOutbox(
         : mime === 'image/png' ? 'png'
         : mime === 'image/heic' ? 'heic'
         : mime.startsWith('image/') ? 'jpg'
-        : mime === 'video/mp4' ? 'mp4'
-        : mime.startsWith('video/') ? 'mov'
         : 'bin';
       const key = objectKey(ownerId, payload.capture_id, payload.media_sha256, ext);
 

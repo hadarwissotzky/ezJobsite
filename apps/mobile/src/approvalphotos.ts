@@ -102,13 +102,11 @@ export function remainingPhotoSlots(attached: number): number {
 }
 
 /**
- * Only still images go to the client.
- *
- * Video is deliberately excluded, and this is a judgement call rather than an
- * oversight: PRD R4 says "photos", the AC is a load-time budget that a 40 MB clip
- * cannot meet on LTE, and a video that buffers is a client who closes the page. The
- * clip stays on the contractor's record either way — `record.ts` renders modality
- * 'photo' AND 'video'. Nothing is lost, it is just not put in front of the signer.
+ * Only still images go to the client. PRD R4 says "photos", and the AC is a load-
+ * time budget that non-image media cannot meet on LTE. This stays an explicit mime
+ * allow-list (image/* only) as defence — video capture is removed from the app
+ * (hadar 2026-07-25), so this now also rejects any legacy 'video/*' bytes still on
+ * an un-wiped device rather than trusting that none exist.
  */
 export function isAttachablePhoto(mime: string): boolean {
   return typeof mime === 'string' && mime.toLowerCase().startsWith('image/');

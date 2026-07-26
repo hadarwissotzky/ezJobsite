@@ -21,10 +21,13 @@ export const APP_OWNED_DDL = [
         CHECK (length(media_sha256) = 64 AND media_sha256 NOT GLOB '*[^0-9a-f]*'),
       media_bytes     INTEGER NOT NULL CHECK (media_bytes > 0),
       media_mime_type TEXT NOT NULL CHECK (length(media_mime_type) > 0),
-      -- REQ-CAP2: voice | video | photo | text. Part of the commitment record
-      -- because a DB-loss rebuild must know WHAT was captured, not just that
-      -- bytes existed.
-      modality        TEXT NOT NULL CHECK (modality IN ('voice','video','photo','text')),
+      -- REQ-CAP2: voice | photo | text (video deferred, hadar 2026-07-25). Part of
+      -- the commitment record because a DB-loss rebuild must know WHAT was captured,
+      -- not just that bytes existed. Existing installs keep their prior CHECK (this
+      -- is CREATE TABLE IF NOT EXISTS); a legacy 'video' row is retained and never
+      -- crashes — it still shows in the capture viewer (fallback icon), though it is
+      -- no longer surfaced as a photo in an extra's record (record.ts is photo-only).
+      modality        TEXT NOT NULL CHECK (modality IN ('voice','photo','text')),
       captured_at_ms  INTEGER NOT NULL CHECK (captured_at_ms > 0),
       -- MANDATE #9: where and when. NULLABLE ON PURPOSE -- a fix is not always
       -- available (basement, denied, no signal from a satellite) and mandate #1

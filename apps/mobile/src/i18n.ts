@@ -77,7 +77,6 @@ const EN: Record<string, string> = {
   'assign.newHere': 'New job right here',
   'assign.newJobName': 'New job (no address yet)',
   'assign.later': 'Later — keep it in the Inbox',
-  'cap.video': 'VIDEO',
   'cap.pick': 'PICK',
   'cap.orType': 'Or type it',
   'cap.whatDecided': 'What was decided?',
@@ -87,7 +86,7 @@ const EN: Record<string, string> = {
 
   // --- consent (REQ-CON1) ---
   'consent.notSetTitle': 'Recording isn’t set up for this job',
-  'consent.notSetBody': 'One tap to set it. Photos and typed notes work now — only voice and video wait.',
+  'consent.notSetBody': 'One tap to set it. Photos and typed notes work now — only voice waits.',
   'consent.needed': 'Recording isn’t set up for this job yet. Set it in job setup — it takes one tap.',
   'consent.no_recording': 'This job is set to no recording. Type it or take a photo instead.',
   'consent.title': 'Recording on this job',
@@ -100,7 +99,7 @@ const EN: Record<string, string> = {
 
   // --- Terms acceptance (personal-use consent model, 2026-07-17) ---
   'terms.title': 'One quick thing before you record',
-  'terms.body': 'This app records the audio and video you capture on the job. By continuing you accept the Terms & Conditions, and confirm you are responsible for recording lawfully where you work. You only do this once.',
+  'terms.body': 'This app records the audio you capture on the job. By continuing you accept the Terms & Conditions, and confirm you are responsible for recording lawfully where you work. You only do this once.',
   'terms.reminder': 'You’re in {state}, where everyone in a conversation must be told they’re being recorded. Please let people know.',
   'terms.accept': 'I ACCEPT',
   'terms.later': 'Not now',
@@ -906,7 +905,6 @@ const ES: Record<string, string> = {
   'assign.newHere': 'Nuevo trabajo aquí mismo',
   'assign.newJobName': 'Trabajo nuevo (sin dirección aún)',
   'assign.later': 'Después — déjalo en la bandeja',
-  'cap.video': 'VIDEO',
   'cap.pick': 'ELEGIR',
   'cap.orType': 'O escríbelo',
   'cap.whatDecided': '¿Qué se decidió?',
@@ -915,7 +913,7 @@ const ES: Record<string, string> = {
   'cap.notSaved': 'No se guardó: {why}',
 
   'consent.notSetTitle': 'La grabación no está configurada para este trabajo',
-  'consent.notSetBody': 'Un toque para configurarla. Las fotos y las notas escritas ya funcionan — solo la voz y el video esperan.',
+  'consent.notSetBody': 'Un toque para configurarla. Las fotos y las notas escritas ya funcionan — solo la voz espera.',
   'consent.needed': 'La grabación aún no está configurada para este trabajo. Configúrala — es un solo toque.',
   'consent.no_recording': 'Este trabajo no permite grabar. Escríbelo o toma una foto.',
   'consent.title': 'Grabación en este trabajo',
@@ -928,7 +926,7 @@ const ES: Record<string, string> = {
 
   // --- Terms acceptance (personal-use consent model, 2026-07-17) ---
   'terms.title': 'Algo rápido antes de grabar',
-  'terms.body': 'Esta app graba el audio y el video que captures en el trabajo. Al continuar, aceptas los Términos y Condiciones y confirmas que eres responsable de grabar de forma legal donde trabajas. Solo lo haces una vez.',
+  'terms.body': 'Esta app graba el audio que captures en el trabajo. Al continuar, aceptas los Términos y Condiciones y confirmas que eres responsable de grabar de forma legal donde trabajas. Solo lo haces una vez.',
   'terms.reminder': 'Estás en {state}, donde se debe avisar a todos en una conversación que están siendo grabados. Por favor avísales.',
   'terms.accept': 'ACEPTO',
   'terms.later': 'Ahora no',

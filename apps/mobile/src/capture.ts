@@ -232,11 +232,9 @@ export function extFor(mime: string, modality: string): string {
   if (m === 'audio/wav' || m === 'audio/x-wav') return 'wav';
   if (m === 'audio/mpeg') return 'mp3';
   if (m.startsWith('audio/')) return 'm4a';
-  if (m === 'video/mp4') return 'mp4';
-  if (m.startsWith('video/')) return 'mov';
   // Fall back on the modality rather than 'bin': a file nobody can open is worse
   // than a reasonable guess, and the bytes are what the hash protects anyway.
-  return modality === 'photo' ? 'jpg' : modality === 'video' ? 'mov'
+  return modality === 'photo' ? 'jpg'
     : modality === 'voice' ? 'm4a' : 'bin';
 }
 
@@ -414,7 +412,6 @@ export async function listCommittedCaptures(db: AbstractPowerSyncDatabase, proje
               CASE WHEN c.media_mime_type LIKE 'text/%'  THEN 'text'
                    WHEN c.media_mime_type LIKE 'audio/%' THEN 'voice'
                    WHEN c.media_mime_type LIKE 'image/%' THEN 'photo'
-                   WHEN c.media_mime_type LIKE 'video/%' THEN 'video'
                    ELSE 'unknown' END) AS modality
      FROM capture_commit c
      -- Discarded captures leave the gallery. The row survives (capture_commit is
