@@ -529,15 +529,23 @@ const openFeed = async () => {
 const closeFeed = () => { feedOpenRef.current = false; setShowFeed(false); };
 
 // REQ-NOTIF1 — tapping a push opens the referenced extra (data.changeOrderId).
+// COLD START too (Codex P1, 2026-07-26): remote payloads carry changeOrderId, and a
+// tap that LAUNCHES the app arrives via getLastNotificationResponseAsync — without it,
+// a killed-app tap on an approval/decline push opened nothing. (Local notifications
+// carry data.url and are handled by the other listener; each no-ops on the other's
+// shape, so running both is safe.)
 React.useEffect(() => {
   let sub: { remove: () => void } | undefined;
+  const openCo = (resp: any) => {
+    const coId = resp?.notification?.request?.content?.data?.changeOrderId;
+    if (coId) void openRecord(String(coId));
+  };
   void (async () => {
     try {
       const N = await import('expo-notifications');
-      sub = N.addNotificationResponseReceivedListener((resp: any) => {
-        const coId = resp?.notification?.request?.content?.data?.changeOrderId;
-        if (coId) void openRecord(String(coId));
-      });
+      const last = await N.getLastNotificationResponseAsync();
+      if (last) openCo(last);                       // launched by tapping a remote push
+      sub = N.addNotificationResponseReceivedListener(openCo);
     } catch { /* notifications module unavailable — no-op */ }
   })();
   return () => { try { sub?.remove(); } catch { /* already gone */ } };
