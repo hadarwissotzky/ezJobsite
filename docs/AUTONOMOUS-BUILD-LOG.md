@@ -69,3 +69,21 @@ design changes, re-verified clean by the database + backend-security lenses:
   needs them) and no status literal can empty a sync bucket.
 - Hardened the connector: a PATCH that is empty after stripping server-owned columns is
   now skipped (the status local-echo can't become a queue-stalling empty update).
+
+### 2026-07-25 — Company Feed (REQ-PM9) review outcome
+
+Panel (database/mobile-UX/QA) found no blockers but several majors; fixed:
+- Query: one deterministic windowed actor lookup (name+verb+time from the SAME row;
+  id tiebreak) instead of 3 correlated subqueries; added open-question count.
+- Render: shows the VERB ("Maria priced it"), a question-aware status chip
+  (discussing surfaces), robust meta (no dangling separators), time right-aligned so
+  the sort key never truncates.
+- Return-to-feed on drill-in (returnToFeedRef → closeRecord reopens the feed fresh);
+  reload-on-refresh so an open feed never goes stale.
+- Discoverability: promoted from a footer pill to a full-width menu row w/ chevron.
+- **DEC-7 (accepted, not fixed):** (a) opening a feed item whose PROJECT is not on the
+  device shows the record read-only (a pre-existing record-screen limit, same as the
+  push path; only reachable post company-sync-deploy; return-to-feed removes the
+  lost-place pain). A cross-project ledger load is a separate record-screen change.
+  (b) Bottom-nav promotion deferred — the prominent full-width row is the reviewer's
+  stated minimum; a 5th nav slot is a broader nav change.

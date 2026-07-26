@@ -36,6 +36,7 @@ import { RecordScreen } from './src/ui/recordscreen';
 import { SettingsScreen } from './src/ui/settingsscreen';
 import { ensureOwnCompany } from './src/company';
 import { LABELS, labelHex } from './src/labels';
+import { companyFeed, type FeedItem } from './src/feed';
 import { extraRecord, type ExtraRecord } from './src/record';
 import { DiscussionLog, ThreadScreen } from './src/ui/threadscreen';
 import { parseThreadLink, threadState, type ThreadMessage } from './src/discussion';
@@ -234,6 +235,10 @@ export default function App() {
   const [ui, setUi] = React.useState<UiState>({ k: 'idle' });
   const [showCapture, setShowCapture] = React.useState(false);   // REQ-CAP-FUSED screen
   const [showSettings, setShowSettings] = React.useState(false); // Settings/Team screen
+  const [showFeed, setShowFeed] = React.useState(false);         // REQ-PM9 Company feed
+  const [feedItems, setFeedItems] = React.useState<FeedItem[]>([]);
+  const feedOpenRef = React.useRef(false);      // feed is showing → refresh() reloads it
+  const returnToFeedRef = React.useRef(false);  // an extra was opened FROM the feed
   const [settingsProfile, setSettingsProfile] = React.useState<import('./src/profile').Profile | null>(null);
   // When set, the capture screen AUGMENTS this existing extra (adds photos/voice as
   // appended evidence) instead of minting a new extra (hadar, 2026-07-25).
@@ -424,6 +429,13 @@ const closeRecord = () => {
   setRecord(null); setRecordSummary(null); setApproval(null); setNarration(null);
   setRecordThread(null); setRecordUndelivered(new Set());
   setRecordRevision(null); setRecordNextId(null);
+  // If this extra was opened FROM the company feed, go back to the feed (fresh) — not
+  // to whatever nav was underneath (review 2026-07-25: don't lose the user's place).
+  if (returnToFeedRef.current) {
+    returnToFeedRef.current = false;
+    void companyFeed(db).then(setFeedItems);
+    setShowFeed(true);
+  }
 };
 
 // Open Settings/Team. Loads the profile and, for a company profile, promotes the
@@ -442,6 +454,14 @@ const openSettings = async () => {
 // string (review 2026-07-25: the ICP may run in Spanish and can't act on 'not allowed').
 const statusErr = (code: string): string =>
   code === '42501' ? T('pm4.errPermission') : T('pm4.errGeneric');
+
+// REQ-PM9 — open the company feed (extras across every project, reverse-chron).
+const openFeed = async () => {
+  feedOpenRef.current = true;
+  try { setFeedItems(await companyFeed(db)); } catch { setFeedItems([]); }
+  setShowFeed(true);
+};
+const closeFeed = () => { feedOpenRef.current = false; setShowFeed(false); };
 
 /**
  * R8 manual remind — ONE implementation for the ledger row and the record screen.
@@ -1382,6 +1402,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       } catch { /* CO schema not up yet */ }
       // The Projects-home cards: counts, last activity and a cover photo per job.
       setCards(await projectCards(db, ps));
+      // Keep the company feed live while it is open (review 2026-07-25: no stale snapshot).
+      if (feedOpenRef.current) { try { setFeedItems(await companyFeed(db)); } catch { /* keep last */ } }
       // Open where he left off. A contractor who closes the app on the Elm St job
       // and reopens it in the same truck should not have to find it again.
       setProjectId((cur) => (cur === INBOX_ID && ps.length ? ps[0].id : cur));
@@ -3401,6 +3423,60 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     );
   }
 
+  // REQ-PM9 — Company feed: every extra across every project, newest first.
+  if (showFeed) {
+    return (
+      <View style={s.homeC}>
+        <View style={s.dashHdr}>
+          <Pressable style={s.hdrBtn} hitSlop={10} onPress={closeFeed}
+            accessibilityLabel={T('common.back')}>
+            <Text style={s.hdrIcon}>‹</Text>
+          </Pressable>
+          <Text style={s.hdrTitle}>{T('feed.title')}</Text>
+          <View style={s.hdrBtn} />
+        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}>
+          {feedItems.length === 0 && <Text style={s.homeEmpty}>{T('feed.empty')}</Text>}
+          {feedItems.map((f) => {
+            const chip = coChip(displayStatus(f.status, { openQuestions: f.openQuestions }) as any);
+            // WHO did WHAT — the verb is the feed's most useful signal, not just the name.
+            const actLabel = (f.lastAct && f.actor)
+              ? T({ k: 'feed.act.' + f.lastAct, p: { name: f.actor } } as any)
+              : (f.actor ?? '');
+            const meta = [f.projectName, actLabel].filter(Boolean).join(' · ');
+            return (
+              <Pressable key={f.id} style={s.jobItem}
+                onPress={() => { returnToFeedRef.current = true; setShowFeed(false); setProjectId(f.projectId); void openRecord(f.id); }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.jobItemName} numberOfLines={1}>{f.scope}</Text>
+                  {!!meta && <Text style={s.jobItemMeta} numberOfLines={1}>{meta}</Text>}
+                </View>
+                {/* Right column: time never truncates (it is the sort key), amount + status. */}
+                <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
+                  {f.atMs > 0 && (
+                    <Text style={{ fontFamily: 'Barlow_400Regular', fontSize: 11, color: '#8c959f' }}>
+                      {createdLabel(f.atMs)}
+                    </Text>
+                  )}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                    {f.amountCents != null && (
+                      <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#0D0F12' }}>{money(f.amountCents)}</Text>
+                    )}
+                    <View style={[{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }, chip.bg]}>
+                      <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 10.5, color: chip.dark ? '#0D0F12' : '#fff' }}>
+                        {chip.label}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  }
+
   // Settings / Team — profile editing + company membership (hadar 2026-07-25).
   if (showSettings && settingsProfile) {
     return (
@@ -3769,6 +3845,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 <Text style={s.homeEmpty}>{q ? T('home.noMatch') : T('home.noProjects')}</Text>
               )}
             </ScrollView>
+            {/* Company feed — a PRIMARY surface (REQ-NAV1), a full-width row with a
+                chevron, not a utility pill (review 2026-07-25). */}
+            <Pressable style={s.jobItem} onPress={() => { setMenuOpen(false); void openFeed(); }}>
+              <Text style={{ fontSize: 17, marginRight: 10 }}>☷</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.jobItemName} numberOfLines={1}>{T('feed.title')}</Text>
+                <Text style={s.jobItemMeta} numberOfLines={1}>{T('feed.sub')}</Text>
+              </View>
+              <Text style={s.chev}>›</Text>
+            </Pressable>
             <View style={s.menuFooter}>
               <Pressable onPress={() => {
                 const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n);
