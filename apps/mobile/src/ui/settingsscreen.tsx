@@ -26,6 +26,8 @@ import appJson from '../../app.json';
 import { t } from '../i18n';
 import type { Lang } from '../i18n';
 import { registerPushToken } from '../push';
+import { checkMembers, type QuotaKind } from '../quota';
+import { QuotaModal } from './quotamodal';
 import { C, F, T as TH, label } from './theme';
 import { TRADES, type Profile } from '../profile';
 import {
@@ -61,6 +63,7 @@ export function SettingsScreen(props: {
   const [busy, setBusy] = React.useState(false);
   const [joinToken, setJoinToken] = React.useState('');
   const [note, setNote] = React.useState<string | null>(null);
+  const [quotaHit, setQuotaHit] = React.useState<{ kind: QuotaKind; limit: number } | null>(null);
 
   // Notification permission is an OS truth, not ours to fake. We reflect it and offer
   // to request+register; we never claim "on" when the OS says otherwise.
@@ -108,6 +111,9 @@ export function SettingsScreen(props: {
 
   const invite = async () => {
     if (!co) return;
+    // FREE-TIER members cap (hadar 2026-07-25): stop before inviting past the limit.
+    const q = await checkMembers(db, co.id);
+    if (!q.ok) { setQuotaHit({ kind: 'members', limit: q.limit }); return; }
     setBusy(true); setNote(null);
     const r = await createInvite(supabase, co.id, 'crew', props.confirmBase);
     setBusy(false);
@@ -331,6 +337,12 @@ export function SettingsScreen(props: {
           <Text style={{ fontFamily: F.dispSemi, fontSize: 15.5, color: C.danger }}>{t('set.signOut')}</Text>
         </Pressable>
       </View>
+
+      {quotaHit && (
+        <QuotaModal kind={quotaHit.kind} limit={quotaHit.limit}
+          onClose={() => setQuotaHit(null)}
+          onSeePlans={() => { setQuotaHit(null); mailTo('EZchangeorder — upgrade / plans'); }} />
+      )}
     </ScrollView>
   );
 }

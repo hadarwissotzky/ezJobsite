@@ -135,3 +135,78 @@ confirmed 6, all fixed before commit:
 - **minor:** notification "Enable" no-op'd when the module was unavailable → 'unknown'/
   'denied' route to Open Settings (OS), only 'undetermined' offers in-app enable.
 - Verify gate green: tsc clean, i18n 720/720 (EN=ES), 296 tests pass. No new migration.
+
+### 2026-07-25 — PRD ⇄ implementation gap audit (3 parallel verifiers vs actual code)
+
+Audited the three authoritative PRDs (SPEC-capture-core-v1, PRD-jobsite-field-record,
+PRD-change-approval-loop + PM/COMMUNICATION layers) against the real code, not the
+status docs. Rough tally (dedup across docs): the P0 money loop is code-complete
+end-to-end; most "not-live" is go-live credentials, not missing code.
+
+REAL DEFECTS (not just unfinished):
+- **R1 paused-capture-kill loses audio** (violates mandate #1). `togglePause` holds
+  the audio file open instead of stop-and-bank; `useLeavingForeground` is coded but
+  never called. Fix written, deliberately unwired pending on-device test. HIGH.
+- **REQ-TL4 raw video is stored + uploaded** — spec says raw video is NEVER retained/
+  uploaded; extract on device. No extraction code exists. Gap + mandate-adjacent.
+
+BUILT, BLOCKED ON SERVER ACTIONS (unlocks a large batch at once):
+- Apply migrations 372–380 (esp. 376 company, 378 lifecycle, 379 push, 380 comments).
+- PowerSync company-wide sync rule → feed + cross-member visibility (PM9, PM11-13).
+- Twilio secrets + A2P → SMS delivery (R5, VAL8).
+- Approval-page host/DNS (EXPO_PUBLIC_CONFIRM_BASE blank) → R4/R5/R5b, JOB9, GAL share.
+- Deepgram + Anthropic keys + RUN the worker → structuring, transcripts (R2, PROC),
+  and TL3/photonarration (empty until STT runs).
+- EAS projectId → killed-app remote push (R8).
+- EXPO_PUBLIC_STATIC_MAP_URL → static map (JOB10/MAP1).
+
+GENUINELY UNBUILT (net-new):
+- Recording-timeline model live-wiring (TL1-3 built in timeline.ts but zero callers;
+  superseded by photonarration for TL3).
+- JOB1 per-project capture timeline (flat grid removed by hadar 2026-07-23 — likely
+  intentional); JOB6/JOB7 in-job capture search + tag-filter are dead state.
+- JOB8 progress before/after docs; JOB9 shared auto-updating job-timeline link.
+- R9 per-trade template library; R11 office web view + CSV export; R14 walkthrough
+  actual auto-split (detection-only today); R15 owner review-before-send queue.
+- REQ-COLLAB1-7 project-scoped cross-company collab (only company-wide invite exists).
+- REQ-COMMENT1 team comments (schema-only, sql/380 — the paused feature).
+- R13 content-translation pipeline (P1.5); R3 investigate-first EWA subtype.
+- REQ-X1 touch-budget accounting + spoken number read-back (TTS); CAP7 pre-roll buffer;
+  CAP4 at-rest file protection (NSFileProtection); VAL8 email channel; VAL4 default
+  directed-by from parties roster; P4 content-signal consumed (write-only today).
+
+Disposition: nothing above blocks the P0 pilot loop, which is code-complete and
+deploy-gated. Priorities to raise with hadar: (1) the R1 durability regression,
+(2) TL4 raw-video, (3) the go-live credential checklist.
+
+### 2026-07-25 — Free tier (2 members, 2 jobs) + video removal; extras cap DEFERRED
+
+hadar: "start a free version — invite only 2 members, create only 2 jobs, 2 extras per
+job — add popups/modals when they run out of quota." Built a quota module + a branded
+QuotaModal, gated at the add actions. A specialist review panel (mandate-#1 / quota-
+logic / modal-UX, each finding adversarially verified) found 7 real issues; that changed
+the shape of what shipped.
+
+- **DEC-9 (extras-per-job DEFERRED):** enforcing it correctly is not possible client-
+  side. Extras are auto-created eagerly on a GUESSED project before the job is picked,
+  and change_order is re-hydrated from the server, so (a) blocking at file-time dead-
+  ends the assign sheet — which is designed to never dead-end (review finding #1), and
+  (b) a locally-discarded draft repopulates on next hydrate and pollutes the count
+  (#2). Doing it right needs the capture->extra PROMOTION reworked (create the extra at
+  file-time against the CHOSEN job) or a server-side gate in the change_order ingest —
+  both touch the most sensitive, on-device-tested path (mandate #1). Deferred rather
+  than ship the broken gate. quota.ts keeps members+jobs only.
+- **DEC-10 (interpretation):** "2 members" read as 2 TOTAL incl. owner (owner + 1). One-
+  line change in FREE_LIMITS if hadar meant owner+2.
+- **Members enforced server-side (sql/381):** client checkMembers is only the modal —
+  it sees one device's active members, not pending invites (company_invite is not
+  synced), so it can't stop multi-invite bypass (#5). The real wall is accept_company_
+  invite re-counting at accept time and refusing past 2. Re-accept is idempotent.
+- **Jobs:** client-gated at both create paths AND un-archive (#4 was a bypass — un-
+  archive re-consumes a slot). Client-only; a fresh-device pre-sync race (#7) can
+  briefly under-count — acceptable for a pilot, server backstop (project-insert gate
+  vs PowerSync revert) is a follow-up.
+- **#3 fixed:** quick-add cap returned {ok:false} with no problemKey -> the card showed
+  a spurious "bad phone" error; added a quotaBlocked flag so the modal speaks instead.
+- Verify gate green: tsc, i18n 724/724 (EN=ES), 296 tests. Migration 381 is UNAPPLIED
+  (D1, human-gated) — the member cap is soft until hadar applies it.

@@ -40,8 +40,9 @@ export function SendToCard({
    *  prefill declined to have an opinion. */
   value: string | null;
   onChange: (project: SendToProject) => void;
-  /** Returns a problem key on failure so the message stays translatable. */
-  onQuickAdd: (o: { name: string; phone: string }) => Promise<{ ok: boolean; problemKey?: string }>;
+  /** Returns a problem key on failure so the message stays translatable. `quotaBlocked`
+   *  means a free-tier cap fired and its own modal is showing — don't render a form error. */
+  onQuickAdd: (o: { name: string; phone: string }) => Promise<{ ok: boolean; problemKey?: string; quotaBlocked?: boolean }>;
 }) {
   // Open by default whenever nothing is selected: the picker IS the question in
   // that case, and hiding it behind "Change" would make the two-in-range AC take
@@ -60,6 +61,9 @@ export function SendToCard({
     setSaving(true);
     try {
       const r = await onQuickAdd({ name, phone });
+      // A free-tier cap fired: its modal is already up, so clear any stale error and
+      // leave the form as-is (the user can dismiss and pick an existing job).
+      if (r.quotaBlocked) { setProblem(null); return; }
       if (!r.ok) { setProblem(r.problemKey ?? 'r1.quickadd.badPhone'); return; }
       setAdding(false); setOpen(false); setName(''); setPhone(''); setProblem(null);
     } finally { setSaving(false); }

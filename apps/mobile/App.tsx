@@ -25,6 +25,8 @@ import { readCapture,
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { photoCapture, pickFromLibrary, textCapture, voiceCapture } from './src/modality';
+import { checkJobs, type QuotaKind } from './src/quota';
+import { QuotaModal } from './src/ui/quotamodal';
 import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
 import { ensurePairSchema, linkPair } from './src/pair';
 import { ensureAugmentSchema, noteAugment } from './src/augmentlog';
@@ -236,6 +238,7 @@ export default function App() {
   const [ui, setUi] = React.useState<UiState>({ k: 'idle' });
   const [showCapture, setShowCapture] = React.useState(false);   // REQ-CAP-FUSED screen
   const [showSettings, setShowSettings] = React.useState(false); // Settings/Team screen
+  const [quota, setQuota] = React.useState<{ kind: QuotaKind; limit: number } | null>(null); // free-tier cap hit
   const [showFeed, setShowFeed] = React.useState(false);         // REQ-PM9 Company feed
   const [feedItems, setFeedItems] = React.useState<FeedItem[]>([]);
   const feedOpenRef = React.useRef(false);      // feed is showing → refresh() reloads it
@@ -2814,9 +2817,20 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     );
   }
 
+  // The free-tier cap modal. Defined once and mounted in each screen that can trip a
+  // cap (new-job, assign, and the main dashboard), since those are early returns and a
+  // RN <Modal> must sit in the mounted subtree. "See plans" clears the blocking sheets
+  // (captures stay committed) and opens Settings → Subscription.
+  const quotaEl = quota ? (
+    <QuotaModal kind={quota.kind} limit={quota.limit}
+      onClose={() => setQuota(null)}
+      onSeePlans={() => { setQuota(null); setNewJob(null); setAssign(null); void openSettings(); }} />
+  ) : null;
+
   if (newJob) {
     return (
       <View style={s.c}>
+        {quotaEl}
         <Text style={s.h}>EZchangeorder</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('job.newTitle')}</Text>
@@ -2835,6 +2849,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           <Pressable style={[s.confirmWide, !newJob.name.trim() && s.btnOff]}
             disabled={!newJob.name.trim()}
             onPress={async () => {
+              // FREE-TIER jobs cap (hadar 2026-07-25): stop before creating the
+              // N+1th job and show the plan modal. If we came from the assign flow,
+              // the captures stay committed and the sheet stays open for another job.
+              const jq = await checkJobs(db);
+              if (!jq.ok) { setQuota({ kind: 'jobs', limit: jq.limit }); return; }
               // Pin it to HERE. That is what makes resolution work later, and it
               // costs the user nothing: he is standing on the job as he creates it.
               const st = await stampNow();
@@ -3208,6 +3227,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     const mm = `${Math.floor(assign.secs / 60)}:${String(assign.secs % 60).padStart(2, '0')}`;
     return (
       <View style={s.assignC}>
+        {quotaEl}
         <View style={s.assignReceipt}>
           <Text style={s.assignSaved}>✓ {T('assign.saved')}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
@@ -3235,6 +3255,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               value={sendToId}
               onChange={(pr: SendToProject) => { setSendToId(pr.id); void fileAll(pr.id); }}
               onQuickAdd={async (o) => {
+                // FREE-TIER jobs cap: quick-add creates a NEW job too, so gate it
+                // before creating. Captures stay committed; the sheet stays open.
+                // quotaBlocked tells the card to show no form error — the modal does.
+                const jq = await checkJobs(db);
+                if (!jq.ok) { setQuota({ kind: 'jobs', limit: jq.limit }); return { ok: false, quotaBlocked: true }; }
                 // Name + phone, created implicitly at first send (R7). The walk files
                 // to it immediately — that is the whole point of quick-add.
                 const r = await quickAddDestination(db, {
@@ -3918,6 +3943,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     return (
       <View style={s.homeC}>
+        {quotaEl}
         {/* Header: title · new job (the ＋ opens the create-job screen, an early
             return, so it works from here). */}
         <View style={s.dashHdr}>
@@ -3998,6 +4024,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 <Pressable hitSlop={10}
                   style={{ minHeight: 44, paddingHorizontal: 10, justifyContent: 'center' }}
                   onPress={async () => {
+                    // Un-archiving re-consumes an active-job slot, so it faces the same
+                    // free-tier cap as creating one (review 2026-07-25: this was a bypass).
+                    const jq = await checkJobs(db);
+                    if (!jq.ok) { setQuota({ kind: 'jobs', limit: jq.limit }); return; }
                     const r = await setProjectStatus(connector.client, db, p.id, 'in_progress');
                     if (r.ok) { await refresh(); await loadArchived(); } else setFiled(statusErr(r.code));
                   }}>
@@ -4153,6 +4183,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const startCaptureJob = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
   return (
     <View style={s.c}>
+      {quotaEl}
       {/* Header: back · Job · bell (mockup 2026-07-23). Fixed above the scroll. */}
       <View style={s.dashHdr}>
         <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('common.back')}
