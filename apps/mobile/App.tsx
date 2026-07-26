@@ -4067,12 +4067,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       : e.status === 'declined' ? 'declined'
       : e.status === 'draft' ? 'draft'
       : e.questions > 0 ? 'needs' : 'waiting';
+    // Soft-tinted pill in the muted kit palette: colour + emoji + label (the mockup's
+    // Waiting/Needs you/Approved chips). Fill is a low-alpha tint of the status colour,
+    // text is the status colour at full strength — never colour alone.
     const stateColor: Record<string, { bg: string; fg: string; emoji: string; label: string }> = {
-      waiting:  { bg: '#FEF6E7', fg: '#B26A00', emoji: '⏳', label: T('act.chipWaiting') },
-      needs:    { bg: '#E8F0FE', fg: '#1A56DB', emoji: '💬', label: T('act.chipNeeds') },
-      approved: { bg: '#E9F6ED', fg: '#1A7F37', emoji: '✅', label: T('act.chipApproved') },
-      draft:    { bg: '#F1F2F4', fg: '#57606a', emoji: '📝', label: T('act.chipCreated') },
-      declined: { bg: '#FDECEC', fg: '#B42318', emoji: '✋', label: T('act.chipDeclined') },
+      waiting:  { bg: 'rgba(164,122,63,0.13)', fg: '#A47A3F', emoji: '⏳', label: T('act.chipWaiting') },
+      needs:    { bg: 'rgba(109,127,137,0.14)', fg: '#5E7079', emoji: '💬', label: T('act.chipNeeds') },
+      approved: { bg: '#E7ECDD',                fg: '#536B49', emoji: '✅', label: T('act.chipApproved') },
+      draft:    { bg: '#EFEBE3',                fg: '#5E666E', emoji: '📝', label: T('act.chipCreated') },
+      declined: { bg: 'rgba(139,81,72,0.13)',  fg: '#8B5148', emoji: '✋', label: T('act.chipDeclined') },
     };
     const tabLabel: Record<typeof activityTab, string> = {
       all: T('act.tabAll'), waiting: T('act.tabWaiting'),
@@ -5056,16 +5059,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
  *  not appear in change_order.status and never should: a status two writers can move
  *  is a status nobody can rely on (220_question_path). */
 function coChip(status: LedgerStatus): { label: string; bg: any; dark: boolean } {
+  // COLOUR + ICON + LABEL — never colour alone (kit status rule; the ICP is often
+  // colour-blind and reading in a second language, so the glyph and the word carry
+  // the state, colour only reinforces). Emoji is the app's icon layer (no SVG lib).
   switch (status) {
-    case 'approved':   return { label: T('co.chip.approved'),   bg: s.chipApproved, dark: false };
-    case 'sent':       return { label: T('co.chip.sent'),       bg: s.chipPending,  dark: true  };
+    case 'approved':   return { label: '✓ ' + T('co.chip.approved'),   bg: s.chipApproved, dark: false };
+    case 'sent':       return { label: '⏳ ' + T('co.chip.sent'),       bg: s.chipPending,  dark: true  };
     // Its own colour, not ink: 'superseded' already owns ink, and two statuses that
-    // look identical is the failure a status chip exists to prevent. Orange is this
-    // app's "act on this", which is exactly true here.
-    case 'discussing': return { label: T('co.chip.discussing'), bg: s.chipDiscussing, dark: false };
-    case 'declined':   return { label: T('co.chip.declined'),   bg: s.chipDeclined, dark: false };
-    case 'superseded': return { label: T('co.chip.superseded'), bg: s.chipRevised,  dark: false };
-    default:           return { label: T('co.chip.draft'),      bg: s.chipDraft,    dark: false };
+    // look identical is the failure a status chip exists to prevent.
+    case 'discussing': return { label: '💬 ' + T('co.chip.discussing'), bg: s.chipDiscussing, dark: false };
+    case 'declined':   return { label: '✕ ' + T('co.chip.declined'),   bg: s.chipDeclined, dark: false };
+    case 'superseded': return { label: '↻ ' + T('co.chip.superseded'), bg: s.chipRevised,  dark: false };
+    default:           return { label: '✎ ' + T('co.chip.draft'),      bg: s.chipDraft,    dark: false };
   }
 }
 
