@@ -6,6 +6,7 @@
  * belongs in how many workers you start, not in this file.
  */
 import { runOnce, serviceClient } from './worker.ts';
+import { drainNotifications } from './notifications.ts';
 
 const IDLE_MS = 5_000;
 const WORKER_ID = `${process.env.WORKER_ID ?? 'worker'}-${process.pid}`;
@@ -22,7 +23,12 @@ console.log(`[worker] ${WORKER_ID} started`);
 while (!stop) {
   try {
     const r = await runOnce(sb, WORKER_ID);
-    if (!r.claimed) { await new Promise((s) => setTimeout(s, IDLE_MS)); continue; }
+    if (!r.claimed) {
+      // Idle on jobs → drain any pending push notifications, then sleep.
+      try { const n = await drainNotifications(sb); if (n) console.log(`[worker] pushed ${n}`); }
+      catch (e: any) { console.error(`[worker] notify: ${e?.message ?? e}`); }
+      await new Promise((s) => setTimeout(s, IDLE_MS)); continue;
+    }
     console.log(`[worker] ${JSON.stringify(r)}`);
   } catch (e: any) {
     // Infrastructure, not a bad capture. Back off rather than spin.

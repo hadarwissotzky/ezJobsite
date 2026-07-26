@@ -87,3 +87,19 @@ Panel (database/mobile-UX/QA) found no blockers but several majors; fixed:
   lost-place pain). A cross-project ledger load is a separate record-screen change.
   (b) Bottom-nav promotion deferred — the prominent full-width row is the reviewer's
   stated minimum; a 5th nav slot is a broader nav change.
+
+### 2026-07-25 — Remote push (REQ-NOTIF1) review outcome
+
+Panel found a blocker + 3 majors; fixed:
+- **BLOCKER (fixed):** getExpoPushTokenAsync needs an EAS projectId or it throws and
+  push ships dark. Now read from EXPO_PUBLIC_EAS_PROJECT_ID and LOG when absent (no
+  silent swallow). **Needs from hadar:** run `eas init`, set EXPO_PUBLIC_EAS_PROJECT_ID
+  (or app.json extra.eas.projectId).
+- Concurrent workers double-sent (no atomic claim) → added claim_notifications RPC
+  (reserve-before-send under SKIP LOCKED, mirrors claim_job); at-most-once by design.
+- One bad token failed the whole batch + retried forever → the worker now parses Expo
+  per-ticket status, prunes DeviceNotRegistered tokens, and the claim caps attempts.
+- notify_on_open fired on EVERY open (spam) → now only the FIRST open per link.
+- **DEPLOY (logged):** apply 379; the WORKER (already needed for AI) drains the outbox
+  and sends via Expo (free, no key). Push is off until EAS is configured; everything
+  else works. pg_net is unavailable, which is why this is worker-drained, not a trigger→edge.

@@ -37,6 +37,7 @@ import { SettingsScreen } from './src/ui/settingsscreen';
 import { ensureOwnCompany } from './src/company';
 import { LABELS, labelHex } from './src/labels';
 import { companyFeed, type FeedItem } from './src/feed';
+import { registerPushToken } from './src/push';
 import { extraRecord, type ExtraRecord } from './src/record';
 import { DiscussionLog, ThreadScreen } from './src/ui/threadscreen';
 import { parseThreadLink, threadState, type ThreadMessage } from './src/discussion';
@@ -462,6 +463,22 @@ const openFeed = async () => {
   setShowFeed(true);
 };
 const closeFeed = () => { feedOpenRef.current = false; setShowFeed(false); };
+
+// REQ-NOTIF1 — tapping a push opens the referenced extra (data.changeOrderId).
+React.useEffect(() => {
+  let sub: { remove: () => void } | undefined;
+  void (async () => {
+    try {
+      const N = await import('expo-notifications');
+      sub = N.addNotificationResponseReceivedListener((resp: any) => {
+        const coId = resp?.notification?.request?.content?.data?.changeOrderId;
+        if (coId) void openRecord(String(coId));
+      });
+    } catch { /* notifications module unavailable — no-op */ }
+  })();
+  return () => { try { sub?.remove(); } catch { /* already gone */ } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 
 /**
  * R8 manual remind — ONE implementation for the ledger row and the record screen.
@@ -1701,6 +1718,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         setSession(s);
         if (s?.user?.id) {
           setOwner(s.user.id);
+          // REQ-NOTIF1 — register this device for remote push, best-effort.
+          void registerPushToken(connector.client, s.user.id);
           // connect() is fire-and-forget: offline is the NORMAL case for this
           // product, not an error, and PowerSync retries internally. Once per app
           // run -- a token refresh must not stack another connection.
