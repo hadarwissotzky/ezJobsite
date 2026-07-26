@@ -84,3 +84,18 @@ export async function signalFailed() {
 export async function signalArmed() {
   try { void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch { /* rule 4 */ }
 }
+
+/**
+ * Processing FINISHED — the extra is written up and ready to check. A felt "it's
+ * ready" cue, deliberately distinct from the save chime (which fires at capture-
+ * commit): a light double-impact, no sound, so a user who pocketed the phone during
+ * upload/AI still feels that it landed. Communication gap #3, 2026-07-26.
+ */
+export async function signalReady() {
+  try {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setTimeout(() => {
+      try { void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch { /* rule 4 */ }
+    }, 110);
+  } catch { /* rule 4 */ }
+}

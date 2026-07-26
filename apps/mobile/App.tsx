@@ -120,7 +120,7 @@ import { BarlowCondensed_600SemiBold, BarlowCondensed_700Bold } from '@expo-goog
 import { describeStamp, ensureLocationPermission, stampNow, type Stamp } from './src/stamp';
 import { addressFor } from './src/geocode';
 import { resolveJurisdiction } from './src/jurisdiction';
-import { initFeedback, signalArmed, signalFailed, signalSaved } from './src/feedback';
+import { initFeedback, signalArmed, signalFailed, signalSaved, signalReady } from './src/feedback';
 import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
 import { addParty, assignBoundary, drainScopeOutbox, ensurePartySchema, listBoundaries,
          listParties, nameBoundary } from './src/parties';
@@ -310,6 +310,16 @@ export default function App() {
     id: string; scope: string; amount_cents: number; status: string;
     project_id: string; pname: string; signed_by: string | null; created_at_ms: number }>>([]);
   const [recovered, setRecovered] = React.useState<{ cents: number; n: number }>({ cents: 0, n: 0 });
+  // The win: celebrate a fresh "yes" while the app is foreground (communication gap
+  // #1). `celebratedRef` is a watermark of extras already celebrated — null until the
+  // first refresh seeds it with history, so opening the app never replays old wins.
+  const [celebrate, setCelebrate] = React.useState<{ n: number; cents: number } | null>(null);
+  const celebratedRef = React.useRef<Set<string> | null>(null);
+  React.useEffect(() => {
+    if (!celebrate) return;
+    const tm = setTimeout(() => setCelebrate(null), 3800);  // auto-dismiss the win
+    return () => clearTimeout(tm);
+  }, [celebrate]);
   // The Home dashboard's extras, ACROSS every job (hadar, 2026-07-23 mockup): the
   // sent extras waiting on a client, each with who directed it, its job, and whether
   // the client has asked a question. `questions` is the same open-question count the
@@ -795,6 +805,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     await markLocalSent(db, c.id);
     if (to) await markApproverUsed(db, to.id);
     setSendPrep(null);
+    void signalSaved();  // felt confirmation the commitment was sent (gap #7)
     setSentLink({ url: re.url, shown: re.shownContent,
       // No amount for an EWA: it is stored with amount_cents = 0, so `c.amount` is
       // "$0.00" — and the EWA contract states NO price. Showing $0.00 misrepresents
@@ -900,6 +911,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                                name: to.name, role: to.role, atMs: sentAtMs });
     }
     setSendPrep(null);
+    void signalSaved();  // felt confirmation the commitment was sent (gap #7)
     setSentLink({ url: r.url, shown: r.shownContent,
       scope: c.scope, amount: c.amount,
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
@@ -1096,6 +1108,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // THE gate: uploaded + words down + AI has written title/tag/price (or, when
         // augmenting, just uploaded).
         if (ready) {
+          // Processing FINISHED — a felt "it's ready" cue (gap #3), so a user who
+          // pocketed the phone during upload/AI knows the extra is written up. Distinct
+          // from the save chime; the visual checkmarks already say it on screen.
+          void signalReady();
           // A beat so the checkmarks are SEEN — a flash reads as a glitch.
           await new Promise((r) => setTimeout(r, 900));
           if (!alive) return;
@@ -1363,6 +1379,24 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           `SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS n
              FROM change_order WHERE status = 'approved'`))[0];
         setRecovered(rec ?? { cents: 0, n: 0 });
+        // CELEBRATE THE YES (gap #1). Compare approved ids to what we've already
+        // celebrated; the first refresh only SEEDS the watermark (never announces
+        // history). A fresh approval fires the win overlay + the success haptic/chime.
+        {
+          const approvedNow = await db.getAll<{ id: string; amount_cents: number | null }>(
+            `SELECT id, amount_cents FROM change_order WHERE status = 'approved'`);
+          if (celebratedRef.current === null) {
+            celebratedRef.current = new Set(approvedNow.map((r) => r.id));
+          } else {
+            const fresh = approvedNow.filter((r) => !celebratedRef.current!.has(r.id));
+            if (fresh.length) {
+              fresh.forEach((r) => celebratedRef.current!.add(r.id));
+              const cents = fresh.reduce((n, r) => n + (r.amount_cents ?? 0), 0);
+              setCelebrate({ n: fresh.length, cents });
+              void signalSaved();  // the strongest success cue we have
+            }
+          }
+        }
         // The Home dashboard: every LIVE extra across all jobs (superseded ones are
         // history), newest first, with its open-question count. Drafts belong here
         // too — they are the creator's unfinished work, private until sent (hadar,
@@ -2828,10 +2862,28 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       onSeePlans={() => { setQuota(null); setNewJob(null); setAssign(null); void openSettings(); }} />
   ) : null;
 
+  // The win overlay (gap #1) — mounted in each early-return screen so it floats over
+  // whatever the user is looking at when a "yes" lands. Tap or wait to dismiss.
+  const celebrateEl = celebrate ? (
+    <Modal visible transparent animationType="fade" onRequestClose={() => setCelebrate(null)}>
+      <Pressable onPress={() => setCelebrate(null)}
+        style={{ flex: 1, backgroundColor: 'rgba(21,26,30,0.55)', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+        <View style={{ width: '100%', maxWidth: 360, backgroundColor: '#FFFDFC', borderRadius: 22, padding: 28, alignItems: 'center' }}>
+          <Text style={{ fontFamily: 'Barlow_700Bold', fontSize: 24, color: '#151A1E', textAlign: 'center', letterSpacing: -0.2 }}>{T('celebrate.title')}</Text>
+          <Text style={{ fontFamily: 'Barlow_700Bold', fontSize: 40, color: '#4E6243', marginTop: 12, letterSpacing: -0.8 }}>{money(celebrate.cents)}</Text>
+          <Text style={{ fontFamily: 'Barlow_400Regular', fontSize: 15, color: '#5E666E', marginTop: 2 }}>
+            {celebrate.n > 1 ? `${T('home.approvedN')} · ${celebrate.n}` : T('home.approvedN')}
+          </Text>
+        </View>
+      </Pressable>
+    </Modal>
+  ) : null;
+
   if (newJob) {
     return (
       <View style={s.c}>
         {quotaEl}
+        {celebrateEl}
         <Text style={s.h}>EZchangeorder</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('job.newTitle')}</Text>
@@ -3229,6 +3281,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     return (
       <View style={s.assignC}>
         {quotaEl}
+        {celebrateEl}
         <View style={s.assignReceipt}>
           <Text style={s.assignSaved}>✓ {T('assign.saved')}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
@@ -3719,6 +3772,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               {outstandingN === 0 ? T('home.awaitNone')
                 : T({ k: 'home.acrossN', p: { n: outstandingN } })}
             </Text>
+            {/* The money already won — the single most motivating number, was computed
+                and never shown (communication gap #2). */}
+            {recovered.n > 0 && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12,
+                backgroundColor: '#E7ECDD', borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 }}>
+                <Icon name="approved" size={15} color="#536B49" />
+                <Text style={{ fontFamily: 'Barlow_700Bold', fontSize: 14, color: '#536B49' }}>
+                  {T({ k: 'home.recoveredInline', p: { amount: money(recovered.cents) } })}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* CAPTURE FIRST — the trigger moment is "get this down before it slips",
@@ -3945,6 +4009,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     return (
       <View style={s.homeC}>
         {quotaEl}
+        {celebrateEl}
         {/* Header: title · new job (the ＋ opens the create-job screen, an early
             return, so it works from here). */}
         <View style={s.dashHdr}>
@@ -4188,6 +4253,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   return (
     <View style={s.c}>
       {quotaEl}
+      {celebrateEl}
       {/* Header: back · Job · bell (mockup 2026-07-23). Fixed above the scroll. */}
       <View style={s.dashHdr}>
         <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('common.back')}
