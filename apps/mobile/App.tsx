@@ -27,6 +27,7 @@ import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } fr
 import { photoCapture, pickFromLibrary, textCapture, voiceCapture } from './src/modality';
 import { checkJobs, type QuotaKind } from './src/quota';
 import { QuotaModal } from './src/ui/quotamodal';
+import { Icon } from './src/ui/icon';
 import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
 import { ensurePairSchema, linkPair } from './src/pair';
 import { ensureAugmentSchema, noteAugment } from './src/augmentlog';
@@ -4741,14 +4742,21 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               page, where send / finish / remind / delete / revise now live. A pill
               focuses one section; "See all" toggles that focus. */}
           {(() => {
-            const fg = { waiting: '#B26A00', needs: '#1A56DB', approved: '#1A7F37' } as const;
-            const label = { waiting: T('job.pillWaiting'), needs: T('job.pillNeeds'), approved: T('job.pillApproved') };
-            const card = (c: LedgerRow, bucket: 'waiting' | 'needs' | 'approved') => (
+            // Muted status pill (kit palette) with a line icon + word — colour never
+            // alone. Waiting = ochre clock, Needs you = slate reply, Approved = forest check.
+            const pill = {
+              waiting:  { color: '#A47A3F', bg: 'rgba(164,122,63,0.13)', icon: 'clock' as const,    label: T('job.pillWaiting') },
+              needs:    { color: '#5E7079', bg: 'rgba(109,127,137,0.14)', icon: 'reply' as const,    label: T('job.pillNeeds') },
+              approved: { color: '#536B49', bg: '#E7ECDD',                icon: 'approved' as const,  label: T('job.pillApproved') },
+            };
+            const card = (c: LedgerRow, bucket: 'waiting' | 'needs' | 'approved') => {
+              const p = pill[bucket];
+              return (
               <Pressable key={c.id} style={s.jxCard} onPress={() => { void openRecord(c.id); }}>
                 {c.photo_relpath
                   ? <Image source={{ uri: FS.documentDirectory + c.photo_relpath }}
                       style={s.jxThumb} resizeMode="cover" />
-                  : <View style={[s.jxThumb, s.coThumbEmpty]}><Text style={s.coThumbIcon}>🎙</Text></View>}
+                  : <View style={[s.jxThumb, s.coThumbEmpty]}><Icon name="microphone" size={24} color="#8A93A0" /></View>}
                 <View style={{ flex: 1 }}>
                   <Text style={s.jxName} numberOfLines={1}>{c.scope}</Text>
                   {c.extra_type && isExtraType(c.extra_type) && (
@@ -4756,11 +4764,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   )}
                   {c.amount_cents != null && <Text style={s.jxAmt}>{c.amount}</Text>}
                 </View>
-                <View style={[s.jxChip, { borderColor: fg[bucket] }]}>
-                  <Text style={[s.jxChipT, { color: fg[bucket] }]}>{label[bucket]}</Text>
+                <View style={[s.jxChip, { borderColor: p.color, backgroundColor: p.bg,
+                  flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+                  <Icon name={p.icon} size={12} color={p.color} />
+                  <Text style={[s.jxChipT, { color: p.color }]}>{p.label}</Text>
                 </View>
               </Pressable>
-            );
+              );
+            };
             const section = (labelKey: string, rows: LedgerRow[], bucket: 'waiting' | 'needs' | 'approved') => {
               if (rows.length === 0 || (jobFilter !== null && jobFilter !== bucket)) return null;
               return (
