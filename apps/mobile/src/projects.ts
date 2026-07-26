@@ -82,6 +82,7 @@ export type Project = {
   id: string; name: string; address: string | null;
   lat: number | null; lng: number | null; geofence_m: number;
   client_ref: string | null; status: string; last_used_ms: number | null;
+  label: string | null;  // REQ-PM14 color-label key, or null
 };
 
 /**
@@ -92,11 +93,18 @@ export async function listProjects(db: AbstractPowerSyncDatabase): Promise<Proje
   return db.getAll<Project>(
     `SELECT id, name, address, lat, lng,
             COALESCE(geofence_m, 150) AS geofence_m,
-            client_ref, COALESCE(status,'active') AS status, last_used_ms
+            client_ref, COALESCE(status,'active') AS status, last_used_ms, label
        FROM project
       WHERE COALESCE(status,'active') = 'active'
       ORDER BY COALESCE(last_used_ms, created_at_ms, 0) DESC`
   );
+}
+
+/** REQ-PM14 — set/clear a project's color label. Local write; PowerSync syncs it. */
+export async function setProjectLabel(
+  db: AbstractPowerSyncDatabase, projectId: string, label: string | null
+): Promise<void> {
+  await db.execute(`UPDATE project SET label = ? WHERE id = ?`, [label, projectId]);
 }
 
 /**

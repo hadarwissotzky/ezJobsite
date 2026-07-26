@@ -45,6 +45,12 @@ const FATAL_PG_CODES = new Set([
   '23502', // not_null_violation
   '42703', // undefined_column   <- client sending a field the server does not have
   '42P01', // undefined_table
+  // PostgREST's OWN column-cache miss. When a client ships a column (e.g. project
+  // .label from 377) before the migration is applied, PostgREST rejects with
+  // PGRST204 and NEVER reaches Postgres, so the 42703 above is never surfaced. Left
+  // out, PGRST204 falls through to `throw` and STALLS the whole upload queue
+  // silently (review 2026-07-25, database lens). Discard-with-evidence instead.
+  'PGRST204', // column not in PostgREST schema cache (client/server schema skew)
 ]);
 
 /**

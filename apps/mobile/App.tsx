@@ -35,6 +35,7 @@ import { ReviewScreen } from './src/ui/reviewscreen';
 import { RecordScreen } from './src/ui/recordscreen';
 import { SettingsScreen } from './src/ui/settingsscreen';
 import { ensureOwnCompany } from './src/company';
+import { LABELS, labelHex } from './src/labels';
 import { extraRecord, type ExtraRecord } from './src/record';
 import { DiscussionLog, ThreadScreen } from './src/ui/threadscreen';
 import { parseThreadLink, threadState, type ThreadMessage } from './src/discussion';
@@ -127,7 +128,7 @@ import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
          tagMap, tagsFor } from './src/tags';
 import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
          INBOX_ID, listProjects, resolveProject, touchProject, distanceM, effectiveProject,
-         type Project } from './src/projects';
+         setProjectLabel, type Project } from './src/projects';
 import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
          getCellularConsent, getTermsAccepted, setCellularConsent,
          setTermsAccepted } from './src/consent';
@@ -292,6 +293,7 @@ export default function App() {
   const [menuOpen, setMenuOpen] = React.useState(false);
   // The Job screen's pill filter (hadar, 2026-07-23 mockup): null = all extras.
   const [jobFilter, setJobFilter] = React.useState<null | 'needs' | 'waiting' | 'approved'>(null);
+  const [labelFilter, setLabelFilter] = React.useState<string | null>(null); // REQ-PM14 Jobs-list filter
   const [waiting, setWaiting] = React.useState<Array<{
     id: string; scope: string; amount_cents: number; status: string;
     project_id: string; pname: string; signed_by: string | null; created_at_ms: number }>>([]);
@@ -3741,6 +3743,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               {shown.map((p) => (
                 <Pressable key={p.id} style={s.jobItem}
                   onPress={() => { setMenuOpen(false); open(p.id); }}>
+                  {labelHex(p.label) && (
+                    <View style={{ width: 10, height: 10, borderRadius: 5, marginRight: 10,
+                      backgroundColor: labelHex(p.label) as string }} />
+                  )}
                   <View style={{ flex: 1 }}>
                     <Text style={s.jobItemName} numberOfLines={1}>{p.name}</Text>
                     <Text style={s.jobItemMeta} numberOfLines={1}>
@@ -3790,10 +3796,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   if (nav === 'jobs') {
     const now = Date.now();
     const q = search.trim().toLowerCase();
+    const usedLabels = LABELS.filter((l) => cards.some((p) => p.label === l.key));
+    // The filter's controls live inside the usedLabels block, which unmounts when a
+    // color stops being used — so a raw labelFilter could freeze the list empty with
+    // no reset (review 2026-07-25, QA lens). Ignore a filter whose color is gone.
+    const activeLabel = usedLabels.some((l) => l.key === labelFilter) ? labelFilter : null;
     const shown = cards
       .filter((p) => p.id !== INBOX_ID)
       .filter((p) => !q || p.name.toLowerCase().includes(q) ||
-                     (p.address ?? '').toLowerCase().includes(q));
+                     (p.address ?? '').toLowerCase().includes(q))
+      .filter((p) => !activeLabel || p.label === activeLabel);
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     return (
       <View style={s.homeC}>
@@ -3813,8 +3825,38 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <TextInput style={s.searchIn} value={search} onChangeText={setSearch}
               placeholder={T('home.search')} placeholderTextColor="#8c959f" />
           )}
+          {/* REQ-PM14 — filter by color label. Chips carry the color NAME (not color
+              alone — color-blind ICP) and are full-height taps (gloves, mandate #3). */}
+          {usedLabels.length > 0 && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 10, flexWrap: 'wrap' }}>
+              <Pressable onPress={() => setLabelFilter(null)} hitSlop={6}
+                style={{ minHeight: 40, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 20, borderWidth: 1,
+                  borderColor: activeLabel === null ? '#0D0F12' : '#E4E5E1',
+                  backgroundColor: activeLabel === null ? '#0D0F12' : '#fff' }}>
+                <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13,
+                  color: activeLabel === null ? '#fff' : '#5C6570' }}>{T('label.all')}</Text>
+              </Pressable>
+              {usedLabels.map((l) => {
+                const on = activeLabel === l.key;
+                return (
+                  <Pressable key={l.key} onPress={() => setLabelFilter(on ? null : l.key)} hitSlop={6}
+                    style={{ minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 7,
+                      paddingHorizontal: 12, borderRadius: 20, borderWidth: on ? 2 : 1,
+                      borderColor: on ? '#0D0F12' : '#E4E5E1', backgroundColor: '#fff' }}>
+                    <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: l.hex }} />
+                    <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13,
+                      color: on ? '#0D0F12' : '#5C6570' }}>{T(('label.' + l.key) as any)}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
           {shown.map((p) => (
             <Pressable key={p.id} style={s.jobItem} onPress={() => open(p.id)}>
+              {labelHex(p.label) && (
+                <View style={{ width: 10, height: 10, borderRadius: 5, marginRight: 10,
+                  backgroundColor: labelHex(p.label) as string }} />
+              )}
               <View style={{ flex: 1 }}>
                 <Text style={s.jobItemName} numberOfLines={1}>{p.name}</Text>
                 <Text style={s.jobItemMeta} numberOfLines={1}>
@@ -4002,6 +4044,46 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             <Text style={s.jobCardSub}>{T({ k: 'job.acrossReq', p: { n: coRows.length } })}</Text>
           </View>
         </Pressable>
+
+        {/* REQ-PM14 — a color label for this job. Full-size taps (gloves, mandate #3);
+            the chosen color shows a ✓ (not ring-color alone — color-blind ICP) and its
+            NAME reads back; a dedicated ✕ swatch clears (never a hidden re-tap). */}
+        {jobProj && (
+          <View style={{ marginTop: 4, marginBottom: 2 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#5C6570', marginRight: 6 }}>
+                {T('label.title')}
+              </Text>
+              {/* Clear */}
+              <Pressable hitSlop={6}
+                onPress={async () => { await setProjectLabel(db, jobProj.id, null); await refresh(); }}
+                style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 26, height: 26, borderRadius: 13, borderWidth: 1.5,
+                  borderColor: jobProj.label ? '#E4E5E1' : '#0D0F12', alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ fontSize: 13, color: jobProj.label ? '#8c959f' : '#0D0F12' }}>✕</Text>
+                </View>
+              </Pressable>
+              {LABELS.map((l) => {
+                const on = jobProj.label === l.key;
+                return (
+                  <Pressable key={l.key} hitSlop={6}
+                    onPress={async () => { await setProjectLabel(db, jobProj.id, on ? null : l.key); await refresh(); }}
+                    style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
+                    <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: l.hex,
+                      borderWidth: on ? 2 : 0, borderColor: '#0D0F12', alignItems: 'center', justifyContent: 'center' }}>
+                      {on && <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>✓</Text>}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {labelHex(jobProj.label) && (
+              <Text style={{ fontFamily: 'Barlow_400Regular', fontSize: 12, color: '#5C6570', marginLeft: 2, marginTop: 2 }}>
+                {T(('label.' + jobProj.label) as any)}
+              </Text>
+            )}
+          </View>
+        )}
 
         {/* RECORD EXTRA WORK — the one capture entry. */}
         <Pressable style={[s.ctaCard, { marginHorizontal: 0 },

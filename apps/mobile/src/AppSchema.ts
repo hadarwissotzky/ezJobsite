@@ -39,6 +39,8 @@ const project = new Table({
   // The tenant this project belongs to (376_company_membership). Company members
   // read it; the sync rules use it to decide what downloads.
   company_id: column.text,
+  // A single user-applied color label (377; REQ-PM14). Color key or null.
+  label: column.text,
 });
 
 // The COMPANY tenant + its roster (376). Both sync DOWN (read-only on the client;
