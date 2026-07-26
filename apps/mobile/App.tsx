@@ -431,7 +431,7 @@ const closeRecord = () => {
 const openSettings = async () => {
   const p = (await getProfile(db)) ?? { name: '', isSolo: true, company: null, trade: null };
   if (!p.isSolo && (p.company ?? '').trim()) {
-    try { await ensureOwnCompany(connector.client, (p.company as string).trim()); await refresh(); }
+    try { await ensureOwnCompany(connector.client, (p.company as string).trim(), p.name); await refresh(); }
     catch { /* offline — the promote retries next time Settings opens */ }
   }
   setSettingsProfile(p);

@@ -86,7 +86,7 @@ export function SettingsScreen(props: {
     const tok = joinToken.trim();
     if (!tok) return;
     setBusy(true); setNote(null);
-    const r = await acceptInvite(supabase, tok);
+    const r = await acceptInvite(supabase, tok, props.profile.name);
     setBusy(false);
     if (!r.ok) { setNote(t('set.joinFailed') + ' ' + r.reason); return; }
     setJoinToken('');
@@ -164,7 +164,8 @@ export function SettingsScreen(props: {
                   </View>
                   <View>
                     <Text style={{ fontFamily: F.bodySemi, fontSize: 14.5, color: C.ink }}>
-                      {m.isMe ? t('set.you') : t('set.teammate')}
+                      {m.name ? (m.isMe ? `${m.name} (${t('set.you')})` : m.name)
+                        : (m.isMe ? t('set.you') : t('set.teammate'))}
                     </Text>
                     <Text style={{ ...TH.bodySteel, fontSize: 12 }}>{roleLabel(m.role)}</Text>
                   </View>

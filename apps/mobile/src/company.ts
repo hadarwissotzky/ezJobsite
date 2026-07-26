@@ -8,9 +8,9 @@
  * auth.uid(); the client never writes company_member directly (the sync tables are
  * read-only mirrors). This module is only the door-knocking; the server decides.
  *
- * NAMES. company_member carries user_id (a uuid), not a display name — there is no
- * server-side name source yet. So the roster shows role + "you"/"teammate"; putting
- * real names on the roster is a follow-up (a synced display name on join).
+ * NAMES. company_member carries a display_name, set from the member's profile name at
+ * create/join and synced down, so the roster reads by name (falling back to "you"/
+ * "teammate" only when a member has no name yet).
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { SupabaseClient } from '@supabase/supabase-js';
@@ -23,6 +23,7 @@ export type Member = {
   userId: string;
   role: MemberRole;
   status: 'active' | 'revoked';
+  name: string | null;
   isMe: boolean;
 };
 
@@ -52,13 +53,14 @@ export async function listMembers(
   db: AbstractPowerSyncDatabase, companyId: string, userId: string
 ): Promise<Member[]> {
   const rows = await db.getAll<{
-    id: string; company_id: string; user_id: string; role: string; status: string;
-  }>(`SELECT id, company_id, user_id, role, status FROM company_member
+    id: string; company_id: string; user_id: string; role: string; status: string; display_name: string | null;
+  }>(`SELECT id, company_id, user_id, role, status, display_name FROM company_member
         WHERE company_id = ? AND status = 'active'
         ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'crew' THEN 1 ELSE 2 END`, [companyId]);
   return rows.map((r) => ({
     memberId: r.id, companyId: r.company_id, userId: r.user_id,
-    role: r.role as MemberRole, status: r.status as 'active' | 'revoked', isMe: r.user_id === userId,
+    role: r.role as MemberRole, status: r.status as 'active' | 'revoked',
+    name: r.display_name, isMe: r.user_id === userId,
   }));
 }
 
@@ -68,10 +70,12 @@ export async function listMembers(
  * setup. `name` is the company display name from the profile.
  */
 export async function ensureOwnCompany(
-  supabase: SupabaseClient, name: string
+  supabase: SupabaseClient, name: string, memberName?: string | null
 ): Promise<{ ok: true; companyId: string } | { ok: false; reason: string }> {
   const id = `cmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  const { data, error } = await supabase.rpc('create_company', { p_id: id, p_name: name });
+  const { data, error } = await supabase.rpc('create_company', {
+    p_id: id, p_name: name, p_display_name: memberName || null,
+  });
   if (error) return { ok: false, reason: error.message };
   return { ok: true, companyId: (data as string) ?? id };
 }
@@ -98,12 +102,14 @@ export async function createInvite(
 
 /** Accept an invite (link tap or typed token) → join the company. */
 export async function acceptInvite(
-  supabase: SupabaseClient, token: string
+  supabase: SupabaseClient, token: string, memberName?: string | null
 ): Promise<{ ok: true; companyId: string; role: MemberRole; companyName: string }
          | { ok: false; reason: string }> {
   const clean = token.trim();
   if (!clean) return { ok: false, reason: 'no token' };
-  const { data, error } = await supabase.rpc('accept_company_invite', { p_token: clean });
+  const { data, error } = await supabase.rpc('accept_company_invite', {
+    p_token: clean, p_display_name: memberName || null,
+  });
   if (error) return { ok: false, reason: error.message };
   return {
     ok: true, companyId: (data as any)?.company_id, role: (data as any)?.role,

@@ -59,6 +59,7 @@ const company_member = new Table(
     role: column.text,     // owner · crew · sub
     status: column.text,   // active · revoked
     invited_by: column.text,
+    display_name: column.text,
     joined_at: column.text,
   },
   { indexes: { by_company: ['company_id'] } }

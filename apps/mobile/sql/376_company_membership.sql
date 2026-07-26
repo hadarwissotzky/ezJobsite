@@ -29,6 +29,7 @@ create table if not exists public.company_member (
   role        text not null default 'crew' check (role in ('owner','crew','sub')),
   status      text not null default 'active'  check (status in ('active','revoked')),
   invited_by  uuid,
+  display_name text,            -- the member's name, so the roster reads by name
   joined_at   timestamptz not null default now(),
   unique (company_id, user_id)
 );
@@ -140,16 +141,21 @@ create policy co_company_read on public.change_order for select to authenticated
 
 -- ── 5. RPCs — the only door to membership. SECURITY DEFINER + auth.uid() checks
 -- Create the caller's OWN company (owner membership), idempotent per owner.
-create or replace function public.create_company(p_id text, p_name text)
+create or replace function public.create_company(p_id text, p_name text, p_display_name text default null)
 returns text language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid(); existing text;
 begin
   if uid is null then raise exception 'not authenticated' using errcode = '42501'; end if;
   select id into existing from public.company where owner_id = uid limit 1;
-  if existing is not null then return existing; end if;
+  if existing is not null then
+    if p_display_name is not null then
+      update public.company_member set display_name = p_display_name where company_id = existing and user_id = uid;
+    end if;
+    return existing;
+  end if;
   insert into public.company (id, name, owner_id) values (p_id, p_name, uid);
-  insert into public.company_member (id, company_id, user_id, role, status)
-    values ('cm-'||left(md5(p_id||uid::text),16), p_id, uid, 'owner', 'active')
+  insert into public.company_member (id, company_id, user_id, role, status, display_name)
+    values ('cm-'||left(md5(p_id||uid::text),16), p_id, uid, 'owner', 'active', p_display_name)
     on conflict (company_id, user_id) do nothing;
   return p_id;
 end $$;
@@ -175,7 +181,7 @@ revoke all on function public.create_company_invite(text,text,int) from public, 
 grant execute on function public.create_company_invite(text,text,int) to authenticated;
 
 -- Anyone authenticated accepts an invite by token → becomes a member.
-create or replace function public.accept_company_invite(p_token text)
+create or replace function public.accept_company_invite(p_token text, p_display_name text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid(); inv public.company_invite;
 begin
@@ -183,16 +189,17 @@ begin
   select * into inv from public.company_invite where token = p_token;
   if not found then raise exception 'invite not found' using errcode = 'P0002'; end if;
   if inv.expires_at < now() then raise exception 'invite expired' using errcode = '22023'; end if;
-  insert into public.company_member (id, company_id, user_id, role, status, invited_by)
-    values ('cm-'||left(md5(inv.company_id||uid::text),16), inv.company_id, uid, inv.role, 'active', inv.created_by)
-    on conflict (company_id, user_id) do update set status = 'active';
+  insert into public.company_member (id, company_id, user_id, role, status, invited_by, display_name)
+    values ('cm-'||left(md5(inv.company_id||uid::text),16), inv.company_id, uid, inv.role, 'active', inv.created_by, p_display_name)
+    on conflict (company_id, user_id) do update set status = 'active',
+      display_name = coalesce(excluded.display_name, public.company_member.display_name);
   update public.company_invite set accepted_by = uid, accepted_at = now()
     where id = inv.id and accepted_by is null;
   return jsonb_build_object('company_id', inv.company_id, 'role', inv.role,
                             'company_name', (select name from public.company where id = inv.company_id));
 end $$;
-revoke all on function public.accept_company_invite(text) from public, anon;
-grant execute on function public.accept_company_invite(text) to authenticated;
+revoke all on function public.accept_company_invite(text, text) from public, anon;
+grant execute on function public.accept_company_invite(text, text) to authenticated;
 
 -- Owner revokes a member (REQ-MEMBER-5) — status flips; sync rules then purge scope.
 create or replace function public.revoke_company_member(p_company_id text, p_user_id uuid)
@@ -208,6 +215,7 @@ end $$;
 revoke all on function public.revoke_company_member(text,uuid) from public, anon;
 grant execute on function public.revoke_company_member(text,uuid) to authenticated;
 
-grant execute on function public.create_company(text,text) to authenticated;
+revoke all on function public.create_company(text,text,text) from public, anon;
+grant execute on function public.create_company(text,text,text) to authenticated;
 grant execute on function public.is_company_member(text) to authenticated;
 grant execute on function public.is_project_visible(text) to authenticated;
