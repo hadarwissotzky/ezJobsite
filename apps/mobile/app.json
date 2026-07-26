@@ -63,6 +63,12 @@
           "speechRecognitionPermission": "EZjobsite turns what you said into text on this phone, so your notes fill themselves in.",
           "microphonePermission": "EZjobsite records what you say on site so nothing gets lost."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#4E6243"
+        }
       ]
     ]
   }

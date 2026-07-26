@@ -6,7 +6,7 @@ import { PowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import * as Contacts from 'expo-contacts';
 import React from 'react';
-import { Dimensions, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Dimensions, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
 import { ago, projectCards, staticMapUrl, type ProjectCard } from './src/ui/home';
@@ -229,6 +229,29 @@ type UiState =
   | { k: 'saved'; id: string }
   | { k: 'refused'; why: Msg | string };
 
+/**
+ * Notification DISPLAY config (2026-07-26). Two things the app needs to actually SHOW
+ * a notification, both missing before: a foreground handler (so a notification appears
+ * even with the app open — otherwise iOS suppresses it), and an Android channel
+ * (Android 8+ silently drops notifications posted to no channel). Best-effort: on a
+ * platform without notifications this no-ops and the app is unaffected.
+ */
+async function configureNotifications(): Promise<void> {
+  try {
+    const N = await import('expo-notifications');
+    N.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: true,
+      }),
+    });
+    if (Platform.OS === 'android') {
+      await N.setNotificationChannelAsync('default', {
+        name: 'Updates', importance: N.AndroidImportance.DEFAULT,
+      });
+    }
+  } catch { /* notifications unavailable — the app works without them */ }
+}
+
 export default function App() {
   // The design language (prototype): condensed display for things you RECOGNISE,
   // humanist body for things you READ. Gated below so text never flashes unstyled.
@@ -360,6 +383,23 @@ export default function App() {
     // The recipient's phone, when known — enables one-tap automatic SMS (Twilio via
     // the send-sms Edge Function). Null falls back to the manual OS share.
     phone?: string | null } | null>(null);
+  // First send is the natural moment to ask for notifications ("we'll tell you when
+  // they respond") — onboarding never asked (audit gap 1c). iOS shows the OS dialog
+  // once ever; after that this no-ops. If granted, mint the push token immediately.
+  const askedNotifyRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!sentLink || askedNotifyRef.current) return;
+    askedNotifyRef.current = true;
+    void (async () => {
+      try {
+        const N = await import('expo-notifications');
+        if ((await N.getPermissionsAsync()).status === 'undetermined') {
+          await N.requestPermissionsAsync();
+          await registerPushToken(connector.client, OWNER);
+        }
+      } catch { /* best-effort — mandate #7, push is opportunistic */ }
+    })();
+  }, [sentLink]);
   // After a send/finish that BEGAN on an extra's detail page, return to that page
   // (hadar, 2026-07-24: "after the send button ... take me back to the extra detail
   // page even if it is a draft"). The change-order id to re-open, or null.
@@ -1733,6 +1773,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       setFirstRun(await isFirstRun(db));
       setHasProfile(await hasProfileFn(db));
       await initFeedback();
+      void configureNotifications();  // display handler + Android channel (2026-07-26)
 
       // THE GATE. If the write connection cannot promise durability we do not
       // arm the recorder at all. Refusing loudly beats saying "saved" and lying.
