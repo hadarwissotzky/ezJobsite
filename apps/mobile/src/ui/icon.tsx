@@ -10,14 +10,12 @@
  * are optically fine at 16/20/24; review at 32 before shipping large.
  */
 import React from 'react';
+import { Image } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import { C } from './theme';
 
 const ICONS = {
-  camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M8 6l1.3-2h5.4L16 6"/><circle cx="12" cy="13" r="4"/></svg>',
-  microphone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21M8 21h8"/></svg>',
-  photo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M4 18l5-5 4 4 3-3 5 4"/></svg>',
-  video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="13" height="14" rx="3"/><path d="M16 10l5-3v10l-5-3z"/></svg>',
+  video:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="13" height="14" rx="3"/><path d="M16 10l5-3v10l-5-3z"/></svg>',
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/></svg>',
   waiting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>',
   approved: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l2.5 2.5L16 9"/></svg>',
@@ -27,8 +25,7 @@ const ICONS = {
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L9 15"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>',
   remind: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
   people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20c0-4 2.5-6 6-6s6 2 6 6M14 15c3.5 0 6 1.5 7 5"/></svg>',
-  mapPin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-6.2 7-13a7 7 0 10-14 0c0 6.8 7 13 7 13z"/><circle cx="12" cy="9" r="2.5"/></svg>',
-  home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></svg>',
+  home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></svg>',
   job: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M9 5V3h6v2M8 10h8M8 14h5"/></svg>',
   extra: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/></svg>',
   offline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8A15 15 0 0122 8.8M5 12.5a10 10 0 0114 0M8.5 16a5 5 0 017 0"/><path d="M3 3l18 18"/></svg>',
@@ -37,12 +34,73 @@ const ICONS = {
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4.5-1 10-10-3.5-3.5-10 10z"/><path d="M13.5 6.5l3.5 3.5"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
   history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 108-8"/><path d="M4 4v6h6"/><path d="M12 7v5l3 2"/></svg>',
+
+  /** Resume. The ONE glyph with no kit artwork — hadar's set has pause but no play
+   *  (the mockup never shows the resumed state). Traced to match the kit's weight;
+   *  replace it if a real one ever ships. */
+  play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5l12 7.5-12 7.5z"/></svg>',
 } as const;
 
-export type IconName = keyof typeof ICONS;
+/**
+ * The kit artwork (hadar, 2026-07-27). These PNGs WIN over any same-named SVG above —
+ * they are the approved drawings, the SVGs were only ever my transcriptions.
+ *
+ * They are pre-processed, not the raw drops in `assets/`: the originals are 1024×1536
+ * with the glyph in a small centred island, so rendering one in a 22px slot put a ~10px
+ * mark in the middle of a mostly-empty box. `assets/icons/*` are the same drawings
+ * cropped to the glyph + 9% breathing room and downscaled to 128², with the background-
+ * removal residue stripped (icon-flash.png in particular carried faint alpha across the
+ * whole canvas). The raw drops are kept as the source of truth — regenerate, don't edit.
+ */
+const KIT = {
+  camera: require('../../assets/icons/camera.png'),
+  microphone: require('../../assets/icons/mic.png'),
+  photo: require('../../assets/icons/photo.png'),
+  mapPin: require('../../assets/icons/location.png'),
+  flash: require('../../assets/icons/flash.png'),
+  cameraFlip: require('../../assets/icons/flip.png'),
+  close: require('../../assets/icons/close.png'),
+  lock: require('../../assets/icons/lock.png'),
+  pause: require('../../assets/icons/pause.png'),
+  // The transition screen's set (hadar, 2026-07-27). PRE-COLOURED sage, unlike the
+  // capture set — see NEVER_TINT below. `arrowCircle` draws its own ring, so it is
+  // used bare rather than dropped inside a filled disc.
+  hardhat: require('../../assets/icons/hardhat.png'),
+  shield: require('../../assets/icons/shield.png'),
+  arrowCircle: require('../../assets/icons/arrow.png'),
+  checklist: require('../../assets/icons/checklist.png'),
+} as const;
+
+/**
+ * Icons whose OWN colour is the artwork. `photo` is the only one: it is a painted
+ * illustration (olive hills, ochre sun, cream frames), and running `tintColor` over it
+ * flattens the whole thing to a single silhouette. Never tint it — pass it a `color`
+ * and it is silently ignored rather than wrecked.
+ */
+const NEVER_TINT = new Set([
+  'photo',
+  // The transition set arrives already coloured in the kit's sage (#80917d–#a4af94),
+  // lighter than C.brand on purpose. Tinting would both darken them and, in the hard
+  // hat's case, flood its cream shell with the stroke colour — verified 2026-07-27,
+  // the tinted hat renders as a solid blob. They are artwork, not glyphs.
+  'hardhat', 'shield', 'arrowCircle', 'checklist',
+]);
+
+export type IconName = keyof typeof ICONS | keyof typeof KIT;
 
 export function Icon({ name, size = 20, color = C.ink }: {
   name: IconName; size?: number; color?: string;
 }) {
-  return <SvgXml xml={ICONS[name]} width={size} height={size} color={color} />;
+  const art = (KIT as Record<string, number | undefined>)[name];
+  if (art != null) {
+    return (
+      <Image
+        source={art}
+        style={[{ width: size, height: size },
+          NEVER_TINT.has(name as string) ? null : { tintColor: color }]}
+        resizeMode="contain"
+      />
+    );
+  }
+  return <SvgXml xml={ICONS[name as keyof typeof ICONS]} width={size} height={size} color={color} />;
 }

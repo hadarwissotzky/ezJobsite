@@ -30,6 +30,9 @@ import { QuotaModal } from './src/ui/quotamodal';
 import { PaywallScreen } from './src/ui/paywallscreen';
 import { type PlanId } from './src/plans';
 import { Icon } from './src/ui/icon';
+import { Svg, Circle } from 'react-native-svg';
+import { C, F } from './src/ui/theme';
+import { radii, shadows } from './src/ui/tokens';
 import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
 import { ensurePairSchema, linkPair } from './src/pair';
 import { ensureAugmentSchema, noteAugment } from './src/augmentlog';
@@ -1158,11 +1161,23 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         let lastError: string | null = null;
         if (!up && tick >= 2) {
           try {
-            const er = (await db.getAll<{ last_error_code: string | null; last_error_text: string | null }>(
-              `SELECT last_error_code, last_error_text FROM capture_outbox
+            // json_extract of the DESTINATION, not just the error (hadar, 2026-07-27).
+            // A bare "23503 violates capture_project_id_fkey" cost a full afternoon of
+            // guessing WHICH project was missing; the answer was in the payload the
+            // whole time. An FK error that names the row it could not find is a
+            // one-line diagnosis instead of a database session.
+            const er = (await db.getAll<{ last_error_code: string | null;
+                                          last_error_text: string | null;
+                                          project_id: string | null }>(
+              `SELECT last_error_code, last_error_text,
+                      json_extract(payload_json, '$.project_id') AS project_id
+                 FROM capture_outbox
                 WHERE capture_id IN (${marks}) AND last_error_text IS NOT NULL
                 ORDER BY last_attempt_at_ms DESC LIMIT 1`, transition.ids))[0];
-            if (er) lastError = [er.last_error_code, er.last_error_text].filter(Boolean).join(': ');
+            if (er) {
+              lastError = [er.last_error_code, er.last_error_text].filter(Boolean).join(': ');
+              if (er.project_id) lastError += `  [job: ${er.project_id}]`;
+            }
           } catch { /* diagnostic only */ }
         }
         setTransition((t) => t && { ...t, uploaded: up, transcribed: tr,
@@ -3249,88 +3264,145 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     );
   }
 
-  // FLOW step 1.5 — the transition after capture. Same dark world as the
-  // capture screen: this is the SAME workflow breathing, not a new place.
-  // Every stage row tracks a real signal; the offline branch tells the truth
-  // and parks at home with everything safe (mandate #1's whole point).
+  // FLOW step 1.5 — the transition after capture, themed to the design system
+  // (hadar mockup, 2026-07-27). The calm face is the mockup's: a progress ring, one
+  // reassuring line, and what happens next.
+  //
+  // WHAT THE MOCKUP DOES NOT SHOW, AND WHY IT IS STILL HERE: the mockup is a single
+  // "working on it" state with nowhere for a failure to appear. The step rows, the
+  // upload bar and the raw error underneath are how a backup that has STALLED admits
+  // it instead of spinning forever — that surface is exactly how the 23503 project-FK
+  // bug was caught (2026-07-27). Mandate #1 is a promise about honesty, not just about
+  // bytes: a screen that always looks like it is working is a screen that can lie.
+  // Decision: mockup look on the happy path, full detail retained underneath, and the
+  // offline/stalled/blocked branch still takes over with plain words + a Done button.
   if (transition) {
     const t = transition;
-    const row = (done: boolean, doingKey: string, doneKey: string) => (
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 18 }}>
-        <Text style={{ fontSize: 22, color: done ? '#2da44e' : '#8c959f' }}>
-          {done ? '✓' : '…'}
-        </Text>
-        <Text style={{ fontSize: 17, color: done ? '#dafbe1' : '#c9d1d9' }}>
-          {T(done ? doneKey : doingKey)}
-        </Text>
-      </View>
-    );
+    // Every row tracks a REAL signal. Transcription only exists when there is an
+    // anchor capture; the AI pass belongs to a NEW extra, so an augment does not
+    // claim a "details sorted" step it never ran.
+    const steps: { done: boolean; doing: string; doneKey: string }[] = [
+      { done: true, doing: 'cap.transSaved', doneKey: 'cap.transSaved' },
+      { done: t.uploaded, doing: 'cap.transUpload', doneKey: 'cap.transUploaded' },
+      ...(t.anchorCaptureId !== null
+        ? [{ done: t.transcribed, doing: 'cap.transStt', doneKey: 'cap.transSttDone' }] : []),
+      ...(!t.isAugment
+        ? [{ done: t.analyzed, doing: 'cap.transAnalyze', doneKey: 'cap.transAnalyzed' }] : []),
+    ];
+    const doneCount = steps.filter((x) => x.done).length;
+    const pct = doneCount / steps.length;
+    const current = steps.find((x) => !x.done);
+    const trouble = t.offline || t.stalled || t.blocked;
+
+    // The ring. Drawn rather than animated: this screen is read at a glance by
+    // someone who wants to know it is working, not watched.
+    const RING = 148, SW = 12, RAD = (RING - SW) / 2, CIRC = 2 * Math.PI * RAD;
+
     return (
-      <View style={{ flex: 1, backgroundColor: '#151A1E', paddingTop: 90, paddingHorizontal: 28 }}>
-        <Text style={{ color: '#fff', fontSize: 26, fontWeight: '700' }}>
-          {T(t.isAugment ? 'cap.transTitleAug' : 'cap.transTitle')}
-        </Text>
-        {!(t.offline || t.stalled || t.blocked) && (
-          <Text style={{ color: '#8c959f', fontSize: 15, lineHeight: 21, marginTop: 8 }}>
-            {T('cap.transSub')}
+      <View style={s.trScreen}>
+        <ScrollView contentContainerStyle={s.trScroll} showsVerticalScrollIndicator={false}>
+          {/* The mockup's background line-art (house frame, tape measure) is still
+              omitted — only the four foreground icons were supplied. */}
+          <Icon name="hardhat" size={62} />
+
+          <Text style={s.trTitle}>
+            {T(t.isAugment ? 'cap.transTitleAug' : 'cap.transTitle')}
           </Text>
-        )}
-        <View style={{ marginTop: 18 }}>
-          {row(true, 'cap.transSaved', 'cap.transSaved')}
-          {row(t.uploaded, 'cap.transUpload', 'cap.transUploaded')}
-          {!t.uploaded && t.uploadTotal > 0 && (
-            <View style={{ marginLeft: 34, marginTop: 8 }}>
-              <View style={{ height: 6, borderRadius: 3, backgroundColor: '#21262d', overflow: 'hidden' }}>
-                <View style={{ height: 6, borderRadius: 3, backgroundColor: '#2da44e',
-                  width: `${Math.round((t.uploadDone / Math.max(1, t.uploadTotal)) * 100)}%` }} />
+          <Text style={s.trSub}>
+            {trouble ? T('cap.transSafe') : T('cap.transMoment')}
+          </Text>
+
+          <View style={s.trCard}>
+            <View style={s.trRingWrap}>
+              <Svg width={RING} height={RING}>
+                <Circle cx={RING / 2} cy={RING / 2} r={RAD} stroke={C.surfaceMuted}
+                  strokeWidth={SW} fill="none" />
+                <Circle cx={RING / 2} cy={RING / 2} r={RAD} stroke={C.brand}
+                  strokeWidth={SW} fill="none" strokeLinecap="round"
+                  strokeDasharray={`${CIRC} ${CIRC}`}
+                  strokeDashoffset={CIRC * (1 - pct)}
+                  transform={`rotate(-90 ${RING / 2} ${RING / 2})`} />
+              </Svg>
+              <View style={s.trRingIcon}>
+                <Icon name="checklist" size={52} />
               </View>
-              <Text style={{ color: '#8c959f', fontSize: 13, marginTop: 6 }}>
-                {T({ k: 'cap.transUploadProg', p: { done: t.uploadDone, total: t.uploadTotal } } as any)}
-              </Text>
             </View>
-          )}
-          {!t.uploaded && t.lastError && (
-            <Text style={{ color: '#f0883e', fontSize: 12.5, lineHeight: 18, marginLeft: 34,
-                           marginTop: 6, fontFamily: 'Menlo' }}>
-              {t.lastError}
+
+            <Text style={s.trState}>{T('cap.transWorking')}</Text>
+            <Text style={s.trStateSub}>
+              {current ? T(current.doing) : T('cap.transPreparing')}
             </Text>
-          )}
-          {t.anchorCaptureId !== null && row(t.transcribed, 'cap.transStt', 'cap.transSttDone')}
-          {/* The AI pass belongs to a NEW extra (title/scope/price). An augment
-              appends evidence and re-processes nothing yet, so it does not claim a
-              "details sorted" step it did not do. */}
-          {!t.isAugment && row(t.analyzed, 'cap.transAnalyze', 'cap.transAnalyzed')}
-        </View>
-        {(t.offline || t.stalled || t.blocked) && (
-          <>
-            <View style={{ backgroundColor: '#3a2c00', borderColor: '#d4a72c', borderWidth: 1,
-              borderRadius: 12, padding: 14, marginTop: 26 }}>
-              <Text style={{ color: '#f5d76a', fontSize: 15, lineHeight: 22 }}>
+
+            {/* The detail. Not decoration — the only place a stall can speak. */}
+            <View style={s.trSteps}>
+              {steps.map((st_, i) => (
+                <View key={i} style={s.trStepRow}>
+                  <Icon name={st_.done ? 'approved' : 'clock'} size={19}
+                    color={st_.done ? C.approve : C.steel} />
+                  <Text style={[s.trStepT, st_.done && s.trStepTDone]}>
+                    {T(st_.done ? st_.doneKey : st_.doing)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {!t.uploaded && t.uploadTotal > 0 && (
+              <View style={s.trProgWrap}>
+                <View style={s.trProgTrack}>
+                  <View style={[s.trProgFill,
+                    { width: `${Math.round((t.uploadDone / Math.max(1, t.uploadTotal)) * 100)}%` }]} />
+                </View>
+                <Text style={s.trProgT}>
+                  {T({ k: 'cap.transUploadProg', p: { done: t.uploadDone, total: t.uploadTotal } } as any)}
+                </Text>
+              </View>
+            )}
+
+            {!t.uploaded && t.lastError && (
+              <Text style={s.trErr}>{t.lastError}</Text>
+            )}
+          </View>
+
+          {/* Trouble takes over: plain words about what is true, and a way out that
+              parks everything safe at home. */}
+          {trouble && (
+            <View style={s.trWarn}>
+              <Text style={s.trWarnT}>
                 {T(t.blocked ? 'cap.transBlocked' : t.offline ? 'cap.transOffline' : 'cap.transStalled')}
               </Text>
-              {t.lastError && (
-                <Text style={{ color: '#c9a227', fontSize: 12.5, lineHeight: 18, marginTop: 10,
-                               fontFamily: 'Menlo' }}>
-                  {t.lastError}
-                </Text>
-              )}
+              {t.lastError && <Text style={s.trWarnErr}>{t.lastError}</Text>}
+              <Pressable
+                onPress={() => {
+                  // Augment came FROM an extra, so Done returns to it — not Home (the
+                  // added evidence is saved and backs up on Wi-Fi). A new extra parks
+                  // at Home as a draft.
+                  if (t.isAugment) { const cid = t.coId; setTransition(null); void openRecord(cid); }
+                  else setTransition(null);
+                }}
+                style={s.trDone}>
+                <Text style={s.trDoneT}>{T('cap.transDone')}</Text>
+              </Pressable>
             </View>
-            <Pressable
-              onPress={() => {
-                // Augment came FROM an extra, so Done returns to it — not Home (the
-                // added evidence is saved and backs up on Wi-Fi). A new extra parks
-                // at Home as a draft.
-                if (t.isAugment) { const cid = t.coId; setTransition(null); void openRecord(cid); }
-                else setTransition(null);
-              }}
-              style={{ marginTop: 18, minHeight: 60, borderRadius: 12, backgroundColor: '#fff',
-                       alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ fontSize: 17, fontWeight: '600', color: '#151A1E' }}>
-                {T('cap.transDone')}
-              </Text>
-            </Pressable>
-          </>
-        )}
+          )}
+
+          {!trouble && (
+            <View style={s.trNext}>
+              {/* Bare, not inside a filled disc: this asset draws its own ring, and
+                  nesting it in one gave a double circle. */}
+              <Icon name="arrowCircle" size={50} />
+              <View style={{ flex: 1 }}>
+                <Text style={s.trNextLab}>{T('cap.transUpNext')}</Text>
+                <Text style={s.trNextT}>{T('cap.transNextReview')}</Text>
+              </View>
+            </View>
+          )}
+
+          <View style={s.trRule} />
+          <View style={s.trSafe}>
+            <Icon name="shield" size={22} />
+            <Text style={s.trSafeT}>{T('cap.transSafe')}</Text>
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -5274,6 +5346,57 @@ function coChip(status: LedgerStatus): { label: string; bg: any; dark: boolean }
 // blue #0969da, amber #9a6700, red #cf222e. Overlays that sit ON photos keep a dark
 // translucent backing so their text reads over any image.
 const s = StyleSheet.create({
+  // ── transition screen (FLOW step 1.5), themed 2026-07-27 ──────────────────
+  trScreen: { flex: 1, backgroundColor: C.paper },
+  trScroll: { alignItems: 'center', paddingTop: 74, paddingHorizontal: 22, paddingBottom: 40 },
+  trTitle: { fontFamily: F.disp, fontSize: 30, color: C.ink, textTransform: 'uppercase',
+    letterSpacing: 0.6, textAlign: 'center', marginTop: 14 },
+  trSub: { fontFamily: F.body, fontSize: 16, color: C.steel, textAlign: 'center',
+    marginTop: 8, lineHeight: 22 },
+
+  trCard: { alignSelf: 'stretch', backgroundColor: C.card, borderRadius: radii.xl,
+    padding: 22, marginTop: 26, alignItems: 'center', ...shadows.card },
+  trRingWrap: { alignItems: 'center', justifyContent: 'center' },
+  trRingIcon: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  trState: { fontFamily: F.bodyBold, fontSize: 18, color: C.ink, textTransform: 'uppercase',
+    letterSpacing: 1.1, marginTop: 18 },
+  trStateSub: { fontFamily: F.body, fontSize: 15.5, color: C.steel, marginTop: 6,
+    textAlign: 'center', lineHeight: 21 },
+
+  trSteps: { alignSelf: 'stretch', marginTop: 18, gap: 10, borderTopWidth: 1,
+    borderTopColor: C.line, paddingTop: 16 },
+  trStepRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  trStepT: { fontFamily: F.body, fontSize: 15, color: C.steel, flexShrink: 1 },
+  trStepTDone: { color: C.ink },
+
+  trProgWrap: { alignSelf: 'stretch', marginTop: 14 },
+  trProgTrack: { height: 6, borderRadius: 3, backgroundColor: C.surfaceMuted, overflow: 'hidden' },
+  trProgFill: { height: 6, borderRadius: 3, backgroundColor: C.brand },
+  trProgT: { fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 6 },
+  // Monospace on purpose: this is a raw server message, and dressing it up as prose
+  // would hide that it is diagnostic text a human may need to quote.
+  trErr: { alignSelf: 'stretch', fontFamily: 'Menlo', fontSize: 12, lineHeight: 17,
+    color: C.danger, marginTop: 10 },
+
+  trWarn: { alignSelf: 'stretch', backgroundColor: C.brandSoft, borderWidth: 1,
+    borderColor: C.caution, borderRadius: radii.lg, padding: 16, marginTop: 18 },
+  trWarnT: { fontFamily: F.body, fontSize: 15.5, color: C.ink, lineHeight: 22 },
+  trWarnErr: { fontFamily: 'Menlo', fontSize: 12, lineHeight: 17, color: C.danger, marginTop: 10 },
+  trDone: { minHeight: 60, borderRadius: radii.md, backgroundColor: C.ink,
+    alignItems: 'center', justifyContent: 'center', marginTop: 14 },
+  trDoneT: { fontFamily: F.bodyBold, fontSize: 17, color: '#fff' },
+
+  trNext: { alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: C.brandSoft, borderRadius: radii.lg, padding: 16, marginTop: 18 },
+  trNextLab: { fontFamily: F.dispSemi, fontSize: 12.5, color: C.brand,
+    textTransform: 'uppercase', letterSpacing: 1.4 },
+  trNextT: { fontFamily: F.bodyBold, fontSize: 18, color: C.ink, marginTop: 2 },
+
+  trRule: { alignSelf: 'stretch', height: 1, backgroundColor: C.line, marginTop: 26 },
+  trSafe: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 14,
+    paddingHorizontal: 8 },
+  trSafeT: { fontFamily: F.body, fontSize: 14, color: C.steel, lineHeight: 20, flexShrink: 1 },
+
   c: { flex: 1, paddingTop: 72, paddingHorizontal: 20, backgroundColor: '#F7F4EE' },
   h: { color: '#151A1E', fontFamily: 'Barlow_700Bold', fontSize: 30, letterSpacing: -0.2, marginBottom: 18 },
   btn: { backgroundColor: '#151A1E', paddingVertical: 28, borderRadius: 18, alignItems: 'center' },

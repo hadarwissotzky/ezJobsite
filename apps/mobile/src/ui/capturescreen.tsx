@@ -3,6 +3,23 @@
  * CHANGE ORDER: walk the site, talk, snap photos along the way, tap Done. Everything
  * else is in service of that.
  *
+ * REDESIGNED 2026-07-27 to hadar's mockup + the EZChangeOrder design system. What
+ * changed is the CHROME, not the machinery: the screen used to be a black full-bleed
+ * viewfinder with dark scrims, and is now the system's warm light theme — a cream top
+ * bar, the camera as an inset band, cream cards over it, and a cream action panel. The
+ * durability path below (segments, interruption recovery, draft banking, stamp baking,
+ * the empty-Done guard) is byte-for-byte the old behaviour and must stay that way.
+ *
+ * ICONS: hadar's kit artwork, wired through `icon.tsx` (which prefers the kit PNG over
+ * any same-named SVG). `play` is the one exception — the kit has pause but no play, so
+ * the resumed state still uses a traced glyph.
+ *
+ * The design's own argument, which is why it is worth the churn: the ICP does not think
+ * in software. The old screen showed him a viewfinder and trusted him to infer that the
+ * mic was live. This one SAYS it — "Your voice is recording", "You do not need to hold
+ * a button", "Saving voice, photos, time and location on this phone" — in sentences, at
+ * a size readable at arm's length, in his language.
+ *
  * What it must survive (the user's spec, 2026-07-20):
  *  - DISRUPTION. Pause/resume as a first-class control, and a phone call stealing the
  *    microphone must not destroy the walk: recording rolls into a new SEGMENT and the
@@ -11,8 +28,8 @@
  *    coaches ("say what you found…"), warns when it has heard nothing, and refuses a
  *    Done with no speech and no photos — refusing loudly beats saving emptiness.
  *  - EVIDENCE. Photos snap without stopping audio, each carrying its own timestamp so
- *    it can later be tied to the sentence being spoken (the transcript segments). A
- *    thumbnail strip confirms what was taken. Gallery picks are allowed but are NEVER
+ *    it can later be tied to the sentence being spoken (the transcript segments). The
+ *    photo sheet confirms what was taken. Gallery picks are allowed but are NEVER
  *    stamped with today's stamp — a library photo was not taken here-and-now, and
  *    baking a fresh stamp onto it would be manufactured evidence.
  *
@@ -23,7 +40,7 @@
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import React from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 
 import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, useAudioRecorderState } from '../recorder';
@@ -35,6 +52,9 @@ import { stampNow, type Stamp } from '../stamp';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { useSessionDraft } from './sessiondraft';
 import { t as T } from '../i18n';
+import { C, F, T as TT } from './theme';
+import { radii, shadows } from './tokens';
+import { Icon } from './icon';
 
 export type FusedPhoto = { bytes: Uint8Array; mime: string; atMs: number; fromLibrary: boolean };
 export type FusedAudioSegment = { bytes: Uint8Array; mime: string; startedAtMs: number };
@@ -60,12 +80,33 @@ function clockLine(ms: number): string {
 /**
  * The stamp burned onto every CAMERA photo. Never raw coordinates — a resolved place
  * a human can check, or an honest "location unavailable".
+ *
+ * This is EVIDENCE, not chrome: it keeps the dark scrim + white text of the old design
+ * on purpose. It is composited onto a photograph of unknown brightness, where the light
+ * theme would be unreadable half the time. Do not "modernise" it to match the screen.
  */
 function StampBlock({ place, now }: { place: string | null; now: number }) {
   return (
     <View style={st.stamp}>
       <Text style={st.stampTime}>{clockLine(now)}</Text>
       <Text style={st.stampWhere}>📍 {place ?? T('cap.noLoc')}</Text>
+    </View>
+  );
+}
+
+/** The dense mockup waveform. Purely an indicator — it reads the live meter only. */
+function Wave({ level, active }: { level: number; active: boolean }) {
+  const bars = React.useMemo(() => Array.from({ length: 34 }, (_, i) => i), []);
+  return (
+    <View style={st.wave}>
+      {bars.map((i) => {
+        // A fixed per-bar shape so the wave looks like a voice, not a bar chart:
+        // tallest in the middle, with a stable pseudo-random wobble per index.
+        const centre = 1 - Math.abs(i - 16.5) / 17;
+        const wobble = 0.45 + ((i * 37) % 11) / 11 * 0.55;
+        const h = active ? 3 + Math.round(level * 26 * centre * wobble) : 3;
+        return <View key={i} style={[st.waveBar, { height: Math.max(3, h) }]} />;
+      })}
     </View>
   );
 }
@@ -102,6 +143,9 @@ export function FusedCapture({
   const [interrupted, setInterrupted] = React.useState(false); // something ELSE stopped us
   const [warnEmpty, setWarnEmpty] = React.useState(false);
   const [bakeShot, setBakeShot] = React.useState<Shot | null>(null);
+  const [sheetOpen, setSheetOpen] = React.useState(false);
+  /** The photo the viewer is showing, or null. Tapping a thumbnail sets it. */
+  const [zoom, setZoom] = React.useState<string | null>(null);
   const bakeResolve = React.useRef<(() => void) | null>(null);
 
   // Interruption bookkeeping. Completed audio files (rolled when a call killed the
@@ -113,16 +157,6 @@ export function FusedCapture({
   // Has the mic heard actual speech yet? (metering peak, not just "is recording")
   const spokeRef = React.useRef(false);
   const [spoke, setSpoke] = React.useState(false);
-  // The on-screen stamp is orientation, not chrome: it confirms the where/when
-  // registered, then clears the viewfinder after 5s of recording (hadar,
-  // 2026-07-23). The stamp BAKED INTO EACH PHOTO is untouched — mandate #9
-  // stamps the evidence, not the preview.
-  const [stampVisible, setStampVisible] = React.useState(true);
-  React.useEffect(() => {
-    if (!micOn) return;
-    const tm = setTimeout(() => setStampVisible(false), 5000);
-    return () => clearTimeout(tm);
-  }, [micOn]);
 
   // R1: the session becomes durable WHILE it happens, not at Done. Photos are banked
   // at the shutter and audio wherever the recorder is ALREADY stopped, so a crash
@@ -207,13 +241,17 @@ export function FusedCapture({
     }
   }, [micOn, saving, paused, interrupted, recState.isRecording, recState.durationMillis, recState.metering]);
 
-  if (!perm) return <View style={st.c} />;
+  if (!perm) return <View style={st.screen} />;
   if (!perm.granted) {
     return (
-      <View style={[st.c, st.center]}>
-        <Text style={st.msg}>{T('cap.needCamera')}</Text>
-        <Pressable style={st.btn} onPress={requestPerm}><Text style={st.btnT}>{T('cap.allowCamera')}</Text></Pressable>
-        <Pressable style={st.link} onPress={onClose}><Text style={st.linkT}>{T('terms.later')}</Text></Pressable>
+      <View style={[st.screen, st.center]}>
+        <Text style={st.permMsg}>{T('cap.needCamera')}</Text>
+        <Pressable style={[TT.btn, TT.btnOrange, st.permBtn]} onPress={requestPerm}>
+          <Text style={TT.btnText}>{T('cap.allowCamera')}</Text>
+        </Pressable>
+        <Pressable style={st.permLink} onPress={onClose}>
+          <Text style={TT.btnGhostText}>{T('terms.later')}</Text>
+        </Pressable>
       </View>
     );
   }
@@ -223,6 +261,22 @@ export function FusedCapture({
   const recordingNow = micOn && recState.isRecording && !paused;
   // Coach the user who tapped and went quiet: nothing has been heard, nothing snapped.
   const coach = micOn && !spoke && !paused && !interrupted && shots.length === 0 && secs >= 3;
+  // The reassurance card is big on open — that is its whole job — and then gets out of
+  // the way of the viewfinder once he is actually doing the thing (hadar, 2026-07-27).
+  // Pausing re-expands it, because a paused mic is exactly when "what is it doing now?"
+  // needs a full-size answer.
+  const expanded = paused || (!spoke && shots.length === 0);
+  // The job, if anything already knows it: GPS resolution wins, else whatever the
+  // caller opened this screen for. Empty string counts as unknown.
+  const knownJob = job || projectName || '';
+
+  /** Close the sheet AND drop the viewer, so reopening never lands mid-photo.
+   *  Android's back gesture routes here too: it shuts the viewer first if one is
+   *  open, which is what "back" means to the person looking at a photo. */
+  const closeSheet = () => {
+    if (zoom) { setZoom(null); return; }
+    setSheetOpen(false);
+  };
 
   const togglePause = async () => {
     if (!micOn) return;
@@ -367,12 +421,16 @@ export function FusedCapture({
   };
 
   return (
-    <View style={st.c}>
-      {/* The bake view renders BEFORE the camera, so the opaque preview hides it.
+    <View style={st.screen}>
+      {/* The bake view renders BEFORE everything, so an OPAQUE sibling hides it.
           It was hidden with opacity 0.01 instead — and captureRef snapshots the
           view AS RENDERED, so every camera photo was baked at 1% opacity: a valid,
           near-white JPEG with a ghost of the scene (hadar, on device 2026-07-23,
-          "the squares are empty"). Never hide a view-shot source with opacity. */}
+          "the squares are empty"). Never hide a view-shot source with opacity.
+          Baking only happens inside finish(), i.e. while `saving` is true, and the
+          saving overlay below is FULLY OPAQUE for exactly this reason — the old
+          layout relied on the full-bleed camera to cover it, and the camera is no
+          longer full-bleed. */}
       {bakeShot && (
         <View ref={bakeRef} collapsable={false} style={st.fill}>
           <Image source={{ uri: bakeShot.uri }} style={st.fill} resizeMode="cover"
@@ -381,145 +439,231 @@ export function FusedCapture({
         </View>
       )}
 
-      <CameraView ref={camRef} style={st.fill} facing={facing} flash={flash} />
-
+      {/* ---------- TOP BAR ---------- */}
       <View style={st.topBar}>
-        <Pressable onPress={onClose} hitSlop={16} style={st.topBtn}>
-          <Text style={st.topIcon}>✕</Text>
+        <Pressable onPress={onClose} hitSlop={12} style={st.topBtn}>
+          <Icon name="close" size={22} color={C.ink} />
+          <Text style={st.topLab}>{T('cap.cancel')}</Text>
         </Pressable>
-        <Text style={st.project} numberOfLines={1}>{job ?? projectName}</Text>
-        {/* Flip + flash: labelled, ≥48px, on scrims — visible over any scene. */}
+
+        <View style={st.topMid}>
+          <Text style={st.topTitle} numberOfLines={1}>
+            {(paused ? T('cap.voiceRecordingPaused') : T('cap.voiceRecording'))
+              + ` · ${two(Math.floor(secs / 60))}:${two(secs % 60)}`}
+          </Text>
+          {/* The where/when line is PERMANENT now, not a 5-second flash: it is the
+              plain-words version of mandate #9, and it costs nothing to keep saying. */}
+          <View style={st.topWhere}>
+            <Icon name="mapPin" size={13} color={C.steel} />
+            <Text style={st.topWhereT} numberOfLines={1}>{place ?? T('cap.savingTimeLoc')}</Text>
+          </View>
+        </View>
+
         <View style={st.topRight}>
           <Pressable onPress={() => setFlash((f) => (f === 'off' ? 'on' : 'off'))} style={st.topBtn}>
-            <Text style={st.topIcon}>{flash === 'on' ? '⚡' : '⚡'}</Text>
+            <Icon name="flash" size={22} color={flash === 'on' ? C.caution : C.ink} />
             <Text style={[st.topLab, flash === 'on' && st.topLabOn]}>
               {flash === 'on' ? T('cap.flashOn') : T('cap.flashOff')}
             </Text>
           </Pressable>
           <Pressable onPress={() => setFacing((f) => (f === 'back' ? 'front' : 'back'))} style={st.topBtn}>
-            <Text style={st.topIcon}>🔄</Text>
+            <Icon name="cameraFlip" size={22} color={C.ink} />
             <Text style={st.topLab}>{T('cap.flip')}</Text>
           </Pressable>
         </View>
       </View>
 
-      {/* Coaching: first-open instructions until the first snap or first heard speech. */}
-      {shots.length === 0 && !spoke && !coach && !interrupted && (
-        <View style={st.remind}>
-          <Text style={st.remindTitle}>{T('cap.remindTitle')}</Text>
-          <Text style={st.remindLine}>✓ {T('cap.remind1')}</Text>
-          <Text style={st.remindLine}>✓ {T('cap.remind2')}</Text>
-          <Text style={st.remindLine}>✓ {T('cap.remind3')}</Text>
-          <Text style={st.remindLine}>✓ {T('cap.remind4')}</Text>
-        </View>
-      )}
-      {coach && (
-        <View style={[st.remind, st.coach]}>
-          <Text style={st.coachT}>🎙 {T('cap.sayWhat')}</Text>
-          <Text style={st.coachEx}>{T('cap.sayWhatEx')}</Text>
-        </View>
-      )}
-      {interrupted && (
-        <Pressable style={[st.remind, st.interruptBox]} onPress={resumeAfterInterruption}>
-          <Text style={st.interruptT}>📞 {T('cap.interrupted')}</Text>
-          <Text style={st.interruptS}>{T('cap.tapToResume')}</Text>
-        </Pressable>
-      )}
-      {warnEmpty && (
-        <View style={[st.remind, st.warnBox]}>
-          <Text style={st.warnT}>{T('cap.nothingYet')}</Text>
-        </View>
-      )}
+      {/* ---------- CAMERA BAND ---------- */}
+      <View style={st.band}>
+        <CameraView ref={camRef} style={st.fill} facing={facing} flash={flash} />
 
-      {/* THE state indicator. A camcorder-red REC pill, blinking, with the running
-          time — visible from arm's length in sun. Grey PAUSED when paused. */}
-      {micOn && !interrupted && (
-        <View style={[st.recPill, paused && st.recPillPaused]}>
-          <View style={[st.recPillDot, (paused || now % 2000 < 1000) && st.recPillDotDim]} />
-          <Text style={st.recPillT}>
-            {paused ? T('cap.pause').toUpperCase() : 'REC'} {two(Math.floor(secs / 60))}:{two(secs % 60)}
-          </Text>
-        </View>
-      )}
-
-      {stampVisible && <StampBlock place={place} now={now} />}
-      {/* The live words, over the camera, while he talks. Rough by design and
-          labelled so — it is never the stored transcript. Rendered above the
-          stamp so the two do not fight for the same corner. */}
-      {liveText.length > 0 && (
-        <View style={st.liveBox} pointerEvents="none">
-          <Text style={st.liveLabel}>{T('r2.liveRough')}</Text>
-          <Text style={st.liveText} numberOfLines={3}>{liveText}</Text>
-        </View>
-      )}
-
-      {micOn && (
-        <View style={st.meterRow}>
-          <View style={[st.recDot, (paused || interrupted) && st.recDotOff]} />
-          <View style={st.waveRow}>
-            {[0,1,2,3,4,5,6,7,8,9,10,11].map((i) => {
-              const wob = 0.35 + (((i * 37 + Math.floor((recState.durationMillis ?? 0) / 180)) % 11) / 11) * 0.65;
-              return <View key={i} style={[st.waveBar,
-                { height: 4 + Math.round(level * 26 * wob) }]} />;
-            })}
-          </View>
-          <Text style={st.timer}>{two(Math.floor(secs / 60))}:{two(secs % 60)}</Text>
-          {shots.length > 0 && <Text style={st.count}>📸 {shots.length}</Text>}
-        </View>
-      )}
-
-      {/* What has been taken so far — visible proof, not a hidden counter. */}
-      {shots.length > 0 && (
-        <ScrollView horizontal style={st.thumbRow} contentContainerStyle={{ gap: 6 }}
-          showsHorizontalScrollIndicator={false}>
-          {shots.map((sh, i) => (
-            <Image key={i} source={{ uri: sh.uri }} style={st.thumb} />
-          ))}
-        </ScrollView>
-      )}
-
-      <View style={st.bottom}>
-        <Text style={st.hint}>
-          {saving ? '' :
-            interrupted ? T('cap.tapToResume') :
-            paused ? T('cap.pausedHint') :
-            shots.length === 0 ? (micOn ? T('cap.talkWalk') : T('cap.tapSnap'))
-              : T({ k: 'cap.keepGoing', p: { n: shots.length } })}
-        </Text>
-        <View style={st.shutterRow}>
-          <View style={st.sideCol}>
-            <Pressable style={st.sideBtn} onPress={pickFromGallery} disabled={saving}>
-              <Text style={st.sideIcon}>🖼</Text>
-              <Text style={st.sideLab}>{T('cap.gallery')}</Text>
+        {/* The cards sit in NORMAL FLOW inside an overlay, not absolutely positioned.
+            They were absolute at first and it only worked on one screen height: the
+            reassurance card grows with its state (the interruption copy is two lines,
+            the coach card three) and a fixed `top` for the camera hint below it means
+            a taller card lands on top of it. Flow + gap cannot overlap at any size. */}
+        <View style={st.bandFlow} pointerEvents="box-none">
+          {/* THE reassurance card. One card, one state at a time — an interruption or a
+              refused Done REPLACES it rather than stacking another banner on top, so
+              there is never more than one thing to read. */}
+          {interrupted ? (
+            <Pressable style={[st.card, st.cardAlarm]} onPress={resumeAfterInterruption}>
+              <Text style={st.alarmT}>📞 {T('cap.interrupted')}</Text>
+              <Text style={st.alarmS}>{T('cap.tapToResume')}</Text>
             </Pressable>
-          </View>
-          <Pressable style={st.shutterOuter} onPress={snap} disabled={saving}>
-            <View style={[st.shutterInner, recordingNow && st.shutterRec]} />
-          </Pressable>
-          <View style={st.sideCol}>
-            {micOn ? (
-              <Pressable style={st.sideBtn} onPress={togglePause} disabled={saving || interrupted}>
-                <Text style={st.sideIcon}>{paused ? '▶️' : '⏸'}</Text>
-                <Text style={st.sideLab}>{paused ? T('cap.resume') : T('cap.pause')}</Text>
-              </Pressable>
-            ) : <View style={st.sideBtn} />}
-          </View>
-        </View>
-        {/* The prototype's signature exit: a full-width white stop bar nobody can miss. */}
-        <Pressable style={[st.stopBar, (!shots.length && !spoke) && st.stopDim]}
-          onPress={finish} disabled={saving}>
-          {saving ? <ActivityIndicator color="#151A1E" /> : (
-            <>
-              <View style={st.stopSq} />
-              <Text style={st.stopT}>{T('cap.doneBuild')}</Text>
-            </>
+          ) : warnEmpty ? (
+            <View style={[st.card, st.cardWarn]}>
+              <Text style={st.warnT}>{T('cap.nothingYet')}</Text>
+            </View>
+          ) : coach ? (
+            <View style={[st.card, st.cardCoach]}>
+              <Text style={st.coachT}>{T('cap.sayWhat')}</Text>
+              <Text style={st.coachEx}>{T('cap.sayWhatEx')}</Text>
+            </View>
+          ) : expanded ? (
+            <View style={st.card}>
+              <View style={st.cardTop}>
+                <View style={[st.micDisc, paused && st.micDiscPaused]}>
+                  <Icon name={paused ? 'pause' : 'microphone'} size={30} color="#fff" />
+                </View>
+                <View style={st.cardTopText}>
+                  <Text style={st.cardTitle}>
+                    {paused ? T('cap.voiceIsPaused') : T('cap.voiceIsRecording')}
+                  </Text>
+                  <Wave level={level} active={recordingNow} />
+                </View>
+              </View>
+              <Text style={st.cardBody}>
+                {paused ? T('cap.pausedHint') : T('cap.explainWhat')}
+              </Text>
+              <View style={st.cardRule} />
+              <View style={st.cardHint}>
+                <Text style={st.cardHintIcon}>☝︎</Text>
+                <Text style={st.cardHintT}>{T('cap.noHoldButton')}</Text>
+              </View>
+            </View>
+          ) : (
+            // The collapsed strip: same information, one line, viewfinder free.
+            <View style={[st.card, st.cardSlim]}>
+              <View style={[st.micDot, paused && st.micDiscPaused]}>
+                <Icon name={paused ? 'pause' : 'microphone'} size={18} color="#fff" />
+              </View>
+              {/* The wave needs a flexible BOX around it here: its own style is a fixed
+                  height row, so as a direct child of this row it would size to zero. */}
+              <View style={st.slimWave}><Wave level={level} active={recordingNow} /></View>
+              <Text style={st.slimTime}>{two(Math.floor(secs / 60))}:{two(secs % 60)}</Text>
+            </View>
           )}
-        </Pressable>
+
+          {/* The camera instruction. Hidden once he has taken one — he knows by then. */}
+          {shots.length === 0 && !interrupted && (
+            <View style={st.hintCard}>
+              <Icon name="camera" size={20} color={C.ink} />
+              <View style={st.hintText}>
+                <Text style={st.hintLine}>{T('cap.pointCamera')}</Text>
+                <Text style={st.hintLine}>{T('cap.tapBelowPhoto')}</Text>
+              </View>
+            </View>
+          )}
+
+          {/* The live words, over the camera, while he talks. Rough by design and
+              labelled so — it is never the stored transcript. `marginTop:'auto'` pins
+              it to the bottom of the band without a magic offset. */}
+          {liveText.length > 0 && (
+            <View style={st.liveBox} pointerEvents="none">
+              <Text style={st.liveLabel}>{T('r2.liveRough')}</Text>
+              <Text style={st.liveText} numberOfLines={3}>{liveText}</Text>
+            </View>
+          )}
+        </View>
       </View>
 
+      {/* ---------- ACTION PANEL ---------- */}
+      <View style={st.panel}>
+        <View style={st.actionRow}>
+          <Pressable style={st.sideBtn} onPress={() => setSheetOpen(true)} disabled={saving}>
+            <Icon name="photo" size={22} color={C.ink} />
+            <View style={st.sideLabRow}>
+              <Text style={st.sideLab}>{T('cap.viewPhotos')}</Text>
+              {shots.length > 0 && (
+                <View style={st.countPill}><Text style={st.countPillT}>{shots.length}</Text></View>
+              )}
+            </View>
+          </Pressable>
+
+          <Pressable style={st.shutter} onPress={snap} disabled={saving}>
+            <View style={[st.shutterInner, recordingNow && st.shutterLive]}>
+              <Icon name="camera" size={32} color="#fff" />
+              <Text style={st.shutterT}>{T('cap.takePhoto')}</Text>
+            </View>
+          </Pressable>
+
+          {micOn ? (
+            <Pressable style={st.sideBtn} onPress={togglePause} disabled={saving || interrupted}>
+              <View style={st.sideDisc}>
+                <Icon name={paused ? 'play' : 'pause'} size={18} color="#fff" />
+              </View>
+              <Text style={st.sideLab}>{paused ? T('cap.resumeVoice') : T('cap.pauseVoice')}</Text>
+            </Pressable>
+          ) : <View style={st.sideBtn} />}
+        </View>
+
+        <Pressable style={[st.done, (!shots.length && !spoke) && st.doneDim]}
+          onPress={finish} disabled={saving}>
+          {saving ? <ActivityIndicator color="#fff" />
+            : <Text style={st.doneT}>{T('cap.doneExplaining')}</Text>}
+        </Pressable>
+
+        {/* When the job is already resolved, saying "next we'll find the job" would be
+            a lie — so the line reports what it knows instead. */}
+        <Text style={st.nextLine} numberOfLines={2}>
+          {knownJob ? T({ k: 'cap.thisIsFor', p: { job: knownJob } }) : T('cap.nextWeFind')}
+        </Text>
+
+        <View style={st.lockRow}>
+          <Icon name="lock" size={14} color={C.steel} />
+          <Text style={st.lockT} numberOfLines={2}>{T('cap.savingOnPhone')}</Text>
+        </View>
+      </View>
+
+      {/* ---------- PHOTO SHEET ---------- */}
+      <Modal visible={sheetOpen} animationType="slide" transparent onRequestClose={closeSheet}>
+        <View style={st.sheetWrap}>
+          <View style={st.sheet}>
+            <Text style={st.sheetTitle}>{T('cap.photosTitle')}</Text>
+            {shots.length === 0 ? (
+              <Text style={st.sheetEmpty}>{T('cap.noPhotosYet')}</Text>
+            ) : (
+              <ScrollView contentContainerStyle={st.sheetGrid} showsVerticalScrollIndicator={false}>
+                {shots.map((sh, i) => (
+                  <Pressable key={i} style={st.sheetCell} onPress={() => setZoom(sh.uri)}
+                    accessibilityLabel={T('cap.viewPhotos')}>
+                    <Image source={{ uri: sh.uri }} style={st.sheetThumb} />
+                    {/* A library pick is labelled, because it is NOT stamped evidence
+                        of this moment and the person reviewing it must be able to see
+                        the difference without opening anything. */}
+                    {sh.fromLibrary && (
+                      <View style={st.sheetTag}><Text style={st.sheetTagT}>{T('cap.fromGalleryTag')}</Text></View>
+                    )}
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+            <Pressable style={st.sheetAdd} onPress={pickFromGallery}>
+              <Icon name="photo" size={20} color={C.ink} />
+              <Text style={st.sheetAddT}>{T('cap.addFromGallery')}</Text>
+            </Pressable>
+            <Pressable style={st.sheetClose} onPress={closeSheet}>
+              <Text style={st.sheetCloseT}>{T('cap.closeSheet')}</Text>
+            </Pressable>
+          </View>
+
+          {/* Photo viewer — tap a thumbnail to see it full-size. Same rules as the
+              record screen's lightbox: closed by a GLOVE-SIZED bottom button, because
+              a corner ✕ is exactly the target the field-UX numbers exist to forbid
+              (hadar, 2026-07-23); tapping the photo itself closes too.
+              Deliberately an in-sheet overlay rather than a nested <Modal> — a second
+              Modal presented from inside this one is the flaky path on iOS, and an
+              absolute fill inside a already-fullscreen transparent Modal covers exactly
+              the same pixels with none of the risk. */}
+          {zoom && (
+            <View style={st.zoomWrap}>
+              <Pressable style={st.zoomTap} onPress={() => setZoom(null)}>
+                <Image source={{ uri: zoom }} style={st.zoomImg} resizeMode="contain" />
+              </Pressable>
+              <Pressable style={st.zoomClose} onPress={() => setZoom(null)}
+                accessibilityLabel={T('common.close')}>
+                <Text style={st.zoomCloseT}>{T('common.close')}</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      </Modal>
+
+      {/* OPAQUE on purpose — see the bake-view note above. */}
       {saving && (
         <View style={st.savingOverlay}>
-          <ActivityIndicator color="#fff" size="large" />
+          <ActivityIndicator color={C.brand} size="large" />
           <Text style={st.savingT}>{T({ k: 'cap.savingN', p: { n: shots.length } })}</Text>
         </View>
       )}
@@ -528,89 +672,152 @@ export function FusedCapture({
 }
 
 const st = StyleSheet.create({
-  c: { flex: 1, backgroundColor: '#000' },
+  screen: { flex: 1, backgroundColor: C.paper },
   fill: { ...StyleSheet.absoluteFillObject },
   center: { alignItems: 'center', justifyContent: 'center', padding: 28 },
-  msg: { color: '#fff', fontSize: 18, textAlign: 'center', marginBottom: 22, lineHeight: 25 },
-  btn: { backgroundColor: '#4E6243', borderRadius: 12, paddingVertical: 18, paddingHorizontal: 40 },
-  btnT: { color: '#fff', fontFamily: 'Barlow_700Bold', fontSize: 19, letterSpacing: -0.2 },
-  link: { paddingVertical: 16 }, linkT: { color: '#adbac7', fontSize: 15 },
+  permMsg: { fontFamily: F.body, fontSize: 18, color: C.ink, textAlign: 'center',
+    marginBottom: 22, lineHeight: 25 },
+  permBtn: { paddingHorizontal: 40, alignSelf: 'stretch' },
+  permLink: { paddingVertical: 16 },
 
-  topBar: { position: 'absolute', top: 52, left: 12, right: 12, flexDirection: 'row',
-    alignItems: 'flex-start', justifyContent: 'space-between' },
-  topRight: { flexDirection: 'row', gap: 8 },
-  // Field UX: ≥48px targets, icon + LABEL, on a scrim so they read over any scene.
-  topBtn: { minWidth: 52, minHeight: 52, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 5 },
-  topIcon: { fontSize: 20, color: '#fff' },
-  topLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 10.5, color: '#D7DBDF',
-    textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 1 },
-  topLabOn: { color: '#A47A3F' },
-  project: { color: '#fff', fontFamily: 'Barlow_600SemiBold', fontSize: 15, flex: 1,
-    textAlign: 'center', marginHorizontal: 8, marginTop: 14 },
+  // ---- top bar ----
+  topBar: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+    paddingTop: 56, paddingBottom: 10, paddingHorizontal: 12, backgroundColor: C.paper, gap: 6 },
+  topMid: { flex: 1, alignItems: 'center', paddingTop: 4 },
+  topTitle: { fontFamily: F.disp, fontSize: 21, color: C.ink, letterSpacing: 0.8,
+    fontVariant: ['tabular-nums'] },
+  topWhere: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  topWhereT: { fontFamily: F.body, fontSize: 13.5, color: C.steel, flexShrink: 1 },
+  // Field UX: ≥48px targets, icon + LABEL. Cards, not scrims — the chrome is light now.
+  topRight: { flexDirection: 'row', gap: 6 },
+  topBtn: { minWidth: 54, minHeight: 54, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.card, borderColor: C.line, borderWidth: 1, borderRadius: radii.md,
+    paddingHorizontal: 8, paddingVertical: 5 },
+  topLab: { fontFamily: F.dispSemi, fontSize: 11, color: C.steel,
+    textTransform: 'uppercase', letterSpacing: 0.9, marginTop: 2 },
+  topLabOn: { color: C.caution },
 
-  remind: { position: 'absolute', top: 118, left: 20, right: 20,
-    backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12, padding: 14 },
-  remindTitle: { color: '#fff', fontFamily: 'Barlow_700Bold', fontSize: 15, marginBottom: 6 },
-  remindLine: { color: '#e6edf3', fontFamily: 'Barlow_400Regular', fontSize: 14, lineHeight: 22 },
-  coach: { backgroundColor: 'rgba(255,90,0,0.92)' },
-  coachT: { color: '#fff', fontFamily: 'Barlow_700Bold', fontSize: 17, lineHeight: 23 },
-  coachEx: { color: '#FFE3D2', fontFamily: 'Barlow_400Regular', fontSize: 14, lineHeight: 20, marginTop: 6 },
-  interruptBox: { backgroundColor: 'rgba(198,40,28,0.94)' },
-  interruptT: { color: '#fff', fontFamily: 'Barlow_700Bold', fontSize: 16 },
-  interruptS: { color: '#FFD9D4', fontFamily: 'Barlow_400Regular', fontSize: 14, marginTop: 4 },
-  warnBox: { backgroundColor: 'rgba(164,122,63,0.95)' },
-  warnT: { color: '#151A1E', fontFamily: 'Barlow_700Bold', fontSize: 15, lineHeight: 21 },
+  // ---- camera band ----
+  band: { flex: 1, backgroundColor: '#000', overflow: 'hidden' },
+  bandFlow: { ...StyleSheet.absoluteFillObject, padding: 14, gap: 12 },
 
-  liveBox: { position: 'absolute', left: 16, right: 16, bottom: 360,
-    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10, padding: 10 },
-  liveLabel: { color: '#ffffff99', fontSize: 11, marginBottom: 2 },
-  liveText: { color: '#fff', fontSize: 15, lineHeight: 20 },
-  stamp: { position: 'absolute', left: 16, bottom: 300, backgroundColor: 'rgba(0,0,0,0.45)',
+  card: { backgroundColor: C.card, borderRadius: radii.lg, padding: 16, ...shadows.card },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  cardTopText: { flex: 1 },
+  micDisc: { width: 64, height: 64, borderRadius: 32, backgroundColor: C.brand,
+    alignItems: 'center', justifyContent: 'center' },
+  micDiscPaused: { backgroundColor: C.steel },
+  cardTitle: { fontFamily: F.bodyBold, fontSize: 25, color: C.ink, letterSpacing: -0.4 },
+  cardBody: { fontFamily: F.body, fontSize: 16, color: C.ink, lineHeight: 22, marginTop: 12,
+    textAlign: 'center' },
+  cardRule: { height: 1, backgroundColor: C.line, marginVertical: 12 },
+  cardHint: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  cardHintIcon: { fontSize: 17, color: C.brand },
+  cardHintT: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.brand },
+
+  cardSlim: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  micDot: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.brand,
+    alignItems: 'center', justifyContent: 'center' },
+  slimWave: { flex: 1 },
+  slimTime: { fontFamily: F.disp, fontSize: 17, color: C.ink, fontVariant: ['tabular-nums'] },
+
+  cardAlarm: { backgroundColor: C.danger },
+  alarmT: { fontFamily: F.bodyBold, fontSize: 18, color: '#fff' },
+  alarmS: { fontFamily: F.body, fontSize: 15, color: '#FFE6E2', marginTop: 4 },
+  cardWarn: { backgroundColor: C.caution },
+  warnT: { fontFamily: F.bodyBold, fontSize: 16.5, color: C.ink, lineHeight: 23 },
+  cardCoach: { backgroundColor: C.brand },
+  coachT: { fontFamily: F.bodyBold, fontSize: 18, color: '#fff', lineHeight: 24 },
+  coachEx: { fontFamily: F.body, fontSize: 15, color: C.brandSoft, lineHeight: 21, marginTop: 6 },
+
+  wave: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 32, marginTop: 6 },
+  waveBar: { flex: 1, borderRadius: 1.5, backgroundColor: C.brand },
+
+  hintCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 10,
+    backgroundColor: C.card, borderRadius: radii.md,
+    paddingHorizontal: 14, paddingVertical: 12, ...shadows.card },
+  hintText: { flex: 1 },
+  hintLine: { fontFamily: F.body, fontSize: 15, color: C.ink, lineHeight: 21 },
+
+  liveBox: { marginTop: 'auto', backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: radii.sm, padding: 10 },
+  liveLabel: { fontFamily: F.body, color: '#ffffff99', fontSize: 11, marginBottom: 2 },
+  liveText: { fontFamily: F.body, color: '#fff', fontSize: 15, lineHeight: 20 },
+
+  // The photo stamp keeps the dark treatment — it is burned onto a photograph.
+  stamp: { position: 'absolute', left: 16, bottom: 40, backgroundColor: 'rgba(0,0,0,0.45)',
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  stampTime: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 22 },
-  stampWhere: { color: '#e6edf3', fontFamily: 'Barlow_400Regular', fontSize: 14, marginTop: 2 },
+  stampTime: { color: '#fff', fontFamily: F.disp, fontSize: 22 },
+  stampWhere: { color: '#e6edf3', fontFamily: F.body, fontSize: 14, marginTop: 2 },
 
-  recPill: { position: 'absolute', top: 112, alignSelf: 'center', flexDirection: 'row',
-    alignItems: 'center', backgroundColor: '#8B5148', borderRadius: 999,
-    paddingHorizontal: 14, paddingVertical: 7 },
-  recPillPaused: { backgroundColor: 'rgba(0,0,0,0.55)' },
-  recPillDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', marginRight: 8 },
-  recPillDotDim: { opacity: 0.25 },
-  recPillT: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 17, letterSpacing: 1.5 },
-  meterRow: { position: 'absolute', left: 16, right: 16, bottom: 272, flexDirection: 'row', alignItems: 'center' },
-  recDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#8B5148', marginRight: 10 },
-  recDotOff: { backgroundColor: '#5E666E' },
-  waveRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, height: 32 },
-  waveBar: { flex: 1, minHeight: 4, borderRadius: 2, backgroundColor: '#4E6243' },
-  timer: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 16, marginLeft: 10 },
-  count: { color: '#fff', fontFamily: 'BarlowCondensed_700Bold', fontSize: 15, marginLeft: 8 },
-
-  thumbRow: { position: 'absolute', left: 16, right: 16, bottom: 212, maxHeight: 52 },
-  thumb: { width: 52, height: 52, borderRadius: 8, borderWidth: 2, borderColor: 'rgba(255,255,255,0.85)' },
-
-  bottom: { position: 'absolute', left: 0, right: 0, bottom: 36, alignItems: 'center' },
-  hint: { color: '#fff', fontFamily: 'Barlow_600SemiBold', fontSize: 14, marginBottom: 12, textAlign: 'center' },
-  shutterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    width: '100%', paddingHorizontal: 26 },
-  sideCol: { width: 96, gap: 8, alignItems: 'center' },
-  sideBtn: { minWidth: 92, minHeight: 50, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12, paddingVertical: 5 },
-  sideIcon: { fontSize: 19, color: '#fff' },
-  sideLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 11, color: '#D7DBDF',
-    textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 1 },
-  shutterOuter: { width: 82, height: 82, borderRadius: 41, borderWidth: 5, borderColor: '#fff',
+  // ---- action panel ----
+  panel: { backgroundColor: C.paper, paddingHorizontal: 16, paddingBottom: 26 },
+  actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  sideBtn: { flex: 1, minHeight: 66, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.card, borderColor: C.line, borderWidth: 1, borderRadius: radii.md,
+    paddingVertical: 10, paddingHorizontal: 8, gap: 4 },
+  sideDisc: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.brand,
     alignItems: 'center', justifyContent: 'center' },
-  shutterInner: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#fff' },
-  shutterRec: { backgroundColor: '#4E6243' },
-  stopBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    backgroundColor: '#fff', borderRadius: 16, minHeight: 62, marginTop: 12,
-    marginHorizontal: 18, alignSelf: 'stretch' },
-  stopDim: { opacity: 0.6 },
-  stopSq: { width: 15, height: 15, borderRadius: 3, backgroundColor: '#8B5148' },
-  stopT: { color: '#151A1E', fontFamily: 'BarlowCondensed_700Bold', fontSize: 20,
-    textTransform: 'uppercase', letterSpacing: 1.4 },
-  savingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)',
+  sideLabRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  sideLab: { fontFamily: F.bodySemi, fontSize: 14, color: C.ink, textAlign: 'center' },
+  countPill: { minWidth: 22, height: 22, borderRadius: 11, backgroundColor: C.brand,
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  countPillT: { fontFamily: F.bodyBold, fontSize: 13, color: '#fff' },
+
+  // The hero. Lifted over the panel edge exactly as drawn, and the biggest target
+  // on the screen because it is the one a gloved hand hits without looking.
+  shutter: { width: 118, height: 118, borderRadius: 59, backgroundColor: C.paper,
+    alignItems: 'center', justifyContent: 'center', marginTop: -46 },
+  shutterInner: { width: 106, height: 106, borderRadius: 53, backgroundColor: C.brand,
+    alignItems: 'center', justifyContent: 'center', gap: 2 },
+  shutterLive: { backgroundColor: C.brandDark },
+  shutterT: { fontFamily: F.dispSemi, fontSize: 13, color: '#fff',
+    textTransform: 'uppercase', letterSpacing: 0.9 },
+
+  done: { minHeight: 66, borderRadius: radii.md, backgroundColor: C.brand,
+    alignItems: 'center', justifyContent: 'center', marginTop: 14 },
+  doneDim: { opacity: 0.55 },
+  doneT: { fontFamily: F.disp, fontSize: 24, color: '#fff',
+    textTransform: 'uppercase', letterSpacing: 1.2 },
+  nextLine: { fontFamily: F.body, fontSize: 14.5, color: C.steel, textAlign: 'center',
+    marginTop: 10, lineHeight: 20 },
+  lockRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.line },
+  lockT: { fontFamily: F.body, fontSize: 13, color: C.steel, flexShrink: 1 },
+
+  // ---- photo sheet ----
+  sheetWrap: { flex: 1, backgroundColor: 'rgba(21,26,30,0.45)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: C.paper, borderTopLeftRadius: radii.xl, borderTopRightRadius: radii.xl,
+    padding: 18, paddingBottom: 30, maxHeight: '82%' },
+  sheetTitle: { fontFamily: F.bodyBold, fontSize: 21, color: C.ink, letterSpacing: -0.3,
+    marginBottom: 12 },
+  sheetEmpty: { fontFamily: F.body, fontSize: 15.5, color: C.steel, lineHeight: 22,
+    paddingVertical: 24, textAlign: 'center' },
+  sheetGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 8 },
+  sheetCell: { width: 104, height: 104, borderRadius: radii.sm, overflow: 'hidden',
+    backgroundColor: C.surfaceMuted },
+  sheetThumb: { width: '100%', height: '100%' },
+  sheetTag: { position: 'absolute', left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(21,26,30,0.72)', paddingVertical: 3, alignItems: 'center' },
+  sheetTagT: { fontFamily: F.dispSemi, fontSize: 10, color: '#fff', letterSpacing: 0.8 },
+  sheetAdd: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    minHeight: 58, borderRadius: radii.md, backgroundColor: C.card, borderWidth: 1,
+    borderColor: C.line, marginTop: 12, paddingHorizontal: 12 },
+  sheetAddT: { fontFamily: F.bodySemi, fontSize: 15.5, color: C.ink, flexShrink: 1 },
+  sheetClose: { minHeight: 52, alignItems: 'center', justifyContent: 'center', marginTop: 6 },
+  sheetCloseT: { fontFamily: F.bodySemi, fontSize: 16, color: C.steel },
+
+  // The viewer goes near-black, not paper: a photo is judged against a neutral
+  // surround, and the warm cream would tint every colour the person is checking.
+  zoomWrap: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.94)' },
+  zoomTap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  zoomImg: { width: '100%', height: '100%' },
+  zoomClose: { position: 'absolute', left: 18, right: 18, bottom: 34, minHeight: 64,
+    borderRadius: 14, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  zoomCloseT: { fontFamily: F.dispSemi, fontSize: 17, letterSpacing: 1.2,
+    textTransform: 'uppercase', color: C.ink },
+
+  savingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: C.paper,
     alignItems: 'center', justifyContent: 'center' },
-  savingT: { color: '#fff', fontFamily: 'Barlow_600SemiBold', fontSize: 17, marginTop: 16 },
+  savingT: { fontFamily: F.bodySemi, fontSize: 17, color: C.ink, marginTop: 16 },
 });
