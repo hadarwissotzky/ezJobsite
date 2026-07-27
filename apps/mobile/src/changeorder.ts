@@ -265,6 +265,21 @@ export function money(cents: number | null): string {
   return `${cents < 0 ? '-' : ''}$${whole}.${s.slice(-2)}`;
 }
 
+/**
+ * Integer cents -> whole-dollar display, no cents (hadar 2026-07-27: the Home hero
+ * showed "$1,500.00" and the ".00" is noise at that size).
+ *
+ * ROUNDS to the nearest dollar rather than truncating, so a summary total is never
+ * understated. This is for HEADLINE TOTALS ONLY — every priced row, change order and
+ * signed document keeps `money()` and its exact cents. Never use this where a number
+ * is confirmed, approved, or sent.
+ */
+export function moneyWhole(cents: number | null): string {
+  if (cents === null) return '—';
+  const dollars = Math.round(Math.abs(cents) / 100);
+  return `${cents < 0 ? '-' : ''}$${dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+}
+
 /** Text -> integer cents. Used by the tap-to-correct field. */
 export function centsFromInput(s: string): number | null {
   const clean = s.replace(/[^0-9.]/g, '');

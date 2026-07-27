@@ -30,6 +30,10 @@ export function PaywallScreen(props: {
   currentPlan: PlanId;
   onClose: () => void;
   onContact: () => void;   // mailto — Enterprise + the not-yet-live case
+  /** Fired after a successful purchase/restore so the caller can re-read the plan.
+   *  The AUTHORITY is still company.plan written by the RevenueCat webhook — this is
+   *  only the cue to go look, not the entitlement itself. */
+  onPurchased?: () => void;
 }) {
   const ready = billingStatus() === 'ready';
   const [busy, setBusy] = React.useState(false);
@@ -41,14 +45,23 @@ export function PaywallScreen(props: {
     setBusy(true); setNote(null);
     const r = await purchasePlan(pid);
     setBusy(false);
-    if (!r.ok && r.reason !== 'cancelled') setNote(t('paywall.failed'));
+    if (r.ok) {
+      // Paid. The webhook writes company.plan server-side and it syncs down, which can
+      // lag a moment — so acknowledge here rather than leaving the buyer staring at
+      // the paywall wondering whether their money went anywhere.
+      setNote(t('paywall.thanks'));
+      props.onPurchased?.();
+      return;
+    }
+    if (r.reason !== 'cancelled') setNote(t('paywall.failed'));
   };
 
   const restore = async () => {
     setBusy(true); setNote(null);
     const r = await restorePurchases();
     setBusy(false);
-    if (!r.ok) setNote(ready ? t('paywall.restoreNone') : t('paywall.notLive'));
+    if (r.ok && r.plan !== 'free') { setNote(t('paywall.thanks')); props.onPurchased?.(); return; }
+    if (!r.ok || r.plan === 'free') setNote(ready ? t('paywall.restoreNone') : t('paywall.notLive'));
   };
 
   const card = (plan: PlanId) => {

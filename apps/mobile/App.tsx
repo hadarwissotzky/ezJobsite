@@ -39,7 +39,8 @@ import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { RecordScreen } from './src/ui/recordscreen';
 import { SettingsScreen } from './src/ui/settingsscreen';
-import { ensureOwnCompany } from './src/company';
+import { ensureOwnCompany, myCompany } from './src/company';
+import { configureBilling } from './src/billing';
 import { LABELS, labelHex } from './src/labels';
 import { companyFeed, type FeedItem } from './src/feed';
 import { registerPushToken } from './src/push';
@@ -119,6 +120,10 @@ import { shareApprovalDoc } from './src/approvalrecordshare';
 import { useFonts } from 'expo-font';
 import { Barlow_400Regular, Barlow_500Medium, Barlow_600SemiBold, Barlow_700Bold } from '@expo-google-fonts/barlow';
 import { BarlowCondensed_600SemiBold, BarlowCondensed_700Bold } from '@expo-google-fonts/barlow-condensed';
+// Design system fonts (Website/src/styles/global.css): Oswald = display (condensed,
+// heavy — the "MONEY WAITING" caps), Inter = body. Home screen matches these.
+import { Oswald_500Medium, Oswald_600SemiBold, Oswald_700Bold } from '@expo-google-fonts/oswald';
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { describeStamp, ensureLocationPermission, stampNow, type Stamp } from './src/stamp';
 import { addressFor } from './src/geocode';
 import { resolveJurisdiction } from './src/jurisdiction';
@@ -161,7 +166,7 @@ import {
 } from './src/approverrouting';
 import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
-         createdLabel, markLocalSent, money, parseMoney, validateLines, CO_PHOTO_SUBQUERY,
+         createdLabel, markLocalSent, money, moneyWhole, parseMoney, validateLines, CO_PHOTO_SUBQUERY,
          type LineItem, type LedgerRow, priceDraftExtra, rehomeDraftExtra,
          type BillingTiming, type ScheduleEffect } from './src/changeorder';
 import { displayStatus, canSupersede, type LedgerStatus } from './src/extrastatus';
@@ -260,6 +265,8 @@ export default function App() {
   const [fontsLoaded] = useFonts({
     Barlow_400Regular, Barlow_500Medium, Barlow_600SemiBold, Barlow_700Bold,
     BarlowCondensed_600SemiBold, BarlowCondensed_700Bold,
+    Oswald_500Medium, Oswald_600SemiBold, Oswald_700Bold,
+    Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold,
   });
   const [ui, setUi] = React.useState<UiState>({ k: 'idle' });
   const [showCapture, setShowCapture] = React.useState(false);   // REQ-CAP-FUSED screen
@@ -1281,6 +1288,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const [nav, setNav] = React.useState<'home' | 'project' | 'jobs' | 'activity'>('home');
   // The Activity page's status tab (hadar, 2026-07-23 mockup): all extras, filtered.
   const [activityTab, setActivityTab] = React.useState<'all' | 'waiting' | 'approved' | 'needs'>('all');
+  // Home's summary-chip filter. Filters the Home list IN PLACE — tapping a chip must
+  // never navigate away (hadar 2026-07-27: "it takes me to another page"). null = show
+  // every section; a value shows only that one, and tapping the live chip clears it.
+  const [homeFilter, setHomeFilter] = React.useState<null | 'needs' | 'waiting' | 'approved'>(null);
   const [cards, setCards] = React.useState<ProjectCard[]>([]);
   const [search, setSearch] = React.useState('');
   const [picker, setPicker] = React.useState(false);
@@ -1817,6 +1828,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           setOwner(s.user.id);
           // REQ-NOTIF1 — register this device for remote push, best-effort.
           void registerPushToken(connector.client, s.user.id);
+          // Billing identity is the COMPANY, not the user — the owner pays and crew
+          // inherit it, so the receipt must follow the company. Best-effort and
+          // non-blocking: with no RevenueCat key this no-ops and the paywall keeps
+          // its "coming soon" state. myCompany() reads synced tables, so it may be
+          // null on a cold first run; configureBilling runs again on the next session
+          // event once membership has synced down.
+          void myCompany(db, s.user.id)
+            .then((c) => configureBilling(c?.id ?? null))
+            .catch(() => {});
           // connect() is fire-and-forget: offline is the NORMAL case for this
           // product, not an error, and PowerSync retries internally. Once per app
           // run -- a token refresh must not stack another connection.
@@ -2932,6 +2952,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const paywallEl = (
     <PaywallScreen visible={showPaywall} currentPlan={paywallPlan}
       onClose={() => setShowPaywall(false)}
+      // Re-read the plan after a purchase. company.plan is written by the RevenueCat
+      // webhook and arrives via sync, so this may still read the old tier for a beat —
+      // refresh() runs again on the next sync tick and settles it.
+      onPurchased={async () => { setPaywallPlan(await currentPlan(db)); void refresh(); }}
       onContact={() => Linking.openURL('mailto:support@ezchangeorder.com?subject=' + encodeURIComponent('EZchangeorder — plans')).catch(() => {})} />
   );
 
@@ -3731,32 +3755,41 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     draft:    { bg: '#EFEBE3',                fg: '#5E666E', emoji: '📝', label: T('act.chipCreated') },
     declined: { bg: 'rgba(139,81,72,0.13)',  fg: '#8B5148', emoji: '✋', label: T('act.chipDeclined') },
   };
+  // Outlined status pill for the Home rows — the mockup's look (thin colored
+  // border + colored text, no fill), in the design-system palette (global.css).
+  const chipStyle: Record<string, { border: string; text: string }> = {
+    waiting:  { border: '#efd667', text: '#8a6d1f' },  // butter-400 border, amber text
+    needs:    { border: '#c3bab2', text: '#3d3733' },  // ink-300 border, ink-700 text
+    approved: { border: '#3bbe77', text: '#157a47' },  // mint-500 border, mint-700 text
+    draft:    { border: '#c3bab2', text: '#6b625b' },
+    declined: { border: '#e0a59c', text: '#8B5148' },
+  };
 
-  // One Home extra row (mockup parity 2026-07-26): a cover-photo thumbnail (falls
-  // back to the status emoji when a capture has no photo yet), scope + project,
-  // the price, and the status chip. A draft keeps its "Finish & send →" call to
-  // action instead of a chip — it is the creator's to move, not the client's.
+  // One Home extra row (mockup parity): a cover-photo thumbnail (falls back to the
+  // status emoji when a capture has no photo yet), scope + project, the price, and
+  // an outlined status chip. A draft keeps its "Finish & send →" call to action
+  // instead of a chip — it is the creator's to move, not the client's.
   const extraRow = (e: Extra) => {
     const st = stateOf(e);
-    const c = stateColor[st];
+    const cp = chipStyle[st];
     return (
       <Pressable key={e.id} style={s.exRow}
         onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
         {e.photo_relpath
           ? <Image source={{ uri: FS.documentDirectory + e.photo_relpath }}
               style={s.exThumb} resizeMode="cover" />
-          : <View style={[s.exThumb, { backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' }]}>
-              <Text style={{ fontSize: 20 }}>{c.emoji}</Text>
+          : <View style={[s.exThumb, s.exThumbEmpty]}>
+              <Text style={{ fontSize: 22 }}>{stateColor[st].emoji}</Text>
             </View>}
         <View style={{ flex: 1 }}>
-          <Text style={s.actName} numberOfLines={1}>{e.scope || T('home.draftsSec')}</Text>
-          {!!e.pname && <Text style={s.exMeta} numberOfLines={1}>{e.pname}</Text>}
-          {e.amount_cents != null && <Text style={s.exRowAmt}>{money(e.amount_cents)}</Text>}
+          <Text style={s.exName} numberOfLines={1}>{e.scope || T('home.draftsSec')}</Text>
+          {!!e.pname && <Text style={s.exSub} numberOfLines={1}>{e.pname}</Text>}
+          {e.amount_cents != null && <Text style={s.exPrice}>{money(e.amount_cents)}</Text>}
         </View>
         {st === 'draft'
           ? <Text style={s.exDraft}>{T('home.finishSend')}</Text>
-          : <View style={[s.exChip, { backgroundColor: c.bg }]}>
-              <Text style={[s.exChipT, { color: c.fg }]}>{c.label}</Text>
+          : <View style={[s.exChip, { borderColor: cp.border }]}>
+              <Text style={[s.exChipT, { color: cp.text }]}>{stateColor[st].label}</Text>
             </View>}
       </Pressable>
     );
@@ -3852,17 +3885,25 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       .filter((p) => !q || p.name.toLowerCase().includes(q) ||
                      (p.address ?? '').toLowerCase().includes(q));
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
-    // Buckets by "whose court is the ball in": a draft is YOURS to finish and send;
-    // a sent extra with a client question is YOURS to answer; a sent extra with none
-    // is the client's to approve; approved is done. The hero totals the money still
-    // OUT on the client (sent, either kind) — that is "waiting for approval".
-    const draftList = homeExtras.filter((e) => e.status === 'draft');
-    const needs = homeExtras.filter((e) => e.status === 'sent' && e.questions > 0);
+    // Buckets by "whose court is the ball in". NEEDS YOU is everything in YOUR court:
+    // an unfinished draft (yours to finish and send) AND a sent extra the client has
+    // asked a question about (yours to answer) — hadar 2026-07-27, drafts used to sit
+    // in a separate section at the bottom. A sent extra with no question is the
+    // client's to approve; approved is done.
+    const questioned = homeExtras.filter((e) => e.status === 'sent' && e.questions > 0);
+    const needs = homeExtras.filter((e) =>
+      e.status === 'draft' || (e.status === 'sent' && e.questions > 0));
     const waitingList = homeExtras.filter((e) => e.status === 'sent' && e.questions === 0);
     const approvedList = homeExtras.filter((e) => e.status === 'approved');
-    const outstanding = [...needs, ...waitingList].reduce((sum, e) => sum + (e.amount_cents ?? 0), 0);
-    const outstandingN = needs.length + waitingList.length;
+    // The hero totals money still OUT ON THE CLIENT — sent only. A draft has never
+    // left the phone, so it is NOT "waiting for approval" and must not inflate this.
+    const outstanding = [...questioned, ...waitingList].reduce((sum, e) => sum + (e.amount_cents ?? 0), 0);
+    const outstandingN = questioned.length + waitingList.length;
     const startCapture = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
+    // Tapping a summary chip filters the list BELOW IT — no navigation. Tapping the
+    // live chip again clears the filter.
+    const toggleFilter = (f: 'needs' | 'waiting' | 'approved') =>
+      setHomeFilter((cur) => (cur === f ? null : f));
     const disabled = !!gate || !!initError;
     return (
       <View style={s.homeC}>
@@ -3884,25 +3925,28 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         </View>
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-          {/* Hero: the money outstanding on the client, across every job. */}
+          {/* Hero — the money outstanding on the client, across every job. Design
+              system: Oswald caps label, huge Oswald figure, Inter sub. The house
+              illustration (assets/house-hero.png) sits top-right. */}
           <View style={s.heroWrap}>
-            <View style={s.houseArt} pointerEvents="none">
-              <View style={s.houseRoof} />
-              <View style={s.houseBody} />
-            </View>
-            <Text style={s.heroLabel}>{T('home.awaiting')}</Text>
-            <Text style={s.heroBig}>{money(outstanding)}</Text>
+            <Image source={require('./assets/house-hero.png')} style={s.houseArt}
+              resizeMode="contain" />
+            <Text style={s.heroLabel}>{T('home.heroLabel')}</Text>
+            {/* One line, whole dollars, and it SHRINKS to fit its column instead of
+                running under the house art — "$300,000" is 8 chars and used to
+                collide (hadar 2026-07-27). */}
+            <Text style={s.heroBig} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.45}>
+              {moneyWhole(outstanding)}
+            </Text>
             <Text style={s.heroSub}>
               {outstandingN === 0 ? T('home.awaitNone')
                 : T({ k: 'home.acrossN', p: { n: outstandingN } })}
             </Text>
-            {/* The money already won — the single most motivating number, was computed
-                and never shown (communication gap #2). */}
+            {/* The money already won — the single most motivating number. */}
             {recovered.n > 0 && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12,
-                backgroundColor: '#E7ECDD', borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 }}>
-                <Icon name="approved" size={15} color="#536B49" />
-                <Text style={{ fontFamily: 'Barlow_700Bold', fontSize: 14, color: '#536B49' }}>
+              <View style={s.recoverPill}>
+                <Icon name="approved" size={15} color="#157a47" />
+                <Text style={s.recoverPillT}>
                   {T({ k: 'home.recoveredInline', p: { amount: money(recovered.cents) } })}
                 </Text>
               </View>
@@ -3913,36 +3957,73 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               so recording starts before any job is chosen. GPS files it after. */}
           <Pressable style={[s.ctaCard, disabled && s.btnOff]} disabled={disabled}
             onPress={startCapture}>
-            <View style={s.ctaIcon}><Icon name="camera" size={22} color="#fff" /></View>
+            <Image source={require('./assets/icon-camera-cut.png')} style={s.ctaCamera}
+              resizeMode="contain" />
             <View style={{ flex: 1 }}>
               <Text style={s.ctaTitle}>{T('home.recordExtra')}</Text>
               <Text style={s.ctaSub}>{T('home.recordSub')}</Text>
             </View>
           </Pressable>
 
-          {/* Status buckets, actionable-first, mirroring the mockup: what needs YOU,
-              then what's out with the client, then the running win, and finally the
-              creator's own unfinished drafts. Each row is the shared extraRow —
-              thumbnail + scope + price + status chip. (hadar 2026-07-26: drafts led
-              the list and, full of test captures, buried the money that matters.) */}
+          {/* Summary chips (mockup): a glance at what needs you / is out / is won.
+              Tapping one filters the sections below IN PLACE; the live chip is ringed
+              and tapping it again clears. Never navigates. */}
+          <View style={s.sumRow}>
+            <Pressable style={[s.sumChip, s.sumNeeds, homeFilter === 'needs' && s.sumChipOn]}
+              accessibilityState={{ selected: homeFilter === 'needs' }}
+              onPress={() => toggleFilter('needs')}>
+              <Text style={s.sumChipT}>{T('act.chipNeeds')}</Text>
+              <View style={[s.sumCount, s.sumCountDark]}>
+                <Text style={s.sumCountT}>{needs.length}</Text>
+              </View>
+            </Pressable>
+            <Pressable style={[s.sumChip, s.sumWait, homeFilter === 'waiting' && s.sumChipOn]}
+              accessibilityState={{ selected: homeFilter === 'waiting' }}
+              onPress={() => toggleFilter('waiting')}>
+              <Text style={[s.sumChipT, s.sumWaitT]}>{T('act.chipWaiting')}</Text>
+              <View style={[s.sumCount, s.sumCountWait]}>
+                <Text style={s.sumCountT}>{waitingList.length}</Text>
+              </View>
+            </Pressable>
+            <Pressable style={[s.sumChip, s.sumOk, homeFilter === 'approved' && s.sumChipOn]}
+              accessibilityState={{ selected: homeFilter === 'approved' }}
+              onPress={() => toggleFilter('approved')}>
+              <Text style={[s.sumChipT, s.sumOkT]}>{T('act.chipApproved')}</Text>
+              <View style={s.sumCheck}>
+                <Text style={s.sumCheckT}>✓</Text>
+              </View>
+            </Pressable>
+          </View>
+
+          {/* Status sections in the mockup's order (waiting out first, then what needs
+              you, the running win, and finally your own drafts). Header is an uppercase
+              Oswald label + a "See all" link into the filtered Activity tab. Each row
+              is the shared extraRow. Drafts have no Activity filter, so no "See all". */}
           {(() => {
-            const bucket = (labelKey: string, badge: object, list: Extra[]) =>
-              list.length > 0 ? (
+            // A filter hides the other sections. "See all" focuses this one; while
+            // focused the link flips to "Show all" and clears — both in place.
+            const bucket = (labelKey: string, f: 'needs' | 'waiting' | 'approved' | null, list: Extra[]) => {
+              if (!list.length) return null;
+              if (homeFilter && homeFilter !== f) return null;
+              const focused = homeFilter === f;
+              return (
                 <React.Fragment key={labelKey}>
                   <View style={s.secHead}>
                     <Text style={s.secLab}>{T(labelKey)}</Text>
-                    <View style={[s.secBadge, badge]}>
-                      <Text style={s.secBadgeT}>{list.length}</Text>
-                    </View>
+                    {f && (
+                      <Pressable onPress={() => setHomeFilter(focused ? null : f)} hitSlop={8}>
+                        <Text style={s.seeAll}>{focused ? T('home.showAll') : T('home.seeAll')}</Text>
+                      </Pressable>
+                    )}
                   </View>
                   {list.map(extraRow)}
                 </React.Fragment>
-              ) : null;
+              );
+            };
             return (<>
-              {bucket('home.needsResponse', s.secBadgeWarn, needs)}
-              {bucket('home.awaiting', s.secBadgeInfo, waitingList)}
-              {bucket('home.approvedSec', s.secBadgeOk, approvedList)}
-              {bucket('home.draftsSec', s.secBadgeMuted, draftList)}
+              {bucket('home.waitingForYes', 'waiting', waitingList)}
+              {bucket('home.needsResponse', 'needs', needs)}
+              {bucket('home.approvedSec', 'approved', approvedList)}
             </>);
           })()}
 
@@ -5506,36 +5587,64 @@ const s = StyleSheet.create({
   tileMeta: { position: 'absolute', bottom: 0, left: 0, right: 0, color: '#fff', fontSize: 10,
     paddingHorizontal: 5, paddingVertical: 3, backgroundColor: '#00000099' },
   // ── capture-first home (prototype c1) ──────────────────────────────────────
-  homeC: { flex: 1, backgroundColor: '#F7F4EE', paddingTop: 54 },
-  // ── Home dashboard (mockup 2026-07-23): money first, two lists, bottom nav ──
+  homeC: { flex: 1, backgroundColor: '#faf7f3', paddingTop: 54 },  // ink-50
+  // ── Home dashboard — matched to the design system: Oswald display + Inter body,
+  //    ink/sky/mint/butter palette from Website/src/styles/global.css (2026-07-26) ──
   dashHdr: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 14, paddingBottom: 6 },
   hdrBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  hdrIcon: { fontSize: 22, color: '#151A1E' },
-  hdrTitle: { fontFamily: 'Barlow_600SemiBold', fontSize: 18, color: '#151A1E' },
+  hdrIcon: { fontSize: 22, color: '#131110' },
+  hdrTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 18, color: '#131110' },
   hdrBadge: { position: 'absolute', top: 3, right: 3, minWidth: 18, height: 18, borderRadius: 9,
-    backgroundColor: '#4E6243', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  hdrBadgeT: { color: '#fff', fontSize: 11, fontFamily: 'Barlow_700Bold' },
-  heroWrap: { paddingHorizontal: 22, paddingTop: 14, paddingBottom: 20 },
-  heroLabel: { fontFamily: 'Barlow_500Medium', fontSize: 14, color: '#6B7280', marginBottom: 2 },
-  heroBig: { fontFamily: 'Barlow_700Bold', fontSize: 46, color: '#151A1E', letterSpacing: -1 },
-  // House line-art without an SVG dep: a faint roof triangle over a body square.
-  houseArt: { position: 'absolute', right: 20, top: 22, width: 96, height: 74 },
-  houseRoof: { position: 'absolute', top: 0, left: 8, width: 0, height: 0,
-    borderLeftWidth: 40, borderRightWidth: 40, borderBottomWidth: 30,
-    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#DCE0E6' },
-  houseBody: { position: 'absolute', top: 30, left: 18, width: 60, height: 44,
-    borderWidth: 2, borderColor: '#DCE0E6', borderTopWidth: 0 },
-  ctaCard: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#16223D',
-    marginHorizontal: 16, borderRadius: 16, paddingVertical: 18, paddingHorizontal: 18, marginBottom: 22 },
-  ctaIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: "#4E6243",
+    backgroundColor: '#157a47', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  hdrBadgeT: { color: '#fff', fontSize: 11, fontFamily: 'Inter_700Bold' },
+  heroWrap: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 14 },
+  // Ratios measured off the mockup (hadar 2026-07-27: "the ratios in the header are
+  // wrong"): the headline is a two-line block ~30pt, the figure ~56pt, and the house
+  // is a big piece of art filling the right third — not a timid corner decoration.
+  heroLabel: { fontFamily: 'Oswald_700Bold', fontSize: 27, lineHeight: 29, color: '#131110',
+    textTransform: 'uppercase', letterSpacing: 0.2, maxWidth: 196, marginBottom: 2 },
+  // maxWidth is the collision guard: the text box stops short of the house, and
+  // adjustsFontSizeToFit shrinks a long figure to fit inside it.
+  heroBig: { fontFamily: 'Oswald_700Bold', fontSize: 56, lineHeight: 62, color: '#131110',
+    letterSpacing: -0.5, maxWidth: 200 },
+  // Hero illustration — the hand-drawn house (assets/house-hero.png), top-right.
+  // Its cream ground (#faf7f3) matches the hero bg so it blends without a seam.
+  houseArt: { position: 'absolute', right: -8, top: 0, width: 210, height: 168 },
+  recoverPill: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, alignSelf: 'flex-start',
+    backgroundColor: '#e4f4eb', borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 },  // mint-100
+  recoverPillT: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: '#157a47' },
+  ctaCard: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#131110',  // ink-900
+    marginHorizontal: 16, borderRadius: 16, paddingVertical: 18, paddingHorizontal: 18, marginTop: 2, marginBottom: 16 },
+  ctaIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#1e9c5b',  // mint-600
     alignItems: 'center', justifyContent: 'center' },
   ctaIconT: { fontSize: 22 },
-  ctaTitle: { color: '#fff', fontFamily: 'Barlow_700Bold', fontSize: 17 },
-  ctaSub: { color: '#AEB8CC', fontFamily: 'Barlow_400Regular', fontSize: 13, marginTop: 2 },
-  secHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18,
-    marginTop: 6, marginBottom: 10 },
-  secLab: { fontFamily: 'Barlow_600SemiBold', fontSize: 16, color: '#151A1E' },
+  // Home CTA camera (assets/icon-camera-cut.png) — white camera straight on the
+  // black card, no tile, matching the mockup.
+  ctaCamera: { width: 48, height: 38 },
+  ctaTitle: { color: '#fff', fontFamily: 'Oswald_700Bold', fontSize: 20, textTransform: 'uppercase', letterSpacing: 0.4 },
+  ctaSub: { color: '#c3bab2', fontFamily: 'Inter_400Regular', fontSize: 13.5, marginTop: 2 },  // ink-300
+  // Summary chips — glance-and-jump into the filtered Activity tab.
+  sumRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 14 },
+  sumChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    borderRadius: 12, borderWidth: 1, paddingVertical: 10 },
+  sumChipOn: { borderWidth: 2, borderColor: '#131110' },  // the live filter, ringed in ink
+  sumNeeds: { backgroundColor: '#f0ebe6', borderColor: '#e2dbd4' },   // ink-100 / ink-200
+  sumWait: { backgroundColor: '#fbf3d4', borderColor: '#efd667' },    // butter-100 / butter-400
+  sumOk: { backgroundColor: '#e4f4eb', borderColor: '#9fe0bb' },      // mint-100
+  sumChipT: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#131110' },
+  sumWaitT: { color: '#8a6d1f' },
+  sumOkT: { color: '#157a47' },
+  sumCount: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  sumCountDark: { backgroundColor: '#131110' },
+  sumCountWait: { backgroundColor: '#c99a2e' },
+  sumCountT: { fontFamily: 'Inter_700Bold', fontSize: 11.5, color: '#fff' },
+  sumCheck: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#157a47', alignItems: 'center', justifyContent: 'center' },
+  sumCheckT: { color: '#fff', fontSize: 12, fontFamily: 'Inter_700Bold' },
+  secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 18,
+    marginTop: 10, marginBottom: 10 },
+  secLab: { fontFamily: 'Oswald_600SemiBold', fontSize: 15, color: '#6b625b', textTransform: 'uppercase', letterSpacing: 0.8 },
+  seeAll: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#285791' },  // sky-700
   secBadge: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center',
     justifyContent: 'center', paddingHorizontal: 6 },
   secBadgeWarn: { backgroundColor: '#F59E0B' },
@@ -5543,16 +5652,18 @@ const s = StyleSheet.create({
   secBadgeMuted: { backgroundColor: '#6B7280' },
   secBadgeOk: { backgroundColor: '#2DA44E' },
   secBadgeT: { color: '#fff', fontSize: 12, fontFamily: 'Barlow_700Bold' },
-  exMeta: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#6B7280', marginTop: 4 },
-  exDraft: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#4E6243' },
-  // Mockup-parity extra row: thumbnail · scope + project + price · status chip.
+  exDraft: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#157a47' },
+  // Mockup-parity extra row: thumbnail · scope + project + price · outlined chip.
   exRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff',
-    borderColor: '#EEEFEC', borderWidth: 1, borderRadius: 12, paddingVertical: 11,
-    paddingHorizontal: 12, marginHorizontal: 16, marginBottom: 8 },
-  exThumb: { width: 52, height: 52, borderRadius: 10, backgroundColor: '#EFEBE3' },
-  exRowAmt: { fontFamily: 'Barlow_700Bold', fontSize: 15, color: '#151A1E', marginTop: 2 },
-  exChip: { borderRadius: 6, paddingVertical: 3, paddingHorizontal: 8 },
-  exChipT: { fontFamily: 'Barlow_600SemiBold', fontSize: 11.5 },
+    borderColor: '#e2dbd4', borderWidth: 1, borderRadius: 14, paddingVertical: 12,
+    paddingHorizontal: 12, marginHorizontal: 16, marginBottom: 10 },
+  exThumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#f0ebe6' },
+  exThumbEmpty: { alignItems: 'center', justifyContent: 'center' },
+  exName: { fontFamily: 'Inter_600SemiBold', fontSize: 15.5, color: '#131110' },
+  exSub: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#6b625b', marginTop: 1 },
+  exPrice: { fontFamily: 'Oswald_700Bold', fontSize: 18, color: '#131110', marginTop: 3, letterSpacing: -0.3 },
+  exChip: { borderWidth: 1.5, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 12 },
+  exChipT: { fontFamily: 'Inter_600SemiBold', fontSize: 12.5 },
   tabBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     borderTopWidth: 1, borderTopColor: '#E9EAE7', backgroundColor: '#fff',
     paddingTop: 8, paddingBottom: 26, paddingHorizontal: 8 },
@@ -5650,8 +5761,7 @@ const s = StyleSheet.create({
   hero: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 26, paddingVertical: 16 },
   heroH: { fontFamily: 'Barlow_700Bold', fontSize: 34, color: '#151A1E',
     letterSpacing: -0.2, textAlign: 'center' },
-  heroSub: { fontFamily: 'Barlow_400Regular', fontSize: 15, color: '#5E666E',
-    marginTop: 6, marginBottom: 20, textAlign: 'center' },
+  heroSub: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#6b625b', marginTop: 4 },
   capBig: { width: 140, height: 140, borderRadius: 70, backgroundColor: '#4E6243',
     alignItems: 'center', justifyContent: 'center', shadowColor: '#4E6243', shadowOpacity: 0.35,
     shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
