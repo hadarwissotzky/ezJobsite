@@ -23,15 +23,23 @@
  *    because nobody goes looking for a capture they were told was handled. So a
  *    weak signal parks it; it does not lower the bar.
  *
- * 3. THE INBOX IS A REAL PROJECT ROW, not null. capture_commit.project_id is NOT
- *    NULL by design (a capture always has a home). The Inbox gives an unresolved
- *    capture a durable home that shows up in a queue, rather than needing a
- *    nullable column that every later query would have to remember to handle.
+ * 3. THE INBOX IS A SENTINEL ID, NOT A ROW. capture_commit.project_id is NOT NULL
+ *    by design (a capture always has a home) but carries no foreign key, so the
+ *    Inbox gives an unresolved capture a durable home without a nullable column
+ *    every later query would have to remember to handle.
+ *    (Corrected 2026-07-27: this said "a REAL PROJECT ROW", contradicting the
+ *    sentinel definition 30 lines below it. The sentinel is what the code does, and
+ *    believing the row existed is what let captures queue against a project the
+ *    server could never resolve.)
  */
-import { AbstractPowerSyncDatabase } from '@powersync/react-native';
-import { SupabaseClient } from '@supabase/supabase-js';
+// `import type` + explicit .ts extensions, matching discardstore.ts: a VALUE import
+// of the PowerSync/Supabase packages drags React Native into any Node process that
+// loads this module, and an extensionless path does not resolve under Node ESM.
+// Both are why this file had no test until 2026-07-27.
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { sha256 } from 'js-sha256';
-import { msg, type Msg } from './i18n';
+import { msg, type Msg } from './i18n.ts';
 
 /**
  * NO app-owned project table and NO project outbox.
@@ -59,8 +67,18 @@ import { msg, type Msg } from './i18n';
  * project existing. That keeps a device-local holding pen OUT of the synced
  * project list -- an "Inbox" job appearing on the office iPad would be noise, and
  * it is not a job anyone works on.
+ *
+ * CONSEQUENCE, learned the hard way (2026-07-27): because no such row exists on the
+ * SERVER either, and `capture.project_id` there is NOT NULL REFERENCES project(id),
+ * an unresolved capture cannot be uploaded at all. It is therefore HELD out of the
+ * outbox until `fileCapture()` gives it a real home. See `mintUploadForFiledCapture`.
+ *
+ * The definition moved to `captureddl.ts` — the zero-import module — so the commit
+ * path and the filing path can share it without importing each other. Re-exported
+ * here so every existing `import { INBOX_ID } from './projects'` keeps working.
  */
-export const INBOX_ID = 'inbox';
+export { INBOX_ID } from './captureddl.ts';
+import { INBOX_ID, buildCapturePayload } from './captureddl.ts';
 
 /** Rows the server refused for good. Surfaced, never silent. */
 export type Rejected = { tbl: string; row_id: string; code: string | null;
@@ -382,7 +400,78 @@ export async function fileCapture(
        project_id = excluded.project_id, resolved_at_ms = excluded.resolved_at_ms`,
     [o.captureId, o.projectId, Date.now(), o.by]
   );
+  await mintUploadForFiledCapture(db, o.captureId, o.projectId);
   await touchProject(db, o.projectId);
+}
+
+/**
+ * Give a just-filed capture a queue entry pointing at its REAL project.
+ *
+ * Two cases, both of which existed on hadar's phone on 2026-07-27:
+ *
+ *  1. HELD — committed to the Inbox, so `performCapture` never queued it. Insert.
+ *  2. STUCK — queued before this fix with `project_id: 'inbox'` baked into the
+ *     payload, failing `capture_project_id_fkey` on every attempt since. Rewrite it.
+ *
+ * The payload is rebuilt from `capture_commit`, which is the authority — nothing is
+ * invented here, only the destination changes. A fresh `mutation_id` is minted because
+ * the digest changes with it, and the server keys idempotency on (mutation_id, digest):
+ * reusing the old id with a new digest is precisely the conflicting-replay case it
+ * refuses with 23505. Reusing it is also unnecessary, since neither case was ever
+ * successfully ingested — case 1 was never sent, and case 2 was rejected by the FK
+ * before the insert took effect.
+ *
+ * `capture_commit` is untouched. Its original mutation_id, digest and `project_id:
+ * 'inbox'` remain as the true record of what the device believed at capture time; the
+ * human's decision lives in `capture_resolution`, exactly as the read path expects.
+ */
+async function mintUploadForFiledCapture(
+  db: AbstractPowerSyncDatabase, captureId: string, projectId: string
+): Promise<void> {
+  if (projectId === INBOX_ID) return;   // filing INTO the inbox changes nothing
+
+  const c = (await db.getAll<any>(
+    `SELECT capture_id, attachment_id, owner_id, media_sha256, media_bytes,
+            media_mime_type, modality, captured_at_ms,
+            gps_lat, gps_lng, gps_accuracy_m, gps_fix_age_ms, stamp_status
+       FROM capture_commit WHERE capture_id = ?`, [captureId]))[0];
+  if (!c) return;                        // nothing committed under that id
+
+  // Already queued against a real project? Then it is in flight or done — leave it
+  // alone. Rewriting a live queue entry would be how a capture gets sent twice.
+  const q = (await db.getAll<any>(
+    `SELECT mutation_id, payload_json FROM capture_outbox WHERE capture_id = ?`,
+    [captureId]))[0];
+  if (q) {
+    let queuedProject: string | null = null;
+    try { queuedProject = JSON.parse(q.payload_json)?.project_id ?? null; } catch { /* corrupt */ }
+    if (queuedProject !== INBOX_ID) return;
+  }
+
+  const mutationId = `mut-${captureId}-${Date.now().toString(36)}`;
+  const payloadJson = buildCapturePayload({
+    captureId: c.capture_id, attachmentId: c.attachment_id, mutationId,
+    projectId, ownerId: c.owner_id,
+    mediaSha256: c.media_sha256, mediaBytes: c.media_bytes,
+    mediaMimeType: c.media_mime_type, modality: c.modality,
+    capturedAtMs: c.captured_at_ms,
+    gpsLat: c.gps_lat ?? null, gpsLng: c.gps_lng ?? null,
+    gpsAccuracyM: c.gps_accuracy_m ?? null, gpsFixAgeMs: c.gps_fix_age_ms ?? null,
+    stampStatus: c.stamp_status ?? 'unavailable',
+  });
+  // Same digest capture.ts computes: js-sha256 UTF-8-encodes a string exactly as
+  // Buffer.from(s,'utf8') does, and the column CHECK demands lowercase hex.
+  const payloadSha256 = sha256(payloadJson).toLowerCase();
+
+  await db.writeTransaction(async (tx) => {
+    if (q) await tx.execute(`DELETE FROM capture_outbox WHERE capture_id = ?`, [captureId]);
+    await tx.execute(
+      `INSERT INTO capture_outbox (mutation_id, capture_id, operation, payload_json,
+         payload_sha256, queued_at_ms, attempt_count, next_attempt_at_ms)
+       VALUES (?,?,'capture.create.v1',?,?,?,0,0)`,
+      [mutationId, captureId, payloadJson, payloadSha256, Date.now()]
+    );
+  });
 }
 
 /** Where a capture actually belongs: the override if a human filed it, else the original. */

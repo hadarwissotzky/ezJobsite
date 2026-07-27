@@ -117,7 +117,7 @@ export async function applyDurabilityProfile(db: AbstractPowerSyncDatabase): Pro
  * triggers on them, must not sync them, and must not clear them.
  * Created via raw DDL against the same database file.
  */
-import { APP_OWNED_DDL } from './captureddl.ts';
+import { APP_OWNED_DDL, OUTBOX_FK_MIGRATION, INBOX_ID, buildCapturePayload } from './captureddl.ts';
 export { APP_OWNED_DDL };
 
 /**
@@ -136,6 +136,51 @@ export { APP_OWNED_DDL };
 export async function ensureAppOwnedSchema(db: AbstractPowerSyncDatabase): Promise<void> {
   for (const stmt of APP_OWNED_DDL) await db.execute(stmt);
   await migrateAppOwnedSchema(db);
+  await migrateOutboxFk(db);
+}
+
+/**
+ * Rebuild capture_outbox with the narrow (capture_id-only) foreign key.
+ *
+ * Runs at most once per install: it inspects the table's own SQL and returns
+ * immediately unless the old composite FK is still there. Everything about this is
+ * shaped by the fact that the rows being copied are PENDING UPLOADS — evidence that
+ * has been promised to a human but not yet delivered:
+ *
+ *  - `PRAGMA foreign_keys=off` before BEGIN, because SQLite ignores that pragma inside
+ *    a transaction and a table swap with FKs live will reject or cascade mid-flight.
+ *  - The copy is COUNTED and compared before the old table is dropped. If a single row
+ *    failed to come across, the transaction is aborted and the original survives — a
+ *    failed migration must leave the queue intact, not half-moved.
+ *  - The pragma is restored in a finally, so a throw cannot leave the database with
+ *    foreign keys silently disabled for the rest of the session.
+ */
+export async function migrateOutboxFk(db: AbstractPowerSyncDatabase): Promise<void> {
+  const sql = (await db.getAll<{ sql: string }>(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='capture_outbox'`))[0]?.sql;
+  // Absent (fresh install — the DDL above already built the narrow shape) or already
+  // migrated. The composite form is the only thing that needs rewriting.
+  if (!sql || !/REFERENCES\s+capture_commit\s*\(\s*mutation_id/i.test(sql)) return;
+
+  await db.execute(`PRAGMA foreign_keys=off`);
+  try {
+    const before = (await db.getAll<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM capture_outbox`))[0]?.n ?? 0;
+    await db.writeTransaction(async (tx) => {
+      for (const stmt of OUTBOX_FK_MIGRATION) {
+        if (stmt.startsWith('DROP TABLE')) {
+          const copied = (await tx.getAll<{ n: number }>(
+            `SELECT COUNT(*) AS n FROM capture_outbox_new`))[0]?.n ?? -1;
+          if (copied !== before) {
+            throw new Error(`outbox FK migration would lose rows: ${before} -> ${copied}`);
+          }
+        }
+        await tx.execute(stmt);
+      }
+    });
+  } finally {
+    await db.execute(`PRAGMA foreign_keys=on`);
+  }
 }
 
 /**
@@ -329,19 +374,17 @@ export async function performCapture(
   }   // capture is now PREPARED
 
   // Canonical request payload + digest over the exact stored bytes.
-  const payloadJson = JSON.stringify({
-    v: 1, capture_id: captureId, attachment_id: attachmentId, mutation_id: mutationId,
-    project_id: opts.projectId, owner_id: opts.ownerId,
-    media_sha256: mediaSha256, media_bytes: mediaBytes, media_mime_type: opts.input.mimeType,
+  const payloadJson = buildCapturePayload({
+    captureId, attachmentId, mutationId,
+    projectId: opts.projectId, ownerId: opts.ownerId,
+    mediaSha256, mediaBytes, mediaMimeType: opts.input.mimeType,
     modality: opts.input.modality,
-    captured_at_ms: capturedAtMs,
-    // MANDATE #9 travels with the capture. Part of the payload hash, so a stamp
-    // cannot be altered in the outbox without the server refusing the replay.
-    gps_lat: opts.stamp?.lat ?? null,
-    gps_lng: opts.stamp?.lng ?? null,
-    gps_accuracy_m: opts.stamp?.accuracyM ?? null,
-    gps_fix_age_ms: opts.stamp?.fixAgeMs ?? null,
-    stamp_status: opts.stamp?.status ?? 'unavailable',
+    capturedAtMs,
+    gpsLat: opts.stamp?.lat ?? null,
+    gpsLng: opts.stamp?.lng ?? null,
+    gpsAccuracyM: opts.stamp?.accuracyM ?? null,
+    gpsFixAgeMs: opts.stamp?.fixAgeMs ?? null,
+    stampStatus: opts.stamp?.status ?? 'unavailable',
   });
   const requestSha256 = await sha256Hex(new Uint8Array(Buffer.from(payloadJson, 'utf8')));
 
@@ -362,12 +405,21 @@ export async function performCapture(
          opts.stamp?.status ?? 'unavailable']
       );
 
-      await tx.execute(
-        `INSERT INTO capture_outbox (mutation_id, capture_id, operation, payload_json,
-           payload_sha256, queued_at_ms, attempt_count, next_attempt_at_ms)
-         VALUES (?,?,'capture.create.v1',?,?,?,0,0)`,
-        [mutationId, captureId, payloadJson, requestSha256, Date.now()]
-      );
+      // HOLD, don't queue, when the capture has no home yet (hadar, 2026-07-27).
+      // The server's capture.project_id is NOT NULL and references project(id); the
+      // Inbox is a sentinel with no row, so queueing this would guarantee a 23503 on
+      // every attempt forever. The capture is COMMITTED either way — media on disk,
+      // capture_commit written, "saved ✓" fully earned, because mandate #1 is a
+      // promise about local durability, not about the network. `fileCapture()` mints
+      // the outbox row the moment a human says where it belongs.
+      if (opts.projectId !== INBOX_ID) {
+        await tx.execute(
+          `INSERT INTO capture_outbox (mutation_id, capture_id, operation, payload_json,
+             payload_sha256, queued_at_ms, attempt_count, next_attempt_at_ms)
+           VALUES (?,?,'capture.create.v1',?,?,?,0,0)`,
+          [mutationId, captureId, payloadJson, requestSha256, Date.now()]
+        );
+      }
     });
   } catch (e: any) {
     return { ok: false, reason: `commit failed: ${e?.message ?? e}` };

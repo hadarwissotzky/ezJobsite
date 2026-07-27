@@ -34,6 +34,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { Buffer } from 'buffer';
 import * as Network from 'expo-network';
 import { getCellularConsent, uploadGate, type UploadGate } from './consent';
+import { INBOX_ID } from './captureddl.ts';
 
 const BUCKET = 'captures';
 
@@ -117,6 +118,20 @@ export async function drainOutbox(
       payload = JSON.parse(row.payload_json);
     } catch {
       await park(db, row, 'CORRUPT_PAYLOAD', 'payload_json is not valid JSON');
+      r.parked++;
+      continue;
+    }
+
+    // AWAITING A HOME. The server's capture.project_id references project(id) and the
+    // Inbox is a sentinel with no row, so sending this is a guaranteed 23503 — which
+    // is exactly what it did, on every tick, for two days (2026-07-27). Captures are
+    // no longer queued while unresolved; this only catches rows queued BEFORE that
+    // fix. It is deliberately parked rather than backed off: backoff implies the next
+    // attempt might work, and this one cannot. `fileCapture()` replaces the row with a
+    // real destination the moment a human picks one.
+    if (payload.project_id === INBOX_ID) {
+      await park(db, row, 'AWAITING_FILING',
+        'held: this capture has no job yet — file it and it will upload');
       r.parked++;
       continue;
     }
