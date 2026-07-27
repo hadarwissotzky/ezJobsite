@@ -3714,6 +3714,54 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     </View>
   );
 
+  // The one status derivation + chip palette, shared by Home and Activity so a
+  // "Waiting" pill reads identically wherever an extra appears (was duplicated
+  // inside the Activity block; lifted here 2026-07-26 so Home's rows match the
+  // mockup's Needs-you / Waiting / Approved chips).
+  type Extra = (typeof homeExtras)[number];
+  const stateOf = (e: Extra): 'approved' | 'declined' | 'draft' | 'needs' | 'waiting' =>
+    e.status === 'approved' ? 'approved'
+    : e.status === 'declined' ? 'declined'
+    : e.status === 'draft' ? 'draft'
+    : e.questions > 0 ? 'needs' : 'waiting';
+  const stateColor: Record<string, { bg: string; fg: string; emoji: string; label: string }> = {
+    waiting:  { bg: 'rgba(164,122,63,0.13)', fg: '#A47A3F', emoji: '⏳', label: T('act.chipWaiting') },
+    needs:    { bg: 'rgba(109,127,137,0.14)', fg: '#5E7079', emoji: '💬', label: T('act.chipNeeds') },
+    approved: { bg: '#E7ECDD',                fg: '#536B49', emoji: '✅', label: T('act.chipApproved') },
+    draft:    { bg: '#EFEBE3',                fg: '#5E666E', emoji: '📝', label: T('act.chipCreated') },
+    declined: { bg: 'rgba(139,81,72,0.13)',  fg: '#8B5148', emoji: '✋', label: T('act.chipDeclined') },
+  };
+
+  // One Home extra row (mockup parity 2026-07-26): a cover-photo thumbnail (falls
+  // back to the status emoji when a capture has no photo yet), scope + project,
+  // the price, and the status chip. A draft keeps its "Finish & send →" call to
+  // action instead of a chip — it is the creator's to move, not the client's.
+  const extraRow = (e: Extra) => {
+    const st = stateOf(e);
+    const c = stateColor[st];
+    return (
+      <Pressable key={e.id} style={s.exRow}
+        onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
+        {e.photo_relpath
+          ? <Image source={{ uri: FS.documentDirectory + e.photo_relpath }}
+              style={s.exThumb} resizeMode="cover" />
+          : <View style={[s.exThumb, { backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' }]}>
+              <Text style={{ fontSize: 20 }}>{c.emoji}</Text>
+            </View>}
+        <View style={{ flex: 1 }}>
+          <Text style={s.actName} numberOfLines={1}>{e.scope || T('home.draftsSec')}</Text>
+          {!!e.pname && <Text style={s.exMeta} numberOfLines={1}>{e.pname}</Text>}
+          {e.amount_cents != null && <Text style={s.exRowAmt}>{money(e.amount_cents)}</Text>}
+        </View>
+        {st === 'draft'
+          ? <Text style={s.exDraft}>{T('home.finishSend')}</Text>
+          : <View style={[s.exChip, { backgroundColor: c.bg }]}>
+              <Text style={[s.exChipT, { color: c.fg }]}>{c.label}</Text>
+            </View>}
+      </Pressable>
+    );
+  };
+
   // ── SHARED OVERLAYS ───────────────────────────────────────────────────────
   // The activity centre and the draft-recovery card must reach the user on HOME,
   // not only inside a project: Home is the landing now, and a recoverable draft is
@@ -3872,105 +3920,31 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             </View>
           </Pressable>
 
-          {/* Drafts — the creator's unfinished extras, private until sent. Tapping
-              one opens its DETAIL page (the record), like every other extra; the
-              record's "Finish this extra" button opens the price composer (hadar,
-              2026-07-24: a tap must reach the extra detail, not the job page). */}
-          {draftList.length > 0 && (<>
-            <View style={s.secHead}>
-              <Text style={s.secLab}>{T('home.draftsSec')}</Text>
-              <View style={[s.secBadge, s.secBadgeMuted]}>
-                <Text style={s.secBadgeT}>{draftList.length}</Text>
-              </View>
-            </View>
-            {draftList.map((e) => (
-              <Pressable key={e.id} style={s.exCard}
-                onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
-                <View style={s.exTop}>
-                  <Text style={s.exName} numberOfLines={1}>{e.scope}</Text>
-                  <Text style={s.exAmt}>{e.amount_cents == null ? '' : money(e.amount_cents)}</Text>
-                </View>
-                <View style={s.exBottom}>
-                  <Text style={s.exDraft}>{T('home.finishSend')}</Text>
-                  <Text style={s.chev}>›</Text>
-                </View>
-              </Pressable>
-            ))}
-          </>)}
-
-          {/* Needs your response — a client asked a question; the ball is in YOUR court. */}
-          {needs.length > 0 && (<>
-            <View style={s.secHead}>
-              <Text style={s.secLab}>{T('home.needsResponse')}</Text>
-              <View style={[s.secBadge, s.secBadgeWarn]}>
-                <Text style={s.secBadgeT}>{needs.length}</Text>
-              </View>
-            </View>
-            {needs.map((e) => (
-              <Pressable key={e.id} style={s.exCard}
-                onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
-                <View style={s.exTop}>
-                  <Text style={s.exName} numberOfLines={1}>{e.scope}</Text>
-                  <Text style={s.exAmt}>{money(e.amount_cents)}</Text>
-                </View>
-                <Text style={s.exMeta} numberOfLines={1}>
-                  {e.who_directed}{e.pname ? ' · ' + e.pname : ''}
-                </Text>
-                <View style={s.exBottom}>
-                  <Text style={s.exQuestion}>{T('home.clientQuestion')}</Text>
-                  <Text style={s.chev}>›</Text>
-                </View>
-              </Pressable>
-            ))}
-          </>)}
-
-          {/* Waiting for approval — sent, no question yet: the client still has it. */}
-          {waitingList.length > 0 && (<>
-            <View style={s.secHead}>
-              <Text style={s.secLab}>{T('home.awaiting')}</Text>
-              <View style={[s.secBadge, s.secBadgeInfo]}>
-                <Text style={s.secBadgeT}>{waitingList.length}</Text>
-              </View>
-            </View>
-            {waitingList.map((e) => (
-              <Pressable key={e.id} style={s.exCard}
-                onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
-                <View style={s.exTop}>
-                  <Text style={s.exName} numberOfLines={1}>{e.scope}</Text>
-                  <Text style={s.exAmt}>{money(e.amount_cents)}</Text>
-                </View>
-                <Text style={s.exMeta} numberOfLines={1}>
-                  {T({ k: 'home.sentAgo', p: { ago: ago(e.created_at_ms, now) } })}
-                  {e.who_directed ? ' · ' + e.who_directed : ''}
-                </Text>
-              </Pressable>
-            ))}
-          </>)}
-
-          {/* Approved — done and signed. Kept on Home as the running win. */}
-          {approvedList.length > 0 && (<>
-            <View style={s.secHead}>
-              <Text style={s.secLab}>{T('home.approvedSec')}</Text>
-              <View style={[s.secBadge, s.secBadgeOk]}>
-                <Text style={s.secBadgeT}>{approvedList.length}</Text>
-              </View>
-            </View>
-            {approvedList.map((e) => (
-              <Pressable key={e.id} style={s.exCard}
-                onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
-                <View style={s.exTop}>
-                  <Text style={s.exName} numberOfLines={1}>{e.scope}</Text>
-                  <Text style={s.exAmt}>{money(e.amount_cents)}</Text>
-                </View>
-                <Text style={s.exMeta} numberOfLines={1}>
-                  {e.signed_by
-                    ? T({ k: 'home.signedBy', p: { name: e.signed_by } })
-                    : T('home.approvedSec')}
-                  {e.pname ? ' · ' + e.pname : ''}
-                </Text>
-              </Pressable>
-            ))}
-          </>)}
+          {/* Status buckets, actionable-first, mirroring the mockup: what needs YOU,
+              then what's out with the client, then the running win, and finally the
+              creator's own unfinished drafts. Each row is the shared extraRow —
+              thumbnail + scope + price + status chip. (hadar 2026-07-26: drafts led
+              the list and, full of test captures, buried the money that matters.) */}
+          {(() => {
+            const bucket = (labelKey: string, badge: object, list: Extra[]) =>
+              list.length > 0 ? (
+                <React.Fragment key={labelKey}>
+                  <View style={s.secHead}>
+                    <Text style={s.secLab}>{T(labelKey)}</Text>
+                    <View style={[s.secBadge, badge]}>
+                      <Text style={s.secBadgeT}>{list.length}</Text>
+                    </View>
+                  </View>
+                  {list.map(extraRow)}
+                </React.Fragment>
+              ) : null;
+            return (<>
+              {bucket('home.needsResponse', s.secBadgeWarn, needs)}
+              {bucket('home.awaiting', s.secBadgeInfo, waitingList)}
+              {bucket('home.approvedSec', s.secBadgeOk, approvedList)}
+              {bucket('home.draftsSec', s.secBadgeMuted, draftList)}
+            </>);
+          })()}
 
           {homeExtras.length === 0 && (
             <Text style={s.homeEmpty}>{T('home.emptyDash')}</Text>
@@ -4204,22 +4178,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   //  communication" (hadar, 2026-07-23). One row per extra; the status IS the
   //  communication state. Reuses homeExtras (all live extras across every job).
   if (nav === 'activity') {
-    type Ext = (typeof homeExtras)[number];
-    const stateOf = (e: Ext): 'approved' | 'declined' | 'draft' | 'needs' | 'waiting' =>
-      e.status === 'approved' ? 'approved'
-      : e.status === 'declined' ? 'declined'
-      : e.status === 'draft' ? 'draft'
-      : e.questions > 0 ? 'needs' : 'waiting';
-    // Soft-tinted pill in the muted kit palette: colour + emoji + label (the mockup's
-    // Waiting/Needs you/Approved chips). Fill is a low-alpha tint of the status colour,
-    // text is the status colour at full strength — never colour alone.
-    const stateColor: Record<string, { bg: string; fg: string; emoji: string; label: string }> = {
-      waiting:  { bg: 'rgba(164,122,63,0.13)', fg: '#A47A3F', emoji: '⏳', label: T('act.chipWaiting') },
-      needs:    { bg: 'rgba(109,127,137,0.14)', fg: '#5E7079', emoji: '💬', label: T('act.chipNeeds') },
-      approved: { bg: '#E7ECDD',                fg: '#536B49', emoji: '✅', label: T('act.chipApproved') },
-      draft:    { bg: '#EFEBE3',                fg: '#5E666E', emoji: '📝', label: T('act.chipCreated') },
-      declined: { bg: 'rgba(139,81,72,0.13)',  fg: '#8B5148', emoji: '✋', label: T('act.chipDeclined') },
-    };
+    // stateOf + stateColor are now shared with Home (defined once, above).
     const tabLabel: Record<typeof activityTab, string> = {
       all: T('act.tabAll'), waiting: T('act.tabWaiting'),
       approved: T('act.tabApproved'), needs: T('act.tabNeeds'),
@@ -5584,15 +5543,16 @@ const s = StyleSheet.create({
   secBadgeMuted: { backgroundColor: '#6B7280' },
   secBadgeOk: { backgroundColor: '#2DA44E' },
   secBadgeT: { color: '#fff', fontSize: 12, fontFamily: 'Barlow_700Bold' },
-  exCard: { backgroundColor: '#fff', borderColor: '#E9EAE7', borderWidth: 1, borderRadius: 12,
-    marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 14, paddingVertical: 13 },
-  exTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  exName: { flex: 1, fontFamily: 'Barlow_600SemiBold', fontSize: 15.5, color: '#151A1E', marginRight: 10 },
-  exAmt: { fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#151A1E' },
   exMeta: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#6B7280', marginTop: 4 },
-  exBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
-  exQuestion: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#E8833A' },
   exDraft: { fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: '#4E6243' },
+  // Mockup-parity extra row: thumbnail · scope + project + price · status chip.
+  exRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff',
+    borderColor: '#EEEFEC', borderWidth: 1, borderRadius: 12, paddingVertical: 11,
+    paddingHorizontal: 12, marginHorizontal: 16, marginBottom: 8 },
+  exThumb: { width: 52, height: 52, borderRadius: 10, backgroundColor: '#EFEBE3' },
+  exRowAmt: { fontFamily: 'Barlow_700Bold', fontSize: 15, color: '#151A1E', marginTop: 2 },
+  exChip: { borderRadius: 6, paddingVertical: 3, paddingHorizontal: 8 },
+  exChipT: { fontFamily: 'Barlow_600SemiBold', fontSize: 11.5 },
   tabBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     borderTopWidth: 1, borderTopColor: '#E9EAE7', backgroundColor: '#fff',
     paddingTop: 8, paddingBottom: 26, paddingHorizontal: 8 },
