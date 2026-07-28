@@ -160,6 +160,7 @@ Log what Codex flags and how it was reconciled in `IMPLEMENTATION_NOTES.md` unde
 | `PM-LAYER.md` · `LANGUAGE-LAYER.md` · `COMMUNICATION-LAYER.md` | The project-management, language, and communication layer specs. |
 | `PRD-companycam-parity.md` | CompanyCam-parity + wedge build spec: elevates seams (Feed, notifications, CO/approval, collaborators) to buildable + adds net-new surfaces (photo grid/viewer, tags, static map, bottom-nav, share links, proposal-review). Build-ordered in waves. |
 | `CRITIC-REVIEW-01.md` | Adversarial review findings + reconciliation status. |
+| **`docs/SPEC-extra-lifecycle-v1.md`** | **The authoritative spec for the extra's three-state lifecycle (draft → negotiation → approved & locked): the stored + derived status vocabulary, every legal transition and its guard, the send-readiness contract, the negotiation contract, the seal, and what must be inside the frozen instrument. `REQ-LC*`. Read it before touching any status, any send gate, or `shown_content`.** |
 | `SPEC-v1-change-order-wedge.md` | **SUPERSEDED** → now the P1.5 Change Order handler detail only. |
 | `VERIFICATION_PLAN.md` | The 8 evaluation criteria + how each is verified + the de-risk exit criteria. |
 | **`SPIKE-A-BUILD-PLAN.md`** | **The foundation-spike build plan — the first thing to build. Task-level plan for M0 + the durability front of M1, with the exit gate.** |

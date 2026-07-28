@@ -42,6 +42,8 @@ system — they share one Project and one Capture stream.
 | The 10 mandates (never-lose, confirm-don't-automate, offline, English-canonical, …) | **`CLAUDE.md`** |
 | The daily field-record surface (timeline, evidence panel, auto-file, home, share) | **`PRD-jobsite-field-record`** |
 | The money loop (structure → send → discuss → approve → record, EWA, ledger, delivery) | **`PRD-change-approval-loop`** |
+| **The extra's lifecycle — stored + derived statuses, every legal transition and its guard, the send-readiness contract, the negotiation contract, the seal, what belongs in the frozen instrument** | **`SPEC-extra-lifecycle-v1`** `[added 2026-07-28]` — it *implements* the wedge PRD's R-numbers and does not replace them; where the two disagree about a **state**, this spec wins, because the PRD names outcomes and this spec names the machine |
+| The four "fill what's missing" flow fields (payment timing · schedule effect · exclusions) + the four-step sequence they sit in | **`FLOW-SIMPLEST-JOBSITE`** `[registered 2026-07-28 — it was unregistered and post-dated this doc]`. It owns the SEQUENCE and the field set. It does **not** own the lifecycle (that is `SPEC-extra-lifecycle-v1`), and its **"contractor's own sign-off"** (§ Review & send) is a **net-new concept nothing else in the doc set mentions** — unadjudicated, not a requirement, see `SPEC-extra-lifecycle-v1` C-LC2 |
 | The seam (Capture → Item promotion) | **both** — specified in jobsite §6, consumed by wedge R2/R3 |
 | Capture UX (fused screen, stamp, authenticity look) | **`CAPTURE-UX-SYNTHESIS`** (design) → shipped as `REQ-CAP-FUSED` |
 | Pricing / seats / who pays | **`PRICING-STRATEGY`** |
