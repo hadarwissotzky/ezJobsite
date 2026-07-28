@@ -14,7 +14,7 @@
  * Use these instead of ad-hoc hex values so the app reads as one product.
  */
 import { StyleSheet, TextStyle } from 'react-native';
-import { palette, radii, shadows } from './tokens';
+import { palette, radii, shadows, statusTints } from './tokens';
 
 export const C = {
   ink: palette.ink,             // #151A1E — primary text + dark primary buttons
@@ -97,6 +97,13 @@ export const T = StyleSheet.create({
   chip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 },
   chipText: { fontFamily: F.dispSemi, fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.2, color: '#fff' },
 });
+
+/**
+ * Tint triple by tone — the same one-place rule as `chipStyle`, applied to the
+ * coloured state BOXES instead of the chips. A screen never mixes its own amber.
+ */
+export type Tone = keyof typeof statusTints;
+export function tint(tone: Tone) { return statusTints[tone]; }
 
 /** Chip colour by state — one place, so a status never means two things. */
 export function chipStyle(kind: 'approved' | 'pending' | 'discuss' | 'ewa' | 'declined') {

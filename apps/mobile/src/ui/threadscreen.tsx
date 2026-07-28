@@ -246,9 +246,14 @@ export function ThreadScreen(props: {
           )}
         </View>
 
-        {/* The channel closes only when you truly cannot reply (a superseded
-            version — the talk moved to the current one). Approved/declined stay
-            open now (supersedes R5b AC4; hadar, 2026-07-24). */}
+        {/* The channel is open for `sent` and NOTHING ELSE (`discussion.ts`
+            canReply → extralifecycle.ts, DEF-4/REQ-LC23). The 2026-07-24 note that
+            used to sit here — "approved/declined stay open now" — was overturned:
+            it widened the CLIENT of a two-sided contract without widening the
+            server, and `308_r5b_discussion.sql:94` rejects a reply on an answered
+            thread with 23514, which is PERMANENT. So the composer that note
+            justified produced replies that parked forever while the UI showed them
+            sent. A conversation after the answer is a new linked extra (REQ-LC31). */}
         {!st.canReply && (
           <View style={{
             marginTop: 14, borderRadius: 12, padding: 12,

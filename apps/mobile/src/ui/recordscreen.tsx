@@ -1,500 +1,336 @@
 /**
- * The extra record screen — PRD R6b, the prototype's c5.
+ * The extra record — now a STAGE DISPATCHER, not a screen.
  *
- * Order is the requirement: identity/state → plain-language state line → people →
- * description → evidence → decision summary (R6c) → full history.
+ * SPEC-extra-lifecycle-v1 D1: an extra has exactly three stages, and each one has a
+ * different job. This file used to be one 686-line flat scroll that tried to serve
+ * all three by hiding and showing rows, which is how a screen ends up offering
+ * Remind on a draft and a reply box on a signed record. `stageOf()` — the single
+ * authority (extralifecycle.ts) — now picks the screen, and this file does two
+ * things only: map the record onto that screen's props, and own the chrome that
+ * has to sit ABOVE whichever screen is showing.
  *
- * Every string comes from i18n (mandate #5). The first version baked English into
- * the component, which put an English legal-record screen in front of a reader who
- * had chosen Spanish.
+ * WHY `stageOf` AND THEN ONE MORE TEST FOR 'approved'. REQ-LC2 maps `declined` and
+ * `superseded` onto the same 'locked' stage as `approved`, and is emphatic that
+ * they are deliberately NOT Stage 3: Stage 3 is defined by the existence of an
+ * approval. `ExtraLockedScreen` is Stage 3 rendered — a green banner, an APPROVED
+ * chip, "approved by X". Sending a decline through it would print a false status on
+ * the one screen whose entire job is being accurate about status. So a terminal row
+ * that nobody signed renders through the negotiation screen, which already states
+ * that it renders a terminal status truthfully with every move closed down.
  *
- * R6c (the derived decision summary) is a CARD, not a section of this file: it is
- * passed in already assembled and renders nothing when null, which is R6c's second
- * AC made structural rather than remembered. See ui/decisionsummarycard.tsx.
+ * WHAT THIS FILE STILL OWNS, and why each is here rather than in a stage screen:
+ *   the photo lightbox   one modal for the whole record, so a tile in Stage 1 and a
+ *                        tile in the Photos & proof subscreen open the same viewer
+ *                        (exported for that second mount point).
+ *   the capture FAB      appending evidence is a record-level act, not a section's.
+ *                        NOT rendered on a sealed record: REQ-LC30 seals Stage 3 and
+ *                        kit.tsx already omits `onAddMore` there for the same reason.
+ *   the successor bar    a superseded version must still be able to hand the reader
+ *                        to the version that replaced it (`erec.viewCurrent`). The
+ *                        negotiation screen has no such move, and losing it would
+ *                        strand a reader on a retired price.
+ *
+ * Every string still comes from i18n (mandate #5); every stage screen is handed
+ * already-translated words, never slugs.
  */
 import React from 'react';
-import { Image, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import type { ExtraRecord, RecordPerson, RecordVoice } from '../record';
-import { playCapture, playbackState, stopPlayback } from '../annotate';
-import type { DecisionSummary } from '../decisionsummary';
-import { DecisionSummaryCard } from './decisionsummarycard';
-import type { ApprovalPanel } from '../eventlog';
-import { RecordApproval } from './recordapproval';
-import { NarratedScope, type ScopePhoto } from './narratedscope';
-import type { Alignment } from '../photonarration';
-import { threadState, type ThreadMessage } from '../discussion';
-import { chipKey, displayStatus, type LedgerStatus } from '../extrastatus';
-import { logDiag } from '../diaglog';
-import { DiscussionLog } from './threadscreen';
-import { createdLabel } from '../changeorder';
-import { t } from '../i18n';
-import { C, F, T, chipStyle, display, label } from './theme';
+import { Image, Modal, Pressable, Text, View } from 'react-native';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
-import { MoneyLine, PeopleCard, TypeLine, useRecordFacts } from './recordfacts';
+import type { ExtraRecord } from '../record';
+import type { ApprovalPanel } from '../eventlog';
+import type { ThreadMessage } from '../discussion';
+import { threadState } from '../discussion';
+import type { RemindVerdict } from '../remind';
+import type { ProcState } from '../status';
+import type { SendReadiness } from '../sendreadiness';
+import { stageOf } from '../extralifecycle';
+import { createdLabel } from '../changeorder';
+import { roleLabel } from '../approvers';
+import { isApproverRole } from '../approverrouting';
+import { t } from '../i18n';
+import { C, F } from './theme';
+import { useRecordFacts } from './recordfacts';
+import { Button } from './kit';
+import { ExtraDraftScreen } from './extradraft';
+import {
+  ExtraNegotiationScreen,
+  type ExtraDetailField,
+  type NegotiationPerson,
+} from './extranegotiation';
+import { ExtraLockedScreen } from './extralocked';
 
-/** Mirrors the ledger's colour semantics (coChip in App.tsx): discussing is
- *  orange — this app's "act on this" — because a question means the ball is in
- *  the contractor's court. Superseded and draft share ink; on this screen the
- *  state bar disambiguates them in words. */
-function chipKind(s: LedgerStatus) {
-  if (s === 'approved') return 'approved' as const;
-  if (s === 'declined') return 'declined' as const;
-  if (s === 'sent') return 'pending' as const;
-  if (s === 'discussing') return 'ewa' as const;
-  return 'discuss' as const;
-}
+/**
+ * Everything the three stage screens need that `ExtraRecord` does not carry.
+ *
+ * It arrives as ONE nullable object rather than fifteen props because it is loaded
+ * by one hydration layer in `openRecord` and it is either all there or none of it
+ * is. Null is a real state, not an error: mandate #7 says a layer that has not
+ * landed degrades the screen, it never blanks the app — so a null lifecycle renders
+ * the paper background for the tick it takes the local read to return, rather than
+ * guessing a price mode or a readiness verdict it does not have.
+ */
+export type RecordLifecycle = {
+  /** REQ-LC12. `recordFacts` states the derivation: reaching a change_order row
+   *  means this is an extra — R10's Decision has no change order and cannot arrive
+   *  here — so this is 'extra' by construction, not by a guess about the row. */
+  kind: 'extra' | 'decision';
+  /** REQ-LC11's content gate, computed by the caller from the same row. */
+  readiness: SendReadiness;
+  /** REQ-LC13's pipeline gate input — orthogonal to `readiness` and both must pass. */
+  proc: ProcState;
+  priceMode: 'fixed' | 'nte';
+  /** The four flow terms, RAW (`next_invoice` · `adds_days` · …). Raw so that NULL
+   *  keeps its one meaning: nobody answered. */
+  billingTiming: string | null;
+  scheduleEffect: string | null;
+  scheduleDays: number | null;
+  exclusions: string | null;
+  /** `who_directed` — who ASKED for the work (REQ-VAL4). Never the approver. */
+  requestedBy: string | null;
+  /** REQ-LC3's derived open signal. Never stored, never a status. */
+  openCount: number;
+  lastOpenedAtMs: number | null;
+  /** `canRemind(...)` at load time. A refusal carries its reason so the button is
+   *  never silently dead. */
+  remind: RemindVerdict;
+};
 
-function avatarColor(kind: RecordPerson['kind']) {
-  return kind === 'approver' ? C.approve : kind === 'crew' ? C.orange : C.ink;
-}
-
-export function RecordScreen(props: {
+export type RecordScreenProps = {
   rec: ExtraRecord;
   /** R6b item 3 reads stored actor facts. Local SQLite only — see recordfacts.tsx
    *  for why the read lives in a hook here and not in the caller. */
   db: AbstractPowerSyncDatabase;
-  /** R6c. Null renders nothing — the record is complete without it (R6c AC2). */
-  summary?: DecisionSummary | null;
-  /** R6 AC2: the FROZEN instrument + "opened 3 times · no answer yet". Null when
-   *  the events have not reached this device; the record renders without it. */
+  lifecycle: RecordLifecycle | null;
+  /** R6 AC2: the FROZEN instrument + its open signal. Null when the events have not
+   *  reached this device; the record renders without it. */
   approval?: ApprovalPanel | null;
-  /** R2: photos grouped under the sentence spoken over them. Null, or an alignment
-   *  with nothing in it, renders nothing and the plain evidence grid below stands. */
-  narration?: Alignment<ScopePhoto> | null;
-  /** R5b: the discussion, lineage-walked (threadFor). Null when not loaded — the
-   *  record renders without it, same rule as every other optional layer here. */
+  /** R5b: the discussion, lineage-walked (threadFor). Null when not loaded. */
   thread?: ThreadMessage[] | null;
   /** Open client questions on THIS version — the ledger's own signal (R7), NOT
-   *  derived from `thread`: the thread deliberately carries prior versions'
-   *  messages, and counting those would mark a fresh revision "discussing" here
-   *  while the ledger says "sent" (Codex review, 2026-07-22). */
+   *  derived from `thread`, which deliberately carries prior versions' messages. */
   openQuestions?: number;
   /** Reply ids still in the outbox (mandate #1: an undelivered reply says so). */
   undelivered?: ReadonlySet<string>;
-  /** R5b's "Revised: $1,850 → $1,500" marker — set when THIS extra supersedes an
-   *  older version. Both sides pre-formatted by money(). */
-  revision?: { priorAmount: string; newAmount: string } | null;
   onBack: () => void;
+  /** Capture INTO this extra (augment). One act, one prop: capturing from inside an
+   *  extra always means adding to it — never starting a new one. */
   onCapture?: () => void;
-  /** Add more photos / voice to THIS extra as appended evidence (hadar 2026-07-25).
-   *  Opens the capture screen in augment mode; the priced scope is never rewritten. */
-  onAugment?: () => void;
-  /** R6 / R5b AC3 — write the approval document and open the share sheet. */
-  onShare?: () => void;
-  /** R5b reply, straight from the record (prototype c5's reply bar). A reply is a
-   *  message: it commits nothing, prices nothing, and may never move status. */
-  onReply?: (text: string) => Promise<void>;
+  /** Open the R5c send preview. Always passed; the draft screen composes all three
+   *  gates itself and disables its own button, so no caller-side condition here. */
+  onSend: () => void;
+  /** A reply is a MESSAGE: it commits nothing and prices nothing. REQ-LC23's
+   *  `canReply` is enforced inside the screen by `threadState`, so this is passed
+   *  unconditionally — the old caller-side status test was a second copy of it. */
+  onReply: (text: string) => Promise<void>;
   /** R8 manual remind — same link, never a new token. Resolves with the verdict so
-   *  a refusal is SHOWN here; the record screen has no other status surface. */
-  onRemind?: () => Promise<{ ok: boolean; why?: string }>;
-  /** R5b/R7 Revise & resend — hands off to the priced read-back composer.
-   *  App.tsx passes it only when canSupersede(status). */
-  onRevise?: () => void;
-  /** Send a ready draft for approval (opens the R5c send preview). Passed only
-   *  when the draft's readiness gate is green. */
-  onSend?: () => void;
-  /** Finish an UNPRICED draft — opens the price/details composer. Passed only for a
-   *  draft that is not yet ready to send, so the extra detail page is never a
-   *  dead-end (hadar, 2026-07-24: tapping an extra must reach its detail page, and
-   *  from there be finishable). */
-  onFinish?: () => void;
-  /** Force the upload + processing of a PRICED draft that isn't ready to send yet,
-   *  so the evidence is on the server before a client gets a link (hadar,
-   *  2026-07-24: "we need an upload and process button before the send"). */
-  onProcess?: () => Promise<void> | void;
+   *  a refusal is SHOWN; this screen has no other status surface. */
+  onRemind: () => Promise<{ ok: boolean; why?: string }>;
+  /** REQ-LC22 Revise & resend. Passed unconditionally; `threadState.canRevise`
+   *  (which is `canSupersede`) decides inside the screen. */
+  onRevise: () => void;
+  /** Open one collapsed field / the detail subscreens (extradetails.tsx). */
+  onOpenDetail: (field: ExtraDetailField) => void;
+  onViewHistory: () => void;
+  /** The whole price + terms composer — the draft screen's secondary action. */
+  onEditDetails: () => void;
+  /** D6 / REQ-LC31: a NEW INDEPENDENT extra linked by origin. The origin row is
+   *  never written to. */
+  onCreateLinkedExtra: () => void;
+  /** Write the approval document and open the OS share sheet. Mandate #2: this
+   *  transmits nothing to a client and must never be changed to. */
+  onViewSignedApproval: () => void;
   /** On a superseded record: open the version that replaced it. */
   onOpenCurrent?: () => void;
-  /** Offered ONLY while the extra is a draft — App.tsx passes undefined once it
-   *  has been sent, because a client may have read it by then. */
+  /** REQ-LC14 / T5: legal in Stage 1 only. `canDelete` is re-checked inside the
+   *  draft screen; the caller offers it or does not. */
   onDelete?: () => void;
-  /** Where the extra's evidence is on its way to the cloud — an i18n key from
-   *  canSendExtra, undefined once everything behind it is processed. hadar,
-   *  from the device: "no indication even if it takes time that it was in the
-   *  process of doing it". This is that indication, on the screen where he
-   *  went looking for it. */
-  readinessKey?: string;
-}) {
-  const { rec } = props;
+};
+
+/**
+ * The draft screen's pinned bar, by arithmetic rather than by `onLayout`: it is
+ * composed inside `ExtraDraftScreen`, which this file does not own, so there is
+ * nothing here to measure. A FAB that covers Send is the exact bug the old `barH`
+ * measurement existed to prevent — if that bar's composition changes, this number
+ * is what must change.
+ *
+ * IT IS THE WORST CASE, NOT THE BEST ONE, and 160 was the best one. That figure
+ * counted 12 top + 58 Edit details + 10 gap + 58 Send + 22 bottom and simply omitted
+ * `SendReason` — a variable-height child in the same `gap: 10` stack that renders
+ * whenever Send is refused, which on a brand-new extra is TWO red lines. The bar is
+ * then ~212pt tall and the FAB, pinned at 172, sat over the right-hand end of the
+ * sentences telling the contractor why the button under his thumb is dead. So the
+ * number covers both blockers plus its gap: 12 + 42 + 10 + 58 + 10 + 58 + 22.
+ * Over-clearing on a bar with no reason costs a little empty space; under-clearing
+ * costs the explanation.
+ */
+const DRAFT_BAR_H = 212;
+
+export function RecordScreen(props: RecordScreenProps) {
+  const { rec, lifecycle } = props;
+  const stage = stageOf(rec.status);
   const messages = props.thread ?? [];
-  // R7's derived vocabulary, the same way the ledger and the thread derive it:
-  // the chip must never disagree with the list the contractor just came from.
-  const st = threadState({ coStatus: rec.status, messages, nowMs: Date.now() });
-  const shown = displayStatus(rec.status, { openQuestions: props.openQuestions ?? 0 });
-  const chip = chipStyle(chipKind(shown));
-  const facts = useRecordFacts(props.db, rec.id, rec.status);
   // The photo the lightbox is showing, or null. Tapping a thumbnail sets it.
   const [zoom, setZoom] = React.useState<string | null>(null);
-  // Reply being typed, and the in-flight flag (same rules as ThreadScreen: clear
-  // only after the write resolved; a failed write keeps the words).
-  const [draft, setDraft] = React.useState('');
-  const [busy, setBusy] = React.useState(false);
-  const [procBusy, setProcBusy] = React.useState(false);
-  // A refused action's reason. This screen has no other status surface, and a
-  // button that silently does nothing is the failure this repo names most often.
-  const [actionNote, setActionNote] = React.useState<string | null>(null);
-  // Measured height of the bottom bar, so the capture FAB sits above it instead
-  // of covering the reply field's send button.
-  const [barH, setBarH] = React.useState(0);
+  const facts = useRecordFacts(props.db, rec.id, rec.status);
 
-  // TEMPORARY DIAGNOSTIC (2026-07-23, hadar: thumbnails render empty, lightbox
-  // blank, file verified valid on disk). Writes the exact uri the Image gets and
-  // what the load callbacks say. Remove once the cause is named.
-  React.useEffect(() => {
-    const p = rec.photos[0];
-    if (p) void logDiag(props.db, 'rec.photo', `present=${p.present} …${p.uri.slice(-70)}`);
-  }, [rec.id]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // D4: exactly ONE approver. It comes from the stored actor facts, never from
+  // `who_directed` — record.ts's header records that this screen once labelled who
+  // ASKED for the extra as who could approve it, which is how a priced document
+  // reaches someone with no authority to sign it.
+  const approver: NegotiationPerson | null = React.useMemo(() => {
+    const p = facts?.people.find((x) => x.kind === 'approver');
+    if (!p) return null;
+    return { name: p.name, role: isApproverRole(p.roleSlug) ? roleLabel(p.roleSlug) : undefined };
+  }, [facts]);
+  const contributors: NegotiationPerson[] = React.useMemo(
+    () => (facts?.people ?? [])
+      .filter((x) => x.kind !== 'approver')
+      .map((x) => ({ name: x.name })),
+    [facts]);
 
-  // R6b item 2 with R5b folded in: when the thread says the ball moved, the state
-  // line says so — the stored status alone would keep reading "Sent — remind them"
-  // while the client sits waiting on an answer.
-  const stateMsg = shown === 'discussing'
-    ? { k: st.unansweredSinceMs !== null ? 'erec.stQuestion' : 'erec.stTheirTurn' }
-    : { k: rec.stateLineKey, p: rec.stateLineParams };
+  // Stage 3 is SEALED (REQ-LC30) and a retired or refused version is sealed by the
+  // same rules (REQ-LC2), so nothing may be appended to any of them. kit.tsx omits
+  // its own "add" tile on a frozen record for this reason; the FAB is the same act
+  // at record level and follows the same rule.
+  const mayAppend = stage !== 'locked' && !!props.onCapture;
+  const successorBar = rec.status === 'superseded' && !!props.onOpenCurrent;
 
-  const composer = st.canReply && !!props.onReply;
-  const terminal = shown === 'approved' || shown === 'declined' || shown === 'superseded';
-
-  const sendReply = async () => {
-    const text = draft.trim();
-    if (!text || busy || !props.onReply) return;
-    setBusy(true);
-    try {
-      await props.onReply(text);
-      setDraft(''); setActionNote(null);
-    } catch (e: any) {
-      setActionNote(String(e?.message ?? e));
-    } finally { setBusy(false); }
-  };
-
-  const remind = async () => {
-    if (!props.onRemind) return;
-    const r = await props.onRemind();
-    setActionNote(!r.ok && r.why ? r.why : null);
-  };
+  const body = (() => {
+    if (lifecycle === null) {
+      // The lifecycle layer has not landed (or failed). Paper, not a spinner and
+      // not a guess: every value it carries decides whether a priced document may
+      // be sent, and none of them has a safe default.
+      return <View style={{ flex: 1, backgroundColor: C.paper }} />;
+    }
+    if (stage === 'draft') {
+      return (
+        <ExtraDraftScreen
+          rec={rec}
+          kind={lifecycle.kind}
+          // No extra is numbered within its job anywhere in this build, so the
+          // kicker carries kind + job only. A number invented here would be the
+          // first place two screens could disagree about which extra this is.
+          extraNo={null}
+          readiness={lifecycle.readiness}
+          proc={lifecycle.proc}
+          priceMode={lifecycle.priceMode}
+          billingTiming={lifecycle.billingTiming}
+          scheduleEffect={lifecycle.scheduleEffect}
+          scheduleDays={lifecycle.scheduleDays}
+          exclusions={lifecycle.exclusions}
+          requestedBy={lifecycle.requestedBy}
+          capturedWith={capturedWith(rec)}
+          onBack={props.onBack}
+          onEditDescription={() => props.onOpenDetail('scope')}
+          onEditCost={() => props.onOpenDetail('cost')}
+          onEditBilling={() => props.onOpenDetail('billing')}
+          onEditSchedule={() => props.onOpenDetail('schedule')}
+          onEditExclusions={() => props.onOpenDetail('exclusions')}
+          onEditDetails={props.onEditDetails}
+          onAddPhotos={props.onCapture ?? (() => props.onOpenDetail('photos'))}
+          onPressPhoto={(uri) => setZoom(uri)}
+          onSend={props.onSend}
+          onDelete={props.onDelete}
+        />
+      );
+    }
+    if (stage === 'locked' && rec.status === 'approved') {
+      return (
+        <ExtraLockedScreen
+          rec={rec}
+          agreed={{
+            billingTiming: lifecycle.billingTiming,
+            scheduleEffect: lifecycle.scheduleEffect,
+            scheduleDays: lifecycle.scheduleDays,
+            exclusions: lifecycle.exclusions,
+          }}
+          approval={props.approval ?? null}
+          // KNOWN DEGRADATION, stated rather than hidden: the screen asks for the
+          // steps that LED to the approval, and `history` is the whole timeline.
+          // Its own header says a wholesale history degrades to one redundant
+          // "time not recorded" line under the signed step — redundant, not wrong —
+          // and the alternative would be guessing which merged rows are the
+          // signature, which is a worse failure on the record that settles disputes.
+          chain={rec.history}
+          approver={approver}
+          onBack={props.onBack}
+          onViewSignedApproval={props.onViewSignedApproval}
+          onViewFullHistory={props.onViewHistory}
+          onCreateLinkedExtra={props.onCreateLinkedExtra}
+          // The same single lightbox the other two stages use. Looking at evidence is
+          // not editing it, and a sealed record whose photos cannot be enlarged is
+          // the least useful version of the one screen built for a dispute.
+          onPressPhoto={(uri) => setZoom(uri)}
+        />
+      );
+    }
+    // `sent` — and every terminal status nobody signed. See the header for why a
+    // decline and a retired version render here and not through the locked screen.
+    return (
+      <ExtraNegotiationScreen
+        rec={rec}
+        kicker={kicker(rec)}
+        terms={{
+          billingTiming: billingSentence(lifecycle.billingTiming),
+          scheduleEffect: scheduleSentence(lifecycle.scheduleEffect, lifecycle.scheduleDays),
+          exclusions: lifecycle.exclusions?.trim() || null,
+        }}
+        approver={approver}
+        contributors={contributors}
+        openCount={lifecycle.openCount}
+        lastOpenedAtMs={lifecycle.lastOpenedAtMs}
+        openQuestions={props.openQuestions ?? 0}
+        thread={threadState({ coStatus: rec.status, messages, nowMs: Date.now() })}
+        undelivered={props.undelivered}
+        remind={lifecycle.remind}
+        formatAt={createdLabel}
+        onBack={props.onBack}
+        onReply={props.onReply}
+        onRemind={props.onRemind}
+        onRevise={props.onRevise}
+        onOpenDetail={props.onOpenDetail}
+        onViewHistory={props.onViewHistory}
+        // DELIBERATELY ABSENT on every status that reaches this screen. REQ-LC31
+        // rule 1 lets an origin link point only at an APPROVED row, and
+        // `createLinkedExtra` re-reads the status and refuses anything else — so
+        // offering the button on a `sent`, `declined` or `superseded` record would
+        // be a control that cannot work. (REQ-LC26 says a retry after a DECLINE is
+        // also "a new extra linked by origin", which rule 1 forbids; that conflict
+        // is flagged in changeorder.ts and is not resolved by hiding a button.)
+        onNewLinkedExtra={undefined}
+      />
+    );
+  })();
 
   return (
     <View style={{ flex: 1, backgroundColor: C.paper }}>
-      {/* paddingTop 54 = this app's status-bar clearance (homeC, reviewscreen…).
-          Without it the back control rendered UNDER the iPhone clock — hadar,
-          from the device 2026-07-22: "no way to get back from it". */}
-      <ScrollView contentContainerStyle={{ padding: 18, paddingTop: 54, paddingBottom: 120 }}>
-        <Pressable onPress={props.onBack} hitSlop={12}
-          style={{ minHeight: 48, justifyContent: 'center', alignSelf: 'flex-start', paddingRight: 24 }}>
-          <Text style={{ ...label, fontSize: 15, color: C.orange }}>‹ {t('erec.back')}</Text>
-        </Pressable>
+      {body}
 
-        {/* R6b item 1, in c5's order: the kicker (type · job) ABOVE the title —
-            "where am I" before "what is this" (hadar, 2026-07-22). */}
-        <TypeLine facts={facts} job={rec.jobName} />
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 3 }}>
-          <Text style={{ ...display(22), flex: 1 }} numberOfLines={3}>{rec.title}</Text>
-          <View style={[T.chip, { backgroundColor: chip.bg }]}>
-            <Text style={[T.chipText, { color: chip.fg }]}>{t(chipKey(shown))}</Text>
-          </View>
-        </View>
-
-        {/* Mandate #6: the price is the CONTRACTOR'S, read back and confirmed by a
-            human. A Decision renders "No cost change" and no figure anywhere
-            (R6b AC2 / R10). */}
-        <MoneyLine rec={rec} facts={facts} />
-
-        {/* R5b: the thread carries across versions with a visible marker. */}
-        {props.revision && (
-          <View style={{
-            marginTop: 10, borderRadius: 12, padding: 12,
-            backgroundColor: '#F1F3F0', borderWidth: 1, borderColor: C.line,
-          }}>
-            <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.ink }}>
-              {t({ k: 'r5b.revisedFrom', p: {
-                prior: props.revision.priorAmount, next: props.revision.newAmount } } as any)}
-            </Text>
-          </View>
-        )}
-
+      {/* A retired version must still hand the reader forward. This is the one row
+          of the old bottom bar that no stage screen carries, and dropping it would
+          strand a reader on a price that is no longer live. */}
+      {successorBar && (
         <View style={{
-          marginTop: 12, borderRadius: 12, padding: 12,
-          backgroundColor: '#FFF3EA', borderWidth: 1, borderColor: '#FFD9C2',
+          borderTopWidth: 1, borderTopColor: C.line, backgroundColor: C.card,
+          padding: 12, paddingBottom: 22,
         }}>
-          <Text style={{ fontFamily: F.bodyMed, fontSize: 14, color: '#7A3A12', lineHeight: 20 }}>
-            {t(stateMsg as any)}
-            {props.readinessKey ? `\n${t(props.readinessKey as any)}` : ''}
-          </Text>
-        </View>
-
-        {!rec.synced && (
-          <Text style={{ ...T.bodySteel, fontSize: 12, marginTop: 8 }}>{t('erec.onPhone')}</Text>
-        )}
-
-        {/* R6b item 3: the approver (name + role label, R5c), captured-by and
-            priced/sent-by, each with its timestamp. Rows come only from stored
-            facts — where nothing was recorded, nothing is shown. */}
-        <PeopleCard facts={facts} />
-
-        <View style={T.card}>
-          <Text style={label}>{t('erec.description')}</Text>
-          <Text style={[T.body, { marginTop: 6 }]}>{rec.description}</Text>
-        </View>
-
-        {/* The voice narrations — the source of the extra plus any voice notes added
-            later, each its own player, stacked oldest-first (hadar 2026-07-25). The
-            transcript (in the summary/description) is derived from the original. */}
-        {rec.voices.map((v, i) => (
-          <VoicePlayer key={v.captureId} voice={v} ordinal={rec.voices.length > 1 ? i + 1 : 0} />
-        ))}
-
-        {/* Evidence. Mandate #1: a file the row promises but the device does not
-            have is SHOWN as missing. A blank tile would be silent loss. */}
-        {/* R2: when the transcript is here, the photos are grouped under what was
-            being said as each was taken. When it is not — offline, no STT key, not
-            processed yet — this renders nothing and the plain grid below stands.
-            Never both: the grid is the fallback, not a companion. */}
-        {props.narration && <NarratedScope alignment={props.narration} />}
-        {/* The empty state is SAID, not implied by absence (hadar, 2026-07-23):
-            a missing card reads as "didn't load", a sentence reads as a fact. */}
-        {!props.narration && rec.photos.length === 0 && (
-          <View style={T.card}>
-            <Text style={label}>{t({ k: 'erec.evidence', p: { n: 0 } } as any)}</Text>
-            <Text style={{ ...T.bodySteel, fontSize: 13.5, marginTop: 6 }}>
-              {t('erec.noPhotos')}
-            </Text>
-            {props.onAugment && (
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-                <AddPhotoTile onPress={props.onAugment} />
-              </View>
-            )}
-            {props.onAugment && <AddVoiceButton onPress={props.onAugment} />}
-          </View>
-        )}
-        {!props.narration && rec.photos.length > 0 && (
-          <View style={T.card}>
-            <Text style={label}>
-              {t({ k: 'erec.evidence', p: { n: rec.photos.length } } as any)}
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-              {rec.photos.map((p) => (
-                <View key={p.captureId}>
-                  {!p.present ? (
-                    <View style={{
-                      width: 86, height: 86, borderRadius: 10, backgroundColor: '#FBEAE7',
-                      borderWidth: 1, borderColor: C.danger, alignItems: 'center',
-                      justifyContent: 'center', padding: 4,
-                    }}>
-                      <Text style={{
-                        fontFamily: F.dispSemi, fontSize: 9, color: C.danger, textAlign: 'center',
-                      }}>
-                        {t('erec.evidenceMissing')}
-                      </Text>
-                    </View>
-                  ) : p.modality === 'photo' ? (
-                    <Pressable onPress={() => setZoom(p.uri)}>
-                      <MaybeImage uri={p.uri}
-                        onEvent={(w) => { void logDiag(props.db, 'rec.img', w); }} />
-                    </Pressable>
-                  ) : (
-                    <View style={{
-                      width: 86, height: 86, borderRadius: 10, backgroundColor: C.ink,
-                      alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      <Text style={{ fontFamily: F.dispSemi, fontSize: 10, color: '#fff' }}>
-                        {p.modality.toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
-                  <Text style={{ ...T.bodySteel, fontSize: 10, marginTop: 3 }}>{p.at}</Text>
-                </View>
-              ))}
-              {props.onAugment && <AddPhotoTile onPress={props.onAugment} />}
-            </View>
-            {rec.photosTruncated > 0 && (
-              <Text style={{ ...T.bodySteel, fontSize: 12, marginTop: 8 }}>
-                {t({ k: 'erec.evidenceMore', p: { n: rec.photosTruncated } } as any)}
-              </Text>
-            )}
-            {props.onAugment && <AddVoiceButton onPress={props.onAugment} />}
-          </View>
-        )}
-
-        {/* Full history — chronological; events with no recorded time sit last and
-            say so, rather than being given an invented position. */}
-        {/* R6b position 6. The summary and the history are never alternatives: the
-            summary is the fast read, the history is the evidence, and both are
-            always on this screen. */}
-        {/* R6 AC2 BEFORE the summary: the exact wording the client signed outranks
-            any derived narrative about it. The summary is a reading aid; this is
-            the instrument. */}
-        <RecordApproval approval={props.approval ?? null} />
-        {/* R5b AC3: the discussion log, with timestamps, beneath the snapshot.
-            Read-only here — the live composer is the bar below, and only while
-            the thread is open; a closed record shows the log alone. */}
-        <DiscussionLog messages={messages} formatAt={createdLabel}
-          undelivered={props.undelivered} />
-        <DecisionSummaryCard summary={props.summary ?? null} />
-        <Text style={{ ...label, marginTop: 16, marginBottom: 8 }}>{t('erec.history')}</Text>
-        <View style={{ borderLeftWidth: 2, borderLeftColor: C.line, paddingLeft: 14 }}>
-          {rec.history.map((h, i) => (
-            <View key={i} style={{ paddingBottom: 14 }}>
-              <Text style={{
-                fontFamily: F.dispSemi, fontSize: 11.5, letterSpacing: 1,
-                textTransform: 'uppercase', color: h.hot ? C.orange : C.steel,
-              }}>
-                {h.at}
-              </Text>
-              <Text style={[T.body, { fontSize: 14.5, marginTop: 1 }]}>{h.what}</Text>
-            </View>
-          ))}
-        </View>
-        <Text style={{ ...T.bodySteel, fontSize: 11.5, marginTop: 2 }}>
-          {t('erec.deliveryNote')}
-        </Text>
-
-        {/* Share, as a quiet row while the extra is still live. Once it is
-            terminal the evidence bundle becomes the point of the record and the
-            same action moves into the bar below as the primary. */}
-        {props.onShare && !terminal && (
-          <Pressable
-            onPress={props.onShare}
-            accessibilityLabel={t('erec.share')}
-            style={{ marginTop: 24, paddingVertical: 14, alignItems: 'center' }}>
-            <Text style={{ ...T.body, fontSize: 15, color: C.steel }}>
-              {t('erec.share')}
-            </Text>
-          </Pressable>
-        )}
-
-        {/* Delete lives HERE, at the bottom of the record, because this is the
-            screen someone opens when they have decided they do not want it. It
-            was first put on the ledger row only, which is not where anyone
-            looks. Last in the scroll on purpose: a destructive action should be
-            reachable, never adjacent to the thumb by accident. */}
-        {props.onDelete && (
-          <Pressable
-            onPress={props.onDelete}
-            accessibilityLabel={t('discard.action')}
-            style={{ marginTop: 28, marginBottom: 40, paddingVertical: 14, alignItems: 'center' }}>
-            <Text style={{ ...T.body, fontSize: 15, color: C.danger }}>
-              {t('discard.action')}
-            </Text>
-          </Pressable>
-        )}
-      </ScrollView>
-
-      {/* The c5 bottom bar: reply, then the ONE action this state calls for.
-          The primary follows the state, not the layout — while the extra is out
-          the primary is Remind; a question makes the reply the primary path; a
-          terminal record's primary is its evidence bundle. A static button pair
-          cannot serve a screen whose job is "where does this stand". */}
-      {(composer || props.onSend || props.onFinish || props.onProcess || props.onRemind || props.onRevise
-        || props.onOpenCurrent || (terminal && props.onShare)) && (
-        <View
-          onLayout={(e) => setBarH(e.nativeEvent.layout.height)}
-          style={{
-            borderTopWidth: 1, borderTopColor: C.line, backgroundColor: C.card,
-            padding: 12, paddingBottom: 22, gap: 10,
-          }}>
-          {composer && (
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TextInput
-                value={draft}
-                onChangeText={setDraft}
-                multiline
-                placeholder={t('r5b.replyPlaceholder')}
-                placeholderTextColor={C.steel}
-                accessibilityLabel={t('r5b.replyPlaceholder')}
-                style={{
-                  flex: 1, fontFamily: F.body, fontSize: 16, color: C.ink,
-                  minHeight: 54, borderWidth: 1.5, borderColor: C.line,
-                  borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
-                  backgroundColor: '#fff',
-                }}
-              />
-              <Pressable
-                onPress={sendReply}
-                disabled={!draft.trim() || busy}
-                accessibilityLabel={t('r5b.send')}
-                style={{
-                  minWidth: 54, minHeight: 54, borderRadius: 12,
-                  backgroundColor: C.ink, alignItems: 'center', justifyContent: 'center',
-                  opacity: !draft.trim() || busy ? 0.4 : 1,
-                }}>
-                <Text style={{ color: '#fff', fontSize: 20 }}>↑</Text>
-              </Pressable>
-            </View>
-          )}
-
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {shown === 'draft' && props.onSend && (
-              <Pressable onPress={props.onSend} accessibilityLabel={t('erec.send')}
-                style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
-                <Text style={T.btnText}>{t('erec.send')}</Text>
-              </Pressable>
-            )}
-            {shown === 'draft' && !props.onSend && props.onFinish && (
-              <Pressable onPress={props.onFinish} accessibilityLabel={t('co.finish')}
-                style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
-                <Text style={T.btnText}>{t('co.finish')}</Text>
-              </Pressable>
-            )}
-            {shown === 'draft' && !props.onSend && !props.onFinish && props.onProcess && (
-              <Pressable disabled={procBusy} accessibilityLabel={t('erec.process')}
-                onPress={async () => { setProcBusy(true); try { await props.onProcess!(); } finally { setProcBusy(false); } }}
-                style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }, procBusy && T.btnOff]}>
-                <Text style={T.btnText}>{procBusy ? t('erec.processing') : t('erec.process')}</Text>
-              </Pressable>
-            )}
-            {shown === 'sent' && props.onRemind && (
-              <Pressable onPress={() => { void remind(); }} accessibilityLabel={t('r8.remind')}
-                style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
-                <Text style={T.btnText}>{t('r8.remind')}</Text>
-              </Pressable>
-            )}
-            {(shown === 'sent' || shown === 'discussing') && props.onRevise && (
-              <Pressable onPress={props.onRevise} accessibilityLabel={t('r5b.revise')}
-                style={[T.btn, { flex: 1, minHeight: 60, borderWidth: 1.5, borderColor: C.orange }]}>
-                <Text style={[T.btnText, { color: C.orange, fontSize: 16 }]}>
-                  {t('r5b.revise')}
-                </Text>
-              </Pressable>
-            )}
-            {shown === 'superseded' && props.onOpenCurrent && (
-              <Pressable onPress={props.onOpenCurrent} accessibilityLabel={t('erec.viewCurrent')}
-                style={[T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
-                <Text style={T.btnText}>{t('erec.viewCurrent')}</Text>
-              </Pressable>
-            )}
-            {terminal && props.onShare && (
-              <Pressable onPress={props.onShare} accessibilityLabel={t('erec.share')}
-                style={shown === 'superseded' && props.onOpenCurrent
-                  ? [T.btn, { flex: 1, minHeight: 60, borderWidth: 1.5, borderColor: C.ink }]
-                  : [T.btn, T.btnInk, { flex: 1, minHeight: 60 }]}>
-                <Text style={shown === 'superseded' && props.onOpenCurrent
-                  ? [T.btnText, { color: C.ink, fontSize: 16 }]
-                  : T.btnText}>
-                  {t('erec.share')}
-                </Text>
-              </Pressable>
-            )}
-          </View>
-
-          {actionNote !== null && (
-            <Text style={{ ...T.body, fontSize: 13, color: C.danger }}>{actionNote}</Text>
-          )}
-          {/* Says the rule out loud where it could be broken (mandate #2 / R5b):
-              a price never settles in chat. */}
-          {composer && (
-            <Text style={{ ...T.bodySteel, fontSize: 11.5 }}>{t('r5b.priceNeedsRevision')}</Text>
-          )}
+          <Button label={t('erec.viewCurrent')} icon="history"
+            onPress={props.onOpenCurrent!} />
         </View>
       )}
 
-      {props.onCapture && (
+      {mayAppend && (
         <Pressable
           onPress={props.onCapture}
           accessibilityLabel={t('erec.capture')}
           style={{
-            // Above the action bar when there is one — never covering the reply
-            // field or the primary button — centered at the thumb otherwise.
-            position: 'absolute', bottom: barH > 0 ? barH + 12 : 26,
-            ...(barH > 0 ? { right: 16 } : { alignSelf: 'center' as const }),
+            // Above whatever bar the stage screen pinned — never covering Send or
+            // the successor row — centered at the thumb when there is none.
+            position: 'absolute',
+            bottom: stage === 'draft' ? DRAFT_BAR_H + 12 : successorBar ? 104 : 26,
+            ...(stage === 'draft' || successorBar
+              ? { right: 16 }
+              : { alignSelf: 'center' as const }),
             width: 72, height: 72, borderRadius: 36, backgroundColor: C.orange,
             alignItems: 'center', justifyContent: 'center',
             shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 12,
@@ -506,177 +342,86 @@ export function RecordScreen(props: {
         </Pressable>
       )}
 
-      {/* Photo lightbox — tap a thumbnail to see it full-size. Closed by a
-          glove-sized bottom button (hadar, 2026-07-23: a corner ✕ is exactly the
-          target the field-UX numbers exist to forbid); tapping the photo itself
-          still closes too. */}
-      <Modal visible={zoom !== null} transparent animationType="fade"
-        onRequestClose={() => setZoom(null)}>
-        <Pressable onPress={() => setZoom(null)}
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' }}>
-          {zoom && <Image source={{ uri: zoom }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />}
-        </Pressable>
-        <Pressable onPress={() => setZoom(null)}
-          accessibilityLabel={t('common.close')}
-          style={{
-            position: 'absolute', left: 18, right: 18, bottom: 34,
-            minHeight: 64, borderRadius: 14, backgroundColor: '#fff',
-            alignItems: 'center', justifyContent: 'center',
-          }}>
-          <Text style={{ fontFamily: F.dispSemi, fontSize: 17, letterSpacing: 1.2,
-            textTransform: 'uppercase', color: C.ink }}>
-            {t('common.close')}
-          </Text>
-        </Pressable>
-      </Modal>
+      <PhotoLightbox uri={zoom} onClose={() => setZoom(null)} />
     </View>
   );
 }
 
-/** "Add photo" — the dashed tile that sits at the end of the evidence grid, sized
- *  to match a thumbnail (hadar, 2026-07-25 mockup). Opens the capture screen to
- *  augment THIS extra; the priced scope is never touched. */
-function AddPhotoTile({ onPress }: { onPress: () => void }) {
+/**
+ * The photo lightbox — ONE viewer for the whole record, exported because the
+ * Photos & proof subscreen is a sibling early-return in App.tsx's cascade and would
+ * otherwise grow a second one. Closed by a glove-sized bottom button (hadar,
+ * 2026-07-23: a corner ✕ is exactly the target the field-UX numbers forbid);
+ * tapping the photo itself still closes too.
+ */
+export function PhotoLightbox({ uri, onClose }: { uri: string | null; onClose: () => void }) {
   return (
-    <Pressable onPress={onPress} accessibilityLabel={t('erec.addPhoto')}
-      style={{
-        width: 86, height: 86, borderRadius: 10, borderWidth: 1.5, borderColor: C.line,
-        borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 3,
-      }}>
-      <Text style={{ fontSize: 20 }}>📷</Text>
-      <Text style={{ fontFamily: F.body, fontSize: 10.5, color: C.steel }}>{t('erec.addPhoto')}</Text>
-    </Pressable>
-  );
-}
-
-/** "Add voice" — a full-width button under the grid. Same augment action; the
- *  capture screen records a clip that appends as evidence. */
-function AddVoiceButton({ onPress }: { onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} accessibilityLabel={t('erec.addVoice')}
-      style={{
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-        marginTop: 12, minHeight: 46, borderRadius: 10, borderWidth: 1, borderColor: C.line,
-      }}>
-      <Text style={{ fontSize: 15 }}>🎙️</Text>
-      <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.inkSoft }}>{t('erec.addVoice')}</Text>
-    </Pressable>
-  );
-}
-
-/** The voice narration: metadata + playback. The audio IS the record (the transcript
- *  is derived from it), so it gets a real player, not just a transcript. Uses the
- *  app's shared expo-audio player (annotate.ts) — one player, so starting a second
- *  clip stops the first, and leaving the screen stops playback. */
-function VoicePlayer({ voice, ordinal = 0 }: { voice: RecordVoice; ordinal?: number }) {
-  const [playing, setPlaying] = React.useState(false);
-  const [pos, setPos] = React.useState(0);
-  const [dur, setDur] = React.useState(0);
-
-  React.useEffect(() => () => { stopPlayback(); }, []);
-
-  React.useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => {
-      const st = playbackState();
-      // Another clip took the one shared player — this one is no longer sounding, so
-      // drop its progress UI (hadar 2026-07-25, multiple voice notes).
-      if (st.uri !== voice.uri) { setPlaying(false); setPos(0); return; }
-      if (st.durationSec > 0) setDur(st.durationSec);
-      setPos(st.positionSec);
-      // expo-audio flips `playing` false at the tail; treat that as ended and reset.
-      if (!st.playing && st.positionSec > 0) { stopPlayback(); setPlaying(false); setPos(0); }
-    }, 250);
-    return () => clearInterval(id);
-  }, [playing, voice.uri]);
-
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-
-  const toggle = async () => {
-    if (playing) { stopPlayback(); setPlaying(false); setPos(0); return; }
-    const r = await playCapture(voice.uri);
-    if (r.ok) { setDur(r.durationSec || dur); setPlaying(true); }
-  };
-
-  const pct = dur > 0 ? Math.min(100, (pos / dur) * 100) : 0;
-
-  return (
-    <View style={T.card}>
-      <Text style={label}>
-        {ordinal > 0 ? t({ k: 'erec.voiceN', p: { n: ordinal } } as any) : t('erec.voice')}
-      </Text>
-      {!voice.present ? (
-        <Text style={{ ...T.body, fontSize: 13.5, color: C.danger, marginTop: 6 }}>
-          {t('erec.voiceMissing')}
+    <Modal visible={uri !== null} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable onPress={onClose}
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' }}>
+        {uri && <Image source={{ uri }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />}
+      </Pressable>
+      <Pressable onPress={onClose}
+        accessibilityLabel={t('common.close')}
+        style={{
+          position: 'absolute', left: 18, right: 18, bottom: 34,
+          minHeight: 64, borderRadius: 14, backgroundColor: '#fff',
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+        <Text style={{ fontFamily: F.dispSemi, fontSize: 17, letterSpacing: 1.2,
+          textTransform: 'uppercase', color: C.ink }}>
+          {t('common.close')}
         </Text>
-      ) : (
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 12 }}>
-          <Pressable onPress={toggle} accessibilityLabel={t('erec.voicePlay')} style={{
-            width: 52, height: 52, borderRadius: 26, backgroundColor: C.ink,
-            alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Text style={{ color: '#fff', fontSize: 20 }}>{playing ? '❚❚' : '▶'}</Text>
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            <View style={{ height: 6, borderRadius: 3, backgroundColor: C.line, overflow: 'hidden' }}>
-              <View style={{ width: `${pct}%`, height: 6, backgroundColor: C.orange }} />
-            </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-              <Text style={{ ...T.bodySteel, fontSize: 12 }}>{voice.at}</Text>
-              <Text style={{ ...T.bodySteel, fontSize: 12, fontVariant: ['tabular-nums'] }}>
-                {(playing || pos > 0) ? `${fmt(pos)} / ${fmt(dur)}` : (dur > 0 ? fmt(dur) : t('erec.voicePlay'))}
-              </Text>
-            </View>
-          </View>
-        </View>
-      )}
-
-      {/* THE FULL TRANSCRIPT for this clip — what was actually said, in full, not the
-          AI-condensed description above (hadar, 2026-07-27: the detail wasn't showing
-          the whole transcription). Missing = not written down yet, said plainly rather
-          than shown as an empty gap. */}
-      {voice.transcript ? (
-        <>
-          <Text style={{ ...label, marginTop: 14 }}>{t('erec.transcript')}</Text>
-          <Text style={{ ...T.body, fontSize: 15, lineHeight: 22, marginTop: 6 }}
-            selectable>{voice.transcript}</Text>
-        </>
-      ) : voice.present ? (
-        <Text style={{ ...T.bodySteel, fontSize: 13, marginTop: 12 }}>{t('erec.transcriptPending')}</Text>
-      ) : null}
-    </View>
+      </Pressable>
+    </Modal>
   );
 }
 
-/** A photo that admits when it cannot be decoded, instead of showing a grey square.
- *  The file existed at query time; decode can still fail (truncated write, codec). */
-function MaybeImage({ uri, onEvent }: { uri: string; onEvent?: (what: string) => void }) {
-  const [failed, setFailed] = React.useState(false);
-  if (failed) {
-    return (
-      <View style={{
-        width: 86, height: 86, borderRadius: 10, backgroundColor: '#FBEAE7',
-        borderWidth: 1, borderColor: C.danger, alignItems: 'center', justifyContent: 'center',
-      }}>
-        <Text style={{ fontFamily: F.dispSemi, fontSize: 9, color: C.danger, textAlign: 'center' }}>
-          {t('erec.evidenceMissing')}
-        </Text>
-      </View>
-    );
+/** "Extra · Miller — Hall Bath". Each segment is dropped when its fact is missing
+ *  rather than replaced: a made-up job name is a worse answer than a shorter one. */
+function kicker(rec: ExtraRecord): string {
+  const word = t('erec.kindExtra');
+  return rec.jobName ? `${word} · ${rec.jobName}` : word;
+}
+
+/** How this extra was captured, for the draft screen's stored-fact row. A stored
+ *  fact that is absent is OMITTED (record.ts's rule), never shown as "Not set" —
+ *  "Not set" invites him to fill a field, and this one is evidence, not a field. */
+function capturedWith(rec: ExtraRecord): string | null {
+  if (rec.voices.length > 0) return `${t('erec.voice')} · ${rec.voices[0].at}`;
+  return rec.capturedAt;
+}
+
+/**
+ * The stored enum → the sentence for it, IN THE READER'S LANGUAGE.
+ *
+ * Deliberately not `flowterms.ts:flowTermLines`, and the negotiation screen's own
+ * header says why: that function composes the ENGLISH-CANONICAL instrument
+ * (mandate #5), and wiring it here would put English terms in front of a
+ * Spanish-reading contractor. Same facts, two audiences, two renderings.
+ *
+ * An unrecognised value renders ITSELF rather than a guess or a blank — flowterms's
+ * rule, for its reason: claiming "not set" over a value that exists is the same lie
+ * as inventing one.
+ */
+export function billingSentence(v: string | null): string | null {
+  if (!v) return null;
+  if (v === 'next_invoice') return t('co.billNext');
+  if (v === 'when_completed') return t('co.billDone');
+  if (v === 'other') return t('co.billOther');
+  return v;
+}
+
+export function scheduleSentence(v: string | null, days: number | null): string | null {
+  if (!v) return null;
+  if (v === 'no_change') return t('co.schedNo');
+  // 'not_sure' IS a complete answer (FLOW decision 3) and reads to the owner as
+  // "to be confirmed", so it is shown as an answer, never as a gap.
+  if (v === 'not_sure') return t('co.schedUnsure');
+  if (v === 'adds_days') {
+    return days != null && days > 0
+      ? t({ k: 'draft.schedDays', p: { n: days } } as any)
+      : t('co.schedAdds');
   }
-  return (
-    <Image
-      source={{ uri }}
-      onLoad={() => onEvent?.('load ok')}
-      onError={(e: any) => {
-        onEvent?.('error ' + String(e?.nativeEvent?.error ?? 'unknown').slice(0, 120));
-        setFailed(true);
-      }}
-      style={{
-        width: 86, height: 86, borderRadius: 10,
-        backgroundColor: '#D8D2C6', borderWidth: 1, borderColor: C.line,
-      }}
-      resizeMode="cover"
-    />
-  );
+  return v;
 }

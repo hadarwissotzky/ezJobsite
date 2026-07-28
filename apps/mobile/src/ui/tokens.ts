@@ -29,6 +29,26 @@ export const palette = {
   focus: '#1F2933',        // focus ring
 } as const;
 
+/**
+ * Status TINTS — the soft fill · hairline · text triple for a coloured state box
+ * (kit.tsx's StatusBanner and ChecklistRow, the missing-evidence tile).
+ *
+ * They exist because the same "something needs attention" box was hand-mixed four
+ * different ways in the tree — `#FFF3EA/#FFD9C2/#7A3A12` on the record screen,
+ * `#FFF7E0/#F0DE9E/#6B5300` on the voice-price card, `#FFF8C5/#D4A72C/#7D5E00` on the
+ * thread, `#FBEAE7` for the broken photo — so the SAME state read as a different
+ * severity on each screen it appeared on. One triple per family, warm enough to sit on
+ * `background`, with `ink` dark enough to hold contrast against its own `soft` in
+ * sunlight. `neutral` is not a new colour: it points at the existing greys so a plain
+ * box and a tinted one are the same component with one lookup.
+ */
+export const statusTints = {
+  caution:  { soft: '#F6EBD9', line: '#E0C79B', ink: '#6E4E1F' },
+  approved: { soft: palette.brandSoft, line: '#C3D0B4', ink: palette.brandDark },
+  danger:   { soft: '#F6E5E1', line: '#DDBAB2', ink: '#6B372F' },
+  neutral:  { soft: palette.surfaceMuted, line: palette.border, ink: palette.ink },
+} as const;
+
 /** Spacing scale (px). */
 export const spacing = {
   xs: 4, sm: 8, md: 12, lg: 16, xl: 24, '2xl': 32, '3xl': 48,

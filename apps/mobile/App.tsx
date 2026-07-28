@@ -43,7 +43,19 @@ import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
-import { RecordScreen } from './src/ui/recordscreen';
+import { PhotoLightbox, RecordScreen, scheduleSentence,
+         type RecordLifecycle } from './src/ui/recordscreen';
+// SPEC-extra-lifecycle-v1 — the detail subscreens the three stage screens open.
+// They are OVERLAYS in the cascade (an early return above `record`), the same way
+// every other screen in this app navigates; a router introduced in one corner would
+// be a second navigation model nobody else obeys.
+import { FullHistory, PhotosAndProof, PriceScheduleEditor, ScopeOfWorkEditor,
+         type RewriteState } from './src/ui/extradetails';
+import type { ExtraDetailField } from './src/ui/extranegotiation';
+// REQ-LC10..13 — the CONTENT half of the send gate. Orthogonal to canSendExtra
+// (the pipeline half): both must pass and they fail for different reasons.
+import { sendReadiness, UNTITLED_SCOPE } from './src/sendreadiness';
+import { mergeTimeline, openCount, type MergedEvent } from './src/eventtimeline';
 import { SettingsScreen } from './src/ui/settingsscreen';
 import { ensureOwnCompany, myCompany } from './src/company';
 import { configureBilling } from './src/billing';
@@ -68,8 +80,9 @@ import { sendEwa } from './src/ewasend';
 // cloud and supersedes this under 150's newest-wins.
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
 import { fetchLatestProposalForCaptures, type Proposal } from './src/proposals';
-import { discardCapture, discardExtra, drainServerDiscards, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
-import { startExtraFromCapture, titleExtraIfUntitled, retitleDraft } from './src/startextra';
+import { discardCapture, discardExtra, drainServerDiscards, drainDiscardedExtras, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
+import { startExtraFromCapture, titleExtraIfUntitled, retitleDraft, setDraftSummary,
+         SCOPE_MAX_CHARS } from './src/startextra';
 import { cleanupTestData } from './src/testdatacleanup';
 import { logDiag } from './src/diaglog';
 // The send gate. hadar: "only then it can be sent to the owner for approval —
@@ -80,12 +93,7 @@ import { captureStatesForExtra } from './src/extrareadiness';
 import { discardSummary } from './src/discard';
 import { ensureVoiceCacheSchema, voiceReadingForDecision, narrationForExtra,
          captureIdsForDecision, type VoiceReading } from './src/voicesource';
-// R2: photos beside the sentence spoken over them. Degrades to a plain strip when
-// there is no transcript — the record screen's existing behaviour — so it is safe
-// to wire before an STT key exists and lights up the moment one does.
-import type { Alignment } from './src/photonarration';
-import type { ScopePhoto } from './src/ui/narratedscope';
-import type { PriceMode } from './src/voiceprice';
+import type { PriceMode, VoicePriceReading } from './src/voiceprice';
 import { VoicePriceCard } from './src/ui/voicepricecard';
 // R1: the Send-to prefill. GPS decides what to SUGGEST and never what to file --
 // prepareSendTo returns candidates and an opinion, the human commits it.
@@ -118,10 +126,8 @@ import { DraftRecoveryCard } from './src/ui/draftrecovery';
 // rendering change_order.scope — the MUTABLE local row — while the client held
 // shown_content. In a dispute they would each be reading a different document and
 // neither would know it.
-import { ensureEventLogSchema, withEventLog, type ApprovalPanel } from './src/eventlog';
+import { ensureEventLogSchema, readEventLog, withEventLog, type ApprovalPanel } from './src/eventlog';
 import { unreadCount, unreadIds, type ActivityRow } from './src/activity';
-import { decisionSummaryFor } from './src/decisionsummarydata';
-import type { DecisionSummary } from './src/decisionsummary';
 import { shareApprovalDoc } from './src/approvalrecordshare';
 import { useFonts } from 'expo-font';
 import { Barlow_400Regular, Barlow_500Medium, Barlow_600SemiBold, Barlow_700Bold } from '@expo-google-fonts/barlow';
@@ -170,12 +176,16 @@ import { drainExtraActorOutbox, ensureExtraActorSchema, noteActorNow, noteApprov
 import {
   EXTRA_TYPES, APPROVER_ROLES, isExtraType, type ExtraType, type ApproverRole, type Suggestion,
 } from './src/approverrouting';
-import { applyLocalApproval, centsFromInput, createChangeOrder, drainChangeOrderOutbox,
+import { applyLocalApproval, centsFromInput, createChangeOrder, createLinkedExtra, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
          createdLabel, markLocalSent, money, moneyWhole, parseMoney, validateLines, CO_PHOTO_SUBQUERY,
          type LineItem, type LedgerRow, priceDraftExtra, rehomeDraftExtra,
          type BillingTiming, type ScheduleEffect } from './src/changeorder';
-import { displayStatus, canSupersede, type LedgerStatus } from './src/extrastatus';
+import { displayStatus, type LedgerStatus } from './src/extrastatus';
+// SPEC-extra-lifecycle-v1 §1 — the ONE authority on what may be done to a row at
+// its stage. The record screen's prop gating used to be a pile of local status
+// comparisons; each one is now this predicate, so the rule has a single owner.
+import { canDelete, stageOf } from './src/extralifecycle';
 import { ensureLedgerStatusSchema, hydrateQuestions, openQuestions, supersededBy,
          supersedeExtra, drainSupersessions, reassertSupersessions } from './src/ledgerstatus';
 import { issueOtp, newOtpCode, renderApproval, signApproval, verifyOtp } from './src/signing';
@@ -200,6 +210,33 @@ const LAST_PROJECT_KEY = 'last_project_id';
 // QUEUE STALLED PERMANENTLY. Jobs, consent and every later PowerSync write stopped
 // reaching the cloud, silently, with the app still saying "saved ✓".
 const OWNER_FALLBACK = 'owner-local';
+
+/**
+ * SPEC-extra-lifecycle-v1 — what `openRecord`'s stage layer holds.
+ *
+ * `view` is the screen's contract (recordscreen.tsx). `co` is the RAW row, kept
+ * beside it because the record's actions — revise, remind, follow-on — need columns
+ * no `ExtraRecord` carries. Declared at module scope, not inline in the `useState`,
+ * so `lifecycleFor` can name its own return type instead of reaching forward to a
+ * `const` declared several hundred lines below it.
+ */
+type RecordLcState = {
+  view: RecordLifecycle;
+  co: {
+    id: string; decision_id: string; project_id: string; scope: string;
+    who_directed: string; amount_cents: number | null; nte_cents: number | null;
+    billing_timing: string | null; schedule_effect: string | null;
+    schedule_days: number | null; exclusions: string | null;
+    /** Carried ONLY so the price editor can write them back unchanged.
+     *  `priceDraftExtra` sets `line_items = ?` on every save, so an editor that did
+     *  not read them would silently destroy the breakdown the contractor typed. */
+    lineItems: LineItem[];
+  };
+  /** R8's rate-limit inputs, so the verdict can be recomputed at render against a
+   *  question count that changes under the open record. */
+  remindCount: number;
+  remindLastMs: number | null;
+};
 
 /** A stable per-CALENDAR-DAY key in LOCAL time — the thing the feed groups on.
  *  Not the raw ms and not UTC: two extras a minute apart across midnight are
@@ -360,9 +397,6 @@ export default function App() {
   // record. Held beside it, not inside it — the network only ever ADDS here, and a
   // fetch that fails must leave the record exactly as usable as it was.
   const [approval, setApproval] = React.useState<ApprovalPanel | null>(null);
-  // R2: the narration blocks for the open record. Null until derived; the screen
-  // falls back to its own photo grid, which is what it showed before.
-  const [narration, setNarration] = React.useState<Alignment<ScopePhoto> | null>(null);
   // The wedge home (prototype c1): extras awaiting a signature, and the money already
   // recovered. Both read from real change_order rows — never invented.
   const [homeTab, setHomeTab] = React.useState<'extras' | 'jobs'>('extras');
@@ -491,53 +525,148 @@ const openRecord = async (changeOrderId: string) => {
   // while one is open). The layers below load asynchronously — drop the PRIOR
   // record's now, or its evidence renders under the new title until each read
   // lands (Codex review, 2026-07-22).
-  setRecordSummary(null); setApproval(null); setNarration(null);
+  setApproval(null); setRecordLc(null); setRecordTimeline([]);
   setRecordThread(null); setRecordUndelivered(new Set());
-  setRecordRevision(null); setRecordNextId(null);
-  try { setRecordSummary(await decisionSummaryFor(db, changeOrderId)); } catch { /* summary is optional */ }
+  setRecordNextId(null); setDetail(null); setZoomUri(null);
+  // SPEC-extra-lifecycle-v1 — the stage layer, and it goes FIRST for a reason: it is
+  // the only layer the screen cannot render without (it decides which of D1's three
+  // screens this is and whether a priced document may be sent), and it is entirely
+  // local. Every layer below it can cross the network, and behind them this one
+  // would leave the record on blank paper for as long as a dead connection takes to
+  // time out (mandate #7). Its own try/catch like every layer here: a failure
+  // degrades, it never blanks the app.
+  try {
+    const lc = await lifecycleFor(r);
+    if (recordIdRef.current === changeOrderId) {
+      setRecordLc(lc.state); setRecordTimeline(lc.timeline);
+    }
+  } catch { setRecordLc(null); setRecordTimeline([]); }
   try {
     const w = await withEventLog(db, connector.client, r);
     setRecord(w); setApproval(w.approval);
   } catch { setApproval(null); }
-  // R2: align the photos to what was said over them. A miss returns the
-  // fallback strip, so this can only ever ADD structure.
+  // R2: fetch the voice narration for this extra. The ALIGNMENT it returns is no
+  // longer rendered — the three stage screens present evidence their own way — but
+  // the call is still load-bearing for its side effect: it warms
+  // voice_transcript_cache from the server. extraRecord read that cache while it was
+  // still COLD (first open), so its voices carry no transcript yet; the re-read
+  // below is what puts the full transcription on the draft screen instead of "still
+  // writing it down…". Guarded on recordIdRef so a fast re-tap to another extra does
+  // not get this one's data stamped over it.
   try {
-    setNarration(await narrationForExtra(db, connector.client, r.id,
-      r.photos.map((ph) => ({ captureId: ph.captureId, uri: ph.uri, present: ph.present }))));
-    // narrationForExtra just warmed voice_transcript_cache from the server. extraRecord
-    // read that cache while it was still COLD (first open), so its voices carry no
-    // transcript yet — re-read now so the detail shows the full transcription instead of
-    // "still writing it down…". Guarded on recordIdRef so a fast re-tap to another extra
-    // does not get this one's data stamped over it.
+    await narrationForExtra(db, connector.client, r.id,
+      r.photos.map((ph) => ({ captureId: ph.captureId, uri: ph.uri, present: ph.present })));
     try {
       const r2 = await extraRecord(db, changeOrderId);
       if (r2 && recordIdRef.current === changeOrderId) setRecord(r2);
     } catch { /* the first read stands */ }
-  } catch { setNarration(null); }
+  } catch { /* no transcript on this device — the record renders without it */ }
   // R5b: the discussion (lineage-walked) and which replies are still queued.
   try {
     setRecordThread(await threadFor(db, changeOrderId));
     setRecordUndelivered(await undeliveredReplyIds(db));
   } catch { setRecordThread(null); setRecordUndelivered(new Set()); }
-  // R5b's revision marker — what this version replaced, if anything.
-  try {
-    const rev = await revisionOf(db, changeOrderId);
-    setRecordRevision(rev
-      ? { priorAmount: money(rev.priorAmountCents), newAmount: r.amount } : null);
-  } catch { setRecordRevision(null); }
   // The forward link on a retired version, so the record can hand the reader on.
   try {
     setRecordNextId(r.status === 'superseded' ? await supersededBy(db, changeOrderId) : null);
   } catch { setRecordNextId(null); }
 };
 
+/**
+ * SPEC-extra-lifecycle-v1 — assemble everything the three stage screens need.
+ *
+ * Reads the change_order row DIRECTLY rather than reusing the loaded ledger:
+ * `coRows` only ever holds the currently open project, and a record reached from a
+ * push or the company feed is routinely another job's — which is why that path used
+ * to render read-only. One local read, no network (mandate #7).
+ */
+const lifecycleFor = async (r: ExtraRecord): Promise<{
+  state: RecordLcState; timeline: MergedEvent[];
+}> => {
+  const raw = (await db.getAll<{
+    id: string; decision_id: string; project_id: string; scope: string;
+    who_directed: string; amount_cents: number | null; nte_cents: number | null;
+    billing_timing: string | null; schedule_effect: string | null;
+    schedule_days: number | null; exclusions: string | null; line_items: string | null;
+  }>(
+    `SELECT id, decision_id, project_id, scope, who_directed, amount_cents, nte_cents,
+            billing_timing, schedule_effect, schedule_days, exclusions, line_items
+       FROM change_order WHERE id = ?`, [r.id]))[0];
+  if (!raw) throw new Error(`no change_order ${r.id}`);
+  let lineItems: LineItem[] = [];
+  // A corrupt breakdown must not take the record down with it, and it must not be
+  // silently rewritten to [] either — an unparseable value stays on the row because
+  // nothing here saves unless the contractor edits the price.
+  try { const p = JSON.parse(raw.line_items ?? '[]'); if (Array.isArray(p)) lineItems = p; }
+  catch { lineItems = []; }
+  const co = { ...raw, lineItems };
+
+  // R3's standing rule made visible: a cap present means this was quoted T&M.
+  const priceMode: PriceMode = co.nte_cents == null ? 'fixed' : 'nte';
+  // REQ-LC13's pipeline half. Failing to read it must not be read as "ready" —
+  // `extraProcState([])` is the honest floor, and canSendExtra refuses on it.
+  let proc = extraProcState([]);
+  try { proc = extraProcState(await captureStatesForExtra(db, co.decision_id)); }
+  catch { /* schema race — the gate stays shut, which is the safe direction */ }
+  // REQ-LC3: `viewed` is DERIVED from confirmation_open evidence, never stored.
+  const { events } = await readEventLog(db, r.id);
+  // R8's manual-remind verdict at load time. A missing local link is NOT folded in
+  // here: `remindExtra` returns `r8.noLink` at press time, which is the refusal the
+  // contractor can actually read where he is looking.
+  const link = await liveLinkFor(db, r.id);
+  return {
+    timeline: mergeTimeline(r.history, events),
+    state: {
+      co,
+      remindCount: link?.remindCount ?? 0,
+      remindLastMs: link?.lastRemindMs ?? null,
+      view: {
+        // REQ-LC12. recordactors.ts states the derivation and it holds here for the
+        // same reason: reaching a change_order row means this is an extra — R10's
+        // Decision has no change order and cannot arrive on this screen.
+        kind: 'extra',
+        readiness: sendReadiness({
+          kind: 'extra',
+          scope: co.scope,
+          amountCents: co.amount_cents,
+          nteCents: co.nte_cents,
+          priceMode,
+          // The TRUE count, not the render cap: a photo dropped by the cap is still
+          // attached, and counting only what fits on screen would report a gap that
+          // does not exist.
+          photoCount: r.photos.length + r.photosTruncated,
+          billingTiming: co.billing_timing,
+          scheduleEffect: co.schedule_effect,
+          exclusions: co.exclusions,
+        }),
+        proc,
+        priceMode,
+        billingTiming: co.billing_timing,
+        scheduleEffect: co.schedule_effect,
+        scheduleDays: co.schedule_days,
+        exclusions: co.exclusions,
+        requestedBy: co.who_directed || null,
+        openCount: openCount(events),
+        lastOpenedAtMs: events.reduce(
+          (m, e) => (e.kind === 'opened' && e.atMs > m ? e.atMs : m), 0) || null,
+        // A placeholder the render replaces. The verdict depends on whether a client
+        // question is open RIGHT NOW (R8 pauses reminding mid-negotiation), and that
+        // count changes under the open record on every refresh tick — computing it
+        // once at load would show a live Remind button over a question he owes an
+        // answer to. See the record guard, where it is recomputed with `questions`.
+        remind: { ok: false, reasonKey: 'r8.notSent' },
+      },
+    },
+  };
+};
+
 /** Close the record overlay and drop every layer loaded with it. One function so
  *  a new layer cannot be cleared on one exit path and leak on the other. */
 const closeRecord = () => {
   recordIdRef.current = null;
-  setRecord(null); setRecordSummary(null); setApproval(null); setNarration(null);
+  setRecord(null); setApproval(null); setRecordLc(null); setRecordTimeline([]);
   setRecordThread(null); setRecordUndelivered(new Set());
-  setRecordRevision(null); setRecordNextId(null);
+  setRecordNextId(null); setDetail(null); setZoomUri(null);
   // If this extra was opened FROM the company feed, go back to the feed (fresh) — not
   // to whatever nav was underneath (review 2026-07-25: don't lose the user's place).
   if (returnToFeedRef.current) {
@@ -611,7 +740,13 @@ React.useEffect(() => {
  * Same link, never a new token (remind.ts's header owns the why). Returns the
  * verdict so each caller can show a refusal where its user is actually looking.
  */
-const remindExtra = async (c: LedgerRow, inDiscussion: boolean):
+// The parameter is a STRUCTURAL SUBSET of LedgerRow, not LedgerRow itself, so the
+// record screen can remind about an extra whose job is not the one currently
+// loaded. `coRows` only ever holds the open project; requiring the whole row here
+// was what made a record reached from a push read-only.
+const remindExtra = async (
+  c: { id: string; status: string; scope: string; amount: string },
+  inDiscussion: boolean):
   Promise<{ ok: boolean; why?: string }> => {
   const link = await liveLinkFor(db, c.id);
   if (!link) return { ok: false, why: T('r8.noLink') };
@@ -636,15 +771,29 @@ const remindExtra = async (c: LedgerRow, inDiscussion: boolean):
 /** R5b/R7 Revise & resend — ONE handoff to the priced read-back composer, shared
  *  by the ledger row, the thread screen and the record screen. The price still
  *  goes through the read-back: mandate #6 has no shortcut for the second number. */
-const startRevision = (c: LedgerRow) => {
+// Same structural-subset parameter as remindExtra, for the same reason: a revision
+// started from a record opened cross-project must not need the ledger row of a job
+// that is not loaded. `amount_cents` is nullable here where LedgerRow's is not —
+// 370 made "he never said a price" representable, and an unpriced row must arrive
+// at the read-back with an EMPTY field, never with "0.00" typed in for him
+// (mandate #6: the app never authors a number).
+const startRevision = (c: {
+  id: string; decision_id: string; scope: string; who_directed: string;
+  amount_cents: number | null; nte_cents: number | null;
+  billing_timing: string | null; schedule_effect: string | null;
+  schedule_days: number | null; exclusions: string | null;
+}) => {
   setPriced({
     decisionId: c.decision_id, scope: c.scope, whoDirected: c.who_directed,
-    amountText: (c.amount_cents / 100).toFixed(2),
+    amountText: c.amount_cents == null ? '' : (c.amount_cents / 100).toFixed(2),
     nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
     mode: c.nte_cents == null ? 'fixed' : 'nte', voice: null, supersedes: c.id,
     // A revision carries the prior version's flow terms forward — the price is
-    // what changed; the terms stay unless the contractor edits them.
-    billingTiming: (c.billing_timing as BillingTiming) ?? 'when_completed',
+    // what changed; the terms stay unless the contractor edits them. Including
+    // SILENCE: a version that said nothing about billing is revised into one that
+    // still says nothing, rather than one that has quietly acquired a payment term
+    // (flowterms.ts, REQ-LC41).
+    billingTiming: (c.billing_timing as BillingTiming) ?? null,
     scheduleEffect: (c.schedule_effect as ScheduleEffect) ?? null,
     scheduleDaysText: c.schedule_days ? String(c.schedule_days) : '',
     exclusions: c.exclusions ?? '',
@@ -663,11 +812,12 @@ const startRevision = (c: LedgerRow) => {
 const finishExtraById = async (changeOrderId: string) => {
   const rows = await db.getAll<{
     decision_id: string; scope: string; who_directed: string; project_id: string;
+    amount_cents: number | null; nte_cents: number | null;
     billing_timing: string | null; schedule_effect: string | null;
     schedule_days: number | null; exclusions: string | null;
   }>(
-    `SELECT decision_id, scope, who_directed, project_id, billing_timing,
-            schedule_effect, schedule_days, exclusions
+    `SELECT decision_id, scope, who_directed, project_id, amount_cents, nte_cents,
+            billing_timing, schedule_effect, schedule_days, exclusions
        FROM change_order WHERE id = ? AND status = 'draft'`, [changeOrderId]);
   if (!rows.length) return;
   const c = rows[0];
@@ -678,9 +828,26 @@ const finishExtraById = async (changeOrderId: string) => {
   setNav('project');
   setPriced({
     decisionId: c.decision_id, scope: c.scope, whoDirected: c.who_directed,
-    amountText: '', nteText: '', mode: 'fixed', voice: null,
+    // THE STORED PRICE, not a blank field. This read `amountText: ''` and did not
+    // even select `amount_cents`, so "Edit details" on a $1,850 draft — now the
+    // permanent secondary button on the draft screen, not just the post-capture
+    // step — opened the composer with the price gone. Confirming then hit
+    // `confirmPriced`'s `cents === null` and returned silently: nothing saved,
+    // nothing said, and the exclusions he came to fix went with it. The empty
+    // string stays the honest value when there is genuinely no price (370,
+    // mandate #6 — the app never types a number on his behalf).
+    amountText: c.amount_cents == null ? '' : (c.amount_cents / 100).toFixed(2),
+    nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
+    mode: c.nte_cents == null ? 'fixed' : 'nte',
+    voice: null,
     existingCoId: changeOrderId,
-    billingTiming: (c.billing_timing as BillingTiming) ?? 'when_completed',
+    // NULL STAYS NULL (flowterms.ts: "silence is the default"). Defaulting to
+    // 'when_completed' put "Payment is due when the work is completed." into the
+    // frozen instrument of every extra that came through here, whether or not the
+    // contractor ever considered it — a clause nobody chose — and it also made
+    // `sendReadiness`'s `no_billing_timing` recommendation unable to fire, so the
+    // draft screen over-reported completeness.
+    billingTiming: (c.billing_timing as BillingTiming) ?? null,
     scheduleEffect: (c.schedule_effect as ScheduleEffect) ?? null,
     scheduleDaysText: c.schedule_days ? String(c.schedule_days) : '',
     exclusions: c.exclusions ?? '',
@@ -749,6 +916,13 @@ const applyProposalToExtra = async (
   if (prop.confidence === 'high' && prop.subject && await retitleDraft(db, changeOrderId, prop.subject)) {
     title = prop.subject;
   }
+  // The owner-facing SUMMARY (hadar, 2026-07-27). High-confidence only, same
+  // mandate-#2 gate as the title: a low-confidence value is a guess, and a guess
+  // must not be presented to the client as the summary of the change. When it is
+  // not set, the record falls back to the title and the raw transcript still stands.
+  if (prop.confidence === 'high' && prop.value) {
+    await setDraftSummary(db, changeOrderId, prop.value);
+  }
   if (prop.extraType && isExtraType(prop.extraType) && await setExtraType(db, changeOrderId, prop.extraType)) {
     tag = prop.extraType;
   }
@@ -757,28 +931,30 @@ const applyProposalToExtra = async (
 
 /**
  * Finish an EDIT to an extra: the added voice has uploaded, transcribed and been
- * analysed, so grow the record's Description to cover what it said — "the same rules
+ * analysed, so grow the record's SUMMARY to cover what it said — "the same rules
  * as the new extra" (hadar, 2026-07-27) — then reopen the record.
  *
- * IT NEVER TOUCHES SCOPE, and that is the whole design. `co.scope` is the title and,
- * once sent, the frozen binding instrument (mandate #5). A new extra puts the AI's
- * subject INTO scope because scope is still a mutable draft; an edit can land on a
- * SENT extra (hadar chose "sent extras too"), so it appends the AI's read as an
- * append-only addendum that record.ts renders beneath the frozen scope. Same rule for
- * a draft, so the two cases cannot diverge and the original title is never clobbered.
+ * IT NEVER TOUCHES SCOPE OR THE BASE SUMMARY, and that is the whole design. `co.scope`
+ * is the title and, once sent, the frozen binding instrument (mandate #5); `co.summary`
+ * is written draft-only. A new extra puts the AI's value INTO co.summary because it is
+ * still a mutable draft; an edit can land on a SENT extra (hadar chose "sent extras
+ * too"), so it appends the AI's read as an append-only addendum that record.ts renders
+ * beneath the base summary. Same rule for a draft, so the two cases cannot diverge.
  *
- * MANDATE #2, mechanically: the AI's words are used only at HIGH confidence; otherwise
- * the addendum is the contractor's OWN transcribed words (voice_transcript_cache),
- * which is more faithful anyway ("the words come from the contractor"), and always
- * available offline. The price is never re-derived — an edit adds evidence, not money.
+ * IT USES THE OWNER-FACING VALUE, not the terse subject: this feeds the "Summary of
+ * the change" the client reads, so the added voice contributes the same clear prose the
+ * base summary is made of. MANDATE #2: the AI's words are used only at HIGH confidence;
+ * otherwise the addendum is the contractor's OWN transcribed words (which the raw
+ * transcript below already shows too), always available offline. The price is never
+ * re-derived — an edit adds evidence, not money.
  */
 const finishAugmentById = async (changeOrderId: string, addedIds: string[]) => {
   try {
     const prop: Proposal | null =
       await fetchLatestProposalForCaptures(connector.client, addedIds);
     let text = '';
-    if (prop && prop.confidence === 'high' && prop.subject) {
-      text = prop.subject.trim();
+    if (prop && prop.confidence === 'high' && (prop.value || prop.subject)) {
+      text = (prop.value || prop.subject || '').trim();
     } else {
       // His own words, verbatim, for every added voice that was written down.
       const marks = addedIds.map(() => '?').join(',');
@@ -949,6 +1125,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         : { proceed: 'hold', settlementHours: asEwa.settlementHours },
       channel: 'link', whenMs: Date.now(), linkBase: CONFIRM_BASE,
       companyName: prof0?.company || prof0?.name || null,
+      // The flow terms ride into the EWA's frozen text too (DEF-2). An EWA is a
+      // change_order row and priceDraftExtra will set these on it, so leaving them
+      // here would let a client sign an authorization missing the exclusions and
+      // schedule impact they were shown.
+      billingTiming: c.billing_timing, scheduleEffect: c.schedule_effect,
+      scheduleDays: c.schedule_days, exclusions: c.exclusions,
     });
     if (!re.ok) { setUi({ k: 'refused', why: T(re.reason as any) }); return; }
     await markLocalSent(db, c.id);
@@ -1340,18 +1522,50 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // kept alongside it so refresh() can re-derive the record while it is open — a
   // record that cannot change is a record that can lie about what is owed.
   const [record, setRecord] = React.useState<ExtraRecord | null>(null);
-  // R6c is loaded ALONGSIDE the record, never inside it: a summary that failed to
-  // assemble must not be able to stop the record from opening (R6c AC2).
-  const [recordSummary, setRecordSummary] = React.useState<DecisionSummary | null>(null);
   const recordIdRef = React.useRef<string | null>(null);
-  // R5b on the record (prototype c5): the discussion, its delivery state, the
-  // revision marker, and — on a superseded record — what replaced it. Loaded
-  // ALONGSIDE the record like the summary: each may fail without costing the rest.
+  // R5b on the record (prototype c5): the discussion, its delivery state, and — on
+  // a superseded record — what replaced it. Loaded ALONGSIDE the record: each layer
+  // may fail without costing the rest.
   const [recordThread, setRecordThread] = React.useState<ThreadMessage[] | null>(null);
   const [recordUndelivered, setRecordUndelivered] = React.useState<ReadonlySet<string>>(new Set());
-  const [recordRevision, setRecordRevision] =
-    React.useState<{ priorAmount: string; newAmount: string } | null>(null);
   const [recordNextId, setRecordNextId] = React.useState<string | null>(null);
+  /**
+   * SPEC-extra-lifecycle-v1 — the stage screens' inputs, its own hydration layer.
+   *
+   * `view` is what the screen reads. `co` is the RAW change_order row, kept beside
+   * it because the record's ACTIONS (revise, remind, follow-on) need columns no
+   * `ExtraRecord` carries — and reading them here rather than off `coRowsRef`
+   * closes the stated cross-project gap: `coRows` only ever holds the currently
+   * open project, so a record reached from a push used to render read-only.
+   */
+  const [recordLc, setRecordLc] = React.useState<RecordLcState | null>(null);
+  /** The merged local+server timeline for the Full history subscreen. Merged ONCE,
+   *  here, from record.ts's local events and the server's — `mergeTimeline` already
+   *  puts unstamped events last on purpose and re-merging its own output would
+   *  double every row. */
+  const [recordTimeline, setRecordTimeline] = React.useState<MergedEvent[]>([]);
+  /**
+   * The open detail subscreen (extradetails.tsx) and its editor buffers.
+   *
+   * The buffers live HERE and not in the editors because those are controlled
+   * components by design: there is one money parser in this product and a second
+   * one on a device is how the phone and the server end up disagreeing about what
+   * a man typed. Nothing is written until Save; backing out discards.
+   */
+  const [detail, setDetail] = React.useState<null | {
+    field: ExtraDetailField | 'history';
+    scope: string;
+    priceMode: PriceMode;
+    amountText: string; nteText: string;
+    scheduleEffect: string | null; scheduleDaysText: string;
+    billingTiming: string | null; exclusions: string;
+    reading: VoicePriceReading | null;
+    rewrite: RewriteState;
+  }>(null);
+  /** The record's photo lightbox, hoisted so the Photos & proof subscreen — a
+   *  sibling early-return in the cascade — opens the SAME viewer instead of
+   *  growing a second one. */
+  const [zoomUri, setZoomUri] = React.useState<string | null>(null);
   const [dsync, setDsync] = React.useState<any>(null);
   const [bundling, setBundling] = React.useState<string | null>(null);
   const [cellOn, setCellOn] = React.useState(false);
@@ -1698,10 +1912,20 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       if (openId) {
         const fresh = await extraRecord(db, openId);
         if (fresh) setRecord(fresh);
-        // R6c: "regenerates, never rewrites" — the narrative is re-derived on the
-        // same cycle as the record, so a question that just landed changes the owed
-        // line without touching a single stored event.
-        setRecordSummary(await decisionSummaryFor(db, openId));
+        // SPEC-extra-lifecycle-v1: the STAGE layer re-derives on the same cycle, and
+        // it has to. The send gate is two orthogonal questions (REQ-LC13) and one of
+        // them — has the evidence left the phone and been processed — is answered by
+        // a background pipeline. Taken once on tap it would leave Send refusing with
+        // a reason that stopped being true minutes ago, which is the behaviour the
+        // old "Upload & process" button existed to work around.
+        if (fresh) {
+          try {
+            const lc = await lifecycleFor(fresh);
+            if (recordIdRef.current === openId) {
+              setRecordLc(lc.state); setRecordTimeline(lc.timeline);
+            }
+          } catch { /* the layer already on screen stands */ }
+        }
         // R5b: the discussion on the open record re-derives too — a question that
         // just landed must flip the state line and surface the reply bar's context
         // while he is looking at it, same rule as the open thread above.
@@ -2056,7 +2280,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // walked back to 'sent' and the retired extra would reappear as live.
           await reassertSupersessions(db);
           const qz = await hydrateQuestions(db, connector.client, pid);
-          if (hy.pulled || hy.statusUpdated || qz.pulled) {
+          // `hy.conflicts` IS IN THE CONDITION, and it was the whole point of
+          // counting them: a tick whose only outcome is a refused status printed
+          // nothing at all here, so a permanent phone-vs-cloud disagreement about a
+          // signed document produced zero output at App level. The per-row line is
+          // in the flight recorder (changeorder.ts); this is the count.
+          if (hy.pulled || hy.statusUpdated || hy.conflicts || qz.pulled) {
             console.log('hydrate:', JSON.stringify({ ...hy, questions: qz.pulled }));
             await refresh();
           }
@@ -2075,6 +2304,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // with it" — this is what makes that true past the handset.
           const sd = await drainServerDiscards(db, connector.client);
           if (sd.attempted) console.log('drain discards:', JSON.stringify(sd));
+          // The change_order half of delete: drop the SERVER's own row for extras
+          // deleted while offline, so a reinstall or a second phone cannot re-pull a
+          // ghost. hydrate already skips these locally; this makes it true past the
+          // handset (hadar, 2026-07-28: delete "doesn't delete the extra").
+          const dx = await drainDiscardedExtras(db, connector.client);
+          if (dx.attempted) console.log('drain discarded extras:', JSON.stringify(dx));
           const nt = await runNotifications(db, pid);
           if (nt.presented || nt.blocked) console.log('notify:', JSON.stringify(nt));
         } catch (e: any) {
@@ -2624,7 +2859,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     ? await discardCapture(db, discard.captureId)
                     : await discardExtra(db, discard.co.id, connector.client);
                   setDiscard(null);
-                  if (!r.ok) setFiled(T('discard.alreadySent'));
+                  if (!r.ok) {
+                    setFiled(T('discard.alreadySent'));
+                  } else {
+                    // Deleted: land on Home, not the job screen the record was opened
+                    // from (hadar, 2026-07-27: "take me back to Home Screen"). The
+                    // record was already closed in onDelete, so there is nothing to
+                    // return to — Home is the honest destination for a thing that no
+                    // longer exists.
+                    setNav('home'); setJobFilter(null);
+                  }
                   // refresh() reloads the ledger AND the captures list.
                   await refresh();
                 } catch (e: any) {
@@ -3323,21 +3567,45 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                       // The signature is authored on the server (it needs the OTP
                       // check), so the local row must be told the outcome or the
                       // ledger would keep calling a signed CO a draft.
-                      await applyLocalApproval(db, sign.coId, 'approved', sign.legalName);
+                      //
+                      // THE RETURN VALUE IS READ (REQ-LC8). applyLocalApproval now
+                      // refuses to walk a superseded or declined row to approved,
+                      // and a refusal that nobody surfaces is the app claiming a
+                      // state change that did not happen. The signature itself IS
+                      // recorded server-side, so this is not an error to hide the
+                      // outcome behind -- it is a disagreement to state plainly.
+                      const la = await applyLocalApproval(db, sign.coId, 'approved', sign.legalName);
                       setSign(null); await refresh();
+                      if (!la.ok) {
+                        console.log('[sign] local approval refused for %s: %s (local status %s)',
+                          sign.coId, la.reason, la.status);
+                        setFiled(`Signed — but this phone still has this extra as ${
+                          la.status ?? 'missing'}, so its status did not change here.`);
+                      }
                     } else setSign({ ...sign, err: r.reason });
                   }}>
                   <Text style={s.confirmT}>{T('sig.sign')}</Text>
                 </Pressable>
                 <Pressable style={s.later} onPress={async () => {
-                  await signApproval(connector.client, {
+                  // A DECLINE IS A TERMINAL ANSWER and it was the one call here that
+                  // threw its result away entirely -- a refusal from the server (this
+                  // version is already superseded, or already answered) left the sheet
+                  // closing exactly as if the decline had landed.
+                  const dr = await signApproval(connector.client, {
                     changeOrderId: sign.coId, projectId: projectId, shownContent: sign.shown,
                     signerLabel: 'Owner', legalName: sign.legalName || 'declined',
                     phoneE164: sign.phone, otpVerifiedAt: sign.verifiedAt!,
                     action: 'declined', userAgent: 'EZchangeorder iOS',
                   });
-                  await applyLocalApproval(db, sign.coId, 'declined', sign.legalName);
+                  if (!dr.ok) { setSign({ ...sign, err: dr.reason }); return; }
+                  const ld = await applyLocalApproval(db, sign.coId, 'declined', sign.legalName);
                   setSign(null); await refresh();
+                  if (!ld.ok) {
+                    console.log('[sign] local decline refused for %s: %s (local status %s)',
+                      sign.coId, ld.reason, ld.status);
+                    setFiled(`Recorded — but this phone still has this extra as ${
+                      ld.status ?? 'missing'}, so its status did not change here.`);
+                  }
                 }}>
                   <Text style={s.laterT}>{T('sig.decline')}</Text>
                 </Pressable>
@@ -3701,130 +3969,415 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     );
   }
 
+  /** Capture INTO an existing extra. Capturing from inside an extra always means
+   *  adding to it — no job prompt, no new extra (hadar 2026-07-25: "it wanted me to
+   *  select a job but this is an augmentation to an existing extra"). One function
+   *  so the FAB, the Add-photo tile and the Photos & proof subscreen cannot drift. */
+  const augmentExtra = (changeOrderId: string) => {
+    if (!terms) { openTerms(); return; }
+    setAugmentCoId(changeOrderId);
+    // THE FEED RETURN IS CANCELLED FIRST, and without this the camera never opens.
+    // `closeRecord` sets `showFeed` when the record was opened from the company feed,
+    // and the render cascade puts `if (showFeed)` ABOVE `if (showCapture)` — so the
+    // feed wins the frame and the capture screen mounts behind it. `closeFeed` does
+    // not clear `showCapture` either, so the camera then ambushes the user on the
+    // next tab tap. We are not "going back" here; we are going forward into a
+    // capture that lands on this same extra.
+    returnToFeedRef.current = false;
+    closeRecord();
+    setShowCapture(true);
+  };
+
+  /** Open one of the extra's detail subscreens, seeding the editor buffers from the
+   *  row that is on screen. Nothing is written until Save; backing out discards. */
+  const openDetail = (field: ExtraDetailField | 'history') => {
+    const c = recordLc?.co;
+    if (!c) return;
+    setDetail({
+      field,
+      scope: c.scope,
+      priceMode: c.nte_cents == null ? 'fixed' : 'nte',
+      // EMPTY, not "0.00", when no price was ever given (370). The app never types a
+      // number into the price field on his behalf (mandate #6).
+      amountText: c.amount_cents == null ? '' : (c.amount_cents / 100).toFixed(2),
+      nteText: c.nte_cents == null ? '' : (c.nte_cents / 100).toFixed(2),
+      scheduleEffect: c.schedule_effect,
+      scheduleDaysText: c.schedule_days ? String(c.schedule_days) : '',
+      billingTiming: c.billing_timing,
+      exclusions: c.exclusions ?? '',
+      reading: null,
+      rewrite: { phase: 'idle' },
+    });
+    // R2's read-back of what the recording said about money — fetched only for the
+    // editor that shows it, because it can cross the network and the record itself
+    // must open with no network at all (mandate #7).
+    if (field !== 'history' && field !== 'photos' && field !== 'scope') {
+      void (async () => {
+        try {
+          const v = await voiceReadingForDecision(db, connector.client, c.decision_id, parseMoney);
+          setDetail((d) => (d && d.field === field ? { ...d, reading: v.price } : d));
+        } catch { /* no transcript on this device — the editor says so itself */ }
+      })();
+    }
+  };
+
+  /** REQ-LC14: the client-facing scope is editable in Stage 1 only, and
+   *  `retitleDraft`'s own `WHERE status = 'draft'` is the guard — not this caller.
+   *  REQ-LC8: a write that moved no row is REPORTED, never swallowed. */
+  const saveScope = async (changeOrderId: string, text: string) => {
+    const ok = await retitleDraft(db, changeOrderId, text);
+    if (!ok) {
+      setFiled(T('erec.errSaveScope'));
+      return;
+    }
+    setDetail(null);
+    await openRecord(changeOrderId);
+    void refresh();
+  };
+
+  /** The price + terms editor's save. One writer (`priceDraftExtra`), which carries
+   *  its own `WHERE status = 'draft'` and refreshes the queued outbox payload so the
+   *  server's first sight of this extra is the priced one. */
+  const savePrice = async (changeOrderId: string, co: RecordLcState['co'],
+                           d: NonNullable<typeof detail>) => {
+    const typed = centsFromInput(d.amountText);
+    // NULL IS NOT ZERO (changeorder.ts:50-55). `priceDraftExtra` takes a number, so
+    // an empty field with no stored price has nothing honest to write: storing 0
+    // would tell a homeowner the work costs nothing. Refuse and say why, rather than
+    // save a figure nobody said.
+    const amount = typed ?? co.amount_cents;
+    if (amount === null) {
+      setFiled(T('erec.errPriceFirst'));
+      return;
+    }
+    const days = parseInt(d.scheduleDaysText, 10);
+    const fin = await priceDraftExtra(db, {
+      changeOrderId,
+      amountCents: amount,
+      nteCents: d.priceMode === 'nte' ? centsFromInput(d.nteText) : null,
+      // Written back unchanged: this editor does not edit the breakdown, and
+      // priceDraftExtra sets the column on every save.
+      lineItems: co.lineItems,
+      billingTiming: (d.billingTiming as BillingTiming) ?? null,
+      scheduleEffect: (d.scheduleEffect as ScheduleEffect) ?? null,
+      scheduleDays: d.scheduleEffect === 'adds_days' && days > 0 ? days : null,
+      exclusions: d.exclusions,
+      whoDirected: co.who_directed || 'Owner',
+      numbersConfirmedAt: new Date(),
+    });
+    if (!fin.ok) { setUi({ k: 'refused', why: fin.reason }); return; }
+    // The read-back happened on this screen; the actor row is the proof of it.
+    await noteActorNow(db, { subjectKind: 'change_order', subjectId: changeOrderId, act: 'priced' });
+    setDetail(null);
+    await openRecord(changeOrderId);
+    void refresh();
+  };
+
+  /**
+   * D6 / REQ-LC31 — a change after approval is a NEW INDEPENDENT EXTRA linked by
+   * origin. It is NOT a supersession and must not reuse one: nothing is written to
+   * the approved row at all. `createLinkedExtra` re-reads the origin's status and
+   * refuses anything but `approved`, so a screen that offered this in the wrong
+   * state cannot turn it into a supersession wearing a different name.
+   *
+   * Shaped exactly like `startExtraFromCapture` on purpose: a fresh decision, then
+   * an UNPRICED draft at the placeholder scope. The follow-on therefore starts in
+   * Stage 1 with both send blockers showing and is priced, previewed and sent by the
+   * ordinary path — mandate #2 gets no exception for the second document just
+   * because a human approved the first.
+   */
+  const createFollowOnExtra = async (originId: string, origin: RecordLcState['co']) => {
+    const { data } = await connector.client.auth.getUser();
+    const uid = data?.user?.id;
+    if (!uid) { setUi({ k: 'refused', why: T('erec.errNotSignedIn') }); return; }
+    const id = `co-fw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    try {
+      const dec = await recordDecision(db, {
+        projectId: origin.project_id, ownerId: uid,
+        // Per-follow-on, so two changes after the same approval are two extras and
+        // never two versions of one decision (startextra.ts's rule, same reason).
+        subject: `extra ${id}`, value: UNTITLED_SCOPE,
+        directedBy: origin.who_directed || 'Owner',
+      });
+      const co = await createLinkedExtra(db, {
+        id, decisionId: dec.decisionId, projectId: origin.project_id, ownerId: uid,
+        scope: UNTITLED_SCOPE,
+        // NULL, never 0 (370): nobody has said a price for the follow-on yet.
+        amountCents: null, nteCents: null, lineItems: [],
+        whoDirected: origin.who_directed || 'Owner',
+        numbersConfirmedAt: new Date(),
+        originChangeOrderId: originId,
+      });
+      if (!co.ok) { setUi({ k: 'refused', why: co.reason }); return; }
+      await refresh();
+      await openRecord(id);
+    } catch (e: any) {
+      setFiled(T({ k: 'erec.errFollowOn', p: { why: String(e?.message ?? e) } } as any));
+    }
+  };
+
+  /**
+   * SPEC-extra-lifecycle-v1 — the extra's detail SUBSCREENS (extradetails.tsx).
+   *
+   * WHERE THIS GUARD SITS, AND WHY IT SITS THERE. Directly ABOVE `if (record)`: a
+   * subscreen is strictly a child of an open record and renders that record's data,
+   * so it has to win the frame while it is open — below `record` the cascade's first
+   * truthy guard would swallow it and the tap would do nothing visible. It is ANDed
+   * with `record` and `recordLc` for the same reason a guard should never be able to
+   * fire without its data: without them there is nothing to render but a blank
+   * screen. It sits BELOW `thread` because a thread opened from the ledger is a
+   * different stack and must not be covered by this one.
+   */
+  if (record && recordLc && detail) {
+    const co = recordLc.co;
+    const back = () => setDetail(null);
+    const d = detail;
+
+    if (d.field === 'history') {
+      return (
+        <FullHistory
+          status={record.status}
+          events={recordTimeline}
+          formatAt={createdLabel}
+          approval={approval}
+          total={record.priced ? record.amount : null}
+          scheduleLine={scheduleSentence(co.schedule_effect, co.schedule_days)}
+          onBack={back}
+        />
+      );
+    }
+
+    if (d.field === 'photos') {
+      // Appending evidence is legal in Stages 1 and 2 (the augment log is
+      // append-only and never touches the frozen instrument) and forbidden once the
+      // record is sealed — REQ-LC30, the same rule the kit follows when it omits its
+      // own add tile on a frozen record.
+      const mayAppend = stageOf(record.status) !== 'locked';
+      return (
+        <>
+          <PhotosAndProof
+            status={record.status}
+            photos={record.photos.map((p) => ({
+              key: p.captureId, uri: p.uri, present: p.present, at: p.at,
+              // The real stamp (mandate #9). `record.ts` now selects gps_lat/gps_lng
+              // and formats them; the hardcoded `null` that used to sit here made
+              // this screen say "No location was recorded" about every photo on
+              // every extra — a specific false claim, on the one screen whose job is
+              // proving the evidence.
+              place: p.place,
+            }))}
+            truncated={record.photosTruncated}
+            capturedAt={record.capturedAt}
+            capturedPlace={record.capturedPlace}
+            // No column stores "best photo" anywhere in this build (grepped:
+            // is_cover/best_photo/cover_photo/hero_photo — zero hits), so the choosing
+            // mode is not offered. A control with nowhere to write is worse than no
+            // control: it would look like it saved.
+            bestKey={null}
+            onPressPhoto={(p) => setZoomUri(p.uri)}
+            onAddPhoto={mayAppend ? () => augmentExtra(record.id) : undefined}
+            onAddVoiceNote={mayAppend ? () => augmentExtra(record.id) : undefined}
+            onBack={back}
+          />
+          {/* The record's own lightbox, mounted here too: this guard returns before
+              RecordScreen renders, so without it a tile on this screen would open
+              nothing. One component, two mount points — never two viewers. */}
+          <PhotoLightbox uri={zoomUri} onClose={() => setZoomUri(null)} />
+        </>
+      );
+    }
+
+    if (d.field === 'scope') {
+      return (
+        <ScopeOfWorkEditor
+          status={record.status}
+          notes={record.voices.map((v, i) => ({
+            key: v.captureId,
+            heading: record.voices.length > 1
+              ? `${T({ k: 'erec.voiceN', p: { n: i + 1 } } as any)} · ${v.at}`
+              : `${T('erec.voice')} · ${v.at}`,
+            text: v.transcript,
+            present: v.present,
+            // The audio, so the Raw tab can play it. This is the only surface a
+            // SENT or APPROVED extra's recording is reachable from.
+            uri: v.uri,
+          }))}
+          value={d.scope}
+          // THE EDITOR'S CAP IS THE WRITER'S CAP, passed rather than defaulted. Its
+          // own default was 1500 and `retitleDraft` stored 200, so the counter said
+          // "612/1500", the save reported success, and 412 characters of the text
+          // that gets frozen into `shown_content` were dropped without a word.
+          maxChars={SCOPE_MAX_CHARS}
+          onChange={(next) => setDetail((x) => x && { ...x, scope: next })}
+          rewrite={d.rewrite}
+          // THERE IS NO REWRITE BACKEND. `supabase/functions` holds exactly
+          // revenuecat-webhook and send-sms, and nothing in this app invokes a
+          // rewrite endpoint. So the tap FAILS LOUDLY with a stated reason rather
+          // than spinning forever or quietly doing nothing — the proposal path
+          // itself is correct and lights up the day an Edge Function exists.
+          onRewrite={() => setDetail((x) => x && {
+            ...x, rewrite: { phase: 'failed', whyKey: 'det.improveNoService' } })}
+          onRewriteDone={() => setDetail((x) => x && { ...x, rewrite: { phase: 'idle' } })}
+          onBack={back}
+          onSave={() => { void saveScope(record.id, d.scope); }}
+        />
+      );
+    }
+
+    // cost · schedule · billing · exclusions — one editor. They are one save on one
+    // row (`priceDraftExtra` writes all of them in a single guarded UPDATE), so four
+    // screens would be four ways for the same write to disagree with itself.
+    return (
+      <PriceScheduleEditor
+        status={record.status}
+        kind={recordLc.view.kind}
+        priceMode={d.priceMode}
+        onPriceModeChange={(m) => setDetail((x) => x && { ...x, priceMode: m })}
+        amountText={d.amountText}
+        onAmountChange={(s) => setDetail((x) => x && { ...x, amountText: s })}
+        nteText={d.nteText}
+        onNteChange={(s) => setDetail((x) => x && { ...x, nteText: s })}
+        // Mandate #6's read-back, through the ONE money formatter. Null when the
+        // text resolves to no number, which is a different fact from zero.
+        amountReadback={centsFromInput(d.amountText) === null
+          ? null : money(centsFromInput(d.amountText))}
+        nteReadback={centsFromInput(d.nteText) === null
+          ? null : money(centsFromInput(d.nteText))}
+        reading={d.reading}
+        scheduleEffect={d.scheduleEffect}
+        onScheduleEffectChange={(v) => setDetail((x) => x && { ...x, scheduleEffect: v })}
+        scheduleDaysText={d.scheduleDaysText}
+        onScheduleDaysChange={(s) => setDetail((x) => x && { ...x, scheduleDaysText: s })}
+        billingTiming={d.billingTiming}
+        onBillingTimingChange={(v) => setDetail((x) => x && { ...x, billingTiming: v })}
+        exclusions={d.exclusions}
+        onExclusionsChange={(s) => setDetail((x) => x && { ...x, exclusions: s })}
+        // From the ONE readiness authority, never re-derived: the editor and the Send
+        // button must not be able to disagree about what is missing.
+        blockers={recordLc.view.readiness.blockers}
+        onBack={back}
+        onSave={() => { void savePrice(record.id, co, d); }}
+      />
+    );
+  }
+
   if (record) {
-    // The ledger row behind this record, when the loaded project has it. The
-    // action handlers need its raw fields (decision_id, cents); a record opened
-    // cross-project (a push about another job) renders read-only instead — the
-    // same stated gap as the notification path above, not a silent one.
-    const row = coRowsRef.current.find((c) => c.id === record.id);
-    const gate = record.status === 'draft'
-      ? canSendExtra((readiness.get(record.id) ?? 'captured') as any) : null;
     return (
       <RecordScreen
         rec={record}
         db={db}
-        summary={recordSummary}
+        // The stage layer. Null while its read is in flight (or after it failed) —
+        // the screen renders paper for that tick rather than guessing a price mode
+        // or a readiness verdict it does not have.
+        lifecycle={recordLc && {
+          ...recordLc.view,
+          // R8's verdict, recomputed HERE and not at load: it depends on whether a
+          // client question is open right now, and that count changes under the open
+          // record on every refresh tick. Computed once at load it would show a live
+          // Remind button over a question the contractor owes an answer to.
+          remind: canRemind(record.status, {
+            count: recordLc.remindCount,
+            lastAtMs: recordLc.remindLastMs,
+            // The LEDGER's per-version signal, not the lineage-walked thread: the
+            // thread carries prior versions' messages and would block reminding on a
+            // fresh revision because of a question already answered on the one it
+            // replaced.
+            inDiscussion: (questions[record.id] ?? 0) > 0,
+          }, Date.now()),
+        }}
         approval={approval}
-        narration={narration}
         thread={recordThread}
         openQuestions={questions[record.id] ?? 0}
         undelivered={recordUndelivered}
-        revision={recordRevision}
-        // Mandate #2: this writes a file and opens the OS share sheet. It does not
-        // transmit anything to a client, and must never be changed to.
-        onShare={() => { void shareApprovalDoc(db, record.id); }}
-        readinessKey={gate && !gate.ok ? gate.whyKey : undefined}
-        // A ready draft can go out from its own record (R6b AC3: the state line
-        // says "send it" — the screen must then offer the send).
-        onSend={gate?.ok && row && record.priced ? () => {
-          // PRICED + processed only. An unpriced draft must NOT show Send — it would
-          // send a price-less instrument (mandate #6). It shows "Finish this extra"
-          // instead (hadar, 2026-07-24: an unpriced, unprocessed extra was offering
-          // Send for approval). Land on the JOB screen (where the send-preview Modal
-          // mounts) and return to this detail page after the send (returnRecordId).
-          setReturnRecordId(record.id); setNav('project'); closeRecord(); void openSendPrep(row);
-        } : undefined}
-        // Finish an UNPRICED draft from its own detail page — opens the price/details
-        // composer. Offered ONLY when the draft has no price yet: a priced draft must
-        // not keep bouncing back to step 3 (hadar, 2026-07-24, "it constantly taking
-        // me to step 3") — it either sends (onSend, when ready) or shows why it isn't.
-        onFinish={record.status === 'draft' && !record.priced
-          ? () => { closeRecord(); void finishExtraById(record.id); } : undefined}
-        // Upload & process a PRICED draft that isn't ready to send yet: force the
-        // capture upload now; the server pipeline then processes it, and the send
-        // button appears once it's 'processed' (hadar, 2026-07-24). Shown only when
-        // it is priced but the readiness gate is not green.
-        onProcess={record.status === 'draft' && record.priced && !(gate?.ok && row)
-          ? async () => {
-              const dr = await drainOutbox(db, connector.client, OWNER);
-              await refresh();
-              await openRecord(record.id);
-              if (dr.blocked) { setFiled('Waiting for Wi-Fi to upload — connect to Wi-Fi or turn on cellular upload in settings.'); return; }
-              // drainOutbox returns when the bytes are INGESTED; the server pipeline
-              // (transcribe → structure) then finishes ASYNCHRONOUSLY, and the Send
-              // button only appears once the readiness gate turns green. Nothing else
-              // re-checks after capture_op_state syncs back, so the button would sit
-              // on "Upload & process" until the user tapped again (Codex P2). Poll the
-              // gate and refresh() when it opens — refresh() recomputes readiness.
-              const did = row?.decision_id;
-              if (!did) return;
-              void (async () => {
-                for (let i = 0; i < 24; i++) {
-                  await new Promise((r) => setTimeout(r, 2500));
-                  let sendable = false;
-                  try { sendable = canSendExtra(extraProcState(await captureStatesForExtra(db, did))).ok; }
-                  catch { /* schema race; try again next tick */ }
-                  if (sendable) { await refresh(); return; }
-                }
-              })();
-            } : undefined}
+        onBack={closeRecord}
+        onCapture={() => augmentExtra(record.id)}
+        // THE GATES ARE NOT RE-STATED HERE. The draft screen composes all three
+        // (stage `canSend` · content `sendReadiness` · pipeline `canSendExtra`) and
+        // disables its own button with the reason printed above it, so this handler
+        // is the ACT and not a second copy of the decision. What it still needs is
+        // the ledger row: `openSendPrep` derives the recipient from the OPEN
+        // project's roster, so a record reached from another job says so instead of
+        // opening a preview addressed to the wrong job's people.
+        onSend={() => {
+          const r = coRowsRef.current.find((c) => c.id === record.id);
+          if (!r) {
+            setFiled(T('erec.errWrongJob'));
+            return;
+          }
+          // Land on the JOB screen (where the send-preview Modal mounts) and return
+          // to this detail page after the send (returnRecordId).
+          setReturnRecordId(record.id); setNav('project'); closeRecord(); void openSendPrep(r);
+        }}
         // Mandate #2: a reply is a MESSAGE. It commits nothing and prices nothing —
-        // and it must never move the extra's status. A new PRICE goes through the
-        // read-back composer (onRevise), never through a chat box.
-        onReply={(record.status === 'sent' || record.status === 'approved' || record.status === 'declined') ? async (text: string) => {
+        // and it must never move the extra's status. REQ-LC23's `canReply` is
+        // `coStatus === 'sent'` and it is enforced by `threadState` INSIDE the
+        // screen; the status test that used to stand here was a second copy of it,
+        // and it disagreed (it allowed approved and declined, which 308's server
+        // trigger rejects, parking the reply forever while the UI showed it sent).
+        onReply={async (text: string) => {
           const pr = await postReply(db, { changeOrderId: record.id, body: text, ownerId: OWNER });
           // postReply reports failure as a value, not a throw. Throwing here is what
           // keeps the typed words in the composer and puts the reason on screen.
           if (!pr.ok) throw new Error(pr.reason);
           setRecordThread(await threadFor(db, record.id));
           setRecordUndelivered(await undeliveredReplyIds(db));
-          try { setRecordSummary(await decisionSummaryFor(db, record.id)); } catch { /* optional */ }
           void refresh();
-        } : undefined}
-        // R8: remind. inDiscussion is the ledger's own per-version signal — the
-        // lineage-walked thread would block reminding on a fresh revision because
-        // of a question already answered on the version it replaced.
-        onRemind={record.status === 'sent' && row
-          ? () => remindExtra(row, (questions[record.id] ?? 0) > 0)
-          : undefined}
-        onRevise={canSupersede(record.status) && row
-          ? () => { closeRecord(); startRevision(row); } : undefined}
+        }}
+        // R8: remind. The verdict above decides whether the button is live; this is
+        // the act, and `remindExtra` re-checks and returns its own refusal (no live
+        // link, rate limit, a cancelled share sheet) for the screen to print.
+        onRemind={() => remindExtra(
+          { id: record.id, status: record.status, scope: record.title, amount: record.amount },
+          (questions[record.id] ?? 0) > 0)}
+        // REQ-LC22. `threadState.canRevise` (which is `canSupersede`) decides inside
+        // the screen; the old `canSupersede(record.status) && row` here was that rule
+        // stated twice, and the `row` half of it silently removed Revise from every
+        // record opened cross-project.
+        onRevise={() => {
+          const c = recordLc?.co;
+          if (!c) { setFiled(T('erec.errStillLoading')); return; }
+          closeRecord(); startRevision(c);
+        }}
+        onOpenDetail={(field) => openDetail(field)}
+        onViewHistory={() => openDetail('history')}
+        // The whole price/details composer — FLOW step 3, the same one the ledger
+        // and the post-capture path use.
+        // Same trap as `augmentExtra`: the composer renders on the JOB screen, which
+        // the feed guard sits above. Without cancelling the feed return, tapping
+        // "Edit details" on an extra opened from the company feed lands the user back
+        // on the feed with the composer mounted underneath it.
+        onEditDetails={() => {
+          returnToFeedRef.current = false;
+          closeRecord();
+          void finishExtraById(record.id);
+        }}
+        onCreateLinkedExtra={() => {
+          const c = recordLc?.co;
+          if (!c) { setFiled(T('erec.errStillLoading')); return; }
+          void createFollowOnExtra(record.id, c);
+        }}
+        // Mandate #2: this writes a file and opens the OS share sheet. It does not
+        // transmit anything to a client, and must never be changed to.
+        onViewSignedApproval={() => { void shareApprovalDoc(db, record.id); }}
         onOpenCurrent={recordNextId
           ? () => { void openRecord(recordNextId); } : undefined}
-        // Only for a draft. Undefined once sent hides the control entirely
-        // rather than showing something that refuses — an action you can press
-        // and be told no is worse than one that was never offered.
-        onDelete={record.status === 'draft' ? async () => {
+        // REQ-LC14 / T5: destruction is legal in Stage 1 only, and `canDelete` is the
+        // single authority for that — `record.status === 'draft'` here was the same
+        // rule written a second time. Undefined hides the control entirely rather
+        // than showing something that refuses.
+        onDelete={canDelete(record.status) ? async () => {
           // Wrapped because it was not: previewDiscard threw on a column that
           // does not exist and this tap died silently (2026-07-23). A delete
           // that fails must SAY so.
           try {
             const plan = await previewDiscard(db, record.id);
+            const row = coRowsRef.current.find((c) => c.id === record.id);
             setRecord(null);
             setDiscard({ co: row ?? ({ id: record.id, scope: record.title } as any), plan });
           } catch (e: any) {
-            setFiled('Could not open the delete confirmation: ' + (e?.message ?? String(e)));
+            setFiled(T({ k: 'erec.errDeleteOpen', p: { why: String(e?.message ?? e) } } as any));
           }
         } : undefined}
-        onBack={closeRecord}
-        // Capturing FROM an extra means adding TO it — so BOTH the capture FAB and
-        // the Add photo/voice buttons AUGMENT this extra: no job prompt, no new extra,
-        // no "Getting your extra ready" (hadar 2026-07-25: "it wanted me to select a
-        // job but this is an augmentation to an existing extra ... it is confusing").
-        // A brand-new, unrelated extra is captured from Home/Jobs, never from inside
-        // one. onCapture and onAugment are the same act here, deliberately.
-        onCapture={() => {
-          if (!terms) { openTerms(); return; }
-          setAugmentCoId(record.id);
-          closeRecord();
-          setShowCapture(true);
-        }}
-        onAugment={() => {
-          if (!terms) { openTerms(); return; }
-          setAugmentCoId(record.id);
-          closeRecord();
-          setShowCapture(true);
-        }}
       />
     );
   }
@@ -3840,9 +4393,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       ? [s.tabBar, { position: 'absolute' as const, left: -20, right: -20, bottom: 0 }]
       : s.tabBar}>
       {/* Two equal halves flank the FAB so it sits DEAD CENTER (hadar: rebalance).
-          Left: Home + Jobs. Right: Company (the feed) + Activity (hadar 2026-07-27 —
-          the feed moved out of the ☰ drawer to a first-class tab). Every non-Company
-          tab clears showFeed, so switching away from the feed actually leaves it. */}
+          Left: Home + Jobs. Right: Company (the feed) + Profile (opens the ☰ drawer —
+          hadar 2026-07-28, replacing the Activity tab; Home's buckets and the Company
+          feed already cover what Activity listed). Every nav tab clears showFeed, so
+          switching away from the feed actually leaves it. */}
       <View style={s.tabHalf}>
         <Pressable style={s.tab} accessibilityLabel={T('home.navHome')}
           onPress={() => { closeFeed(); setNav('home'); setJobFilter(null); void refresh(); }}>
@@ -3867,13 +4421,43 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           <Icon name="feed" size={22} color={active === 'company' ? '#151A1E' : '#8A93A0'} />
           <Text style={[s.tabLab, active === 'company' && s.tabLabOn]}>{T('home.navCompany')}</Text>
         </Pressable>
-        <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
-          onPress={() => { closeFeed(); setNav('activity'); void refresh(); }}>
-          <Icon name="people" size={22} color={active === 'activity' ? '#151A1E' : '#8A93A0'} />
-          <Text style={[s.tabLab, active === 'activity' && s.tabLabOn]}>{T('home.navActivity')}</Text>
+        {/* Profile opens the ☰ drawer (the account / settings / plan / support hub).
+            It is an OVERLAY, not a destination, so it never carries an `active` state —
+            the drawer element is mounted on every screen that renders this bar. */}
+        <Pressable style={s.tab} accessibilityLabel={T('home.navProfile')}
+          onPress={() => setMenuOpen(true)}>
+          <Icon name="person" size={22} color="#8A93A0" />
+          <Text style={s.tabLab}>{T('home.navProfile')}</Text>
         </Pressable>
       </View>
     </View>
+  );
+
+  // The ☰ drawer, defined ONCE and mounted on every screen that shows the bottom bar —
+  // because the Profile tab (which opens it) lives in that shared bar. Previously the
+  // drawer was only on Home and the Company feed, so a Profile tap from Jobs or a Job
+  // screen would have opened nothing.
+  const drawerEl = (
+    <Drawer
+      visible={menuOpen}
+      onClose={() => setMenuOpen(false)}
+      onProfile={() => void openSettings('profile')}
+      onCompanySettings={() => void openSettings('company')}
+      onPlans={() => void openPaywall()}
+      onInbox={async () => { setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true); }}
+      inboxCount={inbox}
+      planName={PLANS[planId].name}
+      isFreePlan={planId === 'free'}
+      isOwner={isOwner}
+      lang={lang}
+      onToggleLang={async () => {
+        const n: Lang = lang === 'en' ? 'es' : 'en';
+        setLang(n); setLangState(n); await saveLang(db, n);
+      }}
+      appVersion={(appJson as any)?.expo?.version ?? '1.0.0'}
+      confirmBase={CONFIRM_BASE}
+      onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
+    />
   );
 
   // REQ-PM9 — Company feed: every extra across every project, newest first. Now a
@@ -3947,26 +4531,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           })()}
         </ScrollView>
         {bottomNav('company', false)}
-        <Drawer
-          visible={menuOpen}
-          onClose={() => setMenuOpen(false)}
-          onProfile={() => void openSettings('profile')}
-          onCompanySettings={() => void openSettings('company')}
-          onPlans={() => void openPaywall()}
-          onInbox={async () => { setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true); }}
-          inboxCount={inbox}
-          planName={PLANS[planId].name}
-          isFreePlan={planId === 'free'}
-          isOwner={isOwner}
-          lang={lang}
-          onToggleLang={async () => {
-            const n: Lang = lang === 'en' ? 'es' : 'en';
-            setLang(n); setLangState(n); await saveLang(db, n);
-          }}
-          appVersion={(appJson as any)?.expo?.version ?? '1.0.0'}
-          confirmBase={CONFIRM_BASE}
-          onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
-        />
+        {drawerEl}
       </View>
     );
   }
@@ -4308,29 +4873,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
         {/* The ☰ opens a LEFT DRAWER (hadar, 2026-07-27), not the old centred card that
             re-listed jobs. Jobs own the bottom-nav Jobs tab; this holds the secondary
-            destinations only. Each row navigates to a screen that already exists. */}
-        <Drawer
-          visible={menuOpen}
-          onClose={() => setMenuOpen(false)}
-          onProfile={() => void openSettings('profile')}
-          onCompanySettings={() => void openSettings('company')}
-          onPlans={() => void openPaywall()}
-          onInbox={async () => {
-            setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true);
-          }}
-          inboxCount={inbox}
-          planName={PLANS[planId].name}
-          isFreePlan={planId === 'free'}
-          isOwner={isOwner}
-          lang={lang}
-          onToggleLang={async () => {
-            const n: Lang = lang === 'en' ? 'es' : 'en';
-            setLang(n); setLangState(n); await saveLang(db, n);
-          }}
-          appVersion={(appJson as any)?.expo?.version ?? '1.0.0'}
-          confirmBase={CONFIRM_BASE}
-          onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
-        />
+            destinations only. Each row navigates to a screen that already exists.
+            Also reachable from the Profile tab in the bottom bar (2026-07-28). */}
+        {drawerEl}
       </View>
     );
   }
@@ -4456,6 +5001,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           )}
         </ScrollView>
         {bottomNav('jobs', false)}
+        {drawerEl}
         {(bell || drafts.length > 0) && (
           <View style={s.homeScrim}>
             <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}
@@ -4548,6 +5094,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           )}
         </ScrollView>
         {bottomNav('activity', false)}
+        {drawerEl}
         {(bell || drafts.length > 0) && (
           <View style={s.homeScrim}>
             <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}
@@ -4840,6 +5387,38 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           await refresh();
           if (send) {
             const row = coRowsRef.current.find((x) => x.id === id);
+            // REQ-LC13'S CONTENT GATE, AND IT WAS MISSING FROM THIS PATH ENTIRELY.
+            // The spec requires all three gates at send; this one — the main flow,
+            // capture → price → review → Send — checked the pipeline only. The
+            // reachable failure: a capture whose proposal came back `low`/`none`
+            // (garbled audio) never gets retitled, so `scope` stays
+            // `UNTITLED_SCOPE`; the composer renders it read-only and the pipeline
+            // gate passes because the audio DID upload and process. The client then
+            // receives a signable priced document whose entire body reads "Untitled
+            // extra — still being written up". `sendReadiness` refuses exactly that,
+            // and only the record screen was asking it.
+            //
+            // CONTENT BEFORE PIPELINE, the order sendreadiness.ts states: this is
+            // the refusal he can act on standing where he is.
+            const ready = row ? sendReadiness({
+              kind: 'extra',
+              scope: row.scope,
+              amountCents: row.amount_cents,
+              nteCents: row.nte_cents,
+              priceMode: row.nte_cents == null ? 'fixed' : 'nte',
+              // Only `ok`/`blockers` is read here, and D3 guarantees no recommended
+              // item can affect either — so the photo count is not queried for a
+              // value that cannot change the answer.
+              photoCount: 0,
+              billingTiming: row.billing_timing,
+              scheduleEffect: row.schedule_effect,
+              exclusions: row.exclusions,
+            }) : null;
+            if (!ready?.ok) {
+              // The record screen is where the blockers are named, one tap each.
+              await openRecord(id);
+              return;
+            }
             // MUST BE PROCESSED FIRST (hadar, 2026-07-24): the evidence has to be
             // uploaded and the pipeline done before a client gets a link — otherwise
             // they open a request whose photos/transcript are still on the phone.
@@ -5457,6 +6036,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           push it (the bug that broke the first attempt). No tab is "active": we are
           inside a job, not on one of the three destinations. */}
       {bottomNav(null, true)}
+      {drawerEl}
     </View>
   );
 }
