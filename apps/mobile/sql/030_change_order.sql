@@ -104,20 +104,21 @@ create trigger approval_immutable before update or delete on public.approval
 -- matches `add constraint` and `create policy` too. This file owns the TABLES;
 -- 230 owns this constraint. One object, one file.
 
--- The CO's frozen scope/amount must not move after it is sent.
-create or replace function public.change_order_guard() returns trigger
-  language plpgsql as $$ begin
-    if old.status in ('sent','approved','declined')
-       and (new.amount_cents is distinct from old.amount_cents
-            or new.scope is distinct from old.scope
-            or new.nte_cents is distinct from old.nte_cents) then
-      raise exception 'a sent change order is frozen: supersede it with a new one';
-    end if;
-    return new;
-  end $$;
-drop trigger if exists change_order_frozen on public.change_order;
-create trigger change_order_frozen before update on public.change_order
-  for each row execute function public.change_order_guard();
+-- The CO's frozen terms must not move after it is sent. `change_order_guard` and its
+-- trigger `change_order_frozen` are NOT defined here any more [2026-07-28]. They live
+-- in `383_frozen_terms_server.sql`, their single owner.
+--
+-- Why they moved: 383 widens the guard from three columns to the SEVEN the device
+-- already freezes (adding billing_timing, schedule_effect, schedule_days,
+-- exclusions -- DEF-3 / REQ-LC42), because those four became terms of the binding
+-- instrument when they started being rendered into `shown_content`. Leaving the
+-- narrow version here would mean the same function was defined in two files, and
+-- `create or replace` is a replace, not a merge: re-running THIS file after 383
+-- would silently restore the three-column guard and a sent extra's payment timing,
+-- schedule impact and exclusions would become mutable again -- with nothing failing
+-- anywhere. That is the identical hazard recorded in `020_confirmations.sql:60-97`
+-- for `confirmation_request_guard`, and the reason for the rule: one object, one
+-- file.
 
 alter table public.change_order enable row level security;
 alter table public.approval     enable row level security;

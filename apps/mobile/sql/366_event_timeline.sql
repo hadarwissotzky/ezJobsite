@@ -25,10 +25,16 @@
 --     off a state flag would put an event on the timeline with an invented
 --     position, which is exactly the rule record.ts exists to hold. When a delivery
 --     receipt lands, it needs its own timestamped column and one line here.
---   * `reminder`. No reminder is ever sent by this product yet. An empty branch for
---     a feature that does not exist is a lie waiting to be believed.
+--   * `reminder`. NO LONGER TRUE [2026-07-28]. When this was written, no reminder was
+--     ever sent by this product, and an empty branch for a feature that does not
+--     exist is a lie waiting to be believed. `388_reminder_scheduler.sql` builds the
+--     attempt record, so the branch now exists and is gated on an attempt a transport
+--     actually confirmed — a claimed, failed or abandoned attempt still emits no
+--     "reminder sent", for the same reason `delivered` above emits nothing.
 --
--- OWNERSHIP: every object below is created only here (check-sql-duplicates).
+-- OWNERSHIP: every object below is created only here (check-sql-duplicates), WITH
+-- ONE EXCEPTION, stated so it is not discovered by accident: `change_order_timeline`
+-- is no longer defined in this file. See the note where it used to be.
 
 -- ── each open is evidence ───────────────────────────────────────────────────
 create table if not exists public.confirmation_open (
@@ -55,9 +61,10 @@ create trigger confirmation_open_no_update before update or delete
   execute function public.confirmation_open_no_change();
 
 alter table public.confirmation_open enable row level security;
--- No select policy: RLS on with no policy is DENY. The only reader is
--- change_order_timeline() below, which is security definer and checks ownership
--- itself. anon can write an open and can never read anybody's.
+-- No select policy: RLS on with no policy is DENY. Every reader is SECURITY DEFINER
+-- and checks ownership itself — change_order_timeline (moved to 388) and
+-- change_order_open_signal (387, the one derivation of 'viewed'). anon can write an
+-- open and can never read anybody's.
 
 -- ── logging an open, from the no-account page ───────────────────────────────
 --
@@ -102,84 +109,24 @@ grant execute on function public.confirmation_opened to anon, authenticated;
 
 -- ── the contractor reads the whole timeline back ────────────────────────────
 --
--- ONE RPC RETURNING EVENTS + SNAPSHOT TOGETHER, not two. The record screen needs
--- both at once and this is read on a phone with one bar; two round trips is the
--- whole perceived load time, doubled, for data that is always wanted together.
+-- `change_order_timeline` IS NOT DEFINED HERE ANY MORE [2026-07-28]. It lives in
+-- `388_reminder_scheduler.sql`, its single owner.
 --
--- SECURITY DEFINER WITH AN EXPLICIT OWNER CHECK: it reads confirmation_request,
+-- Why it moved: 388 adds the `reminder` and `reminder_failed` branches — the events
+-- this file's header refused to fake while no reminder was ever sent — and a
+-- `create or replace function` in two files is a replace, not a merge. Keeping the
+-- body here would mean re-running THIS file after 388 silently restored a timeline
+-- with no reminder on it: the record would stop showing that a client had been
+-- chased twice, and nothing anywhere would fail. That is the identical hazard
+-- recorded in `020_confirmations.sql:60-97`. One object, one file.
+--
+-- The reasoning that governs the function did not move and still applies: ONE RPC
+-- returning events + snapshot together (two round trips on one bar is the whole
+-- perceived load time, doubled, for data always wanted together), and SECURITY
+-- DEFINER WITH AN EXPLICIT OWNER CHECK, because it reads confirmation_request,
 -- confirmation_open, confirmation_question and confirmation_response, none of which
--- grant select to authenticated (260 is the precedent — an approval is visible to
--- the contractor it belongs to and nobody else). Definer without the check would
--- have handed every signed-in user every client's questions and signatures.
-create or replace function public.change_order_timeline(p_change_order_id text)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare evs jsonb; snap jsonb;
-begin
-  if not exists (
-    select 1 from public.change_order co
-     where co.id = p_change_order_id and co.owner_id = auth.uid()
-  ) then
-    raise exception 'not your change order' using errcode = '42501';
-  end if;
-
-  with req as (
-    select * from public.confirmation_request where change_order_id = p_change_order_id
-  ),
-  evs_raw as (
-    select 'sent'::text as kind, r.created_at as at_ts,
-           jsonb_build_object('channel', r.channel, 'who', r.counterparty_label) as detail
-      from req r
-    union all
-    select 'opened', o.opened_at, '{}'::jsonb
-      from public.confirmation_open o join req r on r.token = o.token
-    union all
-    select 'asked', q.asked_at, jsonb_build_object('note', q.note)
-      from public.confirmation_question q join req r on r.token = q.token
-    union all
-    select case when x.action = 'confirmed' then 'approved' else 'declined' end,
-           x.responded_at,
-           jsonb_build_object('name', x.signed_name, 'note', x.note)
-      from public.confirmation_response x join req r on r.token = x.token
-    union all
-    -- A superseded link IS the revision event R6 asks for: the old instrument was
-    -- retired at that instant because a new one was issued (250).
-    select 'superseded', r.superseded_at, '{}'::jsonb
-      from req r where r.superseded_at is not null
-  )
-  select coalesce(
-           jsonb_agg(jsonb_build_object('kind', kind, 'at', at_ts, 'detail', detail)
-                     order by at_ts),
-           '[]'::jsonb)
-    into evs
-    from evs_raw;
-
-  -- The binding instrument, for AC2: "either party opens its record later, then they
-  -- see the identical immutable snapshot". The contractor's app was rendering
-  -- change_order.scope — the MUTABLE local row — which is the one thing that must
-  -- never stand in for the signed document.
-  --
-  -- Which request, when there are several: the ANSWERED one wins, because that is the
-  -- one that was signed. Only if none was answered does the newest live one show.
-  select jsonb_build_object(
-           'token', r.token,
-           'shown_content', r.shown_content,
-           'shown_sha256', r.shown_sha256,
-           'action', x.action,
-           'signed_name', x.signed_name,
-           'answered_at', x.responded_at,
-           'superseded', r.superseded_at is not null)
-    into snap
-    from public.confirmation_request r
-    left join public.confirmation_response x on x.token = r.token
-   where r.change_order_id = p_change_order_id
-   order by (x.token is not null) desc, r.created_at desc
-   limit 1;
-
-  return jsonb_build_object('events', evs, 'snapshot', snap);
-end $$;
-
-revoke all on function public.change_order_timeline from public, anon;
-grant execute on function public.change_order_timeline to authenticated;
+-- grant select to authenticated (260 is the precedent). Definer without the check
+-- would have handed every signed-in user every client's questions and signatures.
 
 -- ── a retired link can point at the live one ────────────────────────────────
 --
