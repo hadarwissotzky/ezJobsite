@@ -39,6 +39,10 @@ const ICONS = {
    *  (the mockup never shows the resumed state). Traced to match the kit's weight;
    *  replace it if a real one ever ships. */
   play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5l12 7.5-12 7.5z"/></svg>',
+  /** A gear, for the account/settings row. A generic primitive, not branded art. */
+  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.4 4.4l1.6 1.6M18 18l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.4 19.6l1.6-1.6M18 6l1.6-1.6"/></svg>',
+  /** A stacked feed/list, for the Company Feed row. */
+  feed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="5" rx="1.5"/><rect x="3.5" y="12.5" width="17" height="7" rx="1.5"/></svg>',
 } as const;
 
 /**

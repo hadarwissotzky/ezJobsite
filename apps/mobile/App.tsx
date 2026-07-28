@@ -28,15 +28,17 @@ import { photoCapture, pickFromLibrary, textCapture, voiceCapture } from './src/
 import { checkJobs, currentPlan, type QuotaKind } from './src/quota';
 import { QuotaModal } from './src/ui/quotamodal';
 import { PaywallScreen } from './src/ui/paywallscreen';
-import { type PlanId } from './src/plans';
+import { PLANS, type PlanId } from './src/plans';
 import { Icon } from './src/ui/icon';
 import { Svg, Circle } from 'react-native-svg';
 import { C, F } from './src/ui/theme';
 import { radii, shadows } from './src/ui/tokens';
 import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
 import { SplashScreen } from './src/ui/splashscreen';
+import { Drawer } from './src/ui/drawer';
+import appJson from './app.json';
 import { ensurePairSchema, linkPair } from './src/pair';
-import { ensureAugmentSchema, noteAugment } from './src/augmentlog';
+import { ensureAugmentSchema, noteAugment, appendAugmentDesc } from './src/augmentlog';
 import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
@@ -199,6 +201,28 @@ const LAST_PROJECT_KEY = 'last_project_id';
 // reaching the cloud, silently, with the app still saying "saved ✓".
 const OWNER_FALLBACK = 'owner-local';
 
+/** A stable per-CALENDAR-DAY key in LOCAL time — the thing the feed groups on.
+ *  Not the raw ms and not UTC: two extras a minute apart across midnight are
+ *  different days, and two at 1am and 11pm the same day must group together. */
+function feedDayKey(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+/** The human header for a day group: Today / Yesterday, else a written date. The
+ *  year is shown only when it is not the current one, so most headers stay short. */
+function feedDayLabel(ms: number, nowMs: number): string {
+  const key = feedDayKey(ms);
+  if (key === feedDayKey(nowMs)) return T('feed.today');
+  if (key === feedDayKey(nowMs - 86400000)) return T('feed.yesterday');
+  const d = new Date(ms);
+  const locale = getLang() === 'es' ? 'es-419' : 'en-US';
+  const sameYear = d.getFullYear() === new Date(nowMs).getFullYear();
+  return d.toLocaleDateString(locale, sameYear
+    ? { weekday: 'short', month: 'short', day: 'numeric' }
+    : { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 /**
  * REQ-VAL6: scope, subject and who-directed are INFERRED WITH DEFAULTS, never a
  * form. The user gets ONE card and ONE action. These heuristics are deliberately
@@ -283,6 +307,12 @@ export default function App() {
   const feedOpenRef = React.useRef(false);      // feed is showing → refresh() reloads it
   const returnToFeedRef = React.useRef(false);  // an extra was opened FROM the feed
   const [settingsProfile, setSettingsProfile] = React.useState<import('./src/profile').Profile | null>(null);
+  // Which face of SettingsScreen to show: personal Profile vs owner-only company Settings.
+  const [settingsMode, setSettingsMode] = React.useState<'profile' | 'company'>('profile');
+  // Drawer needs the company's plan + whether THIS user is the owner: the plan box shows
+  // to everyone, but the Upgrade CTA and the company-Settings entry are owner-only.
+  const [planId, setPlanId] = React.useState<PlanId>('free');
+  const [isOwner, setIsOwner] = React.useState(false);
   // When set, the capture screen AUGMENTS this existing extra (adds photos/voice as
   // appended evidence) instead of minting a new extra (hadar, 2026-07-25).
   const [augmentCoId, setAugmentCoId] = React.useState<string | null>(null);
@@ -474,6 +504,15 @@ const openRecord = async (changeOrderId: string) => {
   try {
     setNarration(await narrationForExtra(db, connector.client, r.id,
       r.photos.map((ph) => ({ captureId: ph.captureId, uri: ph.uri, present: ph.present }))));
+    // narrationForExtra just warmed voice_transcript_cache from the server. extraRecord
+    // read that cache while it was still COLD (first open), so its voices carry no
+    // transcript yet — re-read now so the detail shows the full transcription instead of
+    // "still writing it down…". Guarded on recordIdRef so a fast re-tap to another extra
+    // does not get this one's data stamped over it.
+    try {
+      const r2 = await extraRecord(db, changeOrderId);
+      if (r2 && recordIdRef.current === changeOrderId) setRecord(r2);
+    } catch { /* the first read stands */ }
   } catch { setNarration(null); }
   // R5b: the discussion (lineage-walked) and which replies are still queued.
   try {
@@ -508,15 +547,19 @@ const closeRecord = () => {
   }
 };
 
-// Open Settings/Team. Loads the profile and, for a company profile, promotes the
-// stored company NAME into a real tenant (idempotent) so the Team roster works.
-const openSettings = async () => {
+// Open Settings in a given MODE (hadar, 2026-07-27): 'profile' is the personal screen
+// (name, trade, language, notifications, join a company); 'company' is the owner-only
+// company screen (team roster, plan). Both reuse SettingsScreen; the mode picks which
+// sections render. Loads the profile and, for a company profile, promotes the stored
+// company NAME into a real tenant (idempotent) so the Team roster works.
+const openSettings = async (mode: 'profile' | 'company' = 'profile') => {
   const p = (await getProfile(db)) ?? { name: '', isSolo: true, company: null, trade: null };
   if (!p.isSolo && (p.company ?? '').trim()) {
     try { await ensureOwnCompany(connector.client, (p.company as string).trim(), p.name); await refresh(); }
     catch { /* offline — the promote retries next time Settings opens */ }
   }
   setSettingsProfile(p);
+  setSettingsMode(mode);
   setShowSettings(true);
 };
 
@@ -710,6 +753,43 @@ const applyProposalToExtra = async (
     tag = prop.extraType;
   }
   return { title, tag };
+};
+
+/**
+ * Finish an EDIT to an extra: the added voice has uploaded, transcribed and been
+ * analysed, so grow the record's Description to cover what it said — "the same rules
+ * as the new extra" (hadar, 2026-07-27) — then reopen the record.
+ *
+ * IT NEVER TOUCHES SCOPE, and that is the whole design. `co.scope` is the title and,
+ * once sent, the frozen binding instrument (mandate #5). A new extra puts the AI's
+ * subject INTO scope because scope is still a mutable draft; an edit can land on a
+ * SENT extra (hadar chose "sent extras too"), so it appends the AI's read as an
+ * append-only addendum that record.ts renders beneath the frozen scope. Same rule for
+ * a draft, so the two cases cannot diverge and the original title is never clobbered.
+ *
+ * MANDATE #2, mechanically: the AI's words are used only at HIGH confidence; otherwise
+ * the addendum is the contractor's OWN transcribed words (voice_transcript_cache),
+ * which is more faithful anyway ("the words come from the contractor"), and always
+ * available offline. The price is never re-derived — an edit adds evidence, not money.
+ */
+const finishAugmentById = async (changeOrderId: string, addedIds: string[]) => {
+  try {
+    const prop: Proposal | null =
+      await fetchLatestProposalForCaptures(connector.client, addedIds);
+    let text = '';
+    if (prop && prop.confidence === 'high' && prop.subject) {
+      text = prop.subject.trim();
+    } else {
+      // His own words, verbatim, for every added voice that was written down.
+      const marks = addedIds.map(() => '?').join(',');
+      const said = await db.getAll<{ text: string }>(
+        `SELECT text FROM voice_transcript_cache WHERE capture_id IN (${marks})`, addedIds);
+      text = said.map((r) => r.text?.trim()).filter(Boolean).join('\n\n');
+    }
+    if (text) await appendAugmentDesc(db, changeOrderId, text);
+  } catch { /* the evidence is committed; a missing addendum never un-saves it */ }
+  await refresh();
+  void openRecord(changeOrderId);
 };
 
 /**
@@ -1049,9 +1129,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     stalled: boolean; uploadDone: number; uploadTotal: number;
     lastError: string | null; blocked: boolean;
     // Augment mode: this transition is backing up ADDED evidence on an existing
-    // extra, not a new one. It gates on UPLOAD only (no AI re-processing — that is
-    // the deferred re-summarize/re-price feature) and, when the bytes are up, opens
-    // the extra's record instead of the priced composer (hadar 2026-07-25).
+    // extra, not a new one. Like a new extra it waits for the added voice to upload,
+    // transcribe and be analysed, then grows the record's Description from what was
+    // said (hadar 2026-07-27) — the price is never re-derived — and reopens the
+    // extra's record instead of the priced composer.
     isAugment: boolean;
   }>(null);
 
@@ -1139,9 +1220,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         } catch { /* schema races: poll again */ }
         if (!alive) return;
 
-        // Augmenting adds evidence and re-processes nothing yet, so it is ready the
-        // moment the bytes are up; a new extra also needs its words + the AI pass.
-        const ready = transition.isAugment ? up : (up && tr && analyzedSeen);
+        // ONE gate for both: uploaded + (when there is a voice) its words are down and
+        // the AI has spoken. `tr` and `analyzedSeen` both initialise to true when there
+        // is no anchor capture, so a photos-only edit still reduces to "ready when up".
+        // An edit with a voice now waits for transcription + analysis exactly like a new
+        // extra (hadar, 2026-07-27) — the augment path no longer short-circuits on upload.
+        const ready = up && tr && analyzedSeen;
         // Only ask the radio once we've actually waited a beat and are still not
         // ready — and if we're online, re-kick the push.
         let offline = false;
@@ -1197,9 +1281,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           await new Promise((r) => setTimeout(r, 900));
           if (!alive) return;
           setTransition((t) => {
-            // New extra → open the priced composer; augment → reopen the extra with
-            // its new evidence attached.
-            if (t) { if (t.isAugment) void openRecord(t.coId); else void finishExtraById(t.coId); }
+            // New extra → open the priced composer; augment → grow the description
+            // from the added voice (same rules as a new extra), then reopen the record.
+            if (t) {
+              if (t.isAugment) void finishAugmentById(t.coId, t.ids);
+              else void finishExtraById(t.coId);
+            }
             return null;
           });
           return;
@@ -1630,6 +1717,21 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // the Projects home, or the auto-select above, both land the right captures.
   React.useEffect(() => { if (ready) void refresh(); }, [projectId, ready, refresh]);
 
+  // Plan + ownership for the drawer. Keyed on OWNER (so it loads once the real user id
+  // arrives after sign-in) and on menuOpen (so the plan box is current every time the
+  // drawer is opened). Best-effort: a pre-migration/unsynced company reads free +
+  // not-owner, the safe default (plan box hides the upgrade, Settings entry hidden).
+  React.useEffect(() => {
+    if (!ready) return;
+    (async () => {
+      try {
+        setPlanId(await currentPlan(db));
+        const co = await myCompany(db, OWNER);
+        setIsOwner(!!co?.isOwner);
+      } catch { setPlanId('free'); setIsOwner(false); }
+    })();
+  }, [ready, OWNER, menuOpen, db]);
+
   // R5b AC1 / R8: tapping the notification opens THAT extra, not the app's last
   // screen. Registered once and kept for the app's life — a listener torn down
   // between renders would drop the tap that arrives while the app is waking.
@@ -1692,6 +1794,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
      try {
       await db.init();
       await applyDurabilityProfile(db);
+      // Kick the auth session read NOW, in parallel with all the local schema setup
+      // below (hadar, 2026-07-27: slow startup). getSession() refreshes an expired
+      // access token over the NETWORK, and on a weak jobsite connection that round-trip
+      // was the single thing the splash waited on. Starting it here overlaps that
+      // latency with work that has to happen anyway, instead of paying for it in series
+      // after the schema is built. It is awaited (not applied) below, unchanged.
+      const sessionPromise = connector.client.auth.getSession()
+        .then((r) => r.data.session ?? null)
+        .catch(() => null);
       await ensureAppOwnedSchema(db);
       await ensureDecisionSchema(db);
       await ensureChangeOrderSchema(db);
@@ -1817,7 +1928,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       if (sl) { setLang(sl); setLangState(sl); }
       setFirstRun(await isFirstRun(db));
       setHasProfile(await hasProfileFn(db));
-      await initFeedback();
+      void initFeedback();            // haptics/sound warmup — not needed before paint
       void configureNotifications();  // display handler + Android channel (2026-07-26)
 
       // THE GATE. If the write connection cannot promise durability we do not
@@ -1863,13 +1974,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           }
         }
       };
-      try {
-        const { data: sess } = await connector.client.auth.getSession();
-        applySession(sess.session ?? null);
-      } catch (e) {
-        console.log('session check failed — treating as logged out', e);
-        setSession(null);
-      }
+      // Await the session that was already in flight since right after db.init(), so its
+      // network refresh overlapped the schema setup rather than adding to it.
+      applySession(await sessionPromise);
       // Keep session + sync in step on later sign-in / sign-out. Skip INITIAL_SESSION:
       // getSession above already applied the startup state.
       const { data: authSub } = connector.client.auth.onAuthStateChange((event, s) => {
@@ -1877,7 +1984,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         applySession(s);
       });
       cleanups.push(() => authSub.subscription.unsubscribe());
-      await refresh();
+      // NOTE: no `await refresh()` here on purpose (hadar, 2026-07-27: "why is startup
+      // so slow"). refresh() runs ~15 queries; blocking first paint on it made the
+      // splash sit there. The effect at the top — `if (ready) void refresh()` — fires
+      // it the instant setReady flips, so the home shell paints immediately and its
+      // content fills a beat later instead of gating the whole launch.
       setReady(true);
 
       // Drain the outbox. Runs on a timer, not on a network event, because
@@ -2304,6 +2415,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         newIds.push(pr.captureId);
         photoN++;
       }
+      const voiceIds: string[] = [];
       for (const seg of a.audioSegments) {
         const vr = await performCapture(db, {
           ownerId: OWNER, projectId: co.project_id,
@@ -2314,6 +2426,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         await linkPair(db, pairId, vr.captureId, 'voice', seg.startedAtMs);
         await noteCapturedBy(db, vr.captureId);
         newIds.push(vr.captureId);
+        voiceIds.push(vr.captureId);
         voiceN++;
       }
       if (!photoN && !voiceN) { setUi({ k: 'refused', why: 'nothing to save' }); return; }
@@ -2325,13 +2438,31 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       if (voiceN) await noteAugment(db, { changeOrderId: coId, kind: 'voice', n: voiceN, atMs: now, byName: prof?.name ?? null });
       setUi({ k: 'saved', id: coId });
       await refresh();
+
+      // Transcribe each added voice on device — the SAME rule as a new capture: AFTER
+      // durability, never awaited into the UI path (mandate #3's touch budget), and it
+      // cannot un-save anything. This is what the transition's `tr` gate below waits on,
+      // and what finishAugmentById falls back to when the AI is not confident.
+      for (const vid of voiceIds) {
+        void (async () => {
+          const row = await db.getAll<{ media_relpath: string }>(
+            `SELECT media_relpath FROM capture_commit WHERE capture_id = ?`, [vid]);
+          if (!row.length) return;
+          await transcribeOnDevice(db, vid, `${FS.documentDirectory}${row[0].media_relpath}`);
+          await refresh();
+        })().catch(() => { /* the worker's cloud path still covers this capture */ });
+      }
+
       // The upload-processing screen for an EDIT (hadar 2026-07-25: "to the
-      // notification upload processing screen if it's an edit"): watch the added
-      // evidence back up, then reopen the extra. Upload-only (isAugment) — the priced
-      // scope is untouched; AI re-processing is the deferred feature.
+      // notification upload processing screen if it's an edit"). When the edit added a
+      // voice, the transition now waits for it to upload, transcribe and be analysed —
+      // exactly like a new extra — and finishAugmentById then grows the Description
+      // (hadar 2026-07-27). Anchor on the first added voice so the poller has a capture
+      // to watch; a photos-only edit has no anchor and stays upload-only.
+      const augAnchor = voiceIds[0] ?? null;
       setTransition({
-        ids: newIds, anchorCaptureId: null, coId,
-        uploaded: false, transcribed: true, analyzed: true, offline: false,
+        ids: newIds, anchorCaptureId: augAnchor, coId,
+        uploaded: false, transcribed: augAnchor === null, analyzed: false, offline: false,
         stalled: false, uploadDone: 0, uploadTotal: newIds.length, lastError: null,
         blocked: false, isAugment: true,
       });
@@ -3287,13 +3418,27 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       { done: t.uploaded, doing: 'cap.transUpload', doneKey: 'cap.transUploaded' },
       ...(t.anchorCaptureId !== null
         ? [{ done: t.transcribed, doing: 'cap.transStt', doneKey: 'cap.transSttDone' }] : []),
-      ...(!t.isAugment
+      // The AI pass belongs to a new extra AND to a voice edit (which now re-summarises
+      // what was added). A photos-only edit ran no AI, so it claims no such step.
+      ...((!t.isAugment || t.anchorCaptureId !== null)
         ? [{ done: t.analyzed, doing: 'cap.transAnalyze', doneKey: 'cap.transAnalyzed' }] : []),
     ];
     const doneCount = steps.filter((x) => x.done).length;
     const pct = doneCount / steps.length;
     const current = steps.find((x) => !x.done);
-    const trouble = t.offline || t.stalled || t.blocked;
+    // A TRANSIENT network failure (backoff stores code 'TRANSIENT', text "Network
+    // request failed") is NOT a crash — the extra is saved and the queue is retrying.
+    // The contractor must not see "TRANSIENT: Network request failed [job: prj-…]";
+    // that dev string reads as broken (hadar, 2026-07-27). Detect it and speak plainly.
+    const netRetry = !t.uploaded && !!t.lastError &&
+      /TRANSIENT|network request failed|network/i.test(t.lastError);
+    // Any surfaced error puts the screen into the reassure-and-let-them-proceed state;
+    // the message below picks the right plain-language words for which kind it is.
+    const trouble = t.offline || t.stalled || t.blocked || !!t.lastError;
+    const warnKey = t.blocked ? 'cap.transBlocked'
+      : t.offline ? 'cap.transOffline'
+      : netRetry ? 'cap.transRetry'
+      : 'cap.transStalled';
 
     // The ring. Drawn rather than animated: this screen is read at a glance by
     // someone who wants to know it is working, not watched.
@@ -3359,18 +3504,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               </View>
             )}
 
-            {!t.uploaded && t.lastError && (
-              <Text style={s.trErr}>{t.lastError}</Text>
-            )}
           </View>
 
           {/* Trouble takes over: plain words about what is true, and a way out that
-              parks everything safe at home. */}
+              parks everything safe at home. The RAW error is kept only as the small
+              secondary line below — for debugging, not as the headline the old screen
+              made it (the "TRANSIENT: Network request failed" the contractor saw). */}
           {trouble && (
             <View style={s.trWarn}>
-              <Text style={s.trWarnT}>
-                {T(t.blocked ? 'cap.transBlocked' : t.offline ? 'cap.transOffline' : 'cap.transStalled')}
-              </Text>
+              <Text style={s.trWarnT}>{T(warnKey)}</Text>
               {t.lastError && <Text style={s.trWarnErr}>{t.lastError}</Text>}
               <Pressable
                 onPress={() => {
@@ -3687,21 +3829,80 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     );
   }
 
-  // REQ-PM9 — Company feed: every extra across every project, newest first.
+  // ── THE ONE BOTTOM NAV ────────────────────────────────────────────────────
+  // Home · Jobs · + (capture) · Company · Activity. Defined once so every screen that
+  // shows it (Feed, Home, Jobs, Job) can never drift. Declared HERE, above the first
+  // screen that renders it (the feed), because a `const` is not hoisted — a use before
+  // this line is a temporal-dead-zone crash. `absolute` pins it over a plain-View
+  // screen (the Job screen); the others use it as a flex child at the column's foot.
+  const bottomNav = (active: 'home' | 'jobs' | 'activity' | 'company' | null, absolute: boolean) => (
+    <View style={absolute
+      ? [s.tabBar, { position: 'absolute' as const, left: -20, right: -20, bottom: 0 }]
+      : s.tabBar}>
+      {/* Two equal halves flank the FAB so it sits DEAD CENTER (hadar: rebalance).
+          Left: Home + Jobs. Right: Company (the feed) + Activity (hadar 2026-07-27 —
+          the feed moved out of the ☰ drawer to a first-class tab). Every non-Company
+          tab clears showFeed, so switching away from the feed actually leaves it. */}
+      <View style={s.tabHalf}>
+        <Pressable style={s.tab} accessibilityLabel={T('home.navHome')}
+          onPress={() => { closeFeed(); setNav('home'); setJobFilter(null); void refresh(); }}>
+          <Icon name="home" size={22} color={active === 'home' ? '#151A1E' : '#8A93A0'} />
+          <Text style={[s.tabLab, active === 'home' && s.tabLabOn]}>{T('home.navHome')}</Text>
+        </Pressable>
+        <Pressable style={s.tab} accessibilityLabel={T('home.navJobs')}
+          onPress={() => { closeFeed(); setNav('jobs'); void refresh(); }}>
+          <Icon name="job" size={22} color={active === 'jobs' ? '#151A1E' : '#8A93A0'} />
+          <Text style={[s.tabLab, active === 'jobs' && s.tabLabOn]}>{T('home.navJobs')}</Text>
+        </Pressable>
+      </View>
+      <Pressable style={[s.fab, (!!gate || !!initError) && s.btnOff]}
+        disabled={!!gate || !!initError} hitSlop={8}
+        accessibilityLabel={T('home.recordExtra')}
+        onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
+        <Icon name="extra" size={26} color="#fff" />
+      </Pressable>
+      <View style={s.tabHalf}>
+        <Pressable style={s.tab} accessibilityLabel={T('feed.title')}
+          onPress={() => void openFeed()}>
+          <Icon name="feed" size={22} color={active === 'company' ? '#151A1E' : '#8A93A0'} />
+          <Text style={[s.tabLab, active === 'company' && s.tabLabOn]}>{T('home.navCompany')}</Text>
+        </Pressable>
+        <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
+          onPress={() => { closeFeed(); setNav('activity'); void refresh(); }}>
+          <Icon name="people" size={22} color={active === 'activity' ? '#151A1E' : '#8A93A0'} />
+          <Text style={[s.tabLab, active === 'activity' && s.tabLabOn]}>{T('home.navActivity')}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  // REQ-PM9 — Company feed: every extra across every project, newest first. Now a
+  // first-class bottom-nav tab ("Company"), not a drawer overlay — so its header
+  // carries the ☰ menu (not a back arrow) and it shows the bottom nav (hadar 2026-07-27).
   if (showFeed) {
     return (
       <View style={s.homeC}>
         <View style={s.dashHdr}>
-          <Pressable style={s.hdrBtn} hitSlop={10} onPress={closeFeed}
-            accessibilityLabel={T('common.back')}>
-            <Text style={s.hdrIcon}>‹</Text>
+          <Pressable style={s.hdrBtn} onPress={() => setMenuOpen(true)}
+            accessibilityLabel={T('home.menu')} hitSlop={10}>
+            <Text style={s.hdrIcon}>☰</Text>
           </Pressable>
           <Text style={s.hdrTitle}>{T('feed.title')}</Text>
           <View style={s.hdrBtn} />
         </View>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}>
           {feedItems.length === 0 && <Text style={s.homeEmpty}>{T('feed.empty')}</Text>}
-          {feedItems.map((f) => {
+          {(() => {
+          // Group the (already newest-first) feed by calendar day: Today, Yesterday,
+          // then written dates. A day header is emitted whenever the day changes as we
+          // walk down the list. Undated rows (atMs 0) fall into one "Earlier" bucket at
+          // the end rather than a bogus 1970 date.
+          const nowMs = Date.now();
+          let prevKey: string | null = null;
+          return feedItems.map((f) => {
+            const dayKey = f.atMs > 0 ? feedDayKey(f.atMs) : 'undated';
+            const showHead = dayKey !== prevKey;
+            prevKey = dayKey;
             const chip = coChip(displayStatus(f.status, { openQuestions: f.openQuestions }) as any);
             // WHO did WHAT — the verb is the feed's most useful signal, not just the name.
             const actLabel = (f.lastAct && f.actor)
@@ -3709,7 +3910,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               : (f.actor ?? '');
             const meta = [f.projectName, actLabel].filter(Boolean).join(' · ');
             return (
-              <Pressable key={f.id} style={s.jobItem}
+              <React.Fragment key={f.id}>
+              {showHead && (
+                <Text style={s.feedDayHead}>
+                  {f.atMs > 0 ? feedDayLabel(f.atMs, nowMs) : T('feed.earlier')}
+                </Text>
+              )}
+              <Pressable style={s.jobItem}
                 onPress={() => { returnToFeedRef.current = true; setShowFeed(false); setProjectId(f.projectId); void openRecord(f.id); }}>
                 <View style={{ flex: 1 }}>
                   <Text style={s.jobItemName} numberOfLines={1}>{f.scope}</Text>
@@ -3734,9 +3941,32 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   </View>
                 </View>
               </Pressable>
+              </React.Fragment>
             );
-          })}
+          });
+          })()}
         </ScrollView>
+        {bottomNav('company', false)}
+        <Drawer
+          visible={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          onProfile={() => void openSettings('profile')}
+          onCompanySettings={() => void openSettings('company')}
+          onPlans={() => void openPaywall()}
+          onInbox={async () => { setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true); }}
+          inboxCount={inbox}
+          planName={PLANS[planId].name}
+          isFreePlan={planId === 'free'}
+          isOwner={isOwner}
+          lang={lang}
+          onToggleLang={async () => {
+            const n: Lang = lang === 'en' ? 'es' : 'en';
+            setLang(n); setLangState(n); await saveLang(db, n);
+          }}
+          appVersion={(appJson as any)?.expo?.version ?? '1.0.0'}
+          confirmBase={CONFIRM_BASE}
+          onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
+        />
       </View>
     );
   }
@@ -3746,10 +3976,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     return (
       <SettingsScreen
         db={db} supabase={connector.client} userId={OWNER} profile={settingsProfile}
-        lang={lang} confirmBase={CONFIRM_BASE}
+        lang={lang} mode={settingsMode} confirmBase={CONFIRM_BASE}
         onSaveProfile={async (p) => { await saveProfile(connector, db, p); setSettingsProfile(p); await refresh(); }}
         onSetLang={async (l) => { setLang(l); setLangState(l); await saveLang(db, l); }}
-        onSignOut={async () => { setShowSettings(false); await connector.signOut(); }}
         onOpenPlans={() => { setShowSettings(false); void openPaywall(); }}
         onBack={() => setShowSettings(false)}
       />
@@ -3772,44 +4001,6 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       />
     );
   }
-
-  // ── THE ONE BOTTOM NAV ────────────────────────────────────────────────────
-  // Home · Jobs · + (capture) · Activity. Defined once so the four screens that
-  // show it (Home, Jobs, Job) can never drift. `absolute` pins it over a plain-View
-  // screen (the Job screen); Home/Jobs use it as a flex child at the column's foot.
-  const bottomNav = (active: 'home' | 'jobs' | 'activity' | null, absolute: boolean) => (
-    <View style={absolute
-      ? [s.tabBar, { position: 'absolute' as const, left: -20, right: -20, bottom: 0 }]
-      : s.tabBar}>
-      {/* Two equal halves flank the FAB so it sits DEAD CENTER (hadar: rebalance).
-          Left half carries Home + Jobs; right half carries Activity. */}
-      <View style={s.tabHalf}>
-        <Pressable style={s.tab} accessibilityLabel={T('home.navHome')}
-          onPress={() => { setNav('home'); setJobFilter(null); void refresh(); }}>
-          <Icon name="home" size={22} color={active === 'home' ? '#151A1E' : '#8A93A0'} />
-          <Text style={[s.tabLab, active === 'home' && s.tabLabOn]}>{T('home.navHome')}</Text>
-        </Pressable>
-        <Pressable style={s.tab} accessibilityLabel={T('home.navJobs')}
-          onPress={() => { setNav('jobs'); void refresh(); }}>
-          <Icon name="job" size={22} color={active === 'jobs' ? '#151A1E' : '#8A93A0'} />
-          <Text style={[s.tabLab, active === 'jobs' && s.tabLabOn]}>{T('home.navJobs')}</Text>
-        </Pressable>
-      </View>
-      <Pressable style={[s.fab, (!!gate || !!initError) && s.btnOff]}
-        disabled={!!gate || !!initError} hitSlop={8}
-        accessibilityLabel={T('home.recordExtra')}
-        onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
-        <Icon name="extra" size={26} color="#fff" />
-      </Pressable>
-      <View style={s.tabHalf}>
-        <Pressable style={s.tab} accessibilityLabel={T('home.navActivity')}
-          onPress={() => { setNav('activity'); void refresh(); }}>
-          <Icon name="people" size={22} color={active === 'activity' ? '#151A1E' : '#8A93A0'} />
-          <Text style={[s.tabLab, active === 'activity' && s.tabLabOn]}>{T('home.navActivity')}</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
 
   // The one status derivation + chip palette, shared by Home and Activity so a
   // "Waiting" pill reads identically wherever an extra appears (was duplicated
@@ -3952,12 +4143,6 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // so this list is navigation, not the thing that decides where a capture goes.
   if (nav === 'home') {
     const now = Date.now();
-    const q = search.trim().toLowerCase();
-    const shown = cards
-      .filter((p) => p.id !== INBOX_ID)
-      .filter((p) => !q || p.name.toLowerCase().includes(q) ||
-                     (p.address ?? '').toLowerCase().includes(q));
-    const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     // Buckets by "whose court is the ball in". NEEDS YOU is everything in YOUR court:
     // an unfinished draft (yours to finish and send) AND a sent extra the client has
     // asked a question about (yours to answer) — hadar 2026-07-27, drafts used to sit
@@ -4111,84 +4296,41 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         {/* Overlays float ABOVE the fixed tab bar in a scrim — inline cards would
             render under the bar and be unreachable. Draft recovery shows itself
             (mandate #1); the bell and the ☰ menu open on tap. */}
-        {(bell || menuOpen || drafts.length > 0) && (
+        {(bell || drafts.length > 0) && (
           <View style={s.homeScrim}>
             <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}
               keyboardShouldPersistTaps="handled">
             {draftsOverlay}
             {activityOverlay}
-            {menuOpen && (
-              <View style={s.menuCard}>
-            <Text style={s.cardH}>{T('home.menu')}</Text>
-            <View style={s.jobsHead}>
-              <Text style={s.sectionLab}>{T('home.yourJobs')}</Text>
-              <Pressable onPress={() => { setMenuOpen(false); setNewJob({ name: '', address: '' }); }}>
-                <Text style={s.addJob}>＋ {T('home.newProject')}</Text>
-              </Pressable>
-            </View>
-            {cards.length > 4 && (
-              <TextInput style={s.searchIn} value={search} onChangeText={setSearch}
-                placeholder={T('home.search')} placeholderTextColor="#8c959f" />
-            )}
-            <ScrollView style={{ maxHeight: 320 }}>
-              {shown.map((p) => (
-                <Pressable key={p.id} style={s.jobItem}
-                  onPress={() => { setMenuOpen(false); open(p.id); }}>
-                  {labelHex(p.label) && (
-                    <View style={{ width: 10, height: 10, borderRadius: 5, marginRight: 10,
-                      backgroundColor: labelHex(p.label) as string }} />
-                  )}
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.jobItemName} numberOfLines={1}>{p.name}</Text>
-                    <Text style={s.jobItemMeta} numberOfLines={1}>
-                      {p.address ?? T('home.noAddress')}
-                      {p.lastMs ? ' · ' + ago(p.lastMs, now) : ''}
-                    </Text>
-                  </View>
-                  <Text style={s.jobCount}>{p.captureCount}</Text>
-                  <Text style={s.chev}>›</Text>
-                </Pressable>
-              ))}
-              {!shown.length && (
-                <Text style={s.homeEmpty}>{q ? T('home.noMatch') : T('home.noProjects')}</Text>
-              )}
-            </ScrollView>
-            {/* Company feed — a PRIMARY surface (REQ-NAV1), a full-width row with a
-                chevron, not a utility pill (review 2026-07-25). */}
-            <Pressable style={s.jobItem} onPress={() => { setMenuOpen(false); void openFeed(); }}>
-              <Text style={{ fontSize: 17, marginRight: 10 }}>☷</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={s.jobItemName} numberOfLines={1}>{T('feed.title')}</Text>
-                <Text style={s.jobItemMeta} numberOfLines={1}>{T('feed.sub')}</Text>
-              </View>
-              <Text style={s.chev}>›</Text>
-            </Pressable>
-            <View style={s.menuFooter}>
-              <Pressable onPress={() => {
-                const n: Lang = lang === 'en' ? 'es' : 'en'; setLang(n); setLangState(n);
-              }}>
-                <Text style={s.langPill}>{lang === 'en' ? 'ES' : 'EN'}</Text>
-              </Pressable>
-              <Pressable onPress={() => { setMenuOpen(false); void openSettings(); }}>
-                <Text style={s.langPill}>⚙︎ {T('set.title')}</Text>
-              </Pressable>
-              {inbox > 0 && (
-                <Pressable onPress={async () => {
-                  setMenuOpen(false);
-                  setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true);
-                }}>
-                  <Text style={s.chipWait}>{T({ k: 'home.inbox', p: { n: inbox } })}</Text>
-                </Pressable>
-              )}
-            </View>
-            <Pressable style={s.later} onPress={() => setMenuOpen(false)}>
-              <Text style={s.laterT}>{T('common.close')}</Text>
-            </Pressable>
-              </View>
-            )}
             </ScrollView>
           </View>
         )}
+
+        {/* The ☰ opens a LEFT DRAWER (hadar, 2026-07-27), not the old centred card that
+            re-listed jobs. Jobs own the bottom-nav Jobs tab; this holds the secondary
+            destinations only. Each row navigates to a screen that already exists. */}
+        <Drawer
+          visible={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          onProfile={() => void openSettings('profile')}
+          onCompanySettings={() => void openSettings('company')}
+          onPlans={() => void openPaywall()}
+          onInbox={async () => {
+            setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true);
+          }}
+          inboxCount={inbox}
+          planName={PLANS[planId].name}
+          isFreePlan={planId === 'free'}
+          isOwner={isOwner}
+          lang={lang}
+          onToggleLang={async () => {
+            const n: Lang = lang === 'en' ? 'es' : 'en';
+            setLang(n); setLangState(n); await saveLang(db, n);
+          }}
+          appVersion={(appJson as any)?.expo?.version ?? '1.0.0'}
+          confirmBase={CONFIRM_BASE}
+          onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
+        />
       </View>
     );
   }
@@ -5374,10 +5516,6 @@ const s = StyleSheet.create({
   trProgTrack: { height: 6, borderRadius: 3, backgroundColor: C.surfaceMuted, overflow: 'hidden' },
   trProgFill: { height: 6, borderRadius: 3, backgroundColor: C.brand },
   trProgT: { fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 6 },
-  // Monospace on purpose: this is a raw server message, and dressing it up as prose
-  // would hide that it is diagnostic text a human may need to quote.
-  trErr: { alignSelf: 'stretch', fontFamily: 'Menlo', fontSize: 12, lineHeight: 17,
-    color: C.danger, marginTop: 10 },
 
   trWarn: { alignSelf: 'stretch', backgroundColor: C.brandSoft, borderWidth: 1,
     borderColor: C.caution, borderRadius: radii.lg, padding: 16, marginTop: 18 },
@@ -5660,8 +5798,6 @@ const s = StyleSheet.create({
 
   // ── Projects home ──────────────────────────────────────────────────────
   homeHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  langPill: { color: '#57606a', fontSize: 12, fontWeight: '700', borderWidth: 1,
-    borderColor: '#D5D0C7', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
   searchIn: { backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
     borderRadius: 10, color: '#151A1E', paddingHorizontal: 14, paddingVertical: 12,
     fontSize: 15, marginBottom: 12 },
@@ -5684,6 +5820,9 @@ const s = StyleSheet.create({
   projMeta: { color: '#57606a', fontSize: 13, marginTop: 3 },
   projStats: { color: '#8c959f', fontSize: 12, marginTop: 8 },
   homeEmpty: { color: '#8c959f', fontSize: 14, textAlign: 'center', marginTop: 40, width: '100%' },
+  // Company-feed day header (Today / Yesterday / date). Small caps label, olive-tinted.
+  feedDayHead: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, color: '#5E666E',
+    textTransform: 'uppercase', letterSpacing: 1.4, marginTop: 20, marginBottom: 6 },
 
   // ── Project detail ─────────────────────────────────────────────────────
   detailHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -5805,8 +5944,6 @@ const s = StyleSheet.create({
   fabT: { color: '#fff', fontSize: 30, marginTop: -2, fontFamily: 'Barlow_400Regular' },
   homeScrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(13,15,18,0.45)', paddingHorizontal: 14 },
-  menuCard: { backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 16 },
-  menuFooter: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
   // ── Job screen (per-job detail, mockup 2026-07-23) ─────────────────────────
   jobCard: { flexDirection: 'row', gap: 14, backgroundColor: '#fff', borderColor: '#E9EAE7',
     borderWidth: 1, borderRadius: 16, padding: 14, marginTop: 6, marginBottom: 16 },
@@ -5879,9 +6016,6 @@ const s = StyleSheet.create({
     letterSpacing: -0.2 },
   brandAccent: { color: '#4E6243' },
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  chipWait: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, color: '#151A1E',
-    backgroundColor: '#A47A3F', textTransform: 'uppercase', letterSpacing: 1.2,
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4, overflow: 'hidden' },
   hero: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 26, paddingVertical: 16 },
   heroH: { fontFamily: 'Barlow_700Bold', fontSize: 34, color: '#151A1E',
     letterSpacing: -0.2, textAlign: 'center' },
@@ -5927,12 +6061,6 @@ const s = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 1.4 },
   recVal: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 28, color: '#fff', marginTop: 2 },
   jobsWrap: { flex: 1, paddingHorizontal: 18, paddingTop: 4 },
-  jobsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginBottom: 8 },
-  sectionLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, color: '#5E666E',
-    textTransform: 'uppercase', letterSpacing: 1.8 },
-  addJob: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 14, color: '#4E6243',
-    textTransform: 'uppercase', letterSpacing: 1 },
   assignC: { flex: 1, backgroundColor: '#151A1E', paddingTop: 54 },
   assignReceipt: { marginHorizontal: 18, backgroundColor: '#15271C', borderColor: '#1E5236',
     borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 16 },

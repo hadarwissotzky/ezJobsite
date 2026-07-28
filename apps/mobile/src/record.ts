@@ -69,6 +69,9 @@ export type RecordVoice = {
   capturedAtMs: number;
   /** False when the audio file the row promises is not on this device (mandate #1). */
   present: boolean;
+  /** The full spoken transcript for THIS clip, from voice_transcript_cache. Null when
+   *  it has not been written down yet (offline, no STT, still processing). */
+  transcript: string | null;
 };
 
 export type ExtraRecord = {
@@ -223,9 +226,18 @@ export async function extraRecord(
       const uri = FS.documentDirectory + vc.media_relpath;
       let present = false;
       try { present = !!(await FS.getInfoAsync(uri)).exists; } catch { present = false; }
+      // The full transcript for this clip. Read here so the detail can show WHAT WAS
+      // SAID in full, not just the AI-condensed description. Missing = not written down
+      // yet; the screen says so rather than showing an empty card.
+      let transcript: string | null = null;
+      try {
+        const tr = (await db.getAll<{ text: string }>(
+          `SELECT text FROM voice_transcript_cache WHERE capture_id = ?`, [vc.capture_id]))[0];
+        transcript = tr?.text?.trim() || null;
+      } catch { transcript = null; }
       return {
         captureId: vc.capture_id, uri, at: createdLabel(vc.captured_at_ms),
-        capturedAtMs: vc.captured_at_ms, present,
+        capturedAtMs: vc.captured_at_ms, present, transcript,
       };
     }));
   }
@@ -278,17 +290,18 @@ export async function extraRecord(
   // Additions made after the fact — "Added 2 photos", "Added a voice note" — the
   // explicit note the augment feature records (hadar, 2026-07-25). Timestamped, so
   // they sort into place with the rest. A hint, never load-bearing: its absence
-  // never breaks the record.
-  try {
-    for (const ev of await augmentEventsFor(db, changeOrderId)) {
-      stamped.push({
-        atMs: ev.atMs, at: createdLabel(ev.atMs),
-        what: ev.kind === 'photo'
-          ? t({ k: 'erec.evAddedPhotos', p: { n: ev.n } } as any)
-          : t('erec.evAddedVoice'),
-      });
-    }
-  } catch { /* the augment log is optional */ }
+  // never breaks the record. Fetched once and reused for the Description below.
+  let augEvents: Awaited<ReturnType<typeof augmentEventsFor>> = [];
+  try { augEvents = await augmentEventsFor(db, changeOrderId); }
+  catch { augEvents = []; }
+  for (const ev of augEvents) {
+    stamped.push({
+      atMs: ev.atMs, at: createdLabel(ev.atMs),
+      what: ev.kind === 'photo'
+        ? t({ k: 'erec.evAddedPhotos', p: { n: ev.n } } as any)
+        : t('erec.evAddedVoice'),
+    });
+  }
   stamped.sort((a, b) => (a.atMs ?? 0) - (b.atMs ?? 0));
 
   // Events we know happened but hold no time for. Marked, never given a fake slot.
@@ -321,6 +334,16 @@ export async function extraRecord(
 
   const line = stateLine(co.status, co.signed_by, synced);
 
+  // The Description GROWS with voice edits, append-only, without ever touching the
+  // frozen scope (hadar, 2026-07-27). The title stays `co.scope`; the description is
+  // that scope followed by the AI's read of each voice added later, oldest first. A
+  // sent extra's binding instrument is untouched — this is display composition, not
+  // an edit — which is the only way mandate #5 lets a sent record's description grow.
+  const addenda = augEvents
+    .filter((e) => e.kind === 'voice' && e.descText)
+    .map((e) => e.descText as string);
+  const description = [co.scope, ...addenda].join('\n\n');
+
   return {
     id: co.id,
     title: co.scope,
@@ -336,7 +359,7 @@ export async function extraRecord(
     stateLineKey: line.key,
     stateLineParams: line.params,
     people,
-    description: co.scope,
+    description,
     photos,
     photosTruncated,
     voices,

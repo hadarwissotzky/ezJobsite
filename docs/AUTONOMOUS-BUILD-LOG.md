@@ -210,3 +210,33 @@ the shape of what shipped.
   a spurious "bad phone" error; added a quotaBlocked flag so the modal speaks instead.
 - Verify gate green: tsc, i18n 724/724 (EN=ES), 296 tests. Migration 381 is UNAPPLIED
   (D1, human-gated) — the member cap is soft until hadar applies it.
+
+### 2026-07-26 — Design system adoption + communication/notification gaps + monetization audit
+
+Design (committed): tokens (a0472c9), palette app-wide (a6a1b11), sentence-case type
+(637bafe), status chips colour+icon+label (99240b8), extra cards + react-native-svg
+kit icons (a877709). Preview artifact shared for direction sign-off.
+
+Communication gaps (committed a1c9011): celebrate-the-yes overlay + haptic; the
+"$X recovered" total (was computed, never rendered); processing-done + sent haptics.
+Remaining: declined not yet a distinct local notif (gap #4), opened has no in-app
+activity kind (gap #5) — both partly gated on remote push (EAS).
+
+Notifications (committed 8d38dca): expo-notifications plugin, foreground handler,
+Android channel, first-send permission prompt + token mint. Remaining = user actions:
+eas init + EXPO_PUBLIC_EAS_PROJECT_ID, apply 379, deploy worker, APNs/FCM creds.
+
+Monetization AUDIT (not yet built): zero payment infra today; one hardcoded free tier.
+- **DEC-11 (payments now in scope):** hadar 2026-07-26 wants free+paid packages and to
+  take money. This REVERSES CLAUDE.md §5 ("do NOT build invoicing/payments"). The
+  compliant path is App Store IAP via RevenueCat (Apple forbids Stripe for digital
+  subs), which is "integrate a billing SDK", narrower than "build an invoicing suite".
+  Recorded as an explicit decision superseding §5 for subscriptions.
+- **CONFLICT found:** PRICING-STRATEGY.md says field crew/members are FREE FOREVER on
+  every tier (the growth loop) — free is capped by PROJECTS (2) × DECISIONS/project
+  (~15), NOT members. But hadar earlier asked to cap free at "2 members". These
+  contradict; the member cap (built in ca92d37 + sql/381) undercuts the strategy's
+  network-growth loop. Needs hadar's decision before wiring entitlements.
+- Build split logged: buildable-now = plans.ts (tiers), company.plan column, entitlement
+  seam in quota.ts, paywall UI; needs-user = App Store Connect products, RevenueCat
+  account+keys+webhook, EAS build.

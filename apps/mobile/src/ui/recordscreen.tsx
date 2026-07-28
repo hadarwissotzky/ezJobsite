@@ -630,6 +630,20 @@ function VoicePlayer({ voice, ordinal = 0 }: { voice: RecordVoice; ordinal?: num
           </View>
         </View>
       )}
+
+      {/* THE FULL TRANSCRIPT for this clip — what was actually said, in full, not the
+          AI-condensed description above (hadar, 2026-07-27: the detail wasn't showing
+          the whole transcription). Missing = not written down yet, said plainly rather
+          than shown as an empty gap. */}
+      {voice.transcript ? (
+        <>
+          <Text style={{ ...label, marginTop: 14 }}>{t('erec.transcript')}</Text>
+          <Text style={{ ...T.body, fontSize: 15, lineHeight: 22, marginTop: 6 }}
+            selectable>{voice.transcript}</Text>
+        </>
+      ) : voice.present ? (
+        <Text style={{ ...T.bodySteel, fontSize: 13, marginTop: 12 }}>{t('erec.transcriptPending')}</Text>
+      ) : null}
     </View>
   );
 }

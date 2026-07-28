@@ -22,7 +22,6 @@ import React from 'react';
 import { Alert, Linking, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import appJson from '../../app.json';
 import { t } from '../i18n';
 import type { Lang } from '../i18n';
 import { registerPushToken } from '../push';
@@ -35,19 +34,19 @@ import {
   type MyCompany, type Member,
 } from '../company';
 
-const APP_VERSION = (appJson as any)?.expo?.version ?? '1.0.0';
-const SUPPORT_EMAIL = 'support@ezchangeorder.com';
-
 export function SettingsScreen(props: {
   db: AbstractPowerSyncDatabase;
   supabase: SupabaseClient;
   userId: string;
   profile: Profile;
   lang: Lang;
+  /** 'profile' = personal (name, trade, language, notifications, join a company).
+   *  'company' = company settings (team, plan) — the caller only opens this for the
+   *  company OWNER; the drawer hides the entry point for everyone else. */
+  mode: 'profile' | 'company';
   confirmBase: string;
   onSaveProfile: (p: Profile) => Promise<void>;
   onSetLang: (l: Lang) => Promise<void>;
-  onSignOut: () => Promise<void>;
   onOpenPlans: () => void;
   onBack: () => void;
 }) {
@@ -160,9 +159,6 @@ export function SettingsScreen(props: {
     );
   };
 
-  const mailTo = (subject: string) =>
-    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}`).catch(() => {});
-
   const roleLabel = (r: string) => t(('set.role.' + r) as any);
   const initials = (name.trim() || props.profile.name || '?')
     .split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
@@ -178,7 +174,9 @@ export function SettingsScreen(props: {
         <Pressable onPress={props.onBack} hitSlop={12} style={{ paddingRight: 12 }}>
           <Text style={{ fontSize: 26, color: C.ink }}>‹</Text>
         </Pressable>
-        <Text style={{ fontFamily: F.dispSemi, fontSize: 24, color: C.ink }}>{t('set.title')}</Text>
+        <Text style={{ fontFamily: F.dispSemi, fontSize: 24, color: C.ink }}>
+          {props.mode === 'company' ? t('set.companyTitle') : t('set.profile')}
+        </Text>
       </View>
 
       {/* ---- Identity header ---- */}
@@ -197,7 +195,8 @@ export function SettingsScreen(props: {
         </View>
       </View>
 
-      {/* ---- Profile ---- */}
+      {/* ---- Profile (personal) ---- profile mode only */}
+      {props.mode === 'profile' && (
       <View style={{ ...TH.card, marginTop: 14 }}>
         <Text style={label}>{t('set.profile')}</Text>
         <TextInput style={inputStyle} value={name} onChangeText={setName}
@@ -228,8 +227,11 @@ export function SettingsScreen(props: {
           <Text style={saveBtnT}>{saved ? t('set.saved') : t('set.save')}</Text>
         </Pressable>
       </View>
+      )}
 
-      {/* ---- Team ---- */}
+      {/* ---- Team (members + invite) ---- company mode only. Managing the roster is
+          a company setting; only the owner opens this screen. */}
+      {props.mode === 'company' && (
       <View style={{ ...TH.card, marginTop: 14 }}>
         <Text style={label}>{t('set.team')}</Text>
         {co ? (
@@ -270,9 +272,16 @@ export function SettingsScreen(props: {
         ) : (
           <Text style={{ ...TH.bodySteel, fontSize: 13, marginTop: 4 }}>{t('set.noCompany')}</Text>
         )}
+        {note && <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 10, color: C.inkSoft }}>{note}</Text>}
+      </View>
+      )}
 
-        <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 16, marginBottom: 6 }}>{t('set.joinTitle')}</Text>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
+      {/* ---- Join a company ---- profile mode: a crew member joins by code HERE, so
+          joining is never locked behind the owner-only company screen. */}
+      {props.mode === 'profile' && (
+      <View style={{ ...TH.card, marginTop: 14 }}>
+        <Text style={label}>{t('set.joinTitle')}</Text>
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
           <TextInput style={{ ...inputStyle, flex: 1, marginTop: 0 }} value={joinToken}
             onChangeText={setJoinToken} autoCapitalize="none"
             placeholder={t('set.joinPlaceholder')} placeholderTextColor="#8c959f" />
@@ -284,8 +293,10 @@ export function SettingsScreen(props: {
         </View>
         {note && <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 10, color: C.inkSoft }}>{note}</Text>}
       </View>
+      )}
 
-      {/* ---- Preferences ---- */}
+      {/* ---- Preferences ---- profile mode (notifications are personal). */}
+      {props.mode === 'profile' && (
       <View style={{ ...TH.card, marginTop: 14 }}>
         <Text style={label}>{t('set.prefs')}</Text>
         <Row
@@ -301,8 +312,11 @@ export function SettingsScreen(props: {
             : { label: t('set.openSystem'), onPress: () => Linking.openSettings().catch(() => {}) }}
         />
       </View>
+      )}
 
-      {/* ---- Subscription ---- */}
+      {/* ---- Subscription ---- company mode only: the plan belongs to the company and
+          only the owner (who is the only one this screen opens for) changes it. */}
+      {props.mode === 'company' && (
       <View style={{ ...TH.card, marginTop: 14 }}>
         <Text style={label}>{t('set.plan')}</Text>
         <Row title={t('set.planName')} value={t('set.planPilot')} />
@@ -312,32 +326,12 @@ export function SettingsScreen(props: {
           <Text style={saveBtnT}>{t('quota.seePlans')}</Text>
         </Pressable>
       </View>
+      )}
 
-      {/* ---- Support ---- */}
-      <View style={{ ...TH.card, marginTop: 14 }}>
-        <Text style={label}>{t('set.support')}</Text>
-        <LinkRow title={t('set.contact')} onPress={() => mailTo('EZchangeorder — support')} />
-        <LinkRow title={t('set.feedback')} onPress={() => mailTo('EZchangeorder — feedback')} />
-      </View>
-
-      {/* ---- About ---- */}
-      <View style={{ ...TH.card, marginTop: 14 }}>
-        <Text style={label}>{t('set.about')}</Text>
-        <Row title={t('set.version')} value={APP_VERSION} />
-        <LinkRow title={t('set.terms')}
-          onPress={() => Linking.openURL(`https://${props.confirmBase || 'ezchangeorder.com'}/terms`).catch(() => {})} />
-        <LinkRow title={t('set.privacy')}
-          onPress={() => Linking.openURL(`https://${props.confirmBase || 'ezchangeorder.com'}/privacy`).catch(() => {})} />
-        <Pressable
-          onPress={() => Alert.alert(t('set.signOut'), t('set.signOutConfirm'), [
-            { text: t('set.cancel'), style: 'cancel' },
-            { text: t('set.signOut'), style: 'destructive', onPress: () => { void props.onSignOut(); } },
-          ])}
-          style={{ marginTop: 14, minHeight: 50, borderRadius: 12, borderWidth: 1.5,
-            borderColor: C.danger, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ fontFamily: F.dispSemi, fontSize: 15.5, color: C.danger }}>{t('set.signOut')}</Text>
-        </Pressable>
-      </View>
+      {/* Support (Contact / Feedback) and About (version, Terms, Privacy, Sign out)
+          moved OUT of this hub and into the left drawer (hadar, 2026-07-27). Profile
+          holds identity + preferences + join-a-company; company Settings (owner-only)
+          holds the team roster + plan. */}
 
       {quotaHit && (
         <QuotaModal kind={quotaHit.kind} limit={quotaHit.limit}
@@ -362,18 +356,6 @@ function Row(props: { title: string; value?: string; action?: { label: string; o
         </Pressable>
       )}
     </View>
-  );
-}
-
-/** A tappable navigation row with a chevron — for links out (mailto, web). */
-function LinkRow(props: { title: string; onPress: () => void }) {
-  return (
-    <Pressable onPress={props.onPress}
-      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingVertical: 12, minHeight: 44 }}>
-      <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink }}>{props.title}</Text>
-      <Text style={{ fontSize: 20, color: C.steel }}>›</Text>
-    </Pressable>
   );
 }
 
