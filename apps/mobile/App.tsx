@@ -34,6 +34,7 @@ import { Svg, Circle } from 'react-native-svg';
 import { C, F } from './src/ui/theme';
 import { radii, shadows } from './src/ui/tokens';
 import { FusedCapture, type FusedArtifacts } from './src/ui/capturescreen';
+import { SplashScreen } from './src/ui/splashscreen';
 import { ensurePairSchema, linkPair } from './src/pair';
 import { ensureAugmentSchema, noteAugment } from './src/augmentlog';
 import { sendSms } from './src/sms';
@@ -2741,7 +2742,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // then sign-in / register. Held until `ready` (and no init failure) so we never
   // flash sign-in over a valid session still being read from storage.
   if (ready && !initError) {
-    if (session === undefined) return <View style={s.c}><Text style={s.h}>EZchangeorder</Text></View>;
+    if (session === undefined) return <SplashScreen />;
     if (session === null) {
       if (!seenOnboarding) {
         return <Onboarding onDone={() => { void setSeenOnboarding(); setSeen(true); }} />;
@@ -2754,7 +2755,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // Nothing until we know. A null firstRun rendered the MAIN screen for a frame
   // and then swapped it for the language picker -- a flash of the wrong app, shown
   // to the one user who has never seen the right one.
-  if (firstRun === null && ready) return <View style={s.c}><Text style={s.h}>EZchangeorder</Text></View>;
+  if (firstRun === null && ready) return <SplashScreen />;
 
   // Enter setup when it's a first run OR the profile is missing — an existing user
   // (first_run_done already set) with no profile must still be asked who they are.
@@ -2774,7 +2775,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     if (step === 'done') {
       // No celebration screen. They came here to create an extra.
       void markFirstRunDone(db).then(() => setFirstRun(false));
-      return <View style={s.c}><Text style={s.h}>EZchangeorder</Text></View>;
+      return <SplashScreen />;
     }
 
     // THE PROFILE — the one setup screen (2026-07-20). Language folds in as a
@@ -3230,7 +3231,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // database opens and the durability profile is asserted.
   // Fonts gate with the durability gate: never flash unstyled text, never flash the
   // capture screen before the database is up.
-  if (!ready || !fontsLoaded) return <View style={s.c}><Text style={s.h}>EZchangeorder</Text></View>;
+  if (!ready || !fontsLoaded) return <SplashScreen />;
 
   // REQ-PROC8: reviewing what the model proposed for a capture. Overlays everything.
   if (review) {

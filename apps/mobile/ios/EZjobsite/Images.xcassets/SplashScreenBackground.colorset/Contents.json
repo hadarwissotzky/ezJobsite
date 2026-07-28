@@ -4,17 +4,14 @@
       "color": {
         "components": {
           "alpha": "1.000",
-          "blue": "1.00000000000000",
-          "green": "1.00000000000000",
-          "red": "1.00000000000000"
+          "blue": "0.93333333333333",
+          "green": "0.95294117647059",
+          "red": "0.97254901960784"
         },
         "color-space": "srgb"
       },
       "idiom": "universal"
     }
   ],
-  "info": {
-    "version": 1,
-    "author": "expo"
-  }
+  "info": { "version": 1, "author": "expo" }
 }

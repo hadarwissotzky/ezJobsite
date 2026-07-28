@@ -1,4 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+    THE NATIVE LAUNCH SCREEN. iOS draws this before a single line of JS exists, so it
+    is the true first frame of the app.
+
+    IT IS DELIBERATELY JUST A CREAM BACKGROUND, NO IMAGE (hadar, 2026-07-27).
+
+    History: it started EMPTY with a white systemBackgroundColor — the original "white
+    with just the title" flash. I then made it draw the full splash artwork. On device
+    that rendered the artwork top-left-anchored at native pixel size — the wordmark
+    blown up and cropped — and, worse, iOS caches the launch render and would not drop
+    the stale snapshot across dev reinstalls, so edits appeared to do nothing (two
+    byte-identical screenshots at the same clock time).
+
+    The robust answer is to NOT put a finicky image in the launch storyboard at all.
+    This paints cream, the same cream as everything else. The JS splash
+    (src/ui/splashscreen.tsx) then draws the full artwork a beat later, over the same
+    cream, so there is no white flash and nothing here can misrender. The only cost is
+    that the artwork fades in a fraction of a second after launch instead of being the
+    literal first frame — an even trade for a launch screen that is always correct.
+
+    CFBundleVersion was bumped (1 -> 2) alongside this so iOS regenerates its launch
+    cache; a launch-storyboard change that iOS refuses to re-snapshot is invisible.
+-->
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="24093.7" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="EXPO-VIEWCONTROLLER-1">
     <device id="retina6_12" orientation="portrait" appearance="light"/>
     <dependencies>
@@ -6,7 +29,6 @@
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="24053.1"/>
         <capability name="Named colors" minToolsVersion="9.0"/>
         <capability name="Safe area layout guides" minToolsVersion="9.0"/>
-        <capability name="System colors in document resources" minToolsVersion="11.0"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
@@ -15,14 +37,10 @@
                 <viewController storyboardIdentifier="SplashScreenViewController" id="EXPO-VIEWCONTROLLER-1" sceneMemberID="viewController">
                     <view key="view" userInteractionEnabled="NO" contentMode="scaleToFill" insetsLayoutMarginsFromSafeArea="NO" id="EXPO-ContainerView" userLabel="ContainerView">
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
-                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews/>
                         <viewLayoutGuide key="safeArea" id="Rmq-lb-GrQ"/>
-                        <constraints>
-                            <constraint firstItem="EXPO-SplashScreen" firstAttribute="centerY" secondItem="EXPO-ContainerView" secondAttribute="centerY" id="0VC-Wk-OaO"/>
-                            <constraint firstItem="EXPO-SplashScreen" firstAttribute="centerX" secondItem="EXPO-ContainerView" secondAttribute="centerX" id="zR4-NK-mVN"/>
-                        </constraints>
-                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                        <color key="backgroundColor" name="SplashScreenBackground"/>
                     </view>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="EXPO-PLACEHOLDER-1" userLabel="First Responder" sceneMemberID="firstResponder"/>
@@ -31,9 +49,8 @@
         </scene>
     </scenes>
     <resources>
-        <image name="SplashScreenLogo" width="100" height="90.333335876464844"/>
-        <systemColor name="systemBackgroundColor">
-            <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
-        </systemColor>
+        <namedColor name="SplashScreenBackground">
+            <color red="0.97254901960784315" green="0.95294117647058818" blue="0.93333333333333335" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </namedColor>
     </resources>
 </document>
