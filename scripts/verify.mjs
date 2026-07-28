@@ -260,6 +260,8 @@ console.log('\nverifying…\n');
   // it is cheap to record a decision and impossible to forget one silently.
   const KNOWN_UNWIRED = {
     'timeline.ts':          'REQ-TL1/2/3 walkthrough markers. Pre-existing dead code; the tracer counts its REQ tags as built while nothing imports it. Wire-or-delete is a product decision, not a wiring one',
+    'ui/narratedscope.tsx': 'Orphaned by the SPEC-extra-lifecycle-v1 three-stage redesign, DELIBERATELY: App.tsx:547 records that the alignment "is no longer rendered — the three stage screens present evidence their own way", and still calls narrationForExtra for its cache-warming side effect. Kept, not deleted, because whether R2 photo-beside-its-text returns to the draft screen is a product decision',
+    'ui/decisionsummarycard.tsx': 'Same redesign. The in-app R6c card was dropped from the record screen; the DATA path is alive and still claimed below — decisionSummaryFor runs in approvalrecordshare.ts, which is where the summary reaches a human. SPEC-extra-lifecycle-v1:551 rules the summary contractor-side only ("never the binding instrument"), so nothing is owed to the approver by its absence here',
   };
   const unexplained = orphans.filter((f) => !(f in KNOWN_UNWIRED));
 
@@ -342,6 +344,15 @@ console.log('\nverifying…\n');
     confirmation_current_link: 'superseded by live_token on confirmation_state (367)',
     confirmation_questions: 'superseded by confirmation_thread (308), which returns both sides; kept because dropping a granted RPC breaks links already in the wild',
     ingest_project_v1: 'projects.ts reaches project creation through a different path',
+    // ── SPEC-extra-lifecycle-v1, server halves that landed ahead of their callers.
+    // Each is recorded here because its own migration header ALREADY states it is
+    // owed; this is that statement made executable so it cannot rot into a silent
+    // "reminders work now". Deleting a line here is how each one gets wired.
+    claim_reminders_v1: 'D5 server half (388). Its own header: "The WORKER STEP does not exist. Nothing calls claim_reminders_v1 yet." The caps and the claimed/sent/failed ledger are enforced; the scheduler step in apps/worker is unbuilt',
+    settle_reminder_v1: 'D5 (388). The worker reports an attempt outcome through this; unreachable until claim_reminders_v1 has a caller, and wiring it alone would record outcomes for attempts nothing makes',
+    record_manual_reminder_v1: 'D5 (388). Exists for remindExtra to call after the share sheet returns; 388 states "the device does not call it yet", so the server 1/day gate currently sees only automated attempts. The manual path still counts locally in activitystore.ts',
+    change_order_state_times_v1: 'DEF-8 server half (385). 385 states the DEVICE half is "still owed": change_order on the phone must gain sent_at_ms/approved_at_ms/declined_at_ms write-once first (REQ-LC4), and record.ts still renders "time not recorded" until it does',
+    extra_open_signal_v1: 'REQ-LC3 project-scoped wrapper (387). The app currently derives the same signal per-extra from the merged timeline (App.tsx:648, openCount from eventtimeline.ts), so the number on screen is correct; this wrapper is the one-round-trip-per-project replacement for that and is not wired yet',
   };
   const dir = join(MOBILE, 'sql');
   const files = run('ls', [dir], ROOT).out.split('\n').map((x) => x.trim()).filter((f) => f.endsWith('.sql'));
@@ -366,8 +377,15 @@ console.log('\nverifying…\n');
   for (const [fn, owner] of [...granted].sort()) {
     if (client.includes(`'${fn}'`) || client.includes(`"${fn}"`)) continue;
     // Called from another migration (a trigger body, a wrapper) counts too.
+    //
+    // `lateral` IS IN THIS LIST BECAUSE ITS ABSENCE PRODUCED A FALSE FINDING, which
+    // is the fifth time in this repo a red check was the thing at fault. A set-
+    // returning function is invoked as `cross join lateral public.f(x) s` — the word
+    // before `public.` is `lateral`, not select/from — so `change_order_open_signal`
+    // was reported as having zero callers while 387:79 and 388:207 both call it, and
+    // the recorded next step was to revoke a function two live consumers depend on.
     const bySql = [...sql].some(([g, body]) =>
-      g !== owner && new RegExp(`\\b(perform|select|from|=)\\s+public\\.${fn}\\s*\\(`, 'i').test(body));
+      g !== owner && new RegExp(`\\b(perform|select|from|lateral|=)\\s+public\\.${fn}\\s*\\(`, 'i').test(body));
     if (bySql) continue;
     if (fn in KNOWN_UNCALLED) continue;
     uncalled.push(fn);
@@ -408,7 +426,12 @@ console.log('\nverifying…\n');
     ['R5c extra type',             'setExtraType',            'App.tsx'],
     ['R6  frozen snapshot',        'withEventLog',            'App.tsx'],
     ['R6b actor facts',            'noteActorNow',            'App.tsx'],
-    ['R6c decision summary',       'decisionSummaryFor',      'App.tsx'],
+    // MOVED by the three-stage redesign, not lost. App.tsx no longer computes the
+    // summary for an on-screen card (that card is now KNOWN_UNWIRED above); the
+    // call that still matters is the one that puts the summary into the approval
+    // document a human actually receives. Pointing the claim at the live caller is
+    // the difference between a claim that stays executable and one that gets muted.
+    ['R6c decision summary',       'decisionSummaryFor',      'src/approvalrecordshare.ts'],
     ['R7  discussing derivation',  'displayStatus',           'App.tsx'],
     ['R7  supersede',              'supersedeExtra',          'App.tsx'],
     ['R8  activity centre',        'activityFor',             'App.tsx'],
@@ -434,7 +457,11 @@ console.log('\nverifying…\n');
     // `rpc callers`; what belongs here is the function that performs the fetch.
     ['R6  timeline fetched',       'hydrateEventLog',         'src/eventlog.ts'],
     ['R6  open signal computed',   'openSignal',              'src/eventlog.ts'],
-    ['R6  open signal shown',      'RecordApproval',          'src/ui/recordscreen.tsx'],
+    // Also moved: recordscreen.tsx is now a dispatcher onto the three stage screens,
+    // and the approval panel is rendered by the sealed one (extralocked.tsx:225) and
+    // by the detail subscreen (extradetails.tsx:948). The sealed screen is the claim,
+    // because Stage 3 is where R6's "opened 3 times · no answer yet" has to survive.
+    ['R6  open signal shown',      'RecordApproval',          'src/ui/extralocked.tsx'],
     // R2 on device. Three wires, and the middle one is the one that rots
     // silently: recognising without uploading leaves the transcript on one
     // handset, which is mandate #1's failure, and the app would look fine.
