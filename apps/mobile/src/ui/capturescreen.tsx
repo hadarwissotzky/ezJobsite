@@ -132,7 +132,6 @@ export function FusedCapture({
 
   const [stamp, setStamp] = React.useState<Stamp | null>(null);
   const [place, setPlace] = React.useState<string | null>(null);
-  const [job, setJob] = React.useState<string | null>(null);
   const [now, setNow] = React.useState(Date.now());
   const [micOn, setMicOn] = React.useState(false);
   const [facing, setFacing] = React.useState<CameraType>('back');
@@ -184,7 +183,7 @@ export function FusedCapture({
       const fix = await stampNow();
       setStamp(fix);
       resolveLabel(fix)
-        .then((r) => { if (live) { setPlace(r.place); setJob(r.job); } })
+        .then((r) => { if (live) setPlace(r.place); })
         .catch(() => { /* unresolved stays honest */ });
       if (await requestMic()) {
         try {
@@ -266,9 +265,6 @@ export function FusedCapture({
   // Pausing re-expands it, because a paused mic is exactly when "what is it doing now?"
   // needs a full-size answer.
   const expanded = paused || (!spoke && shots.length === 0);
-  // The job, if anything already knows it: GPS resolution wins, else whatever the
-  // caller opened this screen for. Empty string counts as unknown.
-  const knownJob = job || projectName || '';
 
   /** Close the sheet AND drop the viewer, so reopening never lands mid-photo.
    *  Android's back gesture routes here too: it shuts the viewer first if one is
@@ -535,17 +531,6 @@ export function FusedCapture({
             </View>
           )}
 
-          {/* The camera instruction. Hidden once he has taken one — he knows by then. */}
-          {shots.length === 0 && !interrupted && (
-            <View style={st.hintCard}>
-              <Icon name="camera" size={20} color={C.ink} />
-              <View style={st.hintText}>
-                <Text style={st.hintLine}>{T('cap.pointCamera')}</Text>
-                <Text style={st.hintLine}>{T('cap.tapBelowPhoto')}</Text>
-              </View>
-            </View>
-          )}
-
           {/* The live words, over the camera, while he talks. Rough by design and
               labelled so — it is never the stored transcript. `marginTop:'auto'` pins
               it to the bottom of the band without a magic offset. */}
@@ -588,22 +573,15 @@ export function FusedCapture({
           ) : <View style={st.sideBtn} />}
         </View>
 
+        {/* DONE sits at the very bottom of the panel now (hadar, 2026-07-27): the
+            camera-hint card, the "this goes to …" line and the "saving on this phone"
+            lock row were all removed to give the viewfinder more room, and Done is the
+            last thing the thumb reaches. */}
         <Pressable style={[st.done, (!shots.length && !spoke) && st.doneDim]}
           onPress={finish} disabled={saving}>
           {saving ? <ActivityIndicator color="#fff" />
             : <Text style={st.doneT}>{T('cap.doneExplaining')}</Text>}
         </Pressable>
-
-        {/* When the job is already resolved, saying "next we'll find the job" would be
-            a lie — so the line reports what it knows instead. */}
-        <Text style={st.nextLine} numberOfLines={2}>
-          {knownJob ? T({ k: 'cap.thisIsFor', p: { job: knownJob } }) : T('cap.nextWeFind')}
-        </Text>
-
-        <View style={st.lockRow}>
-          <Icon name="lock" size={14} color={C.steel} />
-          <Text style={st.lockT} numberOfLines={2}>{T('cap.savingOnPhone')}</Text>
-        </View>
       </View>
 
       {/* ---------- PHOTO SHEET ---------- */}
@@ -733,12 +711,6 @@ const st = StyleSheet.create({
   wave: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 32, marginTop: 6 },
   waveBar: { flex: 1, borderRadius: 1.5, backgroundColor: C.brand },
 
-  hintCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 10,
-    backgroundColor: C.card, borderRadius: radii.md,
-    paddingHorizontal: 14, paddingVertical: 12, ...shadows.card },
-  hintText: { flex: 1 },
-  hintLine: { fontFamily: F.body, fontSize: 15, color: C.ink, lineHeight: 21 },
-
   liveBox: { marginTop: 'auto', backgroundColor: 'rgba(0,0,0,0.6)',
     borderRadius: radii.sm, padding: 10 },
   liveLabel: { fontFamily: F.body, color: '#ffffff99', fontSize: 11, marginBottom: 2 },
@@ -775,15 +747,10 @@ const st = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 0.9 },
 
   done: { minHeight: 66, borderRadius: radii.md, backgroundColor: C.brand,
-    alignItems: 'center', justifyContent: 'center', marginTop: 14 },
+    alignItems: 'center', justifyContent: 'center', marginTop: 16 },
   doneDim: { opacity: 0.55 },
   doneT: { fontFamily: F.disp, fontSize: 24, color: '#fff',
     textTransform: 'uppercase', letterSpacing: 1.2 },
-  nextLine: { fontFamily: F.body, fontSize: 14.5, color: C.steel, textAlign: 'center',
-    marginTop: 10, lineHeight: 20 },
-  lockRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.line },
-  lockT: { fontFamily: F.body, fontSize: 13, color: C.steel, flexShrink: 1 },
 
   // ---- photo sheet ----
   sheetWrap: { flex: 1, backgroundColor: 'rgba(21,26,30,0.45)', justifyContent: 'flex-end' },
