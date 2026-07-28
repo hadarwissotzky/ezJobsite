@@ -1,12 +1,13 @@
 /**
  * R3 step one — the Extra Work Authorization (EWA), as pure logic.
  *
- * PURE. No imports, no database, no clock, no I/O — same rule and the same reason
- * as `approverrouting.ts`: this file decides the WORDS of a signed commitment and
+ * PURE. No database, no clock, no I/O — same rule and the same reason as
+ * `approverrouting.ts`: this file decides the WORDS of a signed commitment and
  * whether money is owed, it is the part of R3 that can be wrong in a way nobody
  * notices for weeks, and `node --test` can only run a file that resolves to
  * nothing. `ewastore.ts` holds the PowerSync half and `ewasend.ts` the Supabase
- * half; neither is importable by a test.
+ * half; neither is importable by a test. The ONE import is `flowterms.ts`, which
+ * is itself import-free for exactly this reason — see the note on renderEwaCard.
  *
  * WHAT AN EWA IS, and what it is not (PRD R3): "An EWA is a signed approval, never
  * an FYI — the homeowner commits to billability and proceed terms before the price
@@ -33,6 +34,9 @@
  * clause KEYS below (`ewa.term.hold` etc.) are what the contractor's screen shows;
  * the clause TEXT is what the client signs. They are deliberately different things.
  */
+// The explicit .ts extension is load-bearing: ewa.test.ts runs under `node --test`,
+// which resolves no extensionless imports. Same rule as confirmations.ts.
+import { flowTermLines, type FlowTerms } from './flowterms.ts';
 
 // ─── the two proceed terms ─────────────────────────────────────────────────────
 // Exactly the two PRD R3 names, and deliberately not a third. A bare "range" is
@@ -171,6 +175,21 @@ export function settlementClause(hours: SettlementHours): string {
  * what keeps 240_shown_content_integrity.sql satisfiable: `amount_cents` is sent
  * as NULL for an EWA, so the trigger has no price to look for, while `nte_cents`
  * carries the cap and the trigger DOES check that the cap string below is present.
+ *
+ * THE FLOW TERMS ARE PART OF THIS DOCUMENT TOO (DEF-2, 2026-07-28). An EWA is a
+ * change_order row, and `priceDraftExtra` sets billing_timing / schedule_effect /
+ * schedule_days / exclusions on any row still in draft without excluding EWAs — so
+ * an authorization CAN carry them. Omitting them here would be the same defect
+ * `renderCard` was fixed for and worse in kind: an EWA authorizes open-ended work
+ * before a price exists, so "Not included: …" is the only thing bounding what the
+ * client just agreed to pay for, and "Schedule: adds 3 days" is a promise they were
+ * told and did not sign. The wording is shared with renderCard rather than repeated
+ * (flowterms.ts) so the two instruments can never say it differently.
+ *
+ * They render between the clause block and the identity block, the same position
+ * renderCard puts them in. When nothing is set the block is the empty string and
+ * this function returns the byte-identical text it returned before DEF-2 — which is
+ * what makes the change safe for authorizations already signed.
  */
 export function renderEwaCard(o: {
   terms: EwaTerms;
@@ -183,7 +202,7 @@ export function renderEwaCard(o: {
   companyName?: string | null;
   /** Locale for the date. The DOCUMENT is English; the moment is a moment. */
   locale?: string;
-}): string {
+} & FlowTerms): string {
   const when = new Date(o.whenMs).toLocaleString(o.locale ?? 'en-US');
   const asker = o.companyName ? `${o.companyName}\n` : '';
   return (
@@ -191,7 +210,9 @@ export function renderEwaCard(o: {
     `${o.scope}\n\n` +
     `${BILLABILITY_CLAUSE}\n` +
     `${proceedClause(o.terms, o.money)}\n` +
-    `${settlementClause(o.terms.settlementHours)}\n\n` +
+    `${settlementClause(o.terms.settlementHours)}\n` +
+    flowTermLines(o) +
+    `\n` +
     `Directed by: ${o.directedBy}\nJob: ${o.projectName}\nDate: ${when}\n\n` +
     `No price is stated in this authorization. ` +
     `Approving it authorizes the work on the terms above, not an amount.`

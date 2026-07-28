@@ -23,7 +23,10 @@
  * transcript does. Until then the extra exists, carries its photos, and is
  * simply not sendable yet — which is what the send gate already enforces.
  */
-import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+// TYPE-ONLY: used only in signatures. A value import pulls in PowerSync's
+// Flow-typed native source, which `node --test` cannot parse — the same rule
+// discardstore.ts states, and what lets summary.test.ts exercise this file's SQL.
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { createChangeOrder } from './changeorder.ts';
 import { recordDecision } from './decisions.ts';
 
@@ -118,6 +121,27 @@ export async function titleExtraIfUntitled(
 }
 
 /**
+ * The cap on `change_order.scope`, and it is a UI contract as much as a storage one.
+ *
+ * IT EXISTS BECAUSE THE TWO HALVES DISAGREED AND THE LOSING HALF WAS SILENT.
+ * `ScopeOfWorkEditor` accepted 1500 characters and printed a "612/1500" counter,
+ * and this function stored `slice(0, 200)` and returned `rowsAffected` — truthy —
+ * so `saveScope` reported success. A contractor typed a 612-character scope of
+ * work, watched it save, and the 412 characters that would have been frozen into
+ * `shown_content` were gone with no message anywhere. That is mandate #1's silent
+ * loss landing on the client-facing instrument itself.
+ *
+ * 1500 rather than 200 because `change_order.scope` is `text not null` on both
+ * sides (030:31 — no length bound at all), so 200 was never a storage limit; it was
+ * a title-length guard from when scope WAS only a title, and it stopped being one
+ * when `renderCard` began sending `scope` as the document's body. Widening loses
+ * nothing that used to fit. `App.tsx` passes this same constant to the editor's
+ * `maxChars`, so the input stops at the number the counter names and the two cannot
+ * drift apart again.
+ */
+export const SCOPE_MAX_CHARS = 1500;
+
+/**
  * Replace a DRAFT's machine-written title with a better one — the AI's subject
  * over the first-sentence interim titleExtraIfUntitled wrote offline (hadar,
  * 2026-07-23: "when the extra is processed we need to generate a new title").
@@ -136,7 +160,32 @@ export async function retitleDraft(
   if (!t) return false;
   const r = await db.execute(
     `UPDATE change_order SET scope = ? WHERE id = ? AND status = 'draft'`,
-    [t.slice(0, 200), changeOrderId]
+    [t.slice(0, SCOPE_MAX_CHARS), changeOrderId]
+  );
+  return !!r.rowsAffected;
+}
+
+/**
+ * Store the AI's owner-facing SUMMARY of the change on a DRAFT (hadar, 2026-07-27:
+ * "summarize the audio and make it clear to the audience"). This is structure.ts's
+ * `value` — clear prose, grouped by task, NO prices — which the pipeline already
+ * generates but the app never showed; the record displays it beside the raw
+ * transcript (which is kept, verbatim, in the voice player).
+ *
+ * DRAFT-ONLY, for the same reason retitleDraft is: once sent, the extra is frozen
+ * and the summary the client saw must not move. It is not in the freeze trigger's
+ * column list, so this WHERE clause is the only thing keeping it immutable after
+ * send — which is why it is a WHERE and not a caller's promise. A voice added to a
+ * SENT extra grows the description through the append-only augment log instead.
+ */
+export async function setDraftSummary(
+  db: AbstractPowerSyncDatabase, changeOrderId: string, summary: string
+): Promise<boolean> {
+  const s = summary.trim();
+  if (!s) return false;
+  const r = await db.execute(
+    `UPDATE change_order SET summary = ? WHERE id = ? AND status = 'draft'`,
+    [s.slice(0, 4000), changeOrderId]
   );
   return !!r.rowsAffected;
 }

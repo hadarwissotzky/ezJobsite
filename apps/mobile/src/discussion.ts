@@ -32,6 +32,10 @@
 // The explicit .ts extension is load-bearing: node --test resolves no extensions,
 // and this module has to keep running there.
 import { canSupersede } from './extrastatus.ts';
+// Same reasoning as the import above: `extralifecycle.ts` owns the stage rules and
+// this file defers to them rather than keeping a second copy. Both are importless
+// but for each other, so node --test still resolves this module.
+import { canReply } from './extralifecycle.ts';
 
 /** Who wrote it. The client is whoever holds the approval link (R5's role-neutral
  *  recipient — homeowner, GC, property manager); the contractor is the app user. */
@@ -142,15 +146,18 @@ export function threadState(o: {
     unansweredSinceMs,
     awaitingReply:
       open && unansweredSinceMs !== null && o.nowMs - unansweredSinceMs >= after,
-    // THE EXTRA IS A CHANNEL (hadar, 2026-07-24: "an extra becomes like a chat or
-    // slack channel"). The conversation stays open once a client is on the other
-    // end — sent, and after the decision (approved/declined) too. This SUPERSEDES
-    // R5b AC4 ("approval closes the thread"): a signed extra is frozen as an
-    // INSTRUMENT, but messages are not the instrument (postReply commits nothing),
-    // so talking after the yes/no changes no record. A draft still has no live link
-    // and no counterparty, and a superseded version is not where the talk happens —
-    // both stay composer-free. Undelivered replies remain flagged (mandate #1).
-    canReply: o.coStatus === 'sent' || o.coStatus === 'approved' || o.coStatus === 'declined',
+    // THE THREAD CLOSES ON THE ANSWER (REQ-LC23, D1, 2026-07-28). This line used
+    // to read `sent || approved || declined`, on a 2026-07-24 note that an extra
+    // "becomes like a chat channel" and that this superseded R5b AC4. The idea is
+    // not the problem; applying it to ONE SIDE of a two-sided contract is. The
+    // server has closed the thread on the answer since 308_r5b_discussion.sql:94
+    // (`confirmation_reply_thread_open`, errcode 23514) and 23514 is in
+    // R5B_PERMANENT (discussionstore.ts:316) — so every reply typed after the
+    // yes/no PARKED FOREVER while this flag told the screen it had been sent. A
+    // silent delivery failure on the one surface whose job is that the record is
+    // complete (DEF-4). A post-approval conversation is a new linked extra
+    // (REQ-LC31), which is where a new commitment belongs anyway.
+    canReply: canReply(o.coStatus),
     // R7's rule, not a copy of it: a draft is edited rather than revised, and a
     // terminal one would rewrite a signed outcome.
     canRevise: canSupersede(o.coStatus),

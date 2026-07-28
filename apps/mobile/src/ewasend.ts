@@ -50,6 +50,11 @@ export async function sendEwa(
     channel: 'email' | 'sms' | 'link'; destination?: string;
     whenMs: number; linkBase: string;
     companyName?: string | null;
+    /** Flow terms (375) off the EWA's own change_order row. Null on an
+     *  authorization whose contractor never answered those questions — see
+     *  renderEwaCard, which then renders the exact prior instrument. */
+    billingTiming?: string | null; scheduleEffect?: string | null;
+    scheduleDays?: number | null; exclusions?: string | null;
   }
 ): Promise<SendEwaResult> {
   // Refuse before writing anything, for the reason sendForConfirmation documents:
@@ -74,6 +79,11 @@ export async function sendEwa(
       : undefined,
     scope: o.scope, directedBy: o.directedBy, projectName: o.projectName,
     whenMs: o.whenMs, companyName: o.companyName ?? null,
+    // Into the frozen text, not merely into the record (DEF-2). A schedule impact
+    // the client was told and did not sign is a document that disagrees with the
+    // deal on the one axis this product exists to keep aligned.
+    billingTiming: o.billingTiming ?? null, scheduleEffect: o.scheduleEffect ?? null,
+    scheduleDays: o.scheduleDays ?? null, exclusions: o.exclusions ?? null,
   });
 
   const token = newToken();

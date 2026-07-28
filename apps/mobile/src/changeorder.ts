@@ -22,6 +22,20 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { sha256 } from 'js-sha256';
 import { getLang } from './i18n.ts';
+// The hydrate's conflict line has to survive a Release build. console.log does not
+// (diaglog.ts's header): a permanent phone-vs-cloud disagreement about a signed
+// document that only ever printed to a debugger nobody has attached is, in the
+// field, silent.
+import { logDiag } from './diaglog.ts';
+// SPEC-extra-lifecycle-v1 §1.3 is the ONE authority on which status moves are
+// legal. Every status write below states its guard TWICE on purpose: once through
+// this module (the belt — a diagnosable refusal with both states named) and once
+// as a literal `WHERE status …` on the UPDATE (the braces — what actually protects
+// the row against a writer that forgot the belt). DEF-1 is what one alone costs.
+// The explicit .ts extension keeps this file loadable under `node --test`.
+import {
+  canAdoptServerStatus, canTransition, canCreateLinkedExtra, isStoredStatus, type StoredStatus,
+} from './extralifecycle.ts';
 
 /**
  * The device authors change orders. The cloud gets a copy.
@@ -73,7 +87,26 @@ export const CHANGE_ORDER_DDL = [
       schedule_effect TEXT CHECK (schedule_effect IS NULL
                         OR schedule_effect IN ('no_change','adds_days','not_sure')),
       schedule_days   INTEGER CHECK (schedule_days IS NULL OR schedule_days > 0),
-      exclusions      TEXT
+      exclusions      TEXT,
+      -- REQ-LC4: WHEN it changed state, not just what state it is in. Written by
+      -- the same guarded UPDATE that moves the status, write-once
+      -- (COALESCE on the stamp), so a second writer can never re-date a
+      -- transition. Without them record.ts prints "time not recorded" over a
+      -- signature and R8's 24h reminder clock has nothing to measure from.
+      -- DEVICE-ONLY. The server derives the same moments from evidence it already
+      -- holds (confirmation_request.created_at / confirmation_response.responded_at);
+      -- a stored server copy would be the second-place-for-the-truth REQ-LC1
+      -- forbids. The device stores them because it holds none of those rows and
+      -- must render the record offline (mandate #7).
+      sent_at_ms       INTEGER,
+      approved_at_ms   INTEGER,
+      declined_at_ms   INTEGER,
+      superseded_at_ms INTEGER,
+      -- REQ-LC31 / D6. The BACKWARD pointer, ACROSS the seal: this extra follows an
+      -- APPROVED one. It is not superseded_by, which points FORWARD within one
+      -- negotiation and retires what it points at. Writing this touches no column of
+      -- the origin row — that is the whole point of D6.
+      origin_change_order_id TEXT
    ) STRICT`,
 
   // Frozen once it leaves: a sent CO is superseded by a new one, never edited.
@@ -132,12 +165,43 @@ async function ensureFlowFields(db: AbstractPowerSyncDatabase) {
         OR schedule_effect IN ('no_change','adds_days','not_sure'))`],
     ['schedule_days', `INTEGER CHECK (schedule_days IS NULL OR schedule_days > 0)`],
     ['exclusions', 'TEXT'],
+    // The AI's owner-facing SUMMARY of the change (structure.ts `value`): clear
+    // prose the client reads, grouped by task, no prices (hadar, 2026-07-27). Set
+    // at draft processing from the proposal and shown on the record beside the raw
+    // transcript. LOCAL-ONLY and derived — the server has no such column, so
+    // hydrateChangeOrders (INSERT OR IGNORE + status-only UPDATE) never clobbers it.
+    // Deliberately NOT in the freeze trigger: it is written draft-only (setDraftSummary),
+    // so it cannot change after send, and it is a display aid, not the binding scope.
+    ['summary', 'TEXT'],
+    // REQ-LC4's state-change moments and REQ-LC31's origin link, for phones
+    // already in the field. See CHANGE_ORDER_DDL above for what each one means and
+    // why the server does NOT store the timestamps.
+    ['sent_at_ms', 'INTEGER'],
+    ['approved_at_ms', 'INTEGER'],
+    ['declined_at_ms', 'INTEGER'],
+    ['superseded_at_ms', 'INTEGER'],
+    ['origin_change_order_id', 'TEXT'],
   ];
   for (const [name, ddl] of adds) {
     if (!have.has(name)) {
       await db.execute(`ALTER TABLE change_order ADD COLUMN ${name} ${ddl}`);
     }
   }
+  // REQ-LC31 rule 3: "a lineage that can be rewritten is not a lineage." The origin
+  // link is set at creation and never again. NULL -> a value is deliberately still
+  // allowed: that is a lineage arriving late (a pull, a backfill), which can only
+  // ADD the true fact. Value -> a different value is the act being refused, because
+  // it would re-parent a priced extra onto an approval it never followed.
+  //
+  // A SEPARATE TRIGGER FROM change_order_frozen, not another clause in it: that one
+  // only fires once a row is sent, and an origin link must be immutable from the
+  // moment the draft exists.
+  await db.execute(`DROP TRIGGER IF EXISTS change_order_origin_frozen`);
+  await db.execute(`CREATE TRIGGER change_order_origin_frozen
+     BEFORE UPDATE ON change_order
+     WHEN old.origin_change_order_id IS NOT NULL
+      AND new.origin_change_order_id IS NOT old.origin_change_order_id
+     BEGIN SELECT RAISE(ABORT, 'the origin link is set once and never rewritten'); END`);
   await db.execute(`DROP TRIGGER IF EXISTS change_order_frozen`);
   await db.execute(`CREATE TRIGGER change_order_frozen
      BEFORE UPDATE ON change_order
@@ -345,6 +409,18 @@ export function validateLines(items: LineItem[], amountCents: number): string | 
 export type CreateCOResult = { ok: true; id: string } | { ok: false; reason: string };
 
 /**
+ * The status every extra is born in.
+ *
+ * A CREATION IS NOT A TRANSITION, which is why this is a typed constant and not an
+ * `assertTransition` call: REQ-LC7's table has no edge INTO 'draft' because there
+ * is no prior state to move from. What the lifecycle module contributes here is the
+ * VOCABULARY — typing this as `StoredStatus` means a typo, or a status invented
+ * outside REQ-LC1's five, fails to compile instead of being written and then
+ * treated as sealed by `stageOf` on the phone that reads it back.
+ */
+const BORN_AS: StoredStatus = 'draft';
+
+/**
  * Create the CO. NO NETWORK. It commits locally and queues the copy.
  *
  * `numbersConfirmedAt` is required by this signature, by the local CHECK, and by
@@ -369,6 +445,14 @@ export async function createChangeOrder(
     scheduleEffect?: ScheduleEffect | null;
     scheduleDays?: number | null;
     exclusions?: string | null;
+    /**
+     * REQ-LC31 / D6 — the APPROVED extra this one follows. Almost always absent;
+     * `createLinkedExtra` is the guarded door for setting it, and it is the only
+     * caller that should. Passed straight through so a follow-on is an ORDINARY
+     * extra in every other respect: it starts at draft, it is priced, previewed and
+     * sent by the same path, and it carries its own signature (REQ-LC32).
+     */
+    originChangeOrderId?: string | null;
   }
 ): Promise<CreateCOResult> {
   const now = Date.now();
@@ -402,6 +486,7 @@ export async function createChangeOrder(
     schedule_effect: o.scheduleEffect ?? null,
     schedule_days: o.scheduleDays ?? null,
     exclusions: o.exclusions?.trim() || null,
+    origin_change_order_id: o.originChangeOrderId ?? null,
   };
   const payloadJson = JSON.stringify(payload);
 
@@ -411,13 +496,16 @@ export async function createChangeOrder(
         `INSERT INTO change_order (id, decision_id, project_id, owner_id, scope,
            line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate,
            numbers_confirmed_at_ms, status, created_at_ms,
-           billing_timing, schedule_effect, schedule_days, exclusions)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?,?,?,?)`,
+           billing_timing, schedule_effect, schedule_days, exclusions,
+           origin_change_order_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [o.id, o.decisionId, o.projectId, o.ownerId, o.scope.trim(),
          JSON.stringify(lineItems), o.amountCents, o.nteCents ?? null,
-         o.isMini ? 1 : 0, o.whoDirected, o.refEstimate ?? null, confirmedMs, now,
+         o.isMini ? 1 : 0, o.whoDirected, o.refEstimate ?? null, confirmedMs,
+         BORN_AS, now,
          o.billingTiming ?? null, o.scheduleEffect ?? null,
-         o.scheduleDays ?? null, o.exclusions?.trim() || null]
+         o.scheduleDays ?? null, o.exclusions?.trim() || null,
+         o.originChangeOrderId ?? null]
       );
       // Atomic with the record. Never after it.
       await tx.execute(
@@ -431,6 +519,67 @@ export async function createChangeOrder(
     return { ok: false, reason: e?.message ?? String(e) };
   }
   return { ok: true, id: o.id };
+}
+
+/**
+ * D6 / REQ-LC31 — a change AFTER approval is a NEW INDEPENDENT EXTRA, linked to the
+ * approved one by origin. This is the local door to that act, and it is a different
+ * mechanism from a revision, not a variant of one:
+ *
+ *   supersedeExtra    retires the row it points at. Nobody had signed it.
+ *   createLinkedExtra WRITES NOTHING TO THE ORIGIN AT ALL. The approved record
+ *                     keeps its status, its amount, its scope and its signature —
+ *                     that is the entire content of D6, and the reason the origin
+ *                     id lives on the NEW row rather than as a forward pointer on
+ *                     the old one.
+ *
+ * The status precondition is `approved`, and it is read FROM THE ROW inside this
+ * call rather than trusted from the caller's rendered ledger copy — the same rule
+ * `supersedeExtra` follows, for the same reason: a screen can be seconds stale, and
+ * hanging a lineage off a `sent` row would be a supersession wearing a different
+ * name (REQ-LC31 rule 1).
+ *
+ * NOTE THE OPEN SPEC CONFLICT, carried here rather than quietly decided: REQ-LC26
+ * says a retry after a DECLINE is also "a new extra linked by origin", which rule 1
+ * forbids. `canCreateLinkedExtra` encodes rule 1 (the migration-backed one) and
+ * this refuses a declined origin with its actual status named, so whoever
+ * adjudicates it can see exactly what was refused.
+ */
+export async function createLinkedExtra(
+  db: AbstractPowerSyncDatabase,
+  o: Parameters<typeof createChangeOrder>[1] & { originChangeOrderId: string }
+): Promise<CreateCOResult> {
+  const origin = (await db.getAll<{ status: string }>(
+    `SELECT status FROM change_order WHERE id = ?`, [o.originChangeOrderId]))[0];
+  if (!origin) {
+    return { ok: false, reason: `no extra ${o.originChangeOrderId} to follow` };
+  }
+  if (!canCreateLinkedExtra(origin.status)) {
+    return { ok: false, reason:
+      `a follow-on extra may only follow an APPROVED one; ${o.originChangeOrderId} is ${origin.status}` };
+  }
+  return createChangeOrder(db, o);
+}
+
+/**
+ * What this extra follows, if anything — REQ-LC32's "Follows: <origin scope>" line.
+ *
+ * A column nothing reads is a column that is wrong and nobody notices, which is the
+ * exact defect ledgerstatus.ts's header records about `superseded`. Returns the
+ * origin's scope and amount so the follow-on can point at it WITHOUT the ledger
+ * ever merging the two figures: REQ-LC32 is emphatic that an origin-linked pair
+ * renders as `$X approved · $Y pending`, never as one row silently showing the sum.
+ */
+export async function originOf(
+  db: AbstractPowerSyncDatabase, changeOrderId: string
+): Promise<{ id: string; scope: string; amountCents: number | null; status: string } | null> {
+  const r = (await db.getAll<{
+    id: string; scope: string; amount_cents: number | null; status: string;
+  }>(
+    `SELECT o.id, o.scope, o.amount_cents, o.status
+       FROM change_order co JOIN change_order o ON o.id = co.origin_change_order_id
+      WHERE co.id = ?`, [changeOrderId]))[0];
+  return r ? { id: r.id, scope: r.scope, amountCents: r.amount_cents, status: r.status } : null;
 }
 
 /**
@@ -482,6 +631,30 @@ export async function drainChangeOrderOutbox(
         p_exclusions: p.exclusions ?? null,
       });
       if (error) throw error;
+
+      // REQ-LC31's lineage rides its OWN RPC, and this is the one place the two
+      // halves of the feature could have disagreed. `ingest_change_order_v1` does
+      // NOT declare `p_origin_change_order_id` — 386 deliberately made the link a
+      // separate function rather than widening that signature, because widening it
+      // means DROP + CREATE (a third owner for a function 050 and 375 already
+      // share) and because PostgREST resolves an RPC by its exact argument-name
+      // set. Passing the origin to `ingest` instead would fail with PGRST202, which
+      // is not in CO_PERMANENT, so exactly the follow-on extras D6 exists to create
+      // would retry on the device forever while every ordinary extra synced fine.
+      //
+      // AFTER the ingest, never before: the child row has to exist for the link's
+      // ownership check to find it. It runs BEFORE the outbox row is deleted, so a
+      // failure here leaves the intent queued and the whole row replays — the
+      // ingest answers `already_applied` off its mutation ledger and the link is
+      // idempotent by outcome (386), so replaying costs nothing and losing the
+      // lineage costs the record of what this change followed from.
+      if (p.origin_change_order_id) {
+        const link = await supabase.rpc('link_origin_change_order_v1', {
+          p_id: p.id, p_origin_change_order_id: p.origin_change_order_id,
+        });
+        if (link.error) throw link.error;
+      }
+
       await db.execute(`DELETE FROM change_order_outbox WHERE mutation_id = ?`, [row.mutation_id]);
       if (data?.status === 'already_applied') r.alreadyApplied++; else r.uploaded++;
     } catch (e: any) {
@@ -747,14 +920,59 @@ export async function rehomeDraftExtra(
   } catch { /* corrupt payload: the drain parks it loudly */ }
 }
 
-/** Mark the outcome of a signature locally. The signing path is online-only. */
+export type ApplyApprovalResult =
+  | { ok: true; at: number }
+  /** `status` is what the row ACTUALLY reads, so a log line or a message can name
+   *  it. null means the row is not on this device at all. */
+  | { ok: false; reason: 'not_found' | 'not_approvable' | 'raced'; status: string | null };
+
+/**
+ * Mark the outcome of a signature locally. The signing path is online-only.
+ *
+ * THIS WAS DEF-1, AND IT WAS A BARE `UPDATE … SET status = ? WHERE id = ?`.
+ * With no precondition on the status, a `superseded` row — a version the contractor
+ * retired, whose link 307 already killed — and a `declined` row — a client's
+ * recorded NO — both walked straight to `approved`, and the ledger then showed a
+ * signature over a document nobody signed and a yes over a recorded no. Only the
+ * server's typed-link path (230_close_the_loop.sql:112) ever carried the guard.
+ *
+ * The precondition is stated TWICE, and the duplication is the design:
+ *   - `canTransition` names both states in the refusal, so the log says WHY;
+ *   - `AND status IN ('draft','sent')` on the UPDATE protects the ROW, including
+ *     against a client answer that landed between the read and the write. The
+ *     `rowsAffected` read is what tells those two cases apart ('raced').
+ * `draft` is legal here for the offline reason REQ-LC7 spells out: the server row
+ * is always `sent` by the time an answer can exist, but this device may not have
+ * hydrated the send back yet, and being behind on sync must not refuse a real
+ * signature (mandate #7).
+ *
+ * IT RETURNS A RESULT, and REQ-LC8 is why: a refused transition that nobody reads
+ * is a UI reporting a state change that did not happen — the "claims that outrun
+ * their evidence" defect this project keeps finding. The caller must read it.
+ */
 export async function applyLocalApproval(
   db: AbstractPowerSyncDatabase, coId: string, action: 'approved' | 'declined', legalName: string
-) {
-  await db.execute(
-    `UPDATE change_order SET status = ?, signed_by = ? WHERE id = ?`,
-    [action, action === 'approved' ? legalName : null, coId]
+): Promise<ApplyApprovalResult> {
+  const cur = (await db.getAll<{ status: string }>(
+    `SELECT status FROM change_order WHERE id = ?`, [coId]))[0];
+  if (!cur) return { ok: false, reason: 'not_found', status: null };
+  if (!canTransition(cur.status, action)) {
+    return { ok: false, reason: 'not_approvable', status: cur.status };
+  }
+
+  // REQ-LC4: the moment is recorded by the same statement that moves the status,
+  // and only if it was never recorded before. A transition is dated once.
+  const at = Date.now();
+  const stamp = action === 'approved' ? 'approved_at_ms' : 'declined_at_ms';
+  const r = await db.execute(
+    `UPDATE change_order
+        SET status = ?, signed_by = ?,
+            ${stamp} = COALESCE(${stamp}, ?)
+      WHERE id = ? AND status IN ('draft','sent')`,
+    [action, action === 'approved' ? legalName : null, at, coId]
   );
+  if (!r.rowsAffected) return { ok: false, reason: 'raced', status: cur.status };
+  return { ok: true, at };
 }
 
 /**
@@ -771,13 +989,34 @@ export async function applyLocalApproval(
  *
  * Returns whether a row actually moved, so the caller never reports a transition
  * that did not happen.
+ *
+ * REQ-LC4: `sent_at_ms` is stamped by this same statement, and by COALESCE only if
+ * it was never stamped. A re-send after a revision is a NEW row with its own
+ * lifecycle (REQ-LC22), so this row's send time is a fact that happens exactly once
+ * — re-dating it would move R8's 24h reminder clock and rewrite the record screen's
+ * account of when the client was actually asked.
  */
 export async function markLocalSent(
   db: AbstractPowerSyncDatabase, coId: string
 ): Promise<boolean> {
+  // The lifecycle check, ahead of the write, for what it puts in the log: `false`
+  // alone cannot tell "already sent" from "already answered" from "no such row",
+  // and those are three different things to say to a contractor holding the phone.
+  const cur = (await db.getAll<{ status: string }>(
+    `SELECT status FROM change_order WHERE id = ?`, [coId]))[0];
+  if (!cur) {
+    console.log('[send] no local row %s to mark sent', coId);
+    return false;
+  }
+  if (!canTransition(cur.status, 'sent')) {
+    console.log('[send] %s is %s, not a draft — the local row does not move', coId, cur.status);
+    return false;
+  }
   const r = await db.execute(
-    `UPDATE change_order SET status = 'sent' WHERE id = ? AND status = 'draft'`,
-    [coId]
+    `UPDATE change_order
+        SET status = 'sent', sent_at_ms = COALESCE(sent_at_ms, ?)
+      WHERE id = ? AND status = 'draft'`,
+    [Date.now(), coId]
   );
   return !!r.rowsAffected;
 }
@@ -801,6 +1040,33 @@ export async function markLocalSent(
  * runs on launch and on drain, so a second device's change shows up within a tick
  * of connectivity, not instantly. Real-time multi-device is what PowerSync would
  * buy, and it is not bought here.
+ *
+ * THE SERVER IS AUTHORITATIVE, BUT NOT ABOUT MOVES THE MACHINE FORBIDS — the ruling
+ * for this path, made explicitly because "the server wins" reads like a complete
+ * answer and is not one. REQ-LC7's table is the shape of a lawful history, and it
+ * binds both sides. So a server status that is lawful PROGRESS on the local one is
+ * ADOPTED (`canAdoptServerStatus`), and one that is not — local `approved`, server
+ * `sent`; local `declined`, server `approved` — is REFUSED and COUNTED, never
+ * silently written.
+ *
+ * ADOPTION IS NOT THE SAME PREDICATE AS ACTION, and using the action one here was a
+ * bug: see `canAdoptServerStatus`'s header for `draft → superseded`, the pair
+ * `canTransition` refuses forever on a device that is merely behind.
+ *
+ * Two reasons, and the second is the one that decides it:
+ *  1. Such a pair is not a fact the server produced lawfully; it means one side is
+ *     behind (this device holds an approval or a supersession the queues have not
+ *     pushed yet) or something is wrong. Neither is repaired by overwriting.
+ *  2. The write it would make is the DEF-1 write, arriving through the back door:
+ *     `approved → sent` un-signs a signature and `declined → approved` turns a
+ *     client's recorded NO into a yes. Guarding two functions and leaving the pull
+ *     able to do the same thing is the "rule enforced in one place" failure again.
+ * Refusing is also the SAFE side of the trade: the local terminal state stands, the
+ * conflict is logged with both statuses, and the next tick re-offers it — where
+ * adopting destroys evidence on the spot. It is deliberately NOT silent: silence is
+ * how a wrong status survives, and this is the class of bug this file has been
+ * bitten by before. `reassertSupersessions` runs right after this on the same tick
+ * and covers the specific pending-supersession case (see its header).
  */
 export async function hydrateChangeOrders(
   db: AbstractPowerSyncDatabase, supabase: SupabaseClient, projectId: string, ownerId: string
@@ -809,7 +1075,29 @@ export async function hydrateChangeOrders(
     .from('change_order')
     .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at')
     .eq('project_id', projectId);
-  if (error || !data) return { pulled: 0, statusUpdated: 0, skipped: 0 };
+  if (error || !data) return { pulled: 0, statusUpdated: 0, skipped: 0, conflicts: 0 };
+
+  // D6's lineage, in a SEPARATE best-effort query and deliberately not a column on
+  // the select above. It is pulled at all because the origin link is authored on ONE
+  // device and read on every other: without it a reinstall or a second handset gets
+  // the follow-on extra back with a NULL origin, and the audit link the whole
+  // decision exists to create is silently absent on the copy most likely to be
+  // opened in a dispute.
+  //
+  // SEPARATE BECAUSE OF WHAT A MISSING COLUMN COSTS. `origin_change_order_id` arrives
+  // with migration 386. Naming it in the main select would mean that on any server
+  // that has not run 386 the whole pull returns an error — and this function's error
+  // path returns zeros silently, so EVERY extra would stop syncing with nothing on
+  // screen and nothing in a log. A lineage nobody can see is a real defect; a
+  // hydrate that dies quietly is a worse one. Here, a server without the column
+  // simply yields no lineage and the extras keep landing.
+  let origins = new Map<string, string | null>();
+  {
+    const { data: ol, error: oe } = await supabase
+      .from('change_order').select('id, origin_change_order_id').eq('project_id', projectId);
+    if (oe) void logDiag(db, 'hydrate.origin', String(oe.message ?? oe).slice(0, 160));
+    else origins = new Map((ol ?? []).map((r: any) => [r.id, r.origin_change_order_id ?? null]));
+  }
 
   // The signer's name lives on the approval, not the CO.
   const { data: appr } = await supabase
@@ -818,8 +1106,33 @@ export async function hydrateChangeOrders(
     .filter((a: any) => a.action === 'approved')
     .map((a: any) => [a.change_order_id, a.legal_name]));
 
-  let pulled = 0, statusUpdated = 0, skipped = 0;
+  // EXTRAS THIS DEVICE DELETED. Without this, hydrate re-inserted a locally-deleted
+  // draft the server still holds — every 15s tick — and the extra "would not delete":
+  // it vanished on the tap and came back seconds later (hadar, 2026-07-28). The
+  // tombstone (change_order_discarded) is written in the same transaction as the local
+  // delete, so this set is authoritative even while the server row is still being
+  // reaped by drainDiscardedExtras. try/catch for the one tick before ensureDiscardSchema.
+  let discarded = new Set<string>();
+  try {
+    discarded = new Set((await db.getAll<{ change_order_id: string }>(
+      `SELECT change_order_id FROM change_order_discarded`)).map((r) => r.change_order_id));
+  } catch { /* schema not up yet; nothing deleted to skip */ }
+
+  let pulled = 0, statusUpdated = 0, skipped = 0, conflicts = 0;
   for (const co of data as any[]) {
+    // A deleted extra must not be resurrected by the pull. Skip it: the local delete
+    // is the intent, the server row is being dropped by drainDiscardedExtras.
+    if (discarded.has(co.id)) { skipped++; continue; }
+    // REQ-LC1: five stored statuses and never a sixth. A status this build has
+    // never heard of comes from a newer server, so it is skipped rather than
+    // stored: written, it would land in a row `stageOf` reads as sealed and no
+    // screen could explain, and the local CHECK would reject it below anyway —
+    // this just refuses it by name instead of as constraint violation 23514.
+    if (!isStoredStatus(co.status)) {
+      skipped++;
+      console.log('hydrate skipped an unknown status:', co.id, String(co.status));
+      continue;
+    }
     // ONE ROW MUST NOT TAKE THE HYDRATE WITH IT. This had no guard: a single
     // change order the local schema cannot accept — a priceless one once the
     // server column goes nullable, or any future column mismatch — threw out of
@@ -832,13 +1145,15 @@ export async function hydrateChangeOrders(
       res = await db.execute(
       `INSERT OR IGNORE INTO change_order (id, decision_id, project_id, owner_id, scope,
          line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate,
-         numbers_confirmed_at_ms, status, signed_by, created_at_ms)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         numbers_confirmed_at_ms, status, signed_by, created_at_ms,
+         origin_change_order_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [co.id, co.decision_id, co.project_id, ownerId, co.scope,
        JSON.stringify(co.line_items ?? []), co.amount_cents, co.nte_cents,
        co.is_mini ?? 0, co.who_directed, co.ref_estimate,
        new Date(co.numbers_confirmed_at).getTime(), co.status,
-       signedBy.get(co.id) ?? null, new Date(co.created_at).getTime()]
+       signedBy.get(co.id) ?? null, new Date(co.created_at).getTime(),
+       origins.get(co.id) ?? null]
       );
     } catch (e: any) {
       skipped++;
@@ -848,15 +1163,42 @@ export async function hydrateChangeOrders(
     if (res.rowsAffected) { pulled++; continue; }
 
     // Existing row: status only, and only if we are not holding an unsent intent.
+    const local = (await db.getAll<{ status: string }>(
+      `SELECT status FROM change_order WHERE id = ?`, [co.id]))[0];
+    if (!local || local.status === co.status) continue;
+    // `canAdoptServerStatus`, NOT `canTransition`, and the difference is a defect
+    // this line shipped with. Adopting is LEARNING a move, not MAKING one, so the
+    // question is "could the server lawfully have got here", not "could this device
+    // have done it". `canTransition` answers the second, and it refused
+    // `draft → superseded` forever — a second handset that pulled the row while it
+    // was still a draft kept rendering a retired version as an editable draft, with
+    // Edit, Send and Delete live, on every tick for the life of the extra.
+    if (!canAdoptServerStatus(local.status, co.status)) {
+      conflicts++;
+      // LOUD, and with both statuses in it. This is the one line anybody will have
+      // to work from when a phone and the cloud disagree about a signed document.
+      // It goes to the flight recorder as well as the console: a Release build
+      // shows nothing of console.log, and this refusal is permanent — it re-fires
+      // every tick and repairs itself never.
+      console.log('hydrate REFUSED an illegal server status: %s is %s here, %s there',
+        co.id, local.status, co.status);
+      void logDiag(db, 'hydrate.conflict', `${co.id}: ${local.status} here, ${co.status} there`);
+      continue;
+    }
+    // No timestamp is stamped here, deliberately. This device knows WHEN IT LEARNED
+    // of the move, which is not when the move happened, and REQ-LC4 dates a
+    // transition once, at the transition. Writing Date.now() would put a plausible
+    // wrong time on a signature; the record screen's honest "time not recorded" is
+    // the correct output until the server's own event timeline is read.
     const upd = await db.execute(
       `UPDATE change_order SET status = ?, signed_by = ?
-        WHERE id = ? AND status IS NOT ?
+        WHERE id = ? AND status = ?
           AND NOT EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = change_order.id)`,
-      [co.status, signedBy.get(co.id) ?? null, co.id, co.status]
+      [co.status, signedBy.get(co.id) ?? null, co.id, local.status]
     );
     if (upd.rowsAffected) statusUpdated++;
   }
-  return { pulled, statusUpdated, skipped };
+  return { pulled, statusUpdated, skipped, conflicts };
 }
 
 

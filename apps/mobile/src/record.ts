@@ -22,10 +22,16 @@
  * The record shows both, separately labelled. The ledger sorts by the former and
  * says "Created", which is now true.
  *
- * KNOWN GAP: `sent`, `delivered` and the signature TIME are not columns on the
- * local change_order — the confirmation row carries channel/delivery_state
- * server-side. Events we hold without a timestamp are rendered with an explicit
- * "time not recorded" marker and sorted last, never with an invented position.
+ * KNOWN GAP, NARROWED (REQ-LC4): `delivered` is still not a column on the local
+ * change_order — the confirmation row carries channel/delivery_state server-side.
+ * The four state-change moments are: `sent_at_ms` / `approved_at_ms` /
+ * `declined_at_ms` / `superseded_at_ms` are stamped write-once by the same guarded
+ * UPDATE that moves the status, and this file READS them. It still renders the
+ * "time not recorded" marker, because rows that moved before those columns existed
+ * — and rows whose status arrived through `hydrateChangeOrders`, which deliberately
+ * refuses to date a move it only learned about — genuinely have no time. Events we
+ * hold without a timestamp are marked and sorted last, never given an invented
+ * position.
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
@@ -56,6 +62,24 @@ export type RecordPhoto = {
   uri: string;
   /** False when the file the row promises is not on this device. Never hidden. */
   present: boolean;
+  /**
+   * Mandate #9's other half — WHERE this was taken, as "37.77490, -122.41940", or
+   * null when the phone had no fix.
+   *
+   * IT IS HERE BECAUSE ITS ABSENCE WAS A FALSE STATEMENT, not because the screen
+   * wanted a nicer row. `capture_commit` has stored `gps_lat`/`gps_lng` all along
+   * and this query did not select them, so `PhotosAndProof` was passed `null` for
+   * every photo and printed "Where: No location was recorded" plus "N photos here
+   * have no location saved" — under a heading that says the stamp is what makes the
+   * photo proof. On the one screen whose job is proving the evidence, that told a
+   * contractor in a dispute his own case was weaker than it is.
+   *
+   * Raw coordinates, not `describeStamp()`: that helper's no-fix branches return
+   * baked English sentences, and this string goes on a bilingual screen. Numbers are
+   * the same in both languages; the ABSENCE of numbers is rendered by the screen's
+   * own localized key.
+   */
+  place: string | null;
 };
 
 /** The voice narration behind an extra — what the contractor said as it was
@@ -103,6 +127,9 @@ export type ExtraRecord = {
   createdAtMs: number;
   /** The real capture moment, when a capture is linked. Null otherwise. */
   capturedAt: string | null;
+  /** Where the earliest capture behind this extra was taken ("37.77490, -122.41940"),
+   *  or null when the phone had no fix. Mandate #9's stamp, surfaced. */
+  capturedPlace: string | null;
   stateLineKey: string;
   stateLineParams?: Record<string, string>;
   people: RecordPerson[];
@@ -137,19 +164,31 @@ function at(ms: number | null | undefined): string | null {
   return ms == null || ms <= 0 ? null : createdLabel(ms);
 }
 
+/** The GPS stamp as text, or null when the phone had no fix. Null is the SCREEN's
+ *  cue to say so in the reader's language — this function never says it. */
+function placeOf(c: { gps_lat: number | null; gps_lng: number | null }): string | null {
+  return c.gps_lat != null && c.gps_lng != null
+    ? `${c.gps_lat.toFixed(5)}, ${c.gps_lng.toFixed(5)}`
+    : null;
+}
+
 export async function extraRecord(
   db: AbstractPowerSyncDatabase, changeOrderId: string
 ): Promise<ExtraRecord | null> {
   const co = (await db.getAll<{
-    id: string; decision_id: string; scope: string; amount_cents: number | null;
+    id: string; decision_id: string; scope: string; summary: string | null;
+    amount_cents: number | null;
     job_name: string | null;
     nte_cents: number | null; is_mini: number; who_directed: string;
     numbers_confirmed_at_ms: number; status: string; signed_by: string | null;
     created_at_ms: number; pending: number;
+    sent_at_ms: number | null; approved_at_ms: number | null;
+    declined_at_ms: number | null; superseded_at_ms: number | null;
   }>(
-    `SELECT co.id, co.decision_id, co.scope, co.amount_cents, co.nte_cents, co.is_mini,
+    `SELECT co.id, co.decision_id, co.scope, co.summary, co.amount_cents, co.nte_cents, co.is_mini,
             co.who_directed, co.numbers_confirmed_at_ms, co.status, co.signed_by,
             co.created_at_ms,
+            co.sent_at_ms, co.approved_at_ms, co.declined_at_ms, co.superseded_at_ms,
             (SELECT p.name FROM project p WHERE p.id = co.project_id) AS job_name,
             EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending
        FROM change_order co WHERE co.id = ?`, [changeOrderId]))[0];
@@ -175,13 +214,16 @@ export async function extraRecord(
   let photosTruncated = 0;
   let voices: RecordVoice[] = [];
   let capturedAtMs: number | null = null;
+  let capturedPlace: string | null = null;
 
   if (captureIds.length) {
     const marks = captureIds.map(() => '?').join(',');
     const caps = await db.getAll<{
       capture_id: string; modality: string | null; captured_at_ms: number; media_relpath: string;
+      gps_lat: number | null; gps_lng: number | null;
     }>(
-      `SELECT DISTINCT cc.capture_id, cc.modality, cc.captured_at_ms, cc.media_relpath
+      `SELECT DISTINCT cc.capture_id, cc.modality, cc.captured_at_ms, cc.media_relpath,
+              cc.gps_lat, cc.gps_lng
          FROM capture_commit cc
         WHERE cc.capture_id IN (${marks})
            OR cc.capture_id IN (
@@ -194,7 +236,10 @@ export async function extraRecord(
       [...captureIds, ...captureIds]);
 
     // The real capture moment — the earliest committed capture behind this extra.
-    if (caps.length) capturedAtMs = caps[0].captured_at_ms;
+    if (caps.length) {
+      capturedAtMs = caps[0].captured_at_ms;
+      capturedPlace = placeOf(caps[0]);
+    }
 
     const visual = caps.filter((c) => c.modality === 'photo');
     photosTruncated = Math.max(0, visual.length - MAX_PHOTOS_RENDERED);
@@ -212,7 +257,7 @@ export async function extraRecord(
         } catch { present = false; }
         return {
           captureId: c.capture_id, modality: c.modality ?? 'photo',
-          at: createdLabel(c.captured_at_ms), uri, present,
+          at: createdLabel(c.captured_at_ms), uri, present, place: placeOf(c),
         };
       })
     );
@@ -304,45 +349,67 @@ export async function extraRecord(
   }
   stamped.sort((a, b) => (a.atMs ?? 0) - (b.atMs ?? 0));
 
-  // Events we know happened but hold no time for. Marked, never given a fake slot.
-  //
-  // These are derived from STATUS, and status is a current state, not a history. That
-  // distinction cost the record its most important line: `co.status === 'sent'` was
-  // the only thing emitting "sent", so the moment a client approved, status became
-  // 'approved' and the send DISAPPEARED from the timeline. Every successfully approved
-  // extra -- the ones that end up in a dispute -- showed created, priced, captured and
-  // signed, with no record that it was ever put in front of the client at all.
+  // The state changes. Derived from STATUS, and status is a current state, not a
+  // history. That distinction cost the record its most important line:
+  // `co.status === 'sent'` was the only thing emitting "sent", so the moment a client
+  // approved, status became 'approved' and the send DISAPPEARED from the timeline.
+  // Every successfully approved extra -- the ones that end up in a dispute -- showed
+  // created, priced, captured and signed, with no record that it was ever put in
+  // front of the client at all.
   //
   // A terminal status is proof the thing was sent: nothing can be approved or declined
   // that was never delivered. So sent is inferred from the whole set, not from being
   // the current state. This is inference, which this file otherwise refuses to do, so
-  // it is bounded to what the status ACTUALLY entails and no further: that it happened,
-  // never when, never by whom. The real timestamp lives on confirmation_request
-  // server-side and is not on this device (see KNOWN GAP in the header).
+  // it is bounded to what the status ACTUALLY entails and no further.
+  //
+  // WHEN IS NOW A COLUMN, AND THE KNOWN GAP IN THE HEADER IS CLOSED FOR THESE FOUR.
+  // REQ-LC4 added `sent_at_ms` / `approved_at_ms` / `declined_at_ms` /
+  // `superseded_at_ms`, stamped write-once by the same guarded UPDATE that moves the
+  // status (changeorder.ts, ledgerstatus.ts). They were being written and read by
+  // nothing, so a sealed record still printed "TIME NOT RECORDED" under a signature
+  // whose exact millisecond was sitting in the row beside it. A stamped event sorts
+  // into the chronology with everything else; an UNSTAMPED one — a row that moved
+  // before those columns existed, or that learned its status from a hydrate, which
+  // deliberately refuses to invent a time — keeps the honest marker and sorts last.
+  // Both cases still exist, so both are still rendered.
   const unstamped: RecordEvent[] = [];
   const noTime = t('erec.noTime');
+  const push = (atMs: number | null | undefined, what: string) => {
+    const when = at(atMs);
+    if (when) stamped.push({ atMs: atMs as number, at: when, what, hot: true });
+    else unstamped.push({ atMs: null, at: noTime, what, hot: true });
+  };
   const wasSent = co.status === 'sent' || co.status === 'approved'
     || co.status === 'declined' || co.status === 'superseded';
-  if (wasSent) unstamped.push({ atMs: null, at: noTime, what: t('erec.evSent'), hot: true });
+  if (wasSent) push(co.sent_at_ms, t('erec.evSent'));
   if (co.signed_by) {
-    unstamped.push({
-      atMs: null, at: noTime,
-      what: t({ k: 'erec.evSigned', p: { name: co.signed_by } } as any), hot: true,
-    });
+    push(co.approved_at_ms, t({ k: 'erec.evSigned', p: { name: co.signed_by } } as any));
   }
-  if (co.status === 'declined') unstamped.push({ atMs: null, at: noTime, what: t('erec.evDeclined'), hot: true });
+  if (co.status === 'declined') push(co.declined_at_ms, t('erec.evDeclined'));
+  // The retirement was the one state change with no line at all on this screen — a
+  // superseded extra showed "Sent" and then nothing, so the record could not say when
+  // (or that) it stopped being the live version.
+  if (co.status === 'superseded') push(co.superseded_at_ms, t('erec.evSuperseded'));
+  // Re-sorted because `push` can add to `stamped` after the sort above.
+  stamped.sort((a, b) => (a.atMs ?? 0) - (b.atMs ?? 0));
 
   const line = stateLine(co.status, co.signed_by, synced);
 
-  // The Description GROWS with voice edits, append-only, without ever touching the
-  // frozen scope (hadar, 2026-07-27). The title stays `co.scope`; the description is
-  // that scope followed by the AI's read of each voice added later, oldest first. A
-  // sent extra's binding instrument is untouched — this is display composition, not
-  // an edit — which is the only way mandate #5 lets a sent record's description grow.
+  // The "Summary of the change" the client reads (hadar, 2026-07-27): the AI's
+  // owner-facing prose (`co.summary`, structure.ts `value`), grown append-only by each
+  // voice added later. The title stays `co.scope`; the RAW transcript is shown
+  // separately, in full, in the voice player — summary and transcript are both kept,
+  // never one instead of the other.
+  //
+  // FALLS BACK TO THE TITLE when there is no summary yet — an extra recorded offline,
+  // one the AI wasn't confident about, or an older extra from before this field — so
+  // the section is never blank. The base is untouched after send (co.summary is
+  // written draft-only); the addenda are append-only, which is how a SENT extra's
+  // summary can still grow without editing the frozen instrument (mandate #5).
   const addenda = augEvents
     .filter((e) => e.kind === 'voice' && e.descText)
     .map((e) => e.descText as string);
-  const description = [co.scope, ...addenda].join('\n\n');
+  const description = [co.summary?.trim() || co.scope, ...addenda].join('\n\n');
 
   return {
     id: co.id,
@@ -356,6 +423,7 @@ export async function extraRecord(
     created: createdLabel(co.created_at_ms),
     createdAtMs: co.created_at_ms,
     capturedAt: capturedLabel,
+    capturedPlace,
     stateLineKey: line.key,
     stateLineParams: line.params,
     people,

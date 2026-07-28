@@ -45,18 +45,19 @@ test('a sent extra nobody has asked about is not In Discussion', () => {
   assert.equal(displayStatus('sent', { openQuestions: clientMessageCount([]) }), 'sent');
 });
 
-test('approval FREEZES the instrument but keeps the channel open (supersedes R5b AC4)', () => {
-  // hadar, 2026-07-24: an extra is a chat channel; the talk continues after the
-  // yes/no. The signed instrument is still frozen (open=false drives the
-  // awaiting/discussion logic), but messages are not the instrument, so canReply
-  // stays true — you can keep talking on an approved extra.
+test('approval CLOSES the thread — R5b AC4, REQ-LC23, DEF-4', () => {
+  // The composer must disappear, and the reason is not tidiness: the server
+  // rejects a reply against an answered request (308:94, errcode 23514) and that
+  // code is permanent, so a composer here produces a message that is parked
+  // forever while the UI calls it sent. The 2026-07-24 "chat channel" reading
+  // widened the client without ever widening the server; D1 seals stage 3.
   const s = threadState({
     coStatus: 'approved',
     messages: [client('q1', T0), contractor('r1', T0 + H)],
     nowMs: T0 + 10 * 24 * H,
   });
   assert.equal(s.open, false, 'the signed record itself takes no new VERSIONS');
-  assert.equal(s.canReply, true, 'but the conversation channel stays open');
+  assert.equal(s.canReply, false, 'a reply here could never be delivered');
   assert.equal(s.canRevise, false, 'a signed version is never superseded');
   assert.equal(s.awaitingReply, false, 'nobody is waiting once it is signed');
   assert.equal(s.messages.length, 2, 'the record is preserved');
@@ -67,6 +68,7 @@ test('approval FREEZES the instrument but keeps the channel open (supersedes R5b
 test('a declined extra also closes the thread', () => {
   const s = threadState({ coStatus: 'declined', messages: [client('q1', T0)], nowMs: T0 + 5 * 24 * H });
   assert.equal(s.open, false);
+  assert.equal(s.canReply, false, 'the server rejects a reply on a declined request too');
   assert.equal(s.awaitingReply, false);
 });
 

@@ -262,6 +262,7 @@ const EN: Record<string, string> = {
   'home.navJobs': 'Jobs',
   'home.navActivity': 'Activity',
   'home.navCompany': 'Company',
+  'home.navProfile': 'Profile',
   // Activity page (mockup 2026-07-23)
   'act.tabAll': 'All',
   'act.tabWaiting': 'Waiting',
@@ -421,6 +422,25 @@ const EN: Record<string, string> = {
   'send.notReady.processing': 'It reached the cloud. Your words are being written down — nothing to do but wait.',
   'send.ready': 'Ready to send',
 
+  // D3's send gate (sendreadiness.ts). TWO tones on purpose, because the two lists
+  // are not the same kind of thing: `blocked` says what is missing and why the
+  // owner cannot act without it; `recommended` states a fact and never scolds. If
+  // the soft lines read like errors, a contractor fills all four out of guilt and
+  // the gate has quietly become the checklist D3 refuses to build.
+  'send.blocked.noDescription': 'Nobody has written up what the work is yet — that is the part the owner reads.',
+  // ONE line covers both halves of `no_cost` (a missing amount, and a
+  // time-and-materials extra missing its cap) because REQ-LC12 makes them one
+  // blocker. It deliberately does not open with "no price": on the T&M case a
+  // price IS on the screen, and telling him otherwise sends him looking for a
+  // field he already filled.
+  'send.blocked.noCost': 'The money is not settled yet. The owner is approving an amount — and time-and-materials also needs its “not to exceed” figure.',
+  'send.recommended.noPhotos': 'No photos on it. A photo is what settles the argument later.',
+  'send.recommended.noBillingTiming': 'You have not said when you bill this.',
+  'send.recommended.noScheduleEffect': 'You have not said whether this moves the schedule.',
+  'send.recommended.noExclusions': 'You have not said what is NOT included.',
+  'send.recommended.count': '{have} of {of} added',
+  'send.recommended.note': 'These are not required. You can send it without them.',
+
   'rep.send': 'Send the client an update →',
   'rep.nothing': 'Nothing new to tell them yet',
 
@@ -437,6 +457,7 @@ const EN: Record<string, string> = {
   'erec.back': 'Job',
   'erec.people': 'People on this record',
   'erec.description': 'Description',
+  'erec.summaryOfChange': 'Summary of the change',
   'erec.voice': 'Voice note',
   'erec.voiceN': 'Voice note {n}',
   'erec.transcript': 'What you said',
@@ -471,6 +492,18 @@ const EN: Record<string, string> = {
   'erec.evSigned': 'Signed by {name}',
   'erec.evDeclined': 'Declined',
   'erec.noTime': 'time not recorded',
+  // Failure messages for the record screen's own actions. They are KEYS and not
+  // literals for i18n.ts's opening reason: every one of these fires at a moment
+  // something did not work, and a Spanish-preference contractor reading an English
+  // sentence as the only explanation for a dead control has been told nothing
+  // (mandate #5). The caller had shipped all of them as baked English.
+  'erec.errSaveScope': 'That did not save — the extra has been sent, or the text was empty.',
+  'erec.errPriceFirst': 'Type the price first. Saving without one would store $0, and $0 tells the owner the work is free.',
+  'erec.errFollowOn': 'Could not start the follow-on extra: {why}',
+  'erec.errWrongJob': 'Open this extra from its own job to send it — the approver list comes from that job.',
+  'erec.errStillLoading': 'This extra is still loading — try again in a moment.',
+  'erec.errDeleteOpen': 'Could not open the delete confirmation: {why}',
+  'erec.errNotSignedIn': 'You are not signed in on this phone.',
   'r3.unpricedRow': 'Send the price',
   // R8 remind
   'r8.remind': 'Remind',
@@ -923,6 +956,255 @@ const EN: Record<string, string> = {
   'erec.share': 'Share the record',
   'erec.viewCurrent': 'See the current version',
 
+  // ── Stage 1, the pre-sent draft screen (SPEC-extra-lifecycle-v1 §2, ui/extradraft.tsx).
+  // D3 is the whole reason these lines are worded the way they are: DESCRIPTION and
+  // COST are the only two things that may be called required, and the four
+  // recommended items are described as help ("would help you get a yes"), never as
+  // a rule. Telling a contractor a photo is mandatory when it is not is the small
+  // dishonesty that makes him stop believing the rest of the screen.
+  'draft.itemNo': '{kind} #{n}',
+  'draft.bannerTitle': 'Draft · not sent',
+  'draft.bannerBlocked': 'You cannot send this yet — {n} required thing(s) still missing.',
+  'draft.bannerReady': 'Ready to send.',
+  'draft.bannerReadyGaps': 'Ready to send. {n} more would help you get a yes — they are not required.',
+  'draft.notADraft': 'This extra has already left this phone. It cannot be sent again from here.',
+  'draft.raw': 'Raw collected information',
+  'draft.rawNote': 'What you captured on site. The owner does not see this part.',
+  'draft.noNotes': 'Nothing has been written down for this extra yet.',
+  // The AI's write-up. It sits under `draft.rawNote` ("the owner does not see this
+  // part") because REQ-LC43 puts `change_order.summary` outside the instrument.
+  'draft.writeUp': 'What the app made of it',
+  'draft.requestedBy': 'Requested by',
+  'draft.capturedWith': 'How this was captured',
+  'draft.scope': 'Scope of work (sent to client)',
+  'draft.scopeNote': 'This is exactly what the owner reads.',
+  'draft.description': 'Description of work',
+  'draft.cost': 'Cost',
+  'draft.billing': 'Payment timing',
+  'draft.schedule': 'Impact on schedule',
+  'draft.exclusions': 'What is NOT included',
+  'draft.photos': 'Photos',
+  'draft.notSet': 'Not set',
+  'draft.showMore': 'Show more',
+  'draft.showLess': 'Show less',
+  'draft.schedDays': 'Adds {n} day(s)',
+  'draft.checklist': 'Ready to send',
+  'draft.checklistCount': '{have} of {of} complete',
+  'draft.mustFill': '{n} of these must be filled in before you can send.',
+  'draft.editDetails': 'Edit details',
+  'draft.sendAnyway': '{n} recommended thing(s) missing — you can still send.',
+
+  // ── Stage 2, the post-sent negotiation screen (SPEC-extra-lifecycle-v1 §3).
+  // The two lines that carry the most weight are `neg.sameLink` and `neg.newLink`:
+  // the doc set used one word, "resend", for two opposite mechanisms (C6), and a
+  // contractor who believes a reminder reissued the document — or who taps Revise
+  // thinking it is a nudge — has been misled by the screen. Say the mechanism.
+  'neg.waitingOn': 'Waiting on {name}',
+  'neg.waitingOnPlain': 'Waiting on the client',
+  'neg.waitingOnYou': '{name} is waiting on you',
+  'neg.waitingOnYouPlain': 'The client is waiting on you',
+  'neg.noResponsePill': 'No response yet',
+  'neg.nextIfUnopened': 'Nobody has opened the link yet. Nudge them — or check the number you sent it to.',
+  'neg.nextIfOpened': 'They have read it and not answered. A nudge is the next move.',
+  'neg.remindName': 'Remind {name}',
+  'neg.remindPlain': 'Remind them',
+  'neg.reply': 'Reply',
+  'neg.sameLink': 'A reminder goes out on the SAME link. Nothing about the extra changes.',
+  'neg.newLink': 'Revising sends a NEW price on a NEW link. The link they already have stops working.',
+  'neg.people': 'People involved',
+  'neg.approverOnly': 'Only {name} can approve this. Anyone else here can read it and ask questions.',
+  'neg.approverOnlyPlain': 'One person approves this. Anyone else here can read it and ask questions.',
+  'neg.closedTitle': 'The discussion is closed',
+  'neg.newLinkedExtra': 'Start a new extra from this one',
+  'neg.document': 'What you sent them',
+  'neg.docFrozen': 'This is frozen — it is what they are reading right now. Anything you change goes out to them as a new version.',
+  'neg.rowScope': 'What the work is',
+  'neg.rowPhotos': 'Photos',
+  'neg.rowCost': 'Cost',
+  'neg.rowSchedule': 'Impact on the schedule',
+  'neg.rowBilling': 'When you bill it',
+  'neg.rowExclusions': 'What is not included',
+  'neg.notSet': 'Not set',
+  'neg.photosN': '{n} attached',
+  'neg.recentActivity': 'Recent activity',
+  'neg.viewHistory': 'View full history',
+  'neg.nothingYet': 'Nothing logged for this extra yet.',
+
+  // ── Stage 3, the approved & locked record (SPEC-extra-lifecycle-v1 §4).
+  // The register is deliberately different from every other screen: nothing here asks
+  // the reader to do anything, because there is nothing left to do. Every line states
+  // a fact about a sealed document, in the words someone would use to settle an
+  // argument about it two years later.
+  'elock.signedApproved': 'Signed & approved',
+  'elock.approvedOnBy': 'Approved on {when} by {name}.',
+  // The three narrower lines are not padding: they are what is true when the frozen
+  // snapshot carries only part of the answer. Nothing is filled in from elsewhere —
+  // the approver on the roster is who was ENTITLED to sign, never proof of who did.
+  'elock.approvedBy': 'Approved by {name}. The exact time is not on this phone.',
+  'elock.approvedOn': 'Approved on {when}.',
+  'elock.approvedNoDetail': 'Approved. The signed details have not reached this phone yet.',
+  'elock.lockedTitle': 'This extra is locked',
+  'elock.lockedBody':
+    'It cannot be changed and it cannot be deleted. Everything below is final — this '
+    + 'record exists so anyone can see exactly what was agreed.',
+  'elock.snapMissingTitle': 'The signed wording is not on this phone',
+  'elock.snapMissingBody':
+    'The approval is real and the document is safe on the server. This phone has not '
+    + 'pulled the exact signed wording yet — open it again when you have signal.',
+  'elock.snapBadTitle': 'This phone’s copy does not match the signed document',
+  'elock.snapBadBody':
+    'Do not rely on the wording on this screen. The document on the server is the one '
+    + 'that was signed — open “View signed approval” to read it.',
+  'elock.noAmount': 'No amount was in the signed agreement.',
+  'elock.agreedTitle': 'What was agreed',
+  'elock.rowScope': 'Approved work',
+  'elock.rowExclusions': 'Not included',
+  'elock.rowPhotos': 'Photos',
+  'elock.rowSchedule': 'Schedule impact',
+  'elock.rowBilling': 'Payment timing',
+  // The never-filled-in lines. They say what the DOCUMENT does, not what the
+  // contractor failed to do — on a sealed record "he didn't fill it in" and "the
+  // agreement is silent on it" are different claims, and only the second one is true.
+  // This is also why Stage 3 does not reuse Stage 2's `neg.notSet`.
+  'elock.exclNone': 'The signed document does not list anything as excluded.',
+  'elock.photosNone': 'No photos went with this approval.',
+  'elock.schedNone': 'The signed document does not say whether this moves the schedule.',
+  'elock.schedNoChange': 'No change to the schedule.',
+  'elock.schedAddsDay': 'Adds 1 day to the schedule.',
+  'elock.schedAddsDays': 'Adds {n} days to the schedule.',
+  'elock.schedAddsDaysUnknown': 'Adds days to the schedule.',
+  'elock.schedNotSure': 'Schedule impact was left to be confirmed.',
+  'elock.billNone': 'The signed document does not say when this is billed.',
+  'elock.billNextInvoice': 'Billed on the next invoice.',
+  'elock.billWhenCompleted': 'Payment is due when the work is completed.',
+  'elock.billOther': 'Payment timing as discussed.',
+  'elock.recordTitle': 'Approval record',
+  'elock.stepApproved': 'Approved by {name}',
+  'elock.stepApprovedUnknown': 'Approved',
+  'elock.showMore': 'Show more',
+  'elock.showLess': 'Show less',
+  'elock.viewApproval': 'View signed approval',
+  'elock.viewHistory': 'View full history',
+  // D6, said to the person about to tap it. "Create another extra" on its own is
+  // exactly what someone reads as "amend this one", which is the single
+  // misunderstanding this stage exists to prevent.
+  'elock.anotherTitle': 'Something changed since this was approved?',
+  'elock.anotherBody':
+    'Start a NEW extra that follows this one. It does not touch this agreement — '
+    + 'nothing here changes — and the new extra has to be approved on its own.',
+  'elock.another': 'Create another extra',
+
+  // ── The detail sub-screens (ui/extradetails.tsx) — scope, price/schedule,
+  // photos & proof, people, full history.
+  //
+  // TWO REGISTERS LIVE IN THIS BLOCK AND THEY MUST NOT BLEND. The editable lines are
+  // instructions to the contractor ("Type what you told the owner"); the frozen and
+  // sealed lines state a fact about a record he cannot change, and they say WHY —
+  // "the client is reading it right now" and "this is approved" are different reasons
+  // and lead to different next moves. A single "you can't edit this" would be the
+  // dead end that sends someone back to a text message.
+  //
+  // The AI lines are written to be distrusted on purpose (`det.proposedAiBody`). The
+  // machine's rewrite is a suggestion a person must read before it replaces their own
+  // words — mandate #10 — and copy that presents it as a finished improvement is how
+  // a tired man taps past a sentence he never wrote.
+  'det.frozenSentTitle': 'Already sent — frozen',
+  'det.frozenSentBody':
+    'The client is reading this right now, so it cannot be changed here. To change it, '
+    + 'go back and revise — that sends them a new version on a new link.',
+  'det.frozenLockedTitle': 'Approved and locked',
+  'det.frozenLockedBody':
+    'This was signed. Nothing on it can be changed or deleted. You can read it here; '
+    + 'to change the work, start a new extra that follows this one.',
+
+  'det.tabRaw': 'Raw captured notes',
+  'det.tabClient': 'Client-facing scope of work',
+  'det.sowPlaceholder': 'Write what the work is, in plain words.',
+  'det.sowEmpty': 'Nothing is written yet. This is what the owner reads — say what the work is.',
+  'det.charCount': '{n}/{of}',
+  'det.charFull': 'that is as long as it goes',
+  'det.useNotes': 'Use captured notes',
+  'det.useNotesSub': 'Start over from your raw notes.',
+  'det.useNotesNone': 'Nothing has been written down from your notes yet.',
+  'det.improve': 'Improve wording',
+  'det.improveSub': 'Tighten, simplify and clean up.',
+  'det.improveWorking': 'Rewriting…',
+  'det.improveFailed': 'The rewrite did not work.',
+  // The reason, when the reason is that nothing is behind the button yet. There is
+  // no rewrite endpoint in `supabase/functions` and nothing in the app invokes one,
+  // so the tap fails LOUDLY and says what is true rather than spinning forever.
+  'det.improveNoService': 'This phone has nothing to rewrite with yet — the wording help is not switched on.',
+  'det.proposedNotesTitle': 'Your notes, word for word',
+  'det.proposedNotesBody':
+    'This is exactly what you captured. Nothing has changed yet — use it and it '
+    + 'replaces what is written now.',
+  'det.proposedAiTitle': 'Suggested wording',
+  'det.proposedAiBody':
+    'The app rewrote your text. Read it before you use it — it is a machine and it can '
+    + 'get the work wrong. Nothing changes until you tap below.',
+  'det.useThis': 'Use this wording',
+  'det.keepMine': 'Keep what I wrote',
+  'det.saveScope': 'Save scope of work',
+
+  'det.priceTitle': 'Price, schedule & payment',
+  'det.savePrice': 'Save price & schedule',
+  'det.modeNteSub': 'Time and materials, with a cap the owner approves.',
+  'det.total': 'Total price',
+  'det.cap': 'Not to exceed',
+  // R3: T&M ALWAYS carries a cap. The line says what an uncapped one costs the owner,
+  // because "required" on its own never explains why anyone should care.
+  'det.capRequired': 'Time and materials always needs a cap. Without one the owner is approving an open bill.',
+  'det.readback': 'You are sending {amount}',
+  'det.readbackNone': 'No amount yet. Type what you told the owner.',
+  'det.capReadback': 'The cap you are sending is {amount}',
+  'det.schedUnsureSub': 'The owner sees this as “to be confirmed”. That is an honest answer.',
+  'det.schedDaysLabel': 'How many days',
+  'det.exclusionsHint':
+    'What is NOT part of this price. Leave it blank and the owner may assume it is included.',
+  'det.exclusionsPlaceholder': 'e.g. paint, fixtures, permit fees',
+  'det.exclusionsNone': 'Nothing was listed as excluded.',
+
+  'det.photosTitle': 'Photos & proof',
+  'det.stampTitle': 'Where and when',
+  'det.stampWhen': 'Time',
+  'det.stampWhere': 'Place',
+  'det.stampWhy': 'The time and place are saved with every photo. That stamp is what makes it proof.',
+  'det.noPlace': 'No location was recorded',
+  'det.someNoPlace': '{n} photo(s) here have no location saved — the phone had no fix at the time.',
+  'det.noPhotos': 'No photos on this extra yet.',
+  'det.bestTitle': 'Best photo for the owner',
+  'det.pickBest': 'Mark best photo for owner',
+  'det.pickBestWhy': 'The one you pick shows first on the page the owner opens.',
+  'det.pickBestOn': 'Tap the photo the owner should see first.',
+  'det.pickBestCancel': 'Stop choosing',
+  'det.clearBest': 'No best photo',
+  'det.bestBadge': 'BEST',
+  'det.addVoice': 'Add a voice note',
+
+  'det.noPeople': 'Nobody is on this extra yet.',
+  'det.noContact': 'No phone or email on this phone.',
+  'det.phone': 'Phone',
+  'det.email': 'Email',
+  'det.addPerson': 'Add someone',
+  // D4 in the words of the person reading it. The two off-nominal lines are the point:
+  // zero approvers and two approvers are both defects, and a footer that reassured in
+  // either case would hide the exact state that makes a send fail.
+  'det.authority': 'Approval authority',
+  'det.authorityOne': 'Only {name} can approve this extra.',
+  'det.authorityOthers': 'Everyone else here can read it and ask questions. They cannot approve it.',
+  'det.authorityNone':
+    'Nobody here can approve this extra yet. Until someone can, there is nobody to send it to.',
+  'det.authorityMany':
+    '{n} people are marked as the approver. Exactly one person approves an extra — fix this before you send.',
+
+  'det.historyTitle': 'Full history',
+  'det.historyNote': 'Everything that has happened to this extra, in the order it happened.',
+  'det.unstampedNote':
+    'The time of {n} of these was never recorded, so they sit at the end rather than in a '
+    + 'place they might not belong.',
+  'det.signedTitle': 'The signed approval',
+  'det.totalLabel': 'Total approved',
+
   'common.close': 'Close',
   'common.cancel': 'Cancel',
   'common.back': 'Back',
@@ -1156,6 +1438,7 @@ const ES: Record<string, string> = {
   'home.navJobs': 'Trabajos',
   'home.navActivity': 'Actividad',
   'home.navCompany': 'Empresa',
+  'home.navProfile': 'Perfil',
   // Página de actividad (maqueta 2026-07-23)
   'act.tabAll': 'Todos',
   'act.tabWaiting': 'Esperando',
@@ -1305,6 +1588,19 @@ const ES: Record<string, string> = {
   'send.notReady.processing': 'Ya llegó a la nube. Se están escribiendo sus palabras — solo hay que esperar.',
   'send.ready': 'Listo para enviar',
 
+  // La puerta de envío de D3. Dos tonos, a propósito: `blocked` dice qué falta y
+  // por qué el dueño no puede aprobar sin eso; `recommended` solo constata un
+  // hecho y nunca regaña. Si las líneas suaves suenan a error, él las llena por
+  // culpa y la puerta se volvió la lista de requisitos que D3 no quiere.
+  'send.blocked.noDescription': 'Todavía nadie escribió en qué consiste el trabajo — eso es lo que el dueño lee.',
+  'send.blocked.noCost': 'El dinero todavía no está definido. El dueño aprueba un monto — y por tiempo y materiales también hace falta el tope “no excede”.',
+  'send.recommended.noPhotos': 'No tiene fotos. Una foto es lo que resuelve el pleito después.',
+  'send.recommended.noBillingTiming': 'No dijo cuándo lo cobra.',
+  'send.recommended.noScheduleEffect': 'No dijo si esto mueve el calendario.',
+  'send.recommended.noExclusions': 'No dijo qué NO está incluido.',
+  'send.recommended.count': '{have} de {of} agregados',
+  'send.recommended.note': 'Esto no es obligatorio. Puede enviarlo sin eso.',
+
   'rep.send': 'Mandarle una actualización al cliente →',
   'rep.nothing': 'Todavía no hay nada nuevo que contarle',
 
@@ -1319,6 +1615,7 @@ const ES: Record<string, string> = {
   'erec.back': 'Trabajo',
   'erec.people': 'Quién está en este registro',
   'erec.description': 'Descripción',
+  'erec.summaryOfChange': 'Resumen del cambio',
   'erec.voice': 'Nota de voz',
   'erec.voiceN': 'Nota de voz {n}',
   'erec.transcript': 'Lo que dijiste',
@@ -1347,6 +1644,13 @@ const ES: Record<string, string> = {
   'erec.evSigned': 'Firmado por {name}',
   'erec.evDeclined': 'Rechazado',
   'erec.noTime': 'sin hora registrada',
+  'erec.errSaveScope': 'No se guardó — el extra ya se envió, o el texto estaba vacío.',
+  'erec.errPriceFirst': 'Escriba el precio primero. Guardar sin él dejaría $0, y $0 le dice al dueño que el trabajo es gratis.',
+  'erec.errFollowOn': 'No se pudo iniciar el extra de seguimiento: {why}',
+  'erec.errWrongJob': 'Abra este extra desde su propio trabajo para enviarlo — la lista de aprobadores viene de ese trabajo.',
+  'erec.errStillLoading': 'Este extra todavía se está cargando — inténtelo en un momento.',
+  'erec.errDeleteOpen': 'No se pudo abrir la confirmación de borrado: {why}',
+  'erec.errNotSignedIn': 'No ha iniciado sesión en este teléfono.',
   'r3.unpricedRow': 'Envíe el precio',
   // R8 recordatorio
   'r8.remind': 'Recordar',
@@ -1783,6 +2087,216 @@ const ES: Record<string, string> = {
   'erec.processing': 'Subiendo…',
   'erec.share': 'Compartir el registro',
   'erec.viewCurrent': 'Ver la versión actual',
+
+  // ── Stage 1, el borrador sin enviar (ui/extradraft.tsx). Registro es-419, presente
+  // y palabras llanas: se lee en una escalera, no en una oficina.
+  'draft.itemNo': '{kind} n.º {n}',
+  'draft.bannerTitle': 'Borrador · sin enviar',
+  'draft.bannerBlocked': 'Todavía no lo puede enviar — falta(n) {n} cosa(s) obligatoria(s).',
+  'draft.bannerReady': 'Listo para enviar.',
+  'draft.bannerReadyGaps': 'Listo para enviar. Otras {n} ayudarían a que le digan que sí — no son obligatorias.',
+  'draft.notADraft': 'Este extra ya salió de este teléfono. No se puede volver a enviar desde aquí.',
+  'draft.raw': 'Lo que se recogió en la obra',
+  'draft.rawNote': 'Lo que usted capturó en la obra. El dueño no ve esta parte.',
+  'draft.noNotes': 'Todavía no se ha escrito nada de este extra.',
+  'draft.writeUp': 'Lo que entendió la app',
+  'draft.requestedBy': 'Quién lo pidió',
+  'draft.capturedWith': 'Cómo se capturó',
+  'draft.scope': 'Trabajo a realizar (lo que ve el cliente)',
+  'draft.scopeNote': 'Esto es exactamente lo que lee el dueño.',
+  'draft.description': 'Descripción del trabajo',
+  'draft.cost': 'Costo',
+  'draft.billing': 'Cuándo se cobra',
+  'draft.schedule': 'Efecto en el calendario',
+  'draft.exclusions': 'Qué NO está incluido',
+  'draft.photos': 'Fotos',
+  'draft.notSet': 'Sin poner',
+  'draft.showMore': 'Ver más',
+  'draft.showLess': 'Ver menos',
+  'draft.schedDays': 'Agrega {n} día(s)',
+  'draft.checklist': 'Listo para enviar',
+  'draft.checklistCount': '{have} de {of} completo(s)',
+  'draft.mustFill': '{n} de estas hay que llenarlas antes de poder enviar.',
+  'draft.editDetails': 'Editar detalles',
+  'draft.sendAnyway': 'Falta(n) {n} recomendada(s) — de todos modos puede enviarlo.',
+
+  // Etapa 2. "Recordar" y "Revisar" son actos opuestos y aquí se dice cuál es cuál:
+  // el recordatorio usa EL MISMO enlace, revisar manda uno NUEVO y mata el anterior.
+  // Registro de usted, igual que el resto de r8/r5b.
+  'neg.waitingOn': 'Esperando a {name}',
+  'neg.waitingOnPlain': 'Esperando al cliente',
+  'neg.waitingOnYou': '{name} está esperando su respuesta',
+  'neg.waitingOnYouPlain': 'El cliente está esperando su respuesta',
+  'neg.noResponsePill': 'Todavía sin respuesta',
+  'neg.nextIfUnopened': 'Nadie ha abierto el enlace todavía. Recuérdeselo — o revise a qué número lo mandó.',
+  'neg.nextIfOpened': 'Ya lo leyeron y no contestaron. Lo que sigue es recordárselo.',
+  'neg.remindName': 'Recordarle a {name}',
+  'neg.remindPlain': 'Recordárselo',
+  'neg.reply': 'Responder',
+  'neg.sameLink': 'El recordatorio sale por EL MISMO enlace. Nada del extra cambia.',
+  'neg.newLink': 'Revisar manda un precio NUEVO en un enlace NUEVO. El enlace que ya tienen deja de servir.',
+  'neg.people': 'Quién está involucrado',
+  'neg.approverOnly': 'Solo {name} puede aprobar esto. Los demás pueden leerlo y hacer preguntas.',
+  'neg.approverOnlyPlain': 'Una sola persona aprueba esto. Los demás pueden leerlo y hacer preguntas.',
+  'neg.closedTitle': 'La conversación está cerrada',
+  'neg.newLinkedExtra': 'Empezar un extra nuevo a partir de este',
+  'neg.document': 'Lo que les mandó',
+  'neg.docFrozen': 'Esto está congelado — es lo que están leyendo ahora mismo. Cualquier cambio les llega como una versión nueva.',
+  'neg.rowScope': 'En qué consiste el trabajo',
+  'neg.rowPhotos': 'Fotos',
+  'neg.rowCost': 'Costo',
+  'neg.rowSchedule': 'Cómo afecta el calendario',
+  'neg.rowBilling': 'Cuándo lo cobra',
+  'neg.rowExclusions': 'Qué no está incluido',
+  'neg.notSet': 'Sin poner',
+  'neg.photosN': '{n} adjuntas',
+  'neg.recentActivity': 'Actividad reciente',
+  'neg.viewHistory': 'Ver el historial completo',
+  'neg.nothingYet': 'Todavía no hay nada registrado para este extra.',
+
+  // ── Etapa 3, el extra aprobado y cerrado. En "usted": es un documento firmado, y
+  // el registro formal es el que corresponde a la única pantalla que alguien abre
+  // para resolver un pleito. Ninguna línea le pide nada al lector — ya no hay nada
+  // que hacer, y esa es justamente la idea.
+  'elock.signedApproved': 'Firmado y aprobado',
+  'elock.approvedOnBy': 'Aprobado el {when} por {name}.',
+  'elock.approvedBy': 'Aprobado por {name}. La hora exacta no está en este teléfono.',
+  'elock.approvedOn': 'Aprobado el {when}.',
+  'elock.approvedNoDetail': 'Aprobado. Los datos de la firma todavía no llegan a este teléfono.',
+  'elock.lockedTitle': 'Este extra está cerrado',
+  'elock.lockedBody':
+    'No se puede cambiar y no se puede borrar. Todo lo de abajo es definitivo — este '
+    + 'registro existe para que cualquiera vea exactamente qué se acordó.',
+  'elock.snapMissingTitle': 'El texto firmado no está en este teléfono',
+  'elock.snapMissingBody':
+    'La aprobación es real y el documento está a salvo en el servidor. Este teléfono '
+    + 'todavía no bajó el texto exacto — ábralo otra vez cuando tenga señal.',
+  'elock.snapBadTitle': 'La copia de este teléfono no coincide con el documento firmado',
+  'elock.snapBadBody':
+    'No confíe en la redacción de esta pantalla. El documento del servidor es el que se '
+    + 'firmó — abra “Ver la aprobación firmada” para leerlo.',
+  'elock.noAmount': 'El acuerdo firmado no traía ningún monto.',
+  'elock.agreedTitle': 'Qué se acordó',
+  'elock.rowScope': 'Trabajo aprobado',
+  'elock.rowExclusions': 'No incluido',
+  'elock.rowPhotos': 'Fotos',
+  'elock.rowSchedule': 'Efecto en el calendario',
+  'elock.rowBilling': 'Cuándo se cobra',
+  // Dicen lo que hace el DOCUMENTO, no lo que al contratista se le olvidó llenar.
+  'elock.exclNone': 'El documento firmado no deja nada por fuera.',
+  'elock.photosNone': 'Esta aprobación no llevó fotos.',
+  'elock.schedNone': 'El documento firmado no dice si esto mueve el calendario.',
+  'elock.schedNoChange': 'No cambia el calendario.',
+  'elock.schedAddsDay': 'Agrega 1 día al calendario.',
+  'elock.schedAddsDays': 'Agrega {n} días al calendario.',
+  'elock.schedAddsDaysUnknown': 'Agrega días al calendario.',
+  'elock.schedNotSure': 'El efecto en el calendario quedó por confirmar.',
+  'elock.billNone': 'El documento firmado no dice cuándo se cobra esto.',
+  'elock.billNextInvoice': 'Se cobra en la próxima factura.',
+  'elock.billWhenCompleted': 'Se paga cuando el trabajo esté terminado.',
+  'elock.billOther': 'El pago queda como se habló.',
+  'elock.recordTitle': 'Registro de aprobación',
+  'elock.stepApproved': 'Aprobado por {name}',
+  'elock.stepApprovedUnknown': 'Aprobado',
+  'elock.showMore': 'Ver más',
+  'elock.showLess': 'Ver menos',
+  'elock.viewApproval': 'Ver la aprobación firmada',
+  'elock.viewHistory': 'Ver el historial completo',
+  'elock.anotherTitle': '¿Cambió algo después de esta aprobación?',
+  'elock.anotherBody':
+    'Empiece un extra NUEVO que sigue a éste. No toca este acuerdo — aquí no cambia '
+    + 'nada — y el extra nuevo tiene que aprobarse por su cuenta.',
+  'elock.another': 'Crear otro extra',
+
+  // ── Las pantallas de detalle (ui/extradetails.tsx).
+  'det.frozenSentTitle': 'Ya enviado — congelado',
+  'det.frozenSentBody':
+    'El cliente lo está leyendo ahora mismo, así que aquí no se puede cambiar. Para '
+    + 'cambiarlo, regrese y haga una revisión — eso le manda una versión nueva en un enlace nuevo.',
+  'det.frozenLockedTitle': 'Aprobado y bloqueado',
+  'det.frozenLockedBody':
+    'Esto se firmó. Nada de esto se puede cambiar ni borrar. Aquí lo puede leer; para '
+    + 'cambiar el trabajo, empiece un extra nuevo que sigue a éste.',
+
+  'det.tabRaw': 'Notas capturadas sin editar',
+  'det.tabClient': 'Alcance del trabajo para el cliente',
+  'det.sowPlaceholder': 'Escriba cuál es el trabajo, en palabras sencillas.',
+  'det.sowEmpty': 'Todavía no hay nada escrito. Esto es lo que lee el dueño — diga cuál es el trabajo.',
+  'det.charCount': '{n}/{of}',
+  'det.charFull': 'hasta ahí llega',
+  'det.useNotes': 'Usar las notas capturadas',
+  'det.useNotesSub': 'Empezar de nuevo desde sus notas sin editar.',
+  'det.useNotesNone': 'Todavía no se ha escrito nada de sus notas.',
+  'det.improve': 'Mejorar la redacción',
+  'det.improveSub': 'Acortar, simplificar y limpiar.',
+  'det.improveWorking': 'Reescribiendo…',
+  'det.improveFailed': 'La reescritura no funcionó.',
+  'det.improveNoService': 'Este teléfono todavía no tiene con qué reescribir — la ayuda de redacción no está activada.',
+  'det.proposedNotesTitle': 'Sus notas, palabra por palabra',
+  'det.proposedNotesBody':
+    'Esto es exactamente lo que capturó. Todavía no cambia nada — si lo usa, reemplaza '
+    + 'lo que está escrito ahora.',
+  'det.proposedAiTitle': 'Redacción sugerida',
+  'det.proposedAiBody':
+    'La app reescribió su texto. Léalo antes de usarlo — es una máquina y puede '
+    + 'equivocarse con el trabajo. Nada cambia hasta que toque abajo.',
+  'det.useThis': 'Usar esta redacción',
+  'det.keepMine': 'Dejar lo que escribí',
+  'det.saveScope': 'Guardar el alcance del trabajo',
+
+  'det.priceTitle': 'Precio, calendario y pago',
+  'det.savePrice': 'Guardar precio y calendario',
+  'det.modeNteSub': 'Por horas y materiales, con un tope que el dueño aprueba.',
+  'det.total': 'Precio total',
+  'det.cap': 'Sin pasar de',
+  'det.capRequired': 'Por horas y materiales siempre necesita un tope. Sin tope, el dueño aprueba una cuenta abierta.',
+  'det.readback': 'Va a mandar {amount}',
+  'det.readbackNone': 'Todavía no hay monto. Escriba lo que le dijo al dueño.',
+  'det.capReadback': 'El tope que va a mandar es {amount}',
+  'det.schedUnsureSub': 'El dueño lo ve como “por confirmar”. Ésa es una respuesta honesta.',
+  'det.schedDaysLabel': 'Cuántos días',
+  'det.exclusionsHint':
+    'Lo que NO entra en este precio. Si lo deja en blanco, el dueño puede pensar que sí entra.',
+  'det.exclusionsPlaceholder': 'ej. pintura, accesorios, permisos',
+  'det.exclusionsNone': 'No se anotó nada como excluido.',
+
+  'det.photosTitle': 'Fotos y pruebas',
+  'det.stampTitle': 'Dónde y cuándo',
+  'det.stampWhen': 'Hora',
+  'det.stampWhere': 'Lugar',
+  'det.stampWhy': 'La hora y el lugar se guardan con cada foto. Ese sello es lo que la hace prueba.',
+  'det.noPlace': 'No se guardó ninguna ubicación',
+  'det.someNoPlace': '{n} foto(s) aquí no tienen ubicación guardada — el teléfono no tenía señal de GPS.',
+  'det.noPhotos': 'Todavía no hay fotos en este extra.',
+  'det.bestTitle': 'Mejor foto para el dueño',
+  'det.pickBest': 'Marcar la mejor foto para el dueño',
+  'det.pickBestWhy': 'La que escoja sale primero en la página que abre el dueño.',
+  'det.pickBestOn': 'Toque la foto que el dueño debe ver primero.',
+  'det.pickBestCancel': 'Dejar de escoger',
+  'det.clearBest': 'Sin mejor foto',
+  'det.bestBadge': 'MEJOR',
+  'det.addVoice': 'Agregar una nota de voz',
+
+  'det.noPeople': 'Todavía no hay nadie en este extra.',
+  'det.noContact': 'No hay teléfono ni correo en este teléfono.',
+  'det.phone': 'Teléfono',
+  'det.email': 'Correo',
+  'det.addPerson': 'Agregar a alguien',
+  'det.authority': 'Quién puede aprobar',
+  'det.authorityOne': 'Sólo {name} puede aprobar este extra.',
+  'det.authorityOthers': 'Los demás aquí lo pueden leer y hacer preguntas. No lo pueden aprobar.',
+  'det.authorityNone':
+    'Todavía nadie aquí puede aprobar este extra. Mientras no haya alguien, no hay a quién mandárselo.',
+  'det.authorityMany':
+    '{n} personas están marcadas como quien aprueba. Sólo una persona aprueba un extra — arréglelo antes de mandar.',
+
+  'det.historyTitle': 'Historial completo',
+  'det.historyNote': 'Todo lo que le ha pasado a este extra, en el orden en que pasó.',
+  'det.unstampedNote':
+    'La hora de {n} de éstos nunca se guardó, así que quedan al final y no en un lugar '
+    + 'que a lo mejor no les toca.',
+  'det.signedTitle': 'La aprobación firmada',
+  'det.totalLabel': 'Total aprobado',
 
   'common.close': 'Cerrar',
   'common.cancel': 'Cancelar',

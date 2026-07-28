@@ -33,9 +33,18 @@
  * tables are append-only. INSERT OR IGNORE on the server's own id makes the pull
  * idempotent without an UPDATE path that could rewrite what a client asked.
  */
-import { AbstractPowerSyncDatabase } from '@powersync/react-native';
-import { SupabaseClient } from '@supabase/supabase-js';
-import { canSupersede } from './extrastatus';
+// TYPE-ONLY, both of them, and it must stay that way — the same rule and the same
+// reason changeorder.ts states: a value import of @powersync/react-native pulls in
+// React Native's Flow-typed source, which Node cannot parse, and the tests that
+// exercise this file's SQL (extratransitions.test.ts) stop running. The explicit
+// .ts extensions below are the other half of that: node --test resolves none.
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { canTransition } from './extralifecycle.ts';
+// Safe under `node --test` for the reason above: diaglog.ts's only import is a
+// type-only powersync one. A server refusal that repairs a row silently is the
+// same class of bug as the one it repairs, so it lands in the flight recorder.
+import { logDiag } from './diaglog.ts';
 
 export const LEDGER_STATUS_DDL = [
   // The client's questions, as this device last saw them.
@@ -161,18 +170,33 @@ export type SupersedeResult =
   | { ok: true }
   | { ok: false; reason: 'not_found' | 'not_sent' | 'already_superseded' };
 
+/** The sentinel that rolls the supersession transaction back when the guarded
+ *  UPDATE matched nothing. A thrown string rather than a flag because the whole
+ *  point is that the queue row must not survive the status write failing. */
+const RACED = 'change order was answered before the supersession landed';
+
 /**
  * Retire an extra because a revision replaces it. LOCAL AND IMMEDIATE, no network.
  *
- * The legality check is `canSupersede` in the pure module: only a 'sent' extra,
- * never a signed answer. It is re-read from the row inside the transaction rather
- * than trusted from the caller's stale ledger copy — the client may have answered
- * between the render and the tap, and walking an approval to 'superseded' would
- * erase an outcome she committed to.
+ * The legality check is `canTransition(status,'superseded')` — REQ-LC7 T4, the same
+ * single edge `canSupersede` expresses from the other end, asked of the one module
+ * that owns the transition table. Only a 'sent' extra, never a signed answer. It is
+ * re-read from the row rather than trusted from the caller's stale ledger copy —
+ * the client may have answered between the render and the tap, and walking an
+ * approval to 'superseded' would erase an outcome she committed to.
  *
  * The row and the intent commit together, the same rule every other queue here
  * follows: a crash between them would leave a retired extra the server never hears
  * about, and the next hydrate would quietly bring it back to life as 'sent'.
+ *
+ * THE LINEAGE IS WRITTEN HERE NOW, in that same transaction. It used to be a
+ * separate UPDATE that `reviseChangeOrder` ran AFTER this returned, and that
+ * function was dead code (zero callers): the live revise path — App.tsx
+ * startRevision → composer → confirmPriced → createChangeOrder + supersedeExtra —
+ * never wrote `change_order.superseded_by` at all, so on the phone that authored a
+ * revision the thread could only walk the lineage through `co_supersession`, and a
+ * crash between the two statements left a retired row with no forward pointer.
+ * One writer, one transaction, no window.
  */
 export async function supersedeExtra(
   db: AbstractPowerSyncDatabase,
@@ -182,22 +206,50 @@ export async function supersedeExtra(
     `SELECT status FROM change_order WHERE id = ?`, [o.changeOrderId]))[0];
   if (!cur) return { ok: false, reason: 'not_found' };
   if (cur.status === 'superseded') return { ok: false, reason: 'already_superseded' };
-  if (!canSupersede(cur.status)) return { ok: false, reason: 'not_sent' };
+  if (!canTransition(cur.status, 'superseded')) return { ok: false, reason: 'not_sent' };
+
+  // `superseded_by` arrives by ALTER in ensureDiscussionSchema, so a device that
+  // has not run that migration yet simply has nowhere to put the forward pointer.
+  // Checked BEFORE the transaction rather than caught inside it: a missing column
+  // must not roll back the supersession itself. `supersededBy()` already falls back
+  // to co_supersession, and pullThreads refills the column from the server's own.
+  const hasLineage = (await db.getAll<{ name: string }>(
+    `SELECT name FROM pragma_table_info('change_order')`))
+    .some((c) => c.name === 'superseded_by');
 
   const now = Date.now();
-  await db.writeTransaction(async (tx) => {
-    // The WHERE repeats the status test so a concurrent write between the read
-    // above and this update cannot slip a terminal answer past the guard.
-    await tx.execute(
-      `UPDATE change_order SET status = 'superseded' WHERE id = ? AND status = 'sent'`,
-      [o.changeOrderId]
-    );
-    await tx.execute(
-      `INSERT OR IGNORE INTO co_supersession
-         (change_order_id, superseded_by, at_ms) VALUES (?,?,?)`,
-      [o.changeOrderId, o.supersededBy, now]
-    );
-  });
+  try {
+    await db.writeTransaction(async (tx) => {
+      // The WHERE repeats the status test so a concurrent write between the read
+      // above and this update cannot slip a terminal answer past the guard.
+      // REQ-LC4 dates the move in the same statement, write-once.
+      const upd = await tx.execute(
+        `UPDATE change_order
+            SET status = 'superseded', superseded_at_ms = COALESCE(superseded_at_ms, ?)
+          WHERE id = ? AND status = 'sent'`,
+        [now, o.changeOrderId]
+      );
+      // REQ-LC8: read it. Zero rows here means the answer landed between the read
+      // and the write, and reporting ok:true would tell the contractor his revision
+      // retired a version that is in fact signed. The throw rolls the queue row back
+      // with it — a supersession the server would refuse must not be queued either.
+      if (!upd.rowsAffected) throw new Error(RACED);
+      if (hasLineage) {
+        await tx.execute(
+          `UPDATE change_order SET superseded_by = ? WHERE id = ? AND superseded_by IS NULL`,
+          [o.supersededBy, o.changeOrderId]
+        );
+      }
+      await tx.execute(
+        `INSERT OR IGNORE INTO co_supersession
+           (change_order_id, superseded_by, at_ms) VALUES (?,?,?)`,
+        [o.changeOrderId, o.supersededBy, now]
+      );
+    });
+  } catch (e: any) {
+    if (String(e?.message ?? e) === RACED) return { ok: false, reason: 'not_sent' };
+    throw e;
+  }
   return { ok: true };
 }
 
@@ -227,6 +279,49 @@ export async function supersededBy(
 }
 
 /**
+ * The server refused a supersession on the merits — the client had already answered
+ * — so the local write that was its intent is UNDONE.
+ *
+ * WHY UNDOING IS THE HONEST MOVE AND NOT A SECOND ILLEGAL TRANSITION. `superseded`
+ * on this row exists only because `supersedeExtra` wrote it optimistically while
+ * offline, and the one authority that could ratify it has now said no. Nothing was
+ * retired; there is no retired version to preserve. Leaving the local row where it
+ * is preserves a state that never happened anywhere but here, and the pull cannot
+ * clean it up: adopting one terminal status over another is exactly what
+ * `canAdoptServerStatus` refuses, and refuses correctly.
+ *
+ * `WHERE status = 'superseded'` is the guard: if anything else has since moved this
+ * row, that move stands and this does nothing. The row goes back to `sent` — the
+ * status it held before the local write — and the next `hydrateChangeOrders` on the
+ * SAME TICK (App.tsx drains supersessions first, deliberately) then adopts the
+ * server's real answer, carrying the signer's name with it.
+ *
+ * The queue row is DELETED rather than marked uploaded: it is an upload intent, not
+ * evidence, and leaving it would keep `supersededBy()` reporting a lineage the
+ * server never accepted. The REPLACEMENT extra is untouched — it is a real draft the
+ * contractor priced, and it is his to send or delete.
+ */
+async function undoRefusedSupersession(
+  db: AbstractPowerSyncDatabase, changeOrderId: string, actual: string
+): Promise<void> {
+  void logDiag(db, 'supersede.refused',
+    `${changeOrderId}: server says ${actual}; local supersession undone`);
+  await db.writeTransaction(async (tx) => {
+    await tx.execute(
+      `UPDATE change_order SET status = 'sent', superseded_at_ms = NULL
+        WHERE id = ? AND status = 'superseded'`, [changeOrderId]);
+    // The forward pointer arrives by ALTER (ensureDiscussionSchema), so a device
+    // that has not run that migration simply has none to clear.
+    try {
+      await tx.execute(
+        `UPDATE change_order SET superseded_by = NULL WHERE id = ?`, [changeOrderId]);
+    } catch { /* no such column on this install */ }
+    await tx.execute(
+      `DELETE FROM co_supersession WHERE change_order_id = ?`, [changeOrderId]);
+  });
+}
+
+/**
  * Push supersessions the server has not applied yet.
  *
  * Backoff mirrors drainR5cOutbox rather than inventing a fifth retry policy.
@@ -234,11 +329,26 @@ export async function supersededBy(
  * fails to upload leaves the OLD approval link answerable, and a client can then
  * sign yesterday's price. That is the exact hazard 250_one_live_link exists for,
  * and it reopens if this queue is allowed to fail quietly.
+ *
+ * A REFUSAL IS NOT AN ERROR, AND READING ONLY `error` MADE IT A SILENT ONE.
+ * `supersede_change_order_v1` answers `{"status":"not_superseded","actual":"…"}`
+ * with NO error when the client answered first (307_extras_ledger.sql:118-122 —
+ * deliberately, "so the device can stop asking rather than retry forever"). This
+ * function destructured `error` alone, so that answer stamped `uploaded_at_ms` and
+ * `uploaded++`: the contractor's phone kept the local-only `superseded` it had
+ * written offline, `reassertSupersessions` stopped covering the row, and the pull
+ * refused to adopt one terminal status over another. The result was permanent — the
+ * owner's signed $1,850 read "Superseded" on the phone forever and the ledger's
+ * approved total was short by that amount, with nothing on screen and nothing in a
+ * log. So the payload is READ, and a refusal UNDOES the local write it was the
+ * upload intent for: the supersession never happened, so the row goes back to
+ * `sent` and the next `hydrateChangeOrders` on the same tick adopts the server's
+ * real answer (with the signer's name) through the ordinary path.
  */
 export async function drainSupersessions(
   db: AbstractPowerSyncDatabase, supabase: SupabaseClient
 ) {
-  const r = { attempted: 0, uploaded: 0, retryable: 0 };
+  const r = { attempted: 0, uploaded: 0, refused: 0, retryable: 0 };
   const rows = await db.getAll<{
     change_order_id: string; superseded_by: string; at_ms: number; attempt_count: number;
   }>(
@@ -251,12 +361,18 @@ export async function drainSupersessions(
   for (const row of rows) {
     r.attempted++;
     try {
-      const { error } = await supabase.rpc('supersede_change_order_v1', {
+      const { data, error } = await supabase.rpc('supersede_change_order_v1', {
         p_id: row.change_order_id,
         p_superseded_by: row.superseded_by,
         p_at_ms: row.at_ms,
       });
       if (error) throw error;
+      if ((data as any)?.status === 'not_superseded') {
+        await undoRefusedSupersession(db, row.change_order_id,
+          String((data as any)?.actual ?? 'unknown'));
+        r.refused++;
+        continue;
+      }
       await db.execute(
         `UPDATE co_supersession SET uploaded_at_ms = ? WHERE change_order_id = ?`,
         [Date.now(), row.change_order_id]
@@ -293,10 +409,23 @@ export async function drainSupersessions(
  * pending-intent table is the version that does not require touching a file three
  * other requirements are also editing. Same outcome, one extra call, stated here
  * so it is not mistaken for belt-and-braces.
+ *
+ * SINCE THAT WAS WRITTEN, hydrate itself learned to refuse a status move REQ-LC7
+ * forbids, which covers `superseded → sent` on its own. This is kept anyway and it
+ * is not redundant: hydrate's guard stops the row being walked BACK, and this is
+ * what walks a row FORWARD when the local copy is still 'sent' because the
+ * supersession was written on a tick the pull also ran. Two different moments.
+ *
+ * `WHERE status = 'sent'` is REQ-LC7 T4 stated literally, which is what the spec
+ * requires of a writer: the pure predicate is a belt, a WHERE clause is what
+ * actually protects the row from a bulk update reaching a signed one.
  */
 export async function reassertSupersessions(db: AbstractPowerSyncDatabase) {
   const r = await db.execute(
-    `UPDATE change_order SET status = 'superseded'
+    `UPDATE change_order
+        SET status = 'superseded',
+            superseded_at_ms = COALESCE(superseded_at_ms,
+              (SELECT s.at_ms FROM co_supersession s WHERE s.change_order_id = change_order.id))
       WHERE status = 'sent'
         AND id IN (SELECT change_order_id FROM co_supersession WHERE uploaded_at_ms IS NULL)`
   );
