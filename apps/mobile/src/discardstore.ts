@@ -57,10 +57,37 @@ export const DISCARD_DDL = [
   `CREATE TRIGGER IF NOT EXISTS capture_discarded_no_delete
      BEFORE DELETE ON capture_discarded
      BEGIN SELECT RAISE(ABORT, 'a discard is a recorded act, not a draft'); END`,
+  // THE DELETED EXTRA'S OWN ROW. capture_discarded tombstones the CAPTURES; this
+  // tombstones the CHANGE ORDER, and its absence was the bug that made delete "not
+  // work": hydrateChangeOrders re-pulls every server change_order for the project on
+  // the 15s tick with INSERT OR IGNORE, so a synced draft deleted locally reappeared
+  // seconds later — the server still had it, and nothing local said "I deleted this"
+  // (hadar, 2026-07-28: "the page closes and it doesn't delete the extra"). hydrate now
+  // skips any id in here, so the delete survives every tick, offline, and a reinstall.
+  //
+  // MUTABLE, unlike capture_discarded: `server_done` flips 0→1 once the server's own
+  // row is gone, so this is sync bookkeeping (like discard_synced2), not an evidence
+  // record — hence no append-only trigger. A row is never removed: forgetting a
+  // tombstone is how the ghost comes back.
+  `CREATE TABLE IF NOT EXISTS change_order_discarded (
+      change_order_id TEXT NOT NULL PRIMARY KEY,
+      at_ms           INTEGER NOT NULL,
+      server_done     INTEGER NOT NULL DEFAULT 0
+   ) STRICT`,
 ];
 
 export async function ensureDiscardSchema(db: AbstractPowerSyncDatabase) {
   for (const s of DISCARD_DDL) await db.execute(s);
+}
+
+/** The extras this device has deleted, for hydrateChangeOrders to skip so the server
+ *  copy never resurrects a locally-deleted extra. */
+export async function discardedExtraIds(
+  db: AbstractPowerSyncDatabase
+): Promise<Set<string>> {
+  const rows = await db.getAll<{ change_order_id: string }>(
+    `SELECT change_order_id FROM change_order_discarded`);
+  return new Set(rows.map((r) => r.change_order_id));
 }
 
 /**
@@ -129,23 +156,64 @@ export async function discardExtra(
   // same world. Offline is different from refused, and only refusal stops us.
   let serverDone = false;
   if (client) {
-    const { error } = await client.rpc('discard_extra_own', {
-      p_change_order_id: changeOrderId,
-    });
-    if (error) {
-      // 42501 is the server saying no on the merits. Anything else -- no signal,
-      // a timeout -- is this device being unable to ask, which is not a no.
-      const refused = /not your extra|was sent/i.test(error.message ?? '');
-      if (refused) {
-        return { ok: false, reason: 'already_sent', deleted: 0, freedBytes: 0,
-                 serverPending: 0, serverDone: false };
-      }
-    } else serverDone = true;
+    try {
+      const { error } = await client.rpc('discard_extra_own', {
+        p_change_order_id: changeOrderId,
+      });
+      if (error) {
+        // 42501 is the server saying no on the merits. Anything else -- no signal,
+        // a timeout, the RPC not deployed, a local-only draft the server has never
+        // seen ("no such extra") -- is this device being unable to ask, which is not
+        // a no. Only a genuine refusal stops the local delete.
+        const refused = /not your extra|was sent/i.test(error.message ?? '');
+        // Logged either way: a delete that "does nothing" left no trace of WHY the
+        // server said no, and this path burned a device round. Now the reason is in
+        // the flight recorder — refusal vs unreachable vs not-deployed all read
+        // differently here (hadar, 2026-07-28).
+        void logDiag(db, 'discardExtra.rpc',
+          `${refused ? 'refused' : 'proceed'}: ${String(error.message ?? error).slice(0, 160)}`);
+        if (refused) {
+          return { ok: false, reason: 'already_sent', deleted: 0, freedBytes: 0,
+                   serverPending: 0, serverDone: false };
+        }
+      } else serverDone = true;
+    } catch (e: any) {
+      // rpc() THREW (a network or auth exception, not a returned error). Before this
+      // catch existed, the throw propagated out of discardExtra and the local delete
+      // below never ran — the tap "did nothing" on a flaky connection (mandate #7:
+      // no signal is the expected condition, never a reason a delete fails to happen).
+      // A throw is unreachable-server, not a refusal, so fall through and delete
+      // locally; the change_order_discarded tombstone + drainDiscardedExtras reconcile
+      // the cloud copy from here, and hydrate never resurrects it in the meantime.
+      void logDiag(db, 'discardExtra.rpc', `threw: ${String(e?.message ?? e).slice(0, 160)}`);
+    }
   }
+
+  // THE WHOLE PAIR GROUP, not just the voice. An extra's captures are its voice
+  // (the one in decision_version) AND the photos snapped with it — a fused capture
+  // writes each photo as its own capture_commit and ties them to the narration
+  // through capture_pair; the photos are NOT in decision_version. planDiscard only
+  // ever sees the decision_version captures, so on its own this tombstoned the voice
+  // and left every photo as a LIVE orphan: bytes still on disk, a row still in the
+  // gallery, and a capture_outbox entry retrying against an extra that no longer
+  // exists (hadar, 2026-07-27: deleting a draft "doesn't remove it"). Walk the pair
+  // from each deletable capture and take the group. Expanded from plan.deleteCaptures
+  // only, so a capture a sibling extra still uses (kept out of deleteCaptures) is
+  // never dragged in through a shared photo.
+  const groupIds = new Set(plan.deleteCaptures);
+  if (plan.deleteCaptures.length) {
+    const marks = plan.deleteCaptures.map(() => '?').join(',');
+    const sib = await db.getAll<{ capture_id: string }>(
+      `SELECT capture_id FROM capture_pair
+        WHERE pair_id IN (SELECT pair_id FROM capture_pair WHERE capture_id IN (${marks}))`,
+      plan.deleteCaptures);
+    for (const s of sib) groupIds.add(s.capture_id);
+  }
+  const ids = [...groupIds];
 
   // Paths read BEFORE the rows go, because capture_commit is where they live.
   const paths = new Map<string, { relpath: string; bytes: number }>();
-  for (const id of plan.deleteCaptures) {
+  for (const id of ids) {
     const r = await db.getAll<{ media_relpath: string; media_bytes: number }>(
       `SELECT media_relpath, media_bytes FROM capture_commit WHERE capture_id = ?`, [id]);
     if (r.length) paths.set(id, { relpath: r[0].media_relpath, bytes: r[0].media_bytes });
@@ -153,17 +221,31 @@ export async function discardExtra(
 
   const now = Date.now();
   await db.writeTransaction(async (tx) => {
-    for (const id of plan.deleteCaptures) {
+    for (const id of ids) {
       await tx.execute(
         `INSERT OR IGNORE INTO capture_discarded
            (capture_id, change_order_id, at_ms, bytes_freed) VALUES (?, ?, ?, ?)`,
         [id, changeOrderId, now, paths.get(id)?.bytes ?? null]);
+      // A deleted capture must never upload afterwards — resurrection by outbox is
+      // worse than a stale card — and its pair rows are grouping metadata with
+      // nothing left to group. Same cleanup discardCapture does, for the same bugs.
+      await tx.execute(`DELETE FROM capture_outbox WHERE capture_id = ?`, [id]);
+      await tx.execute(`DELETE FROM capture_pair WHERE capture_id = ?`, [id]);
     }
     // The outbox FIRST: an entry that outlived its change order would try to
     // upload a row that no longer exists and park forever with a reason nobody
     // can act on.
     await tx.execute(`DELETE FROM change_order_outbox WHERE change_order_id = ?`, [changeOrderId]);
     await tx.execute(`DELETE FROM change_order WHERE id = ?`, [changeOrderId]);
+    // THE TOMBSTONE, in the same transaction as the delete so the intent is as
+    // durable as the deletion. server_done is 1 only when 369 already dropped the
+    // server row this call; otherwise 0, and drainDiscardedExtras retries the RPC on
+    // later ticks. Either way hydrateChangeOrders now skips this id, so the extra
+    // cannot come back on the 15s tick — which is the bug the user actually saw.
+    await tx.execute(
+      `INSERT OR IGNORE INTO change_order_discarded (change_order_id, at_ms, server_done)
+       VALUES (?, ?, ?)`,
+      [changeOrderId, now, serverDone ? 1 : 0]);
   });
 
   // Bytes last, and each failure is survivable: the tombstone already says
@@ -181,7 +263,7 @@ export async function discardExtra(
   return {
     ok: true,
     serverDone,
-    deleted: plan.deleteCaptures.length,
+    deleted: ids.length,
     freedBytes,
     // Only still pending if the server was never reached. When 369 ran, the
     // objects are gone and there is nothing to warn about.
@@ -196,6 +278,64 @@ export async function discardedCaptureIds(
   const rows = await db.getAll<{ capture_id: string }>(
     `SELECT capture_id FROM capture_discarded`);
   return new Set(rows.map((r) => r.capture_id));
+}
+
+/**
+ * The cloud half of "delete an extra": drop the server's own change_order row for
+ * every extra deleted while the server was unreachable (server_done = 0).
+ *
+ * WHY IT EXISTS. discardExtra deletes the LOCAL row and tombstones, but 369
+ * (`discard_extra_own`) is the only thing that drops the SERVER row — and it was
+ * called once, at delete time, with no retry. Offline at that moment (the field's
+ * normal state, mandate #7), or a transient error, left the server row alive; hydrate
+ * skips it locally now, but on a reinstall or a second phone that tombstone is absent
+ * and the ghost returns. This closes that gap the same way drainServerDiscards closes
+ * it for capture bytes: idempotent, on the tick, until the server confirms.
+ *
+ * "no such extra" (42704) is DONE, not an error: the row is already gone, which is the
+ * goal. A genuine refusal ("was sent") is the rare offline race — the extra was sent
+ * after this device deleted its draft copy; the local delete stands, the server keeps
+ * its sent record, and we stop retrying and log it rather than hammer a no forever.
+ */
+export async function drainDiscardedExtras(
+  db: AbstractPowerSyncDatabase, client: SupabaseClient
+): Promise<{ attempted: number; done: number; kept: number }> {
+  const pending = await db.getAll<{ change_order_id: string }>(
+    `SELECT change_order_id FROM change_order_discarded WHERE server_done = 0 LIMIT 50`);
+  if (!pending.length) return { attempted: 0, done: 0, kept: 0 };
+
+  let done = 0, kept = 0;
+  for (const { change_order_id } of pending) {
+    let confirmed = false;
+    try {
+      const { error } = await client.rpc('discard_extra_own', {
+        p_change_order_id: change_order_id,
+      });
+      if (!error) confirmed = true;
+      else if (/no such extra/i.test(error.message ?? '')) confirmed = true;   // already gone = done
+      else if (/not your extra|was sent/i.test(error.message ?? '')) {
+        // The offline race. Stop retrying — the answer will not change — but record it.
+        void logDiag(db, 'ddrain.extra.kept',
+          `${change_order_id}: ${String(error.message ?? error).slice(0, 120)}`);
+        confirmed = true; kept++;
+      } else {
+        // Unreachable / not deployed: leave server_done = 0, try again next tick.
+        void logDiag(db, 'ddrain.extra',
+          `${change_order_id}: ${String(error.message ?? error).slice(0, 120)}`);
+        continue;
+      }
+    } catch (e: any) {
+      void logDiag(db, 'ddrain.extra', `${change_order_id}: threw ${String(e?.message ?? e).slice(0, 120)}`);
+      continue;   // offline; the tombstone waits, hydrate still skips it locally
+    }
+    if (confirmed) {
+      await db.execute(
+        `UPDATE change_order_discarded SET server_done = 1 WHERE change_order_id = ?`,
+        [change_order_id]);
+      done++;
+    }
+  }
+  return { attempted: pending.length, done, kept };
 }
 
 
