@@ -160,19 +160,40 @@ export function checkQuickAdd(raw: { name: string; phone: string }): QuickAddChe
   const typed = (raw.phone ?? '').trim();
   if (!typed) return { ok: true, name, phoneE164: null };
 
+  const e164 = toE164(typed);
+  if (!e164) return { ok: false, problemKey: 'r1.quickadd.badPhone' };
+  return { ok: true, name, phoneE164: e164 };
+}
+
+/**
+ * Normalise a typed number to E.164, or null if it cannot be read as one.
+ *
+ * EXTRACTED from checkQuickAdd (2026-08-01) so sign-in and quick-add share ONE
+ * parser. They must: the number a contractor types to log in and the number he
+ * types to reach a homeowner are the same kind of value, and two parsers would
+ * be two places for the +1 assumption above to drift. The reasoning in the
+ * comment above — never invent digits, show the assumption back — governs both.
+ *
+ * Null means "cannot be read", NOT "empty". Callers distinguish the two, because
+ * quick-add allows a blank number and sign-in does not.
+ */
+export function toE164(raw: string): string | null {
+  const typed = (raw ?? '').trim();
+  if (!typed) return null;
+
   const plus = typed.startsWith('+');
   const digits = typed.replace(/\D/g, '');
 
   if (plus) {
     // Already international: trust the digits, check only that they could be a
     // number at all. E.164 is 8-15 digits including the country code.
-    if (digits.length < 8 || digits.length > 15) return { ok: false, problemKey: 'r1.quickadd.badPhone' };
-    return { ok: true, name, phoneE164: `+${digits}` };
+    if (digits.length < 8 || digits.length > 15) return null;
+    return `+${digits}`;
   }
-  if (digits.length === 11 && digits.startsWith('1')) return { ok: true, name, phoneE164: `+${digits}` };
-  if (digits.length === 10) return { ok: true, name, phoneE164: `+1${digits}` };
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  if (digits.length === 10) return `+1${digits}`;
   // Anything else: we would be guessing which digits are the country code.
-  return { ok: false, problemKey: 'r1.quickadd.badPhone' };
+  return null;
 }
 
 /** Can an approval link actually reach this destination? Read by the Send button. */

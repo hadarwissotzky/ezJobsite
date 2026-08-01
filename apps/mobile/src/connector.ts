@@ -128,20 +128,34 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
     });
   }
 
-  async login(email: string, password: string) {
-    const { error } = await this.client.auth.signInWithPassword({ email, password });
+  /**
+   * Send a 6-digit code by SMS (REQ-ID1).
+   *
+   * THERE IS NO SEPARATE REGISTRATION (REQ-ID2). `signInWithOtp` creates the account
+   * on first use and returns a session on every use after, so the user never has to
+   * know whether they are signing up or signing in — a distinction that means nothing
+   * to someone who does not think in software, and which the old two-mode screen made
+   * them choose from before they had done anything.
+   *
+   * `phone` MUST already be E.164 (`toE164` in sendto.ts). This method does not parse:
+   * the number has to be shown back to the user before a code is sent (REQ-ID4), which
+   * means parsing has to happen where it can be displayed, not here.
+   */
+  async startPhoneAuth(phoneE164: string): Promise<void> {
+    const { error } = await this.client.auth.signInWithOtp({ phone: phoneE164 });
     if (error) throw error;
   }
 
   /**
-   * Registration. Returns whether a session came back immediately: with email
-   * confirmation OFF, signUp logs the user straight in (session present); with it
-   * ON, no session yet and the caller must tell the user to check their email.
+   * Exchange the code for a session. On success `onAuthStateChange` in App swaps the
+   * screen — this returns nothing, so there is one source of truth for "logged in"
+   * rather than two.
    */
-  async signUp(email: string, password: string): Promise<{ needsEmailConfirm: boolean }> {
-    const { data, error } = await this.client.auth.signUp({ email, password });
+  async verifyPhoneCode(phoneE164: string, code: string): Promise<void> {
+    const { error } = await this.client.auth.verifyOtp({
+      phone: phoneE164, token: code, type: 'sms',
+    });
     if (error) throw error;
-    return { needsEmailConfirm: !data.session };
   }
 
   async signOut() {
