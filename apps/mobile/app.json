@@ -92,7 +92,10 @@
     "updates": {
       "url": "https://u.expo.dev/2627bce9-ca41-4f4e-b50f-6d810818e651",
       "fallbackToCacheTimeout": 0,
-      "checkAutomatically": "ON_LOAD"
+      "checkAutomatically": "ON_LOAD",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
     },
     "owner": "hiloventuresgroup",
     "extra": {
