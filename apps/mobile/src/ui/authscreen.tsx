@@ -30,6 +30,7 @@ import * as Linking from 'expo-linking';
 import type { SupabaseConnector } from '../connector';
 import { displayPhone, toE164 } from '../sendto';
 import { t as T } from '../i18n';
+import { Icon } from './icon';
 
 const RESEND_AFTER_S = 60;
 const CODE_LEN = 6;
@@ -37,7 +38,8 @@ const CODE_LEN = 6;
 type Method = 'phone' | 'email';
 type Step = 'form' | 'confirm' | 'code';
 type Fail =
-  | { kind: 'net' | 'notArrived' | 'badCode' | 'cantSend' | 'badLogin' }
+  | { kind: 'net' | 'notArrived' | 'badCode' | 'cantSend' | 'badLogin'
+        | 'notConfirmed' | 'alreadyExists' | 'weakPassword' }
   | { kind: 'other'; text: string }
   | null;
 
@@ -46,7 +48,16 @@ function classify(e: any, phase: 'send' | 'verify' | 'login'): Fail {
   const status = e?.status ?? e?.code;
   if (/network|fetch|timed? ?out|connection|offline/i.test(text)) return { kind: 'net' };
   if (String(status) === '429' || /rate|too many|limit/i.test(text)) return { kind: 'notArrived' };
-  if (phase === 'login') return { kind: 'badLogin' };
+  // Supabase names the reason; discarding it and printing one generic line is how a
+  // user ends up retrying a password that was never the problem. `code` is the
+  // authoritative field; the message regex is the fallback for older shapes.
+  if (phase === 'login') {
+    const c = String(e?.code ?? e?.error_code ?? '');
+    if (c === 'email_not_confirmed' || /not confirmed/i.test(text)) return { kind: 'notConfirmed' };
+    if (c === 'user_already_exists' || /already registered|already exists/i.test(text)) return { kind: 'alreadyExists' };
+    if (c === 'weak_password' || /at least \d+ characters|weak password/i.test(text)) return { kind: 'weakPassword' };
+    return { kind: 'badLogin' };
+  }
   if (phase === 'verify' && /invalid|expired|incorrect|token/i.test(text)) return { kind: 'badCode' };
   if (phase === 'send') return { kind: 'cantSend' };
   return { kind: 'other', text };
@@ -64,6 +75,7 @@ export function AuthScreen({ connector }: { connector: SupabaseConnector }) {
   const [notice, setNotice] = React.useState<string | null>(null);
   const [left, setLeft] = React.useState(0);
   const [signUp, setSignUp] = React.useState(false);
+  const [showPw, setShowPw] = React.useState(false);
 
   // Derived every render, never cached: a stored copy is how the number shown and the
   // number texted come to disagree, which is what the confirm step exists to prevent.
@@ -139,6 +151,9 @@ export function AuthScreen({ connector }: { connector: SupabaseConnector }) {
     : T(fail.kind === 'net' ? 'auth.errNoSignal'
       : fail.kind === 'notArrived' ? 'auth.errNotArrived'
       : fail.kind === 'cantSend' ? 'auth.errCantSend'
+      : fail.kind === 'notConfirmed' ? 'auth.errNotConfirmed'
+      : fail.kind === 'alreadyExists' ? 'auth.errAlreadyExists'
+      : fail.kind === 'weakPassword' ? 'auth.errWeakPassword'
       : fail.kind === 'badLogin' ? 'auth.errBadLogin'
       : 'auth.errBadCode');
 
@@ -258,13 +273,30 @@ export function AuthScreen({ connector }: { connector: SupabaseConnector }) {
               autoCapitalize="none" autoCorrect={false}
               keyboardType="email-address" inputMode="email" textContentType="emailAddress"
             />
-            <TextInput
-              style={st.input} value={password}
-              onChangeText={(v) => { setPassword(v); reset(); }}
-              placeholder={T('auth.password')} placeholderTextColor="#8c959f"
-              autoCapitalize="none" secureTextEntry
-              textContentType={signUp ? 'newPassword' : 'password'}
-            />
+            {/* The reveal toggle. A password typed with gloves on, on a phone, with
+                autocorrect fighting you, is the single most mistyped field in the app —
+                and "That didn't work" cannot tell a typo from a wrong password. Letting
+                someone SEE what they typed removes the ambiguity before it becomes a
+                support question. */}
+            <View style={st.pwWrap}>
+              <TextInput
+                style={[st.input, st.pwInput]} value={password}
+                onChangeText={(v) => { setPassword(v); reset(); }}
+                placeholder={T('auth.password')} placeholderTextColor="#8c959f"
+                autoCapitalize="none" secureTextEntry={!showPw}
+                textContentType={signUp ? 'newPassword' : 'password'}
+              />
+              <Pressable
+                style={st.eye}
+                onPress={() => setShowPw((v) => !v)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityState={{ selected: showPw }}
+                accessibilityLabel={T(showPw ? 'auth.hidePassword' : 'auth.showPassword')}
+              >
+                <Icon name={showPw ? 'eyeOff' : 'eye'} size={22} color="#5E666E" />
+              </Pressable>
+            </View>
             <Pressable style={[st.btn, (!emailOk || busy) && st.btnOff]}
               disabled={!emailOk || busy} onPress={submitEmail}>
               {busy ? <ActivityIndicator color="#fff" /> : (
@@ -316,6 +348,14 @@ const st = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 15, fontSize: 18, color: '#151A1E', marginBottom: 12,
   },
   codeInput: { fontSize: 30, textAlign: 'center', letterSpacing: 10, fontWeight: '700' },
+  pwWrap: { position: 'relative', justifyContent: 'center' },
+  // Padding so long passwords never run under the icon.
+  pwInput: { paddingRight: 52 },
+  // 44pt touch target (mandate #3's floor) even though the glyph is 22.
+  eye: {
+    position: 'absolute', right: 0, top: 0, bottom: 12,
+    width: 52, alignItems: 'center', justifyContent: 'center',
+  },
   bigNumber: { fontSize: 30, fontWeight: '800', color: '#151A1E', textAlign: 'center', marginBottom: 14 },
   err: { color: '#8B5148', fontSize: 15, marginBottom: 10, textAlign: 'center' },
   notice: { color: '#536B49', fontSize: 15, marginBottom: 10, textAlign: 'center' },
