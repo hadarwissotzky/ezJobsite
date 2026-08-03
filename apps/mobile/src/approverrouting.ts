@@ -42,6 +42,37 @@ export const APPROVER_ROLES = [
 ] as const;
 export type ApproverRole = (typeof APPROVER_ROLES)[number];
 
+/**
+ * WHAT THIS PERSON IS IN THE CHAIN (hadar, 2026-07-31, simplified from a two-way
+ * homeowner/supply-chain flag: "they can select from homeowner, inspector, GC,
+ * sub-contractor, designer, architect").
+ *
+ * Stored in `project_approver.chain_side`, which is deliberately a free TEXT column:
+ * `role` carries a SQLite CHECK constraint that cannot be widened without rebuilding
+ * the table, and this list is the one that will keep growing as trades ask for their
+ * own word. Kept as its own fact rather than folded into `role` because role decides
+ * AUTHORITY (who may bind the client's money) and this decides POSITION — a designer
+ * may sit either side of me and only one of those two answers changes.
+ *
+ * `null`/absent = never asked. A third state, not a default.
+ */
+export const CLIENT_TYPES = [
+  'homeowner',
+  'general_contractor',
+  'sub_contractor',
+  'architect',
+  'designer',
+  'inspector',
+] as const;
+export type ClientType = (typeof CLIENT_TYPES)[number];
+export function isClientType(v: unknown): v is ClientType {
+  return typeof v === 'string' && (CLIENT_TYPES as readonly string[]).includes(v);
+}
+
+/** Older name, kept so existing call sites compile while the drawer lands. */
+export type ChainSide = ClientType;
+export const isChainSide = isClientType;
+
 export type Approver = {
   id: string;
   name: string;

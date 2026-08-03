@@ -32,8 +32,8 @@ import { sha256 } from 'js-sha256';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { t as t2 } from './i18n';
 import {
-  suggestApprover, isApproverRole, isExtraType,
-  type Approver, type ApproverRole, type ExtraType, type Suggestion,
+  suggestApprover, isApproverRole, isChainSide, isExtraType,
+  type Approver, type ApproverRole, type ChainSide, type ExtraType, type Suggestion,
 } from './approverrouting';
 
 export const APPROVER_DDL = [
@@ -101,6 +101,24 @@ export const APPROVER_DDL = [
 
 export async function ensureApproverSchema(db: AbstractPowerSyncDatabase) {
   for (const s of APPROVER_DDL) await db.execute(s);
+  // WHERE THIS PERSON SITS RELATIVE TO ME (hadar, 2026-07-31).
+  //
+  // `role` says what someone IS on the job (designer, GC). It does NOT say which
+  // side of me they stand on, and the same word flips meaning with my own position:
+  // "general contractor" is who I bill when I am the sub, and who I am when I hire
+  // one. An extra has to name who the decision is FOR, so the chain direction is its
+  // own fact:
+  //   'homeowner'    — the end client. The money starts here.
+  //   'supply_chain' — a link between me and that money (GC above me, a sub I direct,
+  //                    a designer or inspector whose sign-off gates the work).
+  // NULL = never asked. Kept distinguishable from an answer, exactly like
+  // `can_bind_money`: "we did not ask" and "we asked and they are a sub" are
+  // different facts, and only the first should prompt.
+  try {
+    await db.execute(`ALTER TABLE project_approver ADD COLUMN chain_side TEXT`);
+  } catch (e: any) {
+    if (!/duplicate column/i.test(String(e?.message ?? e))) throw e;
+  }
   // extra_type on the change order. Added here rather than in CHANGE_ORDER_DDL
   // because that array is a CREATE TABLE list and this has to run against tables
   // that already exist on phones in the field. SQLite has no ADD COLUMN IF NOT
@@ -145,6 +163,8 @@ async function enqueue(
 export type RosterMember = Approver & {
   phone: string | null;
   email: string | null;
+  /** Which side of me they stand on. null = never asked (a third state). */
+  chainSide: ChainSide | null;
 };
 
 export async function listRoster(
@@ -153,9 +173,9 @@ export async function listRoster(
   const rows = await db.getAll<{
     id: string; name: string; role: string;
     phone_e164: string | null; email: string | null; last_used_ms: number;
-    can_bind_money: number | null;
+    can_bind_money: number | null; chain_side: string | null;
   }>(
-    `SELECT id, name, role, phone_e164, email, last_used_ms, can_bind_money
+    `SELECT id, name, role, phone_e164, email, last_used_ms, can_bind_money, chain_side
        FROM project_approver
       WHERE project_id = ? AND status = 'active'
       ORDER BY last_used_ms DESC, name`,
@@ -170,6 +190,10 @@ export async function listRoster(
     // undefined (not false) when unset: bindsMoney() must fall through to the role
     // default, and `0 ?? x` would not.
     canBindMoney: r.can_bind_money == null ? undefined : r.can_bind_money === 1,
+    // An unrecognised value is treated as NEVER ASKED rather than coerced: quietly
+    // relabelling where someone sits in the chain is the same class of lie as
+    // relabelling their authority (see the role filter above).
+    chainSide: isChainSide(r.chain_side) ? r.chain_side : null,
   }));
 }
 
@@ -178,7 +202,10 @@ export async function addApprover(
   o: { projectId: string; name: string; role: ApproverRole;
        phone?: string | null; email?: string | null;
        /** Leave undefined when not asked; the role default then applies. */
-       canBindMoney?: boolean }
+       canBindMoney?: boolean;
+       /** Which side of me they stand on. Omit when not asked — that is a third
+        *  state, not a default (see the column comment in ensureApproverSchema). */
+       chainSide?: ChainSide | null }
 ): Promise<string> {
   const name = o.name.trim();
   if (!name) throw new Error('an approver needs a name');
@@ -190,22 +217,87 @@ export async function addApprover(
     id, project_id: o.projectId, name, role: o.role,
     phone_e164: o.phone?.trim() || null, email: o.email?.trim() || null,
     can_bind_money: o.canBindMoney == null ? null : (o.canBindMoney ? 1 : 0),
+    chain_side: o.chainSide ?? null,
     created_at_ms: now,
   };
   await db.writeTransaction(async (tx) => {
     await tx.execute(
       `INSERT INTO project_approver
          (id, project_id, name, role, phone_e164, email, can_bind_money,
-          last_used_ms, created_at_ms)
-       VALUES (?,?,?,?,?,?,?,0,?)`,
+          chain_side, last_used_ms, created_at_ms)
+       VALUES (?,?,?,?,?,?,?,?,0,?)`,
       [id, o.projectId, name, o.role, payload.phone_e164, payload.email,
-       payload.can_bind_money, now]
+       payload.can_bind_money, payload.chain_side, now]
     );
     // Atomic with the row, same reason as addParty: a crash between them leaves an
     // approver only this phone knows about, and the next device would re-add them.
     await enqueue(tx, 'add', id, payload, now);
   });
   return id;
+}
+
+/**
+ * THE CLIENT DRAWER'S ONE WRITE (hadar, 2026-07-31: "roster is the source of truth").
+ *
+ * Name + phone + where-they-sit belong to the PERSON, not to one extra, so they are
+ * stored once on the roster and every extra on the job reads the same row. Matching is
+ * by name, case- and space-insensitively, for the reason `PeopleSection` already
+ * states: these strings are typed by hand in more than one place and will not agree on
+ * capitalisation, and two rows for one human is how a job ends up with two answers to
+ * "who approves this".
+ *
+ * An existing row is UPDATED, never duplicated — and a field the caller left blank
+ * does not erase what is already known (COALESCE-style at the call site): a contractor
+ * who opens the drawer to answer the chain question must not lose the phone number
+ * somebody else entered.
+ *
+ * Returns the roster id so the caller can point the extra at it.
+ */
+export async function saveClientApprover(
+  db: AbstractPowerSyncDatabase,
+  o: { projectId: string; name: string; phone?: string | null;
+       chainSide?: ChainSide | null; role?: ApproverRole }
+): Promise<string> {
+  const name = o.name.trim();
+  if (!name) throw new Error('a client needs a name');
+  const key = name.toLowerCase().replace(/\s+/g, ' ');
+
+  const existing = await db.getAll<{ id: string; name: string }>(
+    `SELECT id, name FROM project_approver WHERE project_id = ? AND status = 'active'`,
+    [o.projectId]);
+  const hit = existing.find(
+    (r) => r.name.trim().toLowerCase().replace(/\s+/g, ' ') === key);
+
+  if (!hit) {
+    return addApprover(db, {
+      projectId: o.projectId, name,
+      // The chain answer implies the role we would otherwise have to ask for twice:
+      // a homeowner IS the owner role. Anything else stays 'other' until someone
+      // says more — a guess about authority is exactly what BINDS_MONEY_BY_DEFAULT
+      // refuses to make silently.
+      role: o.role ?? (o.chainSide === 'homeowner' ? 'owner' : 'other'),
+      phone: o.phone ?? null,
+      chainSide: o.chainSide ?? null,
+    });
+  }
+
+  const now = Date.now();
+  const phone = o.phone?.trim() || null;
+  await db.writeTransaction(async (tx) => {
+    // COALESCE on phone: a blank field means "not answered here", never "erase it".
+    // chain_side is passed straight through — the drawer always sends the current
+    // answer, including a deliberate null.
+    await tx.execute(
+      `UPDATE project_approver
+          SET name = ?, phone_e164 = COALESCE(?, phone_e164), chain_side = ?
+        WHERE id = ?`,
+      [name, phone, o.chainSide ?? null, hit.id]);
+    await enqueue(tx, 'add', hit.id, {
+      id: hit.id, project_id: o.projectId, name,
+      phone_e164: phone, chain_side: o.chainSide ?? null, at_ms: now,
+    }, now);
+  });
+  return hit.id;
 }
 
 /**

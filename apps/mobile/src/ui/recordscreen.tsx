@@ -93,6 +93,9 @@ export type RecordLifecycle = {
   /** `canRemind(...)` at load time. A refusal carries its reason so the button is
    *  never silently dead. */
   remind: RemindVerdict;
+  /** Which version this row is (1 = original), derived from the supersession lineage
+   *  by `versionNumber` — never stored. */
+  version: number;
 };
 
 export type RecordScreenProps = {
@@ -130,6 +133,19 @@ export type RecordScreenProps = {
   onRevise: () => void;
   /** Open one collapsed field / the detail subscreens (extradetails.tsx). */
   onOpenDetail: (field: ExtraDetailField) => void;
+  /** Rename from the header, in place. Stage 1 only — passed straight to the draft
+   *  screen, which gates it on `isDraft`. */
+  onRetitle?: (next: string) => void;
+  /** Open the client drawer (Stage 1). */
+  onEditClient?: () => void;
+  /** The client's type on this job, already translated. */
+  clientTypeLabel?: string | null;
+  /** Record a voice note onto this extra — its own act, not the camera's. */
+  onAddVoice?: () => void;
+  /** Add ANOTHER person on the chain (architect, inspector, the GC above you) without
+   *  changing who this extra is for. Offered once a client exists — before that, the
+   *  thing to do is name the client, not collect bystanders. */
+  onAddContact?: () => void;
   onViewHistory: () => void;
   /** The whole price + terms composer — the draft screen's secondary action. */
   onEditDetails: () => void;
@@ -146,24 +162,11 @@ export type RecordScreenProps = {
   onDelete?: () => void;
 };
 
-/**
- * The draft screen's pinned bar, by arithmetic rather than by `onLayout`: it is
- * composed inside `ExtraDraftScreen`, which this file does not own, so there is
- * nothing here to measure. A FAB that covers Send is the exact bug the old `barH`
- * measurement existed to prevent — if that bar's composition changes, this number
- * is what must change.
- *
- * IT IS THE WORST CASE, NOT THE BEST ONE, and 160 was the best one. That figure
- * counted 12 top + 58 Edit details + 10 gap + 58 Send + 22 bottom and simply omitted
- * `SendReason` — a variable-height child in the same `gap: 10` stack that renders
- * whenever Send is refused, which on a brand-new extra is TWO red lines. The bar is
- * then ~212pt tall and the FAB, pinned at 172, sat over the right-hand end of the
- * sentences telling the contractor why the button under his thumb is dead. So the
- * number covers both blockers plus its gap: 12 + 42 + 10 + 58 + 10 + 58 + 22.
- * Over-clearing on a bar with no reason costs a little empty space; under-clearing
- * costs the explanation.
- */
-const DRAFT_BAR_H = 212;
+/* The draft bar's height constant lived here, twice guessed (160, then 212) so a
+ * floating capture button could be pinned clear of it. Both guesses were arithmetic
+ * over a bar composed in another file, and both were wrong in the field. The button
+ * moved into the content, so there is no longer anything to clear and nothing to
+ * keep in sync — see the note where it used to render. */
 
 export function RecordScreen(props: RecordScreenProps) {
   const { rec, lifecycle } = props;
@@ -180,12 +183,18 @@ export function RecordScreen(props: RecordScreenProps) {
   const approver: NegotiationPerson | null = React.useMemo(() => {
     const p = facts?.people.find((x) => x.kind === 'approver');
     if (!p) return null;
-    return { name: p.name, role: isApproverRole(p.roleSlug) ? roleLabel(p.roleSlug) : undefined };
+    // The design labels the approver "<role> / Approver" (e.g. "Homeowner / Approver"):
+    // the role they hold AND that they are the one who signs. Falls back to just the
+    // "Approver" word when no role slug is on record.
+    const role = isApproverRole(p.roleSlug)
+      ? `${roleLabel(p.roleSlug)} / ${t('erec.approverRole')}`
+      : t('erec.approverRole');
+    return { name: p.name, role };
   }, [facts]);
   const contributors: NegotiationPerson[] = React.useMemo(
     () => (facts?.people ?? [])
       .filter((x) => x.kind !== 'approver')
-      .map((x) => ({ name: x.name })),
+      .map((x) => ({ name: x.name, role: contributionRole(x.contributions) })),
     [facts]);
 
   // Stage 3 is SEALED (REQ-LC30) and a retired or refused version is sealed by the
@@ -221,6 +230,10 @@ export function RecordScreen(props: RecordScreenProps) {
           requestedBy={lifecycle.requestedBy}
           capturedWith={capturedWith(rec)}
           onBack={props.onBack}
+          onRetitle={props.onRetitle}
+          onEditClient={props.onEditClient}
+          clientTypeLabel={props.clientTypeLabel}
+          onAddContact={props.onAddContact}
           onEditDescription={() => props.onOpenDetail('scope')}
           onEditCost={() => props.onOpenDetail('cost')}
           onEditBilling={() => props.onOpenDetail('billing')}
@@ -238,6 +251,7 @@ export function RecordScreen(props: RecordScreenProps) {
       return (
         <ExtraLockedScreen
           rec={rec}
+          kicker={kicker(rec)}
           agreed={{
             billingTiming: lifecycle.billingTiming,
             scheduleEffect: lifecycle.scheduleEffect,
@@ -251,7 +265,13 @@ export function RecordScreen(props: RecordScreenProps) {
           // "time not recorded" line under the signed step — redundant, not wrong —
           // and the alternative would be guessing which merged rows are the
           // signature, which is a worse failure on the record that settles disputes.
-          chain={rec.history}
+          version={lifecycle.version}
+          // THE CONTRACT SAYS "do NOT include the approval itself", and this passed
+          // the whole timeline — so the sealed screen rendered the signature twice:
+          // once from the frozen snapshot and once from `co.approved_at_ms`, which can
+          // be a different time or "time not recorded". Two signature times stacked on
+          // an approval record is the exact failure that screen exists to prevent.
+          chain={rec.history.filter((e) => e.kind !== 'signed')}
           approver={approver}
           onBack={props.onBack}
           onViewSignedApproval={props.onViewSignedApproval}
@@ -289,6 +309,12 @@ export function RecordScreen(props: RecordScreenProps) {
         onRemind={props.onRemind}
         onRevise={props.onRevise}
         onOpenDetail={props.onOpenDetail}
+        onAddContact={props.onAddContact}
+        onAddVoice={mayAppend ? props.onAddVoice : undefined}
+        version={lifecycle.version}
+        // The SAME single lightbox the other two stages use — one viewer for the
+        // whole record. Legal on a frozen extra: looking at evidence is not editing it.
+        onPressPhoto={(uri) => setZoom(uri)}
         onViewHistory={props.onViewHistory}
         // DELIBERATELY ABSENT on every status that reaches this screen. REQ-LC31
         // rule 1 lets an origin link point only at an APPROVED row, and
@@ -298,6 +324,9 @@ export function RecordScreen(props: RecordScreenProps) {
         // also "a new extra linked by origin", which rule 1 forbids; that conflict
         // is flagged in changeorder.ts and is not resolved by hiding a button.)
         onNewLinkedExtra={undefined}
+        // Same gate the removed FAB carried: capture is offered only where the
+        // record may still grow, so a locked one is never handed the callback.
+        onCapture={mayAppend ? props.onCapture : undefined}
       />
     );
   })();
@@ -319,29 +348,19 @@ export function RecordScreen(props: RecordScreenProps) {
         </View>
       )}
 
-      {mayAppend && (
-        <Pressable
-          onPress={props.onCapture}
-          accessibilityLabel={t('erec.capture')}
-          style={{
-            // Above whatever bar the stage screen pinned — never covering Send or
-            // the successor row — centered at the thumb when there is none.
-            position: 'absolute',
-            bottom: stage === 'draft' ? DRAFT_BAR_H + 12 : successorBar ? 104 : 26,
-            ...(stage === 'draft' || successorBar
-              ? { right: 16 }
-              : { alignSelf: 'center' as const }),
-            width: 72, height: 72, borderRadius: 36, backgroundColor: C.orange,
-            alignItems: 'center', justifyContent: 'center',
-            shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 12,
-            shadowOffset: { width: 0, height: 6 }, elevation: 8,
-          }}>
-          <Text style={{ fontFamily: F.disp, fontSize: 12, color: '#fff', letterSpacing: 1 }}>
-            {t('erec.capture').toUpperCase()}
-          </Text>
-        </Pressable>
-      )}
-
+      {/* THE FLOATING CAPTURE BUTTON IS GONE, and its absence is the fix rather than
+          a regression. A 72pt circle pinned over a ScrollView occludes whatever the
+          viewport is showing: it covered the third photo of the evidence grid on the
+          draft and the approver's row on the negotiation screen — the one line that
+          says who you are waiting on. Scroll padding cannot fix that, because the
+          occlusion happens MID-scroll, not at the end; padding only buys clearance
+          once you have reached the bottom.
+          Capture did not go away, it moved into the content where the design has it:
+          the draft's "+ Add more" tile inside the evidence grid (already wired to
+          this same `onCapture`), and the negotiation screen's "Add photo or voice
+          note" under the conversation. Both are reachable without covering anything.
+          `mayAppend` still governs WHETHER capture is offered — a locked record must
+          never grow — it is now enforced by which screen receives the callback. */}
       <PhotoLightbox uri={zoom} onClose={() => setZoom(null)} />
     </View>
   );
@@ -379,9 +398,32 @@ export function PhotoLightbox({ uri, onClose }: { uri: string | null; onClose: (
 
 /** "Extra · Miller — Hall Bath". Each segment is dropped when its fact is missing
  *  rather than replaced: a made-up job name is a worse answer than a shorter one. */
+/** A crew member's People-card role is their CONTRIBUTION ("Captured", "Priced & sent"),
+ *  in the fixed captured→priced→sent order — the design labels the contractor side by
+ *  what each person DID, not a generic "Crew". Returns undefined (→ the "Crew" fallback)
+ *  when no contribution is on record. */
+const CONTRIB_ORDER = ['erec.capturedBy', 'erec.pricedBy', 'erec.sentBy'] as const;
+const CONTRIB_SHORT: Record<string, string> = {
+  'erec.capturedBy': 'erec.roleCaptured',
+  'erec.pricedBy': 'erec.rolePriced',
+  'erec.sentBy': 'erec.roleSent',
+};
+function contributionRole(contribs: { roleKey: string }[]): string | undefined {
+  const keys = CONTRIB_ORDER.filter((k) => contribs.some((c) => c.roleKey === k));
+  if (keys.length === 0) return undefined;
+  // Later labels are stored lower-case so a join reads "Priced & sent"; capitalise the
+  // first character so a single "sent" still renders "Sent".
+  const s = keys.map((k) => t(CONTRIB_SHORT[k])).join(' & ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function kicker(rec: ExtraRecord): string {
   const word = t('erec.kindExtra');
-  return rec.jobName ? `${word} · ${rec.jobName}` : word;
+  // The REAL per-job number (`change_order.co_number`), replacing the static "#4" that
+  // stood in before the column existed. A row with no number yet prints none — a
+  // made-up number on the line that identifies the document is worse than a short line.
+  const head = rec.extraNo != null ? `${word} #${rec.extraNo}` : word;
+  return rec.jobName ? `${head} · ${rec.jobName}` : head;
 }
 
 /** How this extra was captured, for the draft screen's stored-fact row. A stored

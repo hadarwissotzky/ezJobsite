@@ -17,9 +17,10 @@ import { StyleSheet, TextStyle } from 'react-native';
 import { palette, radii, shadows, statusTints } from './tokens';
 
 export const C = {
-  ink: palette.ink,             // #151A1E — primary text + dark primary buttons
-  paper: palette.background,    // #F7F4EE — warm off-white app background
-  card: palette.surface,        // #FFFDFC — cards / sheets
+  ink: palette.ink,             // #161918 — primary text + dark primary buttons
+  paper: palette.background,    // #F5F1E8 — warm cream app background
+  card: palette.surface,        // #FBF8F1 — cards / sheets (cream, never white)
+  raised: palette.surfaceRaised,// #FFFDF8 — a surface above a card
   surfaceMuted: palette.surfaceMuted, // #EFEBE3 — insets, neutral chips, pressed
   // `orange` is the historical name for THE accent; it now carries the OLIVE BRAND.
   orange: palette.brand,        // #4E6243 — capture/send/money accent (was #FF5A00)
@@ -27,8 +28,11 @@ export const C = {
   brand: palette.brand,
   brandDark: palette.brandDark,
   brandSoft: palette.brandSoft, // #E7ECDD — brand-tinted fill (approved/selected bg)
-  steel: palette.textSecondary, // #5E666E — secondary text
-  line: palette.border,         // #D5D0C7 — hairlines/borders
+  steel: palette.textSecondary, // #555B57 — secondary text
+  muted: palette.textMuted,     // #777C78 — metadata: timestamps, counts, headings
+  disabled: palette.textDisabled,// #A4A7A3 — disabled labels only, never real info
+  line: palette.border,         // #D8D1C4 — dividers / hairlines / borders
+  brandLine: palette.brandBorder,// #B9C6AF — hairline on a brand-tinted surface
   approve: palette.statusApproved, // #536B49 — approved / confirmed (muted forest)
   caution: palette.statusWaiting,  // #A47A3F — waiting / pending (muted ochre)
   danger: palette.statusFailed,    // #8B5148 — failed / declined / destructive (muted brick)
@@ -77,7 +81,11 @@ export const money: TextStyle = { fontFamily: F.disp, fontVariant: ['tabular-num
 export const T = StyleSheet.create({
   screen: { flex: 1, backgroundColor: C.paper },
   card: {
-    backgroundColor: C.card, borderColor: C.line, borderWidth: 1,
+    // The RAISED surface (#FFFDF8), not the flat card tone (#FBF8F1). Against the
+    // cream page (#F5F1E8) the flat tone was one shade off the background and the
+    // card boundary vanished, so RAW / SCOPE / READY-TO-SEND blurred into one field
+    // instead of reading as three cards. The brighter surface is what separates them.
+    backgroundColor: C.raised, borderColor: C.line, borderWidth: 1,
     borderRadius: radii.lg, padding: 14, marginBottom: 10, ...shadows.card,
   },
   body: { fontFamily: F.body, fontSize: 16, color: C.ink, lineHeight: 23 },
@@ -95,7 +103,7 @@ export const T = StyleSheet.create({
   btnGhostText: { fontFamily: F.bodySemi, fontSize: 15.5, color: C.steel, letterSpacing: 0.2 },
   // Status chip — the angled cut is the prototype's signature (a cut ticket edge).
   chip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 },
-  chipText: { fontFamily: F.dispSemi, fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.2, color: '#fff' },
+  chipText: { fontFamily: F.dispSemi, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, color: '#fff' },
 });
 
 /**

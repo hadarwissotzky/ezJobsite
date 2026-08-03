@@ -42,14 +42,14 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ApprovalPanel } from '../eventlog';
 import type { ExtraRecord, RecordEvent } from '../record';
 import type { FlowTerms } from '../flowterms';
-import { chipKey } from '../extrastatus';
 import { t } from '../i18n';
 import { Icon, type IconName } from './icon';
 import {
-  Button, Card, Chip, PersonRow, PhotoGrid, ScreenHeader, Section, StatusBanner,
+  APP_NAME, Button, MoneyBlock, Card, PersonRow, PhotoGrid, Row, ScreenHeader, Section, StatusBanner, SyncedPill,
   type PhotoTile,
 } from './kit';
 import { RecordApproval } from './recordapproval';
+import { RecordingsCard } from './recordings';
 import { C, F, T, label as labelStyle, money as moneyStyle, tint, type Tone } from './theme';
 import { radii, touchTargets } from './tokens';
 
@@ -77,11 +77,22 @@ export type ExtraLockedProps = {
   approver: { name: string; role?: string; photoUri?: string | null } | null;
   /** What the approver typed back with their answer, when they typed anything. */
   approverNote?: string | null;
+  /** Which version this row is (1 = the original), derived from the lineage. */
+  version?: number;
+  /** The context line above the title — "Extra · Miller — Hall Bath". Same prop and
+   *  same position as the other two stage screens; this screen used to smuggle it
+   *  into the back control instead. */
+  kicker: string;
   onBack: () => void;
   /** Open the signed approval document — the server's copy, which is the one that
    *  outranks anything this device holds. */
   onViewSignedApproval: () => void;
   onViewFullHistory: () => void;
+  /** Open the version history ("Current version: V2 → View previous versions"). Optional;
+   *  falls back to full history until a versions screen exists. */
+  onViewVersions?: () => void;
+  /** Open the conversation that led to approval. Optional; falls back to full history. */
+  onViewConversation?: () => void;
   /** D6 / REQ-LC31: start a NEW INDEPENDENT extra linked to this one by origin. It must
    *  not edit, supersede or amend this record. The button says so on screen too — a rule
    *  that lives only in a comment is a rule the person tapping never learns. */
@@ -97,6 +108,8 @@ export type ExtraLockedProps = {
    * tiles rather than a control that does nothing.
    */
   onPressPhoto?: (uri: string) => void;
+  /** DEV ONLY (__fixturelocked): scroll to Y after mount for screenshots. */
+  _fixtureScrollY?: number;
 };
 
 export function ExtraLockedScreen(props: ExtraLockedProps) {
@@ -113,39 +126,53 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
     : t('elock.approvedNoDetail');
 
   const photos: PhotoTile[] = rec.photos.map((p) => ({
-    key: p.captureId, uri: p.uri, present: p.present, caption: p.at,
+    key: p.captureId, uri: p.uri, present: p.present,
   }));
 
   const schedule = scheduleTerm(agreed);
   const billing = billingTerm(agreed);
   const excluded = agreed.exclusions?.trim() ?? '';
+  const lockScroll = React.useRef<ScrollView>(null);
+  React.useEffect(() => {
+    if (props._fixtureScrollY != null) lockScroll.current?.scrollTo({ y: props._fixtureScrollY, animated: false });
+  }, [props._fixtureScrollY]);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.paper }}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingTop: 0, paddingBottom: 48 }}>
-        {/* The job rides in the back control rather than as a kicker line above the
-            title: `ScreenHeader` owns the 54pt status-bar clearance and has no slot
-            above its title, and re-deriving that clearance here is the exact bug it
-            exists to prevent (a back control under the iPhone clock, shipped once). */}
+      <ScrollView ref={lockScroll} contentContainerStyle={{ padding: 18, paddingTop: 0, paddingBottom: 48 }}>
+        {/* The job used to ride INSIDE the back control here, because ScreenHeader
+            had no kicker slot — so this screen's back button read "‹ 1151 Stanyan St"
+            while the other two read "‹ Job". Same missing prop, a third workaround.
+            The job belongs in the kicker, where it names the thing you are reading;
+            the back control names where the tap goes. */}
         <ScreenHeader
           title={rec.title}
+          kicker={props.kicker}
+          // GATED, like both sibling screens. It was unconditional: an approved record
+          // that had never reached the server still displayed "Synced" — a specific
+          // false claim about whether the signed record exists anywhere but this
+          // handset, on the one screen built for a dispute (mandate #1).
+          kickerRight={rec.synced ? <SyncedPill label={t('neg.synced')} /> : undefined}
+          navTitle={APP_NAME}
           onBack={props.onBack}
-          backLabel={rec.jobName ?? t('erec.back')}
-          right={<Chip kind="approved" label={t(chipKey('approved'))} />}
+          backLabel={t('erec.back')}
         />
 
+        {!rec.synced && (
+          <Text style={[T.bodySteel, { fontSize: 12, marginTop: 6 }]}>{t('erec.onPhone')}</Text>
+        )}
+
         {rec.priced ? (
-          <View style={st.moneyRow}>
-            <Text style={st.money}>{rec.amount}</Text>
-            <Text style={T.bodySteel}>
-              {rec.nte ? t({ k: 'erec.nte', p: { amount: rec.nte } }) : t('erec.fixed')}
-              {rec.isMini ? ` · ${t('erec.mini')}` : ''}
-            </Text>
-          </View>
+          <MoneyBlock
+            amount={rec.amount}
+            green
+            subtitle={`${rec.nte ? t({ k: 'erec.nte', p: { amount: rec.nte } }) : t('erec.fixed')}`
+              + `${rec.isMini ? ` · ${t('erec.mini')}` : ''} · ${t('erec.yourPrice')}`}
+          />
         ) : (
           // Never "—" and never "no cost change": one is a dash posing as an amount, the
           // other tells the reader the work was free. What is true is narrower than both.
-          <Text style={st.noAmount}>{t('elock.noAmount')}</Text>
+          <MoneyBlock amount={t('elock.noAmount')} muted />
         )}
 
         {/* ABOVE the green banner on purpose. Both of these say the reader cannot trust
@@ -161,69 +188,135 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
             title={t('elock.snapMissingTitle')} body={t('elock.snapMissingBody')} />
         )}
 
-        <StatusBanner kind="approved" title={t('elock.signedApproved')} detail={detail} />
+        {/* ONE solid block, not a divided card: a filled check disc on the left, the
+            title beside it, and the approval lines tight underneath — the design's
+            shape. The shared StatusBanner splits title/detail with a rule, which is
+            right for the negotiation stage and wrong here. */}
+        <View style={st.sealBanner}>
+          <View style={st.sealDisc}>
+            <Icon name="check" size={20} color={C.raised} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={st.sealTitle}>{t('elock.signedApproved')}</Text>
+            <Text style={st.sealLine}>{detail}</Text>
+          </View>
+        </View>
 
-        <Notice tone="neutral" icon="lock"
-          title={t('elock.lockedTitle')} body={t('elock.lockedBody')} />
+        {/* Compact lock strip: icon + two quiet lines, no bold heading — the design
+            states the fact, it does not shout it. */}
+        <View style={st.lockStrip}>
+          <Icon name="lock" size={20} color={C.ink} />
+          <View style={{ flex: 1 }}>
+            <Text style={st.lockLine}>{t('elock.lockedTitle')}</Text>
+            <Text style={st.lockLine}>{t('elock.lockedBody')}</Text>
+          </View>
+        </View>
 
-        <Section title={t('elock.agreedTitle')}>
-          {/* `scope` is the frozen column, so it is both the screen's title and the
-              document's first term, and it is written twice on purpose: the title is
-              chrome, this is the clause. The mockup's separate "included" row has no
-              second frozen column behind it — the only candidates are `summary` (not
-              frozen, ruled outside the instrument by REQ-LC43) and this same text — so
-              rather than print one of them twice under two headings, or promote a
-              mutable sentence to an agreed term, there is one scope row. */}
-          <Term title={t('elock.rowScope')}>
-            <TermText text={rec.title} stated />
-          </Term>
+        {/* Version — its own card, above the agreed terms. */}
+        <Card style={st.navCard}>
+          {/* The REAL version, from the supersession lineage. A v1 record says
+              "Original" and offers no link — a chevron to a list of previous versions
+              that do not exist is a control that cannot work. */}
+          <Row
+            icon="layers"
+            label={t({ k: 'elock.currentVersion', p: { n: props.version ?? 1 } })}
+            value={(props.version ?? 1) > 1 ? t('elock.viewPrevious') : t('elock.noPrevious')}
+            chevron={(props.version ?? 1) > 1}
+            onPress={(props.version ?? 1) > 1
+              ? (props.onViewVersions ?? props.onViewFullHistory) : undefined}
+          />
+        </Card>
 
-          <Term title={t('elock.rowExclusions')}>
-            <TermText text={excluded || t('elock.exclNone')} stated={!!excluded} />
-          </Term>
+        {/* The two "views" that led to the seal — conversation + signature. */}
+        <Card style={st.navCard}>
+          <Row
+            icon="message"
+            label={t('elock.convTitle')}
+            sub={t('elock.convBody')}
+            chevron
+            divider
+            onPress={props.onViewConversation ?? props.onViewFullHistory}
+          />
+          <Row
+            icon="edit"
+            label={t('elock.sigTitle')}
+            sub={t('elock.sigBody')}
+            chevron
+            onPress={props.onViewSignedApproval}
+          />
+        </Card>
 
-          <Term title={t('elock.rowPhotos')}>
-            {photos.length === 0 ? (
-              <TermText text={t('elock.photosNone')} stated={false} />
-            ) : (
-              <>
-                {/* No `onAddMore`: a frozen record's evidence cannot grow. A file the
-                    row promises but the phone no longer holds renders as a NAMED
-                    missing tile, never a blank square (mandate #1). */}
-                <PhotoGrid
-                  photos={photos}
-                  missingLabel={t('erec.evidenceMissing')}
-                  onPressPhoto={props.onPressPhoto
-                    ? (photo) => props.onPressPhoto?.(photo.uri) : undefined}
-                />
-                {rec.photosTruncated > 0 && (
-                  <Text style={st.truncated}>
-                    {t({ k: 'erec.evidenceMore', p: { n: rec.photosTruncated } })}
-                  </Text>
-                )}
-              </>
-            )}
-          </Term>
+        {/* What was agreed — a plain card of rows (no section header). Scope/included/
+            excluded open the signed document; the flow terms show their agreed value. */}
+        <Card style={st.card12}>
+          <Row
+            icon="doc"
+            label={t('elock.rowScope')}
+            value={t('draft.showMore')}
+            chevron
+            divider
+            onPress={props.onViewSignedApproval}
+          />
+          <Row
+            icon="checklist"
+            label={t('elock.rowIncluded')}
+            value={t('draft.showMore')}
+            chevron
+            divider
+            onPress={props.onViewSignedApproval}
+          />
+          <Row
+            icon="excluded"
+            label={t('elock.rowExclusions')}
+            value={excluded ? t('draft.showMore') : t('elock.exclNone')}
+            chevron
+            divider
+            onPress={props.onViewSignedApproval}
+          />
+          <Row
+            icon="image"
+            label={t('elock.rowPhotos')}
+            value={photos.length > 0
+              ? t({ k: 'neg.photosN', p: { n: photos.length } })
+              : t('elock.photosNone')}
+            chevron={photos.length > 0}
+            divider
+            onPress={photos.length > 0 && props.onPressPhoto
+              ? () => props.onPressPhoto?.(photos[0].uri) : undefined}
+          />
+          {photos.length > 0 && (
+            <View style={{ marginLeft: 36, marginTop: 10, marginBottom: 12 }}>
+              <PhotoGrid
+                photos={photos}
+                missingLabel={t('erec.evidenceMissing')}
+                onPressPhoto={props.onPressPhoto
+                  ? (photo) => props.onPressPhoto?.(photo.uri) : undefined}
+                tileSize={62}
+              />
+            </View>
+          )}
+          <Row
+            icon="clock"
+            label={t('elock.rowSchedule')}
+            value={schedule.text}
+            divider
+          />
+          <Row
+            icon="payment"
+            label={t('elock.rowBilling')}
+            value={billing.text}
+          />
+        </Card>
 
-          <Term title={t('elock.rowSchedule')}>
-            <TermText text={schedule.text} stated={schedule.stated} />
-          </Term>
-
-          <Term title={t('elock.rowBilling')}>
-            <TermText text={billing.text} stated={billing.stated} />
-          </Term>
-        </Section>
+        {/* THE ORIGINAL RECORDINGS, on the one screen built for a dispute. Listening
+            is not editing, so this is no exception to the seal — and "what exactly was
+            agreed" is not answerable from a summary when the audio is the record. */}
+        <RecordingsCard voices={rec.voices} />
 
         <Section title={t('elock.recordTitle')}>
-          {props.approver && (
-            <PersonRow
-              name={props.approver.name}
-              role={props.approver.role ?? t('erec.approverRole')}
-              photoUri={props.approver.photoUri}
-              kind="approver"
-            />
-          )}
-          {/* Newest first, and the approval is always the newest thing that happened. */}
+          {/* No separate approver row: the design's record starts straight at
+              "Approved by <name>". The first step names the approver; a person row
+              above it repeated her. Newest first — approval is the newest event. */}
           <ApprovalStep
             what={snap?.signedName
               ? t({ k: 'elock.stepApproved', p: { name: snap.signedName } })
@@ -236,28 +329,26 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
           ))}
         </Section>
 
-        {/* The frozen instrument, quoted verbatim by the component that already owns that
-            rendering. Outside the Section because it draws its own card. */}
-        <RecordApproval approval={props.approval ?? null} />
+        {/* The frozen instrument stays ONLY as the verification alarm when this
+            device's copy does not hash to the signed value — that is load-bearing
+            evidence and must never hide behind a tap. When it verifies, the full
+            snapshot lives behind "View signed approval" (the design keeps the sealed
+            screen to the record + the actions, not the instrument inline). */}
+        {snap && !snap.verified && <RecordApproval approval={props.approval ?? null} />}
 
+        {/* Three OUTLINE actions, stacked, matching the design. "Create another extra"
+            is D6 — a NEW independent extra, not an amendment — and the copy under it
+            says so; but it is one of the three buttons, not a boxed-off card. */}
         <View style={st.actions}>
-          <Button label={t('elock.viewApproval')} icon="approval"
+          <Button label={t('elock.viewApproval')} icon="doc" variant="secondary"
             onPress={props.onViewSignedApproval} />
-          <Button label={t('elock.viewHistory')} icon="history" variant="ghost"
-            onPress={props.onViewFullHistory} />
-        </View>
-
-        {/* D6 stated where the person tapping will read it. "Create another extra" on its
-            own is exactly the phrasing someone reads as "amend this one", which is the
-            single misunderstanding this whole stage exists to prevent — so the sentence
-            above the button says what the tap does and, just as importantly, what it does
-            not do to the agreement they are looking at. */}
-        <Card style={{ marginTop: 18 }}>
-          <Text style={st.followTitle}>{t('elock.anotherTitle')}</Text>
-          <Text style={st.followBody}>{t('elock.anotherBody')}</Text>
+          <Button label={t('elock.viewConversation')} icon="message" variant="secondary"
+            onPress={props.onViewConversation ?? props.onViewFullHistory} style={{ marginTop: 10 }} />
+          <Button label={t('elock.viewHistory')} icon="clock" variant="secondary"
+            onPress={props.onViewFullHistory} style={{ marginTop: 10 }} />
           <Button label={t('elock.another')} icon="extra" variant="secondary"
-            onPress={props.onCreateLinkedExtra} style={{ marginTop: 12 }} />
-        </Card>
+            onPress={props.onCreateLinkedExtra} style={{ marginTop: 10 }} />
+        </View>
       </ScrollView>
     </View>
   );
@@ -301,10 +392,20 @@ function billingTerm(a: FlowTerms): TermValue {
   }
 }
 
-function Term({ title, children }: { title: string; children: React.ReactNode }) {
+function Term({ title, icon, children }: {
+  title: string;
+  /** The same glyph the draft and negotiation screens give this term. A sealed
+   *  record is the one place a reader arrives cold, months later — the icon is how
+   *  "Payment timing" is found by eye rather than by reading five headings. */
+  icon?: IconName;
+  children: React.ReactNode;
+}) {
   return (
     <View style={st.term}>
-      <Text style={labelStyle}>{title}</Text>
+      <View style={st.termHead}>
+        {icon && <Icon name={icon} size={16} color={C.steel} />}
+        <Text style={labelStyle}>{title}</Text>
+      </View>
       <View style={{ marginTop: 6 }}>{children}</View>
     </View>
   );
@@ -349,6 +450,8 @@ function LongText({ text }: { text: string }) {
           style={st.more}
         >
           <Text style={st.moreT}>{t(open ? 'elock.showLess' : 'elock.showMore')}</Text>
+          {/* The caret follows the state, like every other expandable on the record. */}
+          <Text style={st.moreCaret}>{open ? '⌃' : '⌄'}</Text>
         </Pressable>
       )}
     </>
@@ -439,18 +542,21 @@ const st = StyleSheet.create({
     borderRadius: radii.md, borderWidth: 1, padding: 14, marginBottom: 10,
   },
   noticeTitle: {
-    fontFamily: F.dispSemi, fontSize: 15, textTransform: 'uppercase', letterSpacing: 1.3,
+    fontFamily: F.bodyBold, fontSize: 15.5, lineHeight: 20, letterSpacing: 0.1,
   },
   noticeBody: { fontFamily: F.body, fontSize: 14.5, lineHeight: 20, marginTop: 4 },
 
+  termHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   term: { marginBottom: 16 },
   silent: { fontFamily: F.body, fontSize: 15, color: C.steel, lineHeight: 21 },
   truncated: { ...T.bodySteel, fontSize: 12, marginTop: 8 },
   more: {
     minHeight: touchTargets.minimum, justifyContent: 'center',
     alignSelf: 'flex-start', paddingRight: 24,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
   },
   moreT: { fontFamily: F.bodySemi, fontSize: 15, color: C.brand },
+  moreCaret: { fontFamily: F.body, fontSize: 13, color: C.brand },
 
   step: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 8 },
   stepWhat: { fontFamily: F.bodySemi, fontSize: 15.5, color: C.ink, lineHeight: 21 },
@@ -462,6 +568,34 @@ const st = StyleSheet.create({
     fontFamily: F.body, fontSize: 14.5, color: C.inkSoft, lineHeight: 21, marginTop: 6,
   },
 
+  // The sealed banner — one solid block, icon left, lines tight under the title.
+  sealBanner: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    backgroundColor: C.brandSoft, borderWidth: 1, borderColor: C.brandLine,
+    borderRadius: 12, padding: 13, marginTop: 12,
+  },
+  sealDisc: {
+    width: 34, height: 34, borderRadius: 17, backgroundColor: C.brand,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  sealTitle: {
+    fontFamily: F.disp, fontSize: 21, color: C.brand,
+    textTransform: 'uppercase', letterSpacing: 0.6,
+  },
+  sealLine: { fontFamily: F.body, fontSize: 13.5, color: C.ink, lineHeight: 19, marginTop: 2 },
+  // The lock strip — quiet, two lines, no heading weight.
+  lockStrip: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    backgroundColor: C.surfaceMuted, borderWidth: 1, borderColor: C.line,
+    borderRadius: 12, padding: 13, marginTop: 8,
+  },
+  lockLine: { fontFamily: F.body, fontSize: 13.5, color: C.ink, lineHeight: 19 },
+  // The nav rows (version / conversation / signature) — squarer, tighter cards.
+  navCard: { borderRadius: 12, marginTop: 8, marginBottom: 0, paddingVertical: 2 },
+  // One consistent card radius across the screen (was 18 via T.card, more rounded than
+  // the design's ~12).
+  card12: { borderRadius: 12, marginTop: 8, marginBottom: 0 },
+  recordLabel: { marginTop: 14, marginBottom: 6 },
   actions: { marginTop: 18, gap: 10 },
   followTitle: { fontFamily: F.bodyBold, fontSize: 17, color: C.ink, letterSpacing: -0.2 },
   followBody: { fontFamily: F.body, fontSize: 14.5, color: C.steel, lineHeight: 20, marginTop: 6 },

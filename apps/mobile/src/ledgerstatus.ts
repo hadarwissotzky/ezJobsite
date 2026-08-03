@@ -260,6 +260,41 @@ export async function supersedeExtra(
  *  lineage through the synced `change_order.superseded_by` column that
  *  pullThreads hydrates — without the fallback, "see the current version" only
  *  ever appeared on the phone that made the revision (Codex review, 2026-07-22). */
+/**
+ * WHICH VERSION THIS ROW IS — 1 for an original, 2 for its first revision, and so on.
+ *
+ * DERIVED FROM THE LINEAGE, never stored. `superseded_by` points FORWARD (old → new),
+ * so walking it in reverse yields this row's ancestors; the count of {this row + its
+ * ancestors} IS the version number. Storing a counter instead would be a second place
+ * for the truth, and it would go wrong exactly when it matters — a revision made on
+ * another phone.
+ *
+ * Depth-capped at 50 for the reason `threadFor` states: a hand-edited row could make a
+ * cycle, and an uncapped recursive CTE against a cycle does not return.
+ *
+ * Returns 1 on any failure. A record whose lineage cannot be read is still a record,
+ * and "version 1" is the honest floor — never a blank where a number belongs.
+ */
+export async function versionNumber(
+  db: AbstractPowerSyncDatabase, changeOrderId: string
+): Promise<number> {
+  try {
+    const r = (await db.getAll<{ n: number }>(
+      `WITH RECURSIVE chain(id, depth) AS (
+         SELECT ?, 0
+         UNION
+         SELECT prior.id, c.depth + 1
+           FROM change_order prior JOIN chain c ON prior.superseded_by = c.id
+          WHERE c.depth < 50
+       )
+       SELECT COUNT(*) AS n FROM chain`,
+      [changeOrderId]))[0];
+    return Math.max(1, r?.n ?? 1);
+  } catch {
+    return 1;
+  }
+}
+
 export async function supersededBy(
   db: AbstractPowerSyncDatabase, changeOrderId: string
 ): Promise<string | null> {

@@ -38,7 +38,7 @@
  * that assembles it stays in one place instead of growing a second query here.
  */
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ActionSheetIOS, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ExtraRecord } from '../record';
 import type { ProcState } from '../status';
 import {
@@ -48,11 +48,51 @@ import {
 import { canDelete, canSend, chipKey, displayStatus, stageOf } from '../extralifecycle';
 import { t } from '../i18n';
 import {
-  Button, ChecklistRow, PhotoGrid, Row, ScreenHeader, Section,
-  StatusBanner, VoiceClip, type ChecklistState, type PhotoTile, type RowTone,
+  APP_NAME, Button, Card, MoneyBlock, ChecklistRow, PersonRow, PhotoGrid, Row, ScreenHeader, Section,
+  StatusBanner, SyncedPill, VoiceClip, type ChecklistState, type PhotoTile, type RowTone,
 } from './kit';
-import { C, F, T, label as labelStyle, money as moneyStyle } from './theme';
+import { C, F, T, label as labelStyle, money as moneyStyle, tint } from './theme';
 import { touchTargets } from './tokens';
+import { Icon } from './icon';
+
+const CAUTION = tint('caution');
+
+const st = StyleSheet.create({
+  // The draft banner, as the design draws it: a filled ochre disc + the state, then
+  // the count and why, then the gaps as tappable "+ Add …" buttons.
+  draftBanner: {
+    backgroundColor: CAUTION.soft, borderWidth: 1, borderColor: CAUTION.line,
+    borderRadius: 12, padding: 13,
+  },
+  draftHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  draftDisc: {
+    width: 32, height: 32, borderRadius: 16, backgroundColor: CAUTION.ink,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  draftTitle: {
+    flex: 1, fontFamily: F.disp, fontSize: 19, color: CAUTION.ink,
+    textTransform: 'uppercase', letterSpacing: 0.8,
+  },
+  draftCount: { fontFamily: F.bodySemi, fontSize: 14, color: C.ink, marginTop: 10 },
+  draftWhy: { fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 2 },
+  draftActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  draftAdd: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderWidth: 1, borderColor: CAUTION.line, borderRadius: 10,
+    backgroundColor: C.card, paddingHorizontal: 12, minHeight: 42,
+  },
+  draftAddPlus: { fontFamily: F.bodySemi, fontSize: 16, color: CAUTION.ink },
+  draftAddText: { fontFamily: F.bodySemi, fontSize: 13, color: CAUTION.ink },
+  draftAddChev: { fontFamily: F.body, fontSize: 16, color: CAUTION.ink },
+  // Send, with its reason as a second line inside the button.
+  sendBtn: {
+    backgroundColor: C.ink, borderRadius: 14, minHeight: 58,
+    alignItems: 'center', justifyContent: 'center', paddingVertical: 10,
+  },
+  sendTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sendLabel: { fontFamily: F.bodyBold, fontSize: 17, color: C.card, letterSpacing: 0.2 },
+  sendSub: { fontFamily: F.body, fontSize: 12.5, color: C.card, opacity: 0.72, marginTop: 2, textAlign: 'center' },
+});
 
 export type ExtraDraftProps = {
   /** The assembled record (`extraRecord()`). Its `status` must be 'draft'; when it
@@ -100,6 +140,17 @@ export type ExtraDraftProps = {
   /** One target per gap. Each opens the editor for exactly that field, because the
    *  screen's promise is that closing a gap is one tap — not one tap into a form
    *  where he then has to find the row again. */
+  /** Rename the extra from the header, in place (Stage 1 only — a sent extra is
+   *  frozen, REQ-LC15). Omit and the title is not tappable. */
+  onRetitle?: (next: string) => void;
+  /** Open the client drawer. Falls back to the details editor when unwired. */
+  onEditClient?: () => void;
+  /** Add another person on the chain, once a client exists. */
+  onAddContact?: () => void;
+  /** What the client IS on this job — "Homeowner", "General contractor" — already
+   *  translated. Null until somebody has answered; the row then falls back to the
+   *  generic "Approver" rather than inventing a position nobody chose. */
+  clientTypeLabel?: string | null;
   onEditDescription: () => void;
   onEditCost: () => void;
   onEditBilling: () => void;
@@ -116,6 +167,10 @@ export type ExtraDraftProps = {
   /** REQ-LC14 / T5: legal in this stage only. Rendered only when the caller offers
    *  it AND `canDelete` agrees — `planDiscard` remains the arbiter of the act. */
   onDelete?: () => void;
+  /** DEV ONLY (__fixturedraft). Scrolls the content to this Y after mount so the
+   *  simulator can be screenshotted below the fold without tap access. Never passed
+   *  by production; removed with the fixture. */
+  _fixtureScrollY?: number;
 };
 
 export function ExtraDraftScreen(props: ExtraDraftProps) {
@@ -128,15 +183,65 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
   const canSendNow = canSend(rec.status) && gate.ok;
   const items = checklist(props);
 
+  const scrollRef = React.useRef<ScrollView>(null);
+  React.useEffect(() => {
+    if (props._fixtureScrollY != null) {
+      scrollRef.current?.scrollTo({ y: props._fixtureScrollY, animated: false });
+    }
+  }, [props._fixtureScrollY]);
+
+  // The ⋯ overflow. One destructive action today — Delete — so a native action
+  // sheet (iOS) / alert (Android) is the whole menu; it does not need a custom
+  // popover. Delete is legal only in this stage (REQ-LC14), which is why the header
+  // hides ⋯ entirely when `canDelete` is false.
+  const openOverflow = () => {
+    const onDelete = props.onDelete;
+    if (!onDelete) return;
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: [t('discard.action'), t('common.cancel')],
+          destructiveButtonIndex: 0,
+          cancelButtonIndex: 1,
+        },
+        (i) => { if (i === 0) onDelete(); },
+      );
+    } else {
+      Alert.alert(rec.title, undefined, [
+        { text: t('discard.action'), style: 'destructive', onPress: onDelete },
+        { text: t('common.cancel'), style: 'cancel' },
+      ]);
+    }
+  };
+
   return (
     <View style={T.screen}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 28 }}>
-        {/* ScreenHeader owns the 54pt status-bar clearance. The kicker sits UNDER
-            the title rather than above it (the record screen's order) because the
-            header draws back + title as one unit and reordering two lines is not
-            worth forking the one component that knows where the iPhone clock is. */}
-        <ScreenHeader title={rec.title} onBack={props.onBack} backLabel={t('erec.back')} />
-        <Text style={[labelStyle, { marginTop: 6 }]}>{kicker(props)}</Text>
+      {/* paddingBottom clears the CAPTURE FAB, which is pinned to the screen and
+          floats over the bottom of this scroll viewport. The bar below is in normal
+          flow so nothing hides behind IT — but the FAB is 72pt plus its 12pt gap,
+          and at 28 the last ~84pt of content could never be scrolled out from under
+          it. That is why the FAB sat on top of a voice note and on top of the row
+          naming the approver. Derived from the token so it cannot drift if the
+          camera target changes. */}
+      <ScrollView ref={scrollRef} contentContainerStyle={{
+        paddingHorizontal: 18,
+        paddingBottom: touchTargets.camera + touchTargets.spacing + 24,
+      }}>
+        {/* ScreenHeader owns the 54pt status-bar clearance AND the kicker, which
+            now sits above the title where the design puts it. It used to be a
+            hand-rolled line underneath, which read as a caption and spent a line
+            of a 375pt screen doing it. */}
+        <ScreenHeader
+          title={rec.title}
+          kicker={kicker(props)}
+          kickerRight={rec.synced ? <SyncedPill label={t('neg.synced')} /> : undefined}
+          onTitleChange={isDraft ? props.onRetitle : undefined}
+          navTitle={APP_NAME}
+          onBack={props.onBack}
+          backLabel={t('erec.back')}
+          onOverflow={canDelete(rec.status) && props.onDelete ? openOverflow : undefined}
+          overflowLabel={t('erec.moreActions')}
+        />
 
         {props.kind === 'extra'
           ? <DraftMoney rec={rec} priceMode={props.priceMode} />
@@ -154,11 +259,32 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
         <View style={{ marginTop: 14 }}>
           {isDraft
             ? (
-              <StatusBanner
-                kind="draft"
-                title={t('draft.bannerTitle')}
-                detail={bannerDetail(readiness)}
-              />
+              // The design's draft banner: a FILLED ochre disc with the hourglass, the
+              // state beside it, then the count/why, then each gap as a tappable
+              // "+ Add …" button. The gaps are actions here, not labels — the whole
+              // point of the banner is to get them filled.
+              <View style={st.draftBanner}>
+                <View style={st.draftHead}>
+                  <View style={st.draftDisc}>
+                    <Icon name="waiting" size={17} color={C.card} />
+                  </View>
+                  <Text style={st.draftTitle}>{t('draft.bannerTitle')}</Text>
+                </View>
+                <Text style={st.draftCount}>{bannerDetail(readiness)}</Text>
+                {bannerNote(readiness) !== '' && (
+                  <Text style={st.draftWhy}>{bannerNote(readiness)}</Text>
+                )}
+                <View style={st.draftActions}>
+                  {bannerActions(readiness, items).map((a) => (
+                    <Pressable key={a.key} style={st.draftAdd} onPress={a.onPress}
+                      accessibilityRole="button" accessibilityLabel={a.label}>
+                      <Text style={st.draftAddPlus}>+</Text>
+                      <Text style={st.draftAddText} numberOfLines={1}>{a.label}</Text>
+                      <Text style={st.draftAddChev}>›</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
             )
             : (
               // Never the draft banner over a row that is not a draft: the state
@@ -174,46 +300,42 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
         <RawSection {...props} />
         <ScopeSection {...props} />
 
-        <Section title={t('draft.checklist')}>
-          <Text style={[T.bodySteel, { fontSize: 13 }]}>
-            {t({ k: 'draft.checklistCount', p: { have: doneCount(items), of: items.length } })}
-          </Text>
-          {/* The wall, counted separately from the fraction. `completeness` is the
-              four recommended items only (REQ-LC11) — a blocker is not 25% of
-              anything — so the blocking count is said in its own sentence. */}
-          {readiness.blockers.length > 0 && (
-            <Text style={[T.body, { fontSize: 13.5, color: C.danger, marginTop: 4 }]}>
-              {t({ k: 'draft.mustFill', p: { n: readiness.blockers.length } })}
-            </Text>
-          )}
-          {readiness.blockers.length === 0 && readiness.recommended.length > 0 && (
-            <Text style={[T.bodySteel, { fontSize: 13, marginTop: 4 }]}>
-              {t('send.recommended.note')}
-            </Text>
-          )}
-          <View style={{ marginTop: 6 }}>
-            {items.map((it) => (
-              <ChecklistRow
-                key={it.key}
-                state={it.state}
-                label={it.label}
-                hint={it.hint}
-                onPress={it.onPress}
-              />
-            ))}
-          </View>
-        </Section>
+        {/* THE CHECKLIST IS A GRID, TWO ACROSS, and the count sits on the heading
+            row opposite the title — the design's shape, and the reason for it is
+            that six full-width rows with a hint sentence under each ran taller than
+            the whole rest of the screen. Six short labels in two columns is one
+            glance. The hints move to the row that opens the field; the pills in the
+            banner already name what is missing.
+            The count keeps `items.length` (6, or 5 for a Decision), NOT
+            `completeness.of` (4) — this heading is counting the things on this list,
+            and the four-item fraction is a different number for a different place. */}
+        {/* A Card, not a Section: the heading and its count share one line INSIDE
+            the card here, where every other section puts its heading outside and
+            above. That is the design, and it is right for this one — the count is
+            part of the checklist, not a label on it. Using Section would have drawn
+            the title twice. */}
+        <View style={{ marginTop: 22 }}>
+          <Card>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+              <Text style={[labelStyle, { flex: 1 }]}>{t('draft.checklist')}</Text>
+              <Text style={[T.bodySteel, { fontSize: 13 }]}>
+                {t({ k: 'draft.checklistCount', p: { have: doneCount(items), of: items.length } })}
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              {items.map((it) => (
+                <View key={it.key} style={{ width: '50%' }}>
+                  <ChecklistRow state={it.state} label={it.label} onPress={it.onPress} />
+                </View>
+              ))}
+            </View>
+          </Card>
+        </View>
 
-        {/* Delete sits last in the scroll, reachable but never adjacent to the
-            thumb that is aiming at Send. Legal in this stage only (REQ-LC14). */}
-        {props.onDelete && canDelete(rec.status) && (
-          <Button
-            label={t('discard.action')}
-            variant="danger"
-            onPress={props.onDelete}
-            style={{ marginTop: 26 }}
-          />
-        )}
+        {/* Delete moved into the header ⋯ menu (hadar, 2026-07-28) — the design ends
+            the scroll at the checklist, and a destructive red button beneath it was
+            not in the mockup. It is still legal in this stage only (REQ-LC14); the
+            overflow handler above gates it on `canDelete`. */}
       </ScrollView>
 
       <BottomBar {...props} gate={gate} canSendNow={canSendNow} isDraft={isDraft} />
@@ -238,22 +360,16 @@ function kicker({ kind, extraNo, rec }: ExtraDraftProps): string {
  *  reads as a rendering fault, and "no cost change" would tell an owner it is free. */
 function DraftMoney({ rec, priceMode }: { rec: ExtraRecord; priceMode: 'fixed' | 'nte' }) {
   if (!rec.priced) {
-    return (
-      <Text style={[moneyStyle, { fontSize: 24, color: C.steel, marginTop: 8 }]}>
-        {t('erec.priceToCome')}
-      </Text>
-    );
+    return <MoneyBlock amount={t('erec.priceToCome')} muted />;
   }
   const mode = priceMode === 'nte' && rec.nte
     ? t({ k: 'erec.nte', p: { amount: rec.nte } })
     : t('erec.fixed');
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 9, marginTop: 8 }}>
-      <Text style={[moneyStyle, { fontSize: 30, color: C.ink }]}>{rec.amount}</Text>
-      <Text style={T.bodySteel}>
-        {mode}{rec.isMini ? ` · ${t('erec.mini')}` : ''} · {t('erec.yourPrice')}
-      </Text>
-    </View>
+    <MoneyBlock
+      amount={rec.amount}
+      subtitle={`${mode}${rec.isMini ? ` · ${t('erec.mini')}` : ''} · ${t('erec.yourPrice')}`}
+    />
   );
 }
 
@@ -262,13 +378,68 @@ function DraftMoney({ rec, priceMode }: { rec: ExtraRecord; priceMode: 'fixed' |
  *  recommended item is NEVER described as required here; the two counts come from
  *  the two separate lists and are worded as a wall and as help. */
 function bannerDetail(r: SendReadiness): string {
+  // Singular and plural are SEPARATE KEYS, not one string carrying "thing(s)".
+  // `t()` interpolates and does not decline, so a single string has to hedge — and
+  // "1 required thing(s) still missing" is what shipped. A contractor reading that
+  // learns the app was written by someone who was not picturing him.
   if (r.blockers.length > 0) {
-    return t({ k: 'draft.bannerBlocked', p: { n: r.blockers.length } });
+    return t(r.blockers.length === 1
+      ? 'draft.bannerBlocked1'
+      : { k: 'draft.bannerBlockedN', p: { n: r.blockers.length } });
   }
   if (r.recommended.length > 0) {
-    return t({ k: 'draft.bannerReadyGaps', p: { n: r.recommended.length } });
+    return t(r.recommended.length === 1
+      ? 'draft.bannerReadyGaps1'
+      : { k: 'draft.bannerReadyGaps', p: { n: r.recommended.length } });
   }
   return t('draft.bannerReady');
+}
+
+/** The banner's THIRD line — why the count matters. D3 is the whole reason this is a
+ *  separate function from `bannerDetail`: a blocker is a wall and a recommendation is
+ *  help, and the two must never be given the same sentence. Nothing is said at all
+ *  once the extra is ready and complete — a banner that keeps talking when there is
+ *  nothing owed teaches him to stop reading it. */
+function bannerNote(r: SendReadiness): string | undefined {
+  if (r.blockers.length > 0) return t('draft.bannerBlockedNote');
+  if (r.recommended.length > 0) return t('draft.bannerGapsNote');
+  return undefined;
+}
+
+/** The names behind the count. Blockers when there are any — they are what Send is
+ *  waiting on — otherwise the recommended gaps, which are what a yes is waiting on.
+ *  Never both at once: mixing them into one row of identical pills is exactly the
+ *  merge D3 says this screen must not make.
+ *
+ *  Read off the CHECKLIST rather than off `blockers`/`recommended` directly, so the
+ *  pill and the checklist row for one gap are the same short words. The readiness
+ *  keys are full sentences ("Nobody has written up what the work is yet — that is
+ *  the part the owner reads"), which are right under a checklist row and impossible
+ *  in a pill. */
+/** The gaps as ACTIONS — each one tappable straight to the field that fills it, which
+ *  is what the design draws ("+ Add schedule impact ›"). Same source array as the
+ *  count above, so the headline and the buttons can never disagree. */
+function bannerActions(
+  r: SendReadiness, items: readonly ChecklistItem[]
+): readonly { key: string; label: string; onPress: () => void }[] {
+  const byKey = new Map(items.map((i) => [i.key as string, i]));
+  const src: readonly string[] = r.blockers.length > 0 ? r.blockers : r.recommended;
+  return src.map((k) => {
+    const it = byKey.get(k);
+    return { key: k, label: it?.label ?? k, onPress: it?.onPress ?? (() => {}) };
+  });
+}
+
+function bannerPills(r: SendReadiness, items: readonly ChecklistItem[]): readonly string[] {
+  // Driven off `r.blockers` — THE SAME ARRAY the count above is length-of. Reading
+  // the checklist's `state` instead let the two disagree: since 2026-07-28 all six
+  // items gate Send, but the checklist still marks the four widened ones 'missing'
+  // (that is what draws their softer ring), so filtering on 'blocking' returned two
+  // pills under a headline that said four. A count with the wrong things named under
+  // it is worse than a count alone.
+  const label = new Map(items.map((i) => [i.key as string, i.label]));
+  const src: readonly string[] = r.blockers.length > 0 ? r.blockers : r.recommended;
+  return src.map((k) => label.get(k) ?? k);
 }
 
 /* -------------------------------------------------------------------- raw -- */
@@ -283,42 +454,67 @@ function bannerDetail(r: SendReadiness): string {
  */
 function RawSection(p: ExtraDraftProps) {
   const { rec } = p;
+  // Starts OPEN when no recording produced a transcript: the collapsed row's job is
+  // to stand in for words you can already read, and with none of them it would be
+  // hiding the only copy of what was said behind a control nobody knows to tap.
+  const noWords = rec.voices.length > 0 && rec.voices.every((v) => !v.transcript);
+  const [notesOpen, setNotesOpen] = React.useState(noWords);
+  // No per-tile captions on the draft. The mockup's raw card shows clean thumbnails
+  // and the timestamp lives on the "Captured notes" row above — captions widened
+  // each cell to fit "Jan 18 · 8:33 am", which is why the "+ Add" tile wrapped to a
+  // second line instead of sitting fourth in the row. The locked/detail screens,
+  // which exist to prove evidence, still pass captions.
   const tiles: PhotoTile[] = rec.photos.map((ph) => ({
-    key: ph.captureId, uri: ph.uri, present: ph.present, caption: ph.at,
+    key: ph.captureId, uri: ph.uri, present: ph.present,
   }));
+  // The on-site source is a PERSON (the crew member who captured it), the same
+  // shape as "Requested by" — the mockup draws Marco R. with an avatar, not the
+  // capture method. `capturedWith` (the "voice note · time" string) is the fallback
+  // only when no crew person is on the record.
+  const source = rec.people.find((pp) => pp.kind === 'crew') ?? null;
   return (
     <Section title={t('draft.raw')}>
-      <Text style={[T.bodySteel, { fontSize: 12.5, marginBottom: 10 }]}>{t('draft.rawNote')}</Text>
-
-      {/* THE APP'S WRITE-UP LIVES HERE, NOT IN THE DOCUMENT SECTION, and the move
-          is REQ-LC43 applied rather than quoted. `rec.description` is built from
-          `change_order.summary`, which the spec rules "a derived reading aid, never
-          the binding instrument": it is not in `change_order_frozen`'s column list,
-          it is not what `sendForConfirmation` puts in `shown_content` (that is
-          `co.scope`, twice), and an appended voice note can still rewrite it after
-          send. It was rendered under "This is exactly what the owner reads", which
-          was false about every extra whose AI summary differed from its title —
-          i.e. every extra the pipeline processed with confidence. `extralocked.tsx`
-          refuses to render this same string for exactly this reason. Under THIS
-          heading, whose note already says the owner does not see it, it is honest
-          and still useful. */}
-      {rec.description.trim() && rec.description.trim() !== rec.title.trim() && (
-        <View style={{ marginBottom: 12 }}>
-          <Text style={labelStyle}>{t('draft.writeUp')}</Text>
-          <Text style={[T.body, { fontSize: 15, marginTop: 4 }]} selectable>
-            {rec.description}
-          </Text>
-        </View>
-      )}
-
+      {/* The standalone write-up block was removed 2026-07-28 to match the mockup,
+          whose raw card is rows only (Captured notes · Photos · Requested by ·
+          Source). The client-facing prose now lives once, under SCOPE → Description
+          of work; the REQ-LC43 concern it used to carry — that an AI summary is not
+          the frozen instrument — is handled there. */}
       {rec.voices.length === 0 && (
         <Text style={[T.bodySteel, { fontSize: 13.5 }]}>{t('draft.noNotes')}</Text>
       )}
-      {rec.voices.map((v, i) => (
+
+      {/* COLLAPSED BY DEFAULT, one tap from open. Two recordings rendered as two
+          full players ran ~220pt on a 375pt screen, which pushed the scope of work
+          and the ready-to-send checklist — the two things this stage exists to get
+          filled — off the bottom. The design shows this as a single row for the
+          same reason.
+          It is a DISCLOSURE, never a removal: the audio IS the record on a
+          voice-led product, and a transcript that failed to arrive (offline, no
+          STT) leaves the recording as the only copy of what was said. It stays
+          expanded once opened, and it starts expanded when nothing was
+          transcribed — in that case the row above it has nothing to show. */}
+      {rec.voices.length > 0 && (
+        <Row
+          icon="doc"
+          label={t('draft.notesRow')}
+          // WHEN it was captured, which is what the design shows and what a
+          // contractor recognises the recording by. No count sub-line — the design
+          // keeps this row to one line, and the count is visible the moment the row
+          // opens. The count still reaches assistive tech via the row's label.
+          value={rec.voices[0]?.at ?? undefined}
+          chevron
+          expanded={notesOpen}
+          divider
+          onPress={() => setNotesOpen((o) => !o)}
+          accessibilityLabel={notesOpen ? t('draft.notesHide') : t('draft.notesShow')}
+        />
+      )}
+
+      {notesOpen && rec.voices.map((v, i) => (
         <View key={v.captureId} style={{ marginBottom: 12 }}>
-          <Text style={labelStyle}>
-            {rec.voices.length > 1 ? t({ k: 'erec.voiceN', p: { n: i + 1 } }) : t('erec.voice')}
-          </Text>
+          {rec.voices.length > 1 && (
+            <Text style={labelStyle}>{t({ k: 'erec.voiceN', p: { n: i + 1 } })}</Text>
+          )}
           {/* THE AUDIO, not only the words about it. The redesign dropped playback
               from every screen, and a null transcript (offline, no STT) then left the
               contractor with no way to hear a recording that is on the phone in his
@@ -342,37 +538,112 @@ function RawSection(p: ExtraDraftProps) {
         </View>
       ))}
 
-      <Text style={[labelStyle, { marginTop: 4, marginBottom: 8 }]}>
-        {t({ k: 'erec.evidence', p: { n: rec.photos.length } })}
-      </Text>
-      <PhotoGrid
-        photos={tiles}
-        missingLabel={t('erec.evidenceMissing')}
-        onPressPhoto={p.onPressPhoto ? (photo) => p.onPressPhoto?.(photo.uri) : undefined}
-        onAddMore={p.onAddPhotos}
-        addLabel={t('erec.addPhoto')}
+      {/* A ROW, then the grid under it — the design's shape. It was an uppercase
+          "EVIDENCE · 8" micro-label, which named the group but was not the same
+          object as the rows above and below it, so the card read as two unrelated
+          halves. As a row it lines up with Captured notes and carries the count in
+          the same place every other count on this screen sits. */}
+      <Row
+        icon="photocam"
+        label={t('draft.photos')}
+        value={t({ k: 'draft.photosN', p: { n: rec.photos.length } })}
+        tone={rec.photos.length > 0 ? 'default' : 'warn'}
+        chevron
+        onPress={p.onAddPhotos}
       />
+      {/* Indented to the ROW'S TEXT COLUMN (24pt icon + 12pt gap), so the first
+          thumbnail starts under the word "Photos", not under its glyph — the
+          design's alignment. 62pt tiles are what makes three photos plus the add
+          tile fit one line inside this indent on a 375pt screen:
+          card inner 309 − 36 indent − 3×8 gaps = 249 → 62 each. At the old 86
+          only three cells fit and the grid wrapped immediately. */}
+      <View style={{ marginLeft: 36, marginTop: 10 }}>
+        <PhotoGrid
+          photos={tiles}
+          missingLabel={t('erec.evidenceMissing')}
+          onPressPhoto={p.onPressPhoto ? (photo) => p.onPressPhoto?.(photo.uri) : undefined}
+          onAddMore={p.onAddPhotos}
+          addLabel={t('draft.addMore')}
+          tileSize={62}
+        />
+      </View>
       {rec.photosTruncated > 0 && (
         <Text style={[T.bodySteel, { fontSize: 12, marginTop: 8 }]}>
           {t({ k: 'erec.evidenceMore', p: { n: rec.photosTruncated } })}
         </Text>
       )}
 
-      <View style={{ marginTop: 6 }}>
-        {/* Requested-by is a FIELD (the composer asks it), so an unanswered one is
-            offered to be filled. The capture source is a stored FACT, so an absent
-            one is omitted — showing "Not set" beside it would invite him to fix
-            something that is not his to fix. */}
-        <Row
-          icon="person"
-          label={t('draft.requestedBy')}
-          value={p.requestedBy ?? t('draft.notSet')}
-          tone={p.requestedBy ? 'default' : 'warn'}
-          chevron
-          onPress={p.onEditDetails}
-        />
-        {p.capturedWith != null && (
-          <Row icon="microphone" label={t('draft.capturedWith')} value={p.capturedWith} />
+      {/* Requested-by is a FIELD (the composer asks it), so an unanswered one is
+          offered to be filled. The capture source is a stored FACT, so an absent one
+          is omitted — showing "Not set" beside it would invite him to fix something
+          that is not his to fix.
+          Both are drawn as a LABEL ROW WITH A PERSON UNDER IT rather than as a
+          name in the value column: the design gives each an avatar, and a name is
+          the one value on this screen that belongs to somebody rather than
+          describing the work. */}
+      <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 6 }}>
+        {p.requestedBy ? (
+          <Pressable
+            onPress={p.onEditClient ?? p.onEditDetails}
+            accessibilityRole="button"
+            accessibilityLabel={t('draft.requestedBy')}
+            style={{ flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingVertical: 6 }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={labelStyle}>{t('draft.requestedBy')}</Text>
+              <PersonRow name={p.requestedBy}
+                role={p.clientTypeLabel || t('erec.approverRole')} kind="approver" />
+            </View>
+            <Text style={{ fontFamily: F.body, fontSize: 22, color: C.muted }}>›</Text>
+          </Pressable>
+        ) : (
+          // THE NEGATIVE STATE, not a dead label. "Client — Not set" named the gap
+          // and offered nothing; this says what to do and opens the drawer that
+          // does it (contacts or type-it-in).
+          <Row
+            icon="person"
+            label={t('draft.requestedBy')}
+            sub={t('client.rowEmptySub')}
+            value={t('client.rowEmptyAction')}
+            tone="warn"
+            chevron
+            onPress={p.onEditClient ?? p.onEditDetails}
+          />
+        )}
+
+        {/* SOURCE = the on-site person, drawn like "Requested by": avatar + name +
+            "On-site observation". The capture-method string is the fallback only. */}
+        {source ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 56,
+            paddingVertical: 6, borderTopWidth: 1, borderTopColor: C.line }}>
+            <View style={{ flex: 1 }}>
+              <Text style={labelStyle}>{t('draft.source')}</Text>
+              <PersonRow name={source.name} role={t('draft.sourceRole')} kind="crew" />
+            </View>
+          </View>
+        ) : p.capturedWith != null ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 48,
+            paddingVertical: 6, borderTopWidth: 1, borderTopColor: C.line }}>
+            <View style={{ flex: 1 }}>
+              <Text style={labelStyle}>{t('draft.source')}</Text>
+              <Text style={[T.bodySteel, { fontSize: 14, marginTop: 3 }]}>{p.capturedWith}</Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* ADD ANOTHER PERSON, once a client exists. An extra rarely involves only the
+            person who signs it — an architect, an inspector, or the GC above you may
+            all need to be reachable on this job. Offered only after the client is
+            named: before that, the thing to do is name the client, not collect
+            bystanders. Adding here NEVER changes who approves (see `saveClient`). */}
+        {p.requestedBy && p.onAddContact && (
+          <Row
+            icon="people"
+            label={t('client.addContact')}
+            sub={t('client.addContactSub')}
+            chevron
+            onPress={p.onAddContact}
+          />
         )}
       </View>
     </Section>
@@ -393,7 +664,10 @@ function ScopeSection(p: ExtraDraftProps) {
 
   return (
     <Section title={t('draft.scope')}>
-      <Text style={[T.bodySteel, { fontSize: 12.5, marginBottom: 10 }]}>{t('draft.scopeNote')}</Text>
+      {/* The "(SENT TO CLIENT)" in the section title already says whose eyes this is
+          for; the extra "This is exactly what the owner reads." line was a second
+          disclaimer over the same thing and the design does not carry it. Removed
+          2026-07-28 per hadar. */}
 
       {/* `rec.title` — `change_order.scope` — and NOT `rec.description`. Three
           things have to agree here and only one string makes them agree: it is what
@@ -405,15 +679,22 @@ function ScopeSection(p: ExtraDraftProps) {
           paragraph, tapped it, was shown a different sentence, saved his edit and
           watched the block not change — while the owner signed the sentence he had
           never been shown. */}
+      {/* The client-facing prose — the long "Description of work" the mockup shows
+          under this heading. NOTE for production wiring: this must be the editable
+          client-facing SCOPE, not the AI summary (`rec.description` stands in here
+          for the fixture). REQ-LC43's rule still holds — the frozen instrument is
+          `co.scope` — but the row the owner reads shows the full scope prose, not a
+          one-line title. Open item for hadar: confirm which column feeds this. */}
       <DescriptionBlock
-        text={rec.title}
+        text={rec.description || rec.title}
         blocked={blocked('no_description')}
         onPress={p.onEditDescription}
       />
 
       {p.kind === 'extra' && (
         <Row
-          icon="approval"
+          icon="cost"
+          divider
           label={t('draft.cost')}
           sub={p.priceMode === 'nte' && rec.nte ? t({ k: 'erec.nte', p: { amount: rec.nte } }) : undefined}
           value={blocked('no_cost') ? t('draft.notSet') : rec.amount}
@@ -423,7 +704,8 @@ function ScopeSection(p: ExtraDraftProps) {
         />
       )}
       <Row
-        icon="clock"
+        icon="calendar"
+        divider
         label={t('draft.schedule')}
         value={scheduleLabel(p.scheduleEffect, p.scheduleDays) ?? t('draft.notSet')}
         tone={softTone('no_schedule_effect')}
@@ -431,7 +713,8 @@ function ScopeSection(p: ExtraDraftProps) {
         onPress={p.onEditSchedule}
       />
       <Row
-        icon="job"
+        icon="payment"
+        divider
         label={t('draft.billing')}
         value={billingLabel(p.billingTiming) ?? t('draft.notSet')}
         tone={softTone('no_billing_timing')}
@@ -439,7 +722,7 @@ function ScopeSection(p: ExtraDraftProps) {
         onPress={p.onEditBilling}
       />
       <Row
-        icon="close"
+        icon="excluded"
         label={t('draft.exclusions')}
         value={p.exclusions?.trim() || t('draft.notSet')}
         tone={softTone('no_exclusions')}
@@ -460,7 +743,7 @@ function ScopeSection(p: ExtraDraftProps) {
  * hidden one. A description that is silently cut with no affordance would be the
  * hidden one.
  */
-const CLAMP_CHARS = 220;
+const CLAMP_CHARS = 140; // ~4 lines at card width — aligns the Show-more button with where numberOfLines actually truncates
 
 function DescriptionBlock({ text, blocked, onPress }: {
   text: string;
@@ -470,8 +753,18 @@ function DescriptionBlock({ text, blocked, onPress }: {
   const [open, setOpen] = React.useState(false);
   const long = text.length > CLAMP_CHARS;
   return (
-    <View style={{ paddingVertical: 8 }}>
-      <Row label={t('draft.description')} chevron onPress={onPress} />
+    <View style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.line }}>
+      {/* The row's chevron reflects the block's state: right while the prose is
+          clamped, DOWN once it is open (hadar, 2026-07-30 — "when the section is open
+          the arrow needs to drop down"). Tapping the row still opens the editor; the
+          mark reports whether this section is expanded. */}
+      <Row
+        icon="doc"
+        label={t('draft.description')}
+        chevron
+        expanded={long ? open : undefined}
+        onPress={onPress}
+      />
       <Text style={[T.body, { marginTop: 2 }]} numberOfLines={open ? undefined : 4} selectable>
         {text}
       </Text>
@@ -485,10 +778,16 @@ function DescriptionBlock({ text, blocked, onPress }: {
           onPress={() => setOpen((v) => !v)}
           accessibilityRole="button"
           accessibilityLabel={open ? t('draft.showLess') : t('draft.showMore')}
-          style={{ minHeight: touchTargets.minimum, justifyContent: 'center' }}
+          // Right-aligned with a caret, in brand green — the design puts "Show more ⌄"
+          // at the end of the truncated prose, not left under it.
+          style={{ minHeight: touchTargets.minimum, flexDirection: 'row',
+            alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}
         >
           <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.brand }}>
             {open ? t('draft.showLess') : t('draft.showMore')}
+          </Text>
+          <Text style={{ fontFamily: F.body, fontSize: 13, color: C.brand }}>
+            {open ? '⌃' : '⌄'}
           </Text>
         </Pressable>
       )}
@@ -567,12 +866,17 @@ function checklist(p: ExtraDraftProps): ChecklistItem[] {
     };
   };
   return [
-    hard('no_description', t('draft.description'), p.onEditDescription),
+    // SHORT labels here, not the scope-row labels. The checklist is a two-across
+    // grid; "Description of work" / "Impact on schedule" / "What is NOT included"
+    // each wrapped to two lines and broke the grid's rhythm. The design uses the
+    // short forms in the checklist (and the banner pills, which read these same
+    // labels), while the SCOPE rows keep the long forms.
+    hard('no_description', t('draft.ckDescription'), p.onEditDescription),
     ...(p.kind === 'extra' ? [hard('no_cost', t('draft.cost'), p.onEditCost)] : []),
     soft('no_photos', t('draft.photos'), p.onAddPhotos),
     soft('no_billing_timing', t('draft.billing'), p.onEditBilling),
-    soft('no_schedule_effect', t('draft.schedule'), p.onEditSchedule),
-    soft('no_exclusions', t('draft.exclusions'), p.onEditExclusions),
+    soft('no_schedule_effect', t('draft.ckSchedule'), p.onEditSchedule),
+    soft('no_exclusions', t('draft.ckExclusions'), p.onEditExclusions),
   ];
 }
 
@@ -599,16 +903,47 @@ function BottomBar(p: ExtraDraftProps & {
       borderTopWidth: 1, borderTopColor: C.line, backgroundColor: C.card,
       padding: 12, paddingBottom: 22, gap: 10,
     }}>
-      <SendReason {...p} />
-      <Button label={t('draft.editDetails')} variant="secondary" onPress={p.onEditDetails} />
-      <Button
-        label={t('erec.send')}
-        icon="send"
+      <Button label={t('draft.editDetails')} icon="edit" variant="secondary" onPress={p.onEditDetails} />
+      {/* The refusal rides INSIDE the button as its second line — the design puts
+          "Add 2 missing details to send" under "Send for approval" rather than as a
+          separate red sentence above. The rule that a refused Send must always SAY
+          why is kept; it just says it where the tap happens. */}
+      <Pressable
         onPress={p.onSend}
         disabled={!p.canSendNow}
-      />
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !p.canSendNow }}
+        accessibilityLabel={t('erec.send')}
+        style={({ pressed }) => [st.sendBtn, pressed && p.canSendNow && { opacity: 0.85 }]}
+      >
+        <View style={st.sendTop}>
+          <Icon name="send" size={19} color={C.card} />
+          <Text style={st.sendLabel}>{t('erec.send')}</Text>
+        </View>
+        <SendSubtitle {...p} />
+      </Pressable>
     </View>
   );
+}
+
+/** The second line inside Send — the same facts `SendReason` states, in the button. */
+function SendSubtitle(p: ExtraDraftProps & { gate: SendGate; isDraft: boolean }) {
+  const sub = (() => {
+    if (!p.isDraft) return t('draft.notADraft');
+    if (!p.gate.ok && p.gate.kind === 'content') {
+      const n = p.gate.readiness.blockers.length;
+      return t(n === 1 ? 'draft.addOneToSend' : { k: 'draft.addNToSend', p: { n } });
+    }
+    if (!p.gate.ok && p.gate.kind === 'pipeline') return t(p.gate.whyKey);
+    if (p.readiness.recommended.length > 0) {
+      return t(p.readiness.recommended.length === 1
+        ? 'draft.sendAnyway1'
+        : { k: 'draft.sendAnyway', p: { n: p.readiness.recommended.length } });
+    }
+    return null;
+  })();
+  if (!sub) return null;
+  return <Text style={st.sendSub} numberOfLines={2}>{sub}</Text>;
 }
 
 /**
@@ -627,12 +962,20 @@ function SendReason(p: ExtraDraftProps & {
     return <Text style={[T.body, { fontSize: 13.5, color: C.danger }]}>{t('draft.notADraft')}</Text>;
   }
   if (!p.gate.ok && p.gate.kind === 'content') {
+    // ONE sentence, not one per blocker. Every blocker already has its own pill in
+    // the banner and its own row in the checklist, each a tap from the field that
+    // fixes it — so a stack of four red lines above the button was the third telling
+    // of the same list, and it pushed the primary action off a 375pt screen. The bar
+    // still refuses to show a dead button with no reason (that is the rule this
+    // function exists for); it just says the FIRST thing to go fix, and the count
+    // says how many follow.
+    const first = p.gate.readiness.blockers[0];
+    const n = p.gate.readiness.blockers.length;
     return (
-      <View style={{ gap: 4 }}>
-        {p.gate.readiness.blockers.map((b) => (
-          <Text key={b} style={[T.body, { fontSize: 13.5, color: C.danger }]}>{t(blockerKey(b))}</Text>
-        ))}
-      </View>
+      <Text style={[T.body, { fontSize: 13.5, color: C.danger }]}>
+        {t(blockerKey(first))}
+        {n > 1 ? ` ${t({ k: 'draft.andNMore', p: { n: n - 1 } })}` : ''}
+      </Text>
     );
   }
   if (!p.gate.ok && p.gate.kind === 'pipeline') {
@@ -644,7 +987,9 @@ function SendReason(p: ExtraDraftProps & {
   if (p.readiness.recommended.length > 0) {
     return (
       <Text style={[T.bodySteel, { fontSize: 13.5 }]}>
-        {t({ k: 'draft.sendAnyway', p: { n: p.readiness.recommended.length } })}
+        {t(p.readiness.recommended.length === 1
+          ? 'draft.sendAnyway1'
+          : { k: 'draft.sendAnyway', p: { n: p.readiness.recommended.length } })}
       </Text>
     );
   }

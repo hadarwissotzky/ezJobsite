@@ -181,6 +181,14 @@ async function ensureFlowFields(db: AbstractPowerSyncDatabase) {
     ['declined_at_ms', 'INTEGER'],
     ['superseded_at_ms', 'INTEGER'],
     ['origin_change_order_id', 'TEXT'],
+    // THE CHANGE ORDER'S NUMBER ON ITS JOB (hadar, 2026-07-31: "we cannot rely on
+    // title"). Sequential per project — CO #1, #2, #3 on the Miller job — because
+    // that is how a contractor, an owner and an office all file one. It is assigned
+    // once at creation and never reassigned; a REVISION inherits the number of the
+    // row it supersedes, so "CO #4 v2" is the second version of one change and not a
+    // fifth change. The title is not an identifier: two extras can be called the same
+    // thing, and a retitle would silently rename a document already in someone's inbox.
+    ['co_number', 'INTEGER'],
   ];
   for (const [name, ddl] of adds) {
     if (!have.has(name)) {
@@ -428,6 +436,61 @@ const BORN_AS: StoredStatus = 'draft';
  * price a human has not read back must never exist, and being offline is not a
  * reason to lower that bar.
  */
+/**
+ * The next change-order number on a job.
+ *
+ * PER PROJECT, not global: "CO #4" means the fourth change on THIS job, which is what
+ * both parties file it under. Computed as MAX+1 over the project rather than kept in a
+ * counter row — a counter is a second place for the truth and it drifts the moment a
+ * row is inserted by any path that forgets to bump it.
+ *
+ * STATED COLLISION BOUNDARY: two devices creating an extra on the same job while both
+ * are offline can allocate the same number, and neither can know. That is a real
+ * limitation of numbering offline-first, not an oversight — the alternative is a
+ * server round-trip before a capture can be saved, which mandate #7 forbids. The
+ * number is a filing label; the row id is the identity, and nothing keys off the
+ * number. A future server-side reconcile can renumber the loser without breaking a
+ * reference.
+ */
+export async function nextCoNumber(
+  db: AbstractPowerSyncDatabase, projectId: string
+): Promise<number> {
+  try {
+    const r = (await db.getAll<{ n: number | null }>(
+      `SELECT MAX(co_number) AS n FROM change_order WHERE project_id = ?`,
+      [projectId]))[0];
+    return (r?.n ?? 0) + 1;
+  } catch {
+    // The column arrives with ensureFlowFields; a device mid-migration gets 1, which
+    // the backfill below then corrects.
+    return 1;
+  }
+}
+
+/**
+ * Give every existing extra a number, oldest first, per project.
+ *
+ * Runs once at launch and is a no-op afterwards (it only touches rows where
+ * `co_number IS NULL`). Ordering by `created_at_ms` is what makes it deterministic —
+ * two devices backfilling the same history independently arrive at the same numbers.
+ */
+export async function backfillCoNumbers(db: AbstractPowerSyncDatabase): Promise<void> {
+  try {
+    const rows = await db.getAll<{ id: string; project_id: string }>(
+      `SELECT id, project_id FROM change_order
+        WHERE co_number IS NULL ORDER BY project_id, created_at_ms, id`);
+    if (!rows.length) return;
+    const next = new Map<string, number>();
+    for (const r of rows) {
+      let n = next.get(r.project_id);
+      if (n == null) n = await nextCoNumber(db, r.project_id);
+      await db.execute(`UPDATE change_order SET co_number = ? WHERE id = ? AND co_number IS NULL`,
+        [n, r.id]);
+      next.set(r.project_id, n + 1);
+    }
+  } catch { /* pre-migration device: the next launch backfills */ }
+}
+
 export async function createChangeOrder(
   db: AbstractPowerSyncDatabase,
   o: {
@@ -453,9 +516,16 @@ export async function createChangeOrder(
      * sent by the same path, and it carries its own signature (REQ-LC32).
      */
     originChangeOrderId?: string | null;
+    /** The CO number to stamp. Omit and one is allocated for the project. A REVISION
+     *  passes the number of the row it supersedes, so a change keeps one number for
+     *  its whole life and only its version moves. */
+    coNumber?: number | null;
   }
 ): Promise<CreateCOResult> {
   const now = Date.now();
+  // Allocated BEFORE the transaction: it is a read, and doing it inside would hold the
+  // write lock across a query for no reason.
+  const coNumber = o.coNumber ?? await nextCoNumber(db, o.projectId);
   const confirmedMs = o.numbersConfirmedAt.getTime();
   const mutationId = `cm-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const lineItems = o.lineItems ?? [];
@@ -487,6 +557,7 @@ export async function createChangeOrder(
     schedule_days: o.scheduleDays ?? null,
     exclusions: o.exclusions?.trim() || null,
     origin_change_order_id: o.originChangeOrderId ?? null,
+    co_number: coNumber,
   };
   const payloadJson = JSON.stringify(payload);
 
@@ -497,15 +568,15 @@ export async function createChangeOrder(
            line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate,
            numbers_confirmed_at_ms, status, created_at_ms,
            billing_timing, schedule_effect, schedule_days, exclusions,
-           origin_change_order_id)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           origin_change_order_id, co_number)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [o.id, o.decisionId, o.projectId, o.ownerId, o.scope.trim(),
          JSON.stringify(lineItems), o.amountCents, o.nteCents ?? null,
          o.isMini ? 1 : 0, o.whoDirected, o.refEstimate ?? null, confirmedMs,
          BORN_AS, now,
          o.billingTiming ?? null, o.scheduleEffect ?? null,
          o.scheduleDays ?? null, o.exclusions?.trim() || null,
-         o.originChangeOrderId ?? null]
+         o.originChangeOrderId ?? null, coNumber]
       );
       // Atomic with the record. Never after it.
       await tx.execute(
@@ -882,6 +953,67 @@ export async function priceDraftExtra(
         ...p, amount_cents: o.amountCents, nte_cents: o.nteCents ?? null,
         line_items: lineItems, who_directed: o.whoDirected,
         numbers_confirmed_at_ms: o.numbersConfirmedAt.getTime(),
+        billing_timing: o.billingTiming ?? null,
+        schedule_effect: o.scheduleEffect ?? null,
+        schedule_days: o.scheduleDays ?? null,
+        exclusions: o.exclusions?.trim() || null,
+      };
+      const json = JSON.stringify(next);
+      await db.execute(
+        `UPDATE change_order_outbox SET payload_json = ?, payload_sha256 = ? WHERE mutation_id = ?`,
+        [json, sha256(json), q[0].mutation_id]);
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Write the FLOW FIELDS of a draft — schedule effect, billing timing, exclusions —
+ * WITHOUT touching the price (hadar, 2026-07-31, when each field became its own
+ * bottom drawer).
+ *
+ * WHY THIS EXISTS RATHER THAN REUSING `priceDraftExtra`: that function takes
+ * `amountCents: number` and stamps `numbers_confirmed_at_ms` on every call. Both are
+ * correct for a price read-back and WRONG here twice over. First, an extra may have
+ * no price yet (370: null ≠ 0), so answering "does this move the schedule?" on an
+ * unpriced draft had nothing to pass and was refused with "set a price first" — a
+ * refusal that has nothing to do with the question being answered. Second,
+ * `numbers_confirmed_at_ms` is the EVIDENCE that a human read a figure back
+ * (mandate #6); stamping it while saving a billing choice would claim a confirmation
+ * that never happened.
+ *
+ * Same guard and same outbox discipline as its sibling: draft-only, and a still-queued
+ * INSERT payload is refreshed under its own mutation_id.
+ */
+export async function setDraftFlowFields(
+  db: AbstractPowerSyncDatabase,
+  o: {
+    changeOrderId: string;
+    billingTiming?: BillingTiming | null;
+    scheduleEffect?: ScheduleEffect | null;
+    scheduleDays?: number | null;
+    exclusions?: string | null;
+  }
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const upd = await db.execute(
+    `UPDATE change_order SET billing_timing = ?, schedule_effect = ?,
+        schedule_days = ?, exclusions = ?
+      WHERE id = ? AND status = 'draft'`,
+    [o.billingTiming ?? null, o.scheduleEffect ?? null,
+     o.scheduleDays ?? null, o.exclusions?.trim() || null, o.changeOrderId]
+  );
+  if (!upd.rowsAffected) {
+    return { ok: false, reason: 'this extra is not a draft anymore' };
+  }
+  const q = await db.getAll<{ mutation_id: string; payload_json: string }>(
+    `SELECT mutation_id, payload_json FROM change_order_outbox WHERE change_order_id = ?`,
+    [o.changeOrderId]);
+  if (q.length) {
+    let p: any = null;
+    try { p = JSON.parse(q[0].payload_json); } catch { /* corrupt: drain will park it */ }
+    if (p) {
+      const next = {
+        ...p,
         billing_timing: o.billingTiming ?? null,
         schedule_effect: o.scheduleEffect ?? null,
         schedule_days: o.scheduleDays ?? null,

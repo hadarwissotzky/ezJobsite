@@ -19,7 +19,7 @@
  * about money.
  */
 import React from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { t } from '../i18n';
 import { clientMessageCount, threadState, type ThreadMessage } from '../discussion';
 // R7 owns what a status is CALLED. R5b owns whether the thread is open. Keeping the
@@ -46,6 +46,8 @@ function chipKind(s: LedgerStatus) {
  * would invite someone to add to a record after it was signed. Timestamps are on
  * every line because a log without them cannot show who was waiting on whom.
  */
+const msgAvatarStyle = { width: 30, height: 30, borderRadius: 15 } as const;
+
 export function DiscussionLog(props: {
   messages: ThreadMessage[];
   formatAt: (ms: number) => string;
@@ -53,28 +55,41 @@ export function DiscussionLog(props: {
   undelivered?: ReadonlySet<string>;
   /** Tapping through to the live thread. Omitted on a closed record. */
   onOpen?: () => void;
+  /** The client's display name — the heading becomes "Discussion with <name>" and
+   *  the client's messages are labelled by name, not the generic "Client". */
+  clientName?: string | null;
+  /** The client's photo, when the roster has one; initials otherwise. */
+  clientAvatar?: string | null;
 }) {
   if (!props.messages.length) return null;
+  const clientName = props.clientName?.trim() || null;
+  // The design labels the discussion by FIRST name ("Discussion with Sarah") and the
+  // client avatar carries a SINGLE initial ("S"), not two.
+  const clientFirst = clientName ? clientName.split(/\s+/)[0] : null;
+  const clientInitials = clientFirst ? clientFirst[0].toUpperCase() : null;
+  const heading = clientFirst ? t({ k: 'r5b.logHeadingWith', p: { name: clientFirst } }) : t('r5b.logHeading');
   return (
     <View style={T.card}>
-      <Text style={label}>{t('r5b.logHeading')}</Text>
+      <Text style={label}>{heading}</Text>
       {/* Chat bubbles (hadar, 2026-07-24: "an extra becomes like a chat or slack
-          channel"). Yours on the right, the client's on the left, each with sender
-          and time; undelivered replies say so (mandate #1). */}
-      <View style={{ marginTop: 10, gap: 10 }}>
+          channel"). Yours on the right, the client's on the left with their avatar
+          and name beside each message; undelivered replies say so (mandate #1). */}
+      <View style={{ marginTop: 10, gap: 12 }}>
         {props.messages.map((m) => {
           const mine = m.side === 'contractor';
-          return (
-            <View key={m.id} style={{ alignItems: mine ? 'flex-end' : 'flex-start' }}>
-              <Text style={{
-                fontFamily: F.dispSemi, fontSize: 10.5, letterSpacing: 1,
-                textTransform: 'uppercase', color: C.steel, marginBottom: 3,
-                marginRight: mine ? 4 : 0, marginLeft: mine ? 0 : 4,
-              }}>
-                {t(mine ? 'r5b.fromYou' : 'r5b.fromClient')} · {props.formatAt(m.atMs)}
-              </Text>
+          const undelivered = mine && props.undelivered?.has(m.id);
+          const bubble = (
+            <View style={{ maxWidth: '82%', alignItems: mine ? 'flex-end' : 'flex-start' }}>
+              {/* Only YOUR messages carry a sender label ("You"), above-right. The
+                  client's messages are identified by their avatar to the left. */}
+              {mine && (
+                <Text style={{
+                  fontFamily: F.dispSemi, fontSize: 10.5, letterSpacing: 1,
+                  textTransform: 'uppercase', color: C.steel, marginBottom: 3, marginRight: 4,
+                }}>{t('r5b.fromYou')}</Text>
+              )}
               <View style={{
-                maxWidth: '82%', borderRadius: 16, paddingVertical: 9, paddingHorizontal: 13,
+                borderRadius: 16, paddingVertical: 9, paddingHorizontal: 13,
                 backgroundColor: mine ? '#4E6243' : '#EFEBE3',
                 borderBottomRightRadius: mine ? 4 : 16,
                 borderBottomLeftRadius: mine ? 16 : 4,
@@ -82,11 +97,33 @@ export function DiscussionLog(props: {
                 <Text style={[T.body, { fontSize: 14.5, lineHeight: 20,
                   color: mine ? '#fff' : '#151A1E' }]}>{m.text}</Text>
               </View>
-              {mine && props.undelivered?.has(m.id) && (
-                <Text style={{ ...T.bodySteel, fontSize: 11, marginTop: 3, marginRight: 4 }}>
-                  {t('r5b.notSentYet')}
-                </Text>
-              )}
+              {/* Time BELOW the bubble; your delivered messages get a ✓✓ read-receipt,
+                  an undelivered one says so instead (mandate #1). */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3,
+                marginRight: mine ? 4 : 0, marginLeft: mine ? 0 : 4 }}>
+                <Text style={{ ...T.bodySteel, fontSize: 11.5 }}>{props.formatAt(m.atMs)}</Text>
+                {mine && (undelivered
+                  ? <Text style={{ ...T.bodySteel, fontSize: 11.5 }}>· {t('r5b.notSentYet')}</Text>
+                  : <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.brand }}>✓✓</Text>)}
+              </View>
+            </View>
+          );
+          // The client's messages carry the client's avatar to the left; yours
+          // sit flush right without one — the design draws the conversation as
+          // "them, over there; you, over here".
+          if (mine) {
+            return <View key={m.id} style={{ alignItems: 'flex-end' }}>{bubble}</View>;
+          }
+          return (
+            <View key={m.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+              {props.clientAvatar
+                ? <Image source={{ uri: props.clientAvatar }} style={msgAvatarStyle} />
+                : (
+                  <View style={[msgAvatarStyle, { backgroundColor: C.approve, alignItems: 'center', justifyContent: 'center' }]}>
+                    <Text style={{ fontFamily: F.dispSemi, fontSize: 12, color: '#fff' }}>{clientInitials ?? '·'}</Text>
+                  </View>
+                )}
+              {bubble}
             </View>
           );
         })}

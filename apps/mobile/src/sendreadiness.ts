@@ -29,12 +29,17 @@
 import { canSendExtra } from './extraprocstate.ts';
 import type { ProcState } from './status.ts';
 
-/** D3's hard gate. Exactly two, and a third would be a defect against D3. */
+/** The hard gate — ALL SIX (hadar 2026-07-28, reversing D3; see `sendReadiness`).
+ *  Was `no_description | no_cost` only. Widened to the union of both lists so a
+ *  `blockers` array can carry any of the six and the screens type-check against it. */
 export type SendBlocker =
   | 'no_description'
-  | 'no_cost';
+  | 'no_cost'
+  | SendRecommendation;
 
-/** D3's soft gate. Never disables Send; rendered as incomplete, never as an error. */
+/** The four that used to be advisory. They still name themselves separately — the
+ *  checklist's completeness fraction and its softer mark are built from this list —
+ *  but as of 2026-07-28 they also block Send. */
 export type SendRecommendation =
   | 'no_photos'
   | 'no_billing_timing'
@@ -142,9 +147,26 @@ export function sendReadiness(x: {
   if (!(x.scheduleEffect ?? '').trim()) recommended.push('no_schedule_effect');
   if (!(x.exclusions ?? '').trim()) recommended.push('no_exclusions');
 
+  // ── ALL SIX BLOCK (hadar, 2026-07-28) ────────────────────────────────────────
+  // This REVERSES D3, which made only description and cost blocking and left these
+  // four as recommendations that warn and send anyway. hadar chose the mockup's
+  // literal behaviour instead: "2 things left before you can send / These are
+  // required for approval", with the missing items named as pills — where the two
+  // named in the design are schedule impact and exclusions, both of which D3 had
+  // as advisory. The design and the decision could not both be true; the design won.
+  //
+  // The two lists SURVIVE as separate fields on purpose. `recommended` still says
+  // which four these are, so the checklist keeps its 4-item completeness fraction
+  // and its softer ochre mark, and so reversing this back is one line here rather
+  // than an unpicking of the screen. What changed is only whether they gate `ok`.
+  //
+  // SPEC-extra-lifecycle-v1 REQ-LC10/LC11 and the D3 text still describe the old
+  // rule and are now WRONG. They are owed an edit; this comment is the record until
+  // then, so the next reader does not "fix" this back to match the spec.
+  const gating = [...blockers, ...recommended];
   return {
-    ok: blockers.length === 0,
-    blockers,
+    ok: gating.length === 0,
+    blockers: gating as SendBlocker[],
     recommended,
     completeness: { have: RECOMMENDED.length - recommended.length, of: 4 },
   };
@@ -160,6 +182,14 @@ export function sendReadiness(x: {
 const BLOCKER_KEYS: Record<SendBlocker, string> = {
   no_description: 'send.blocked.noDescription',
   no_cost: 'send.blocked.noCost',
+  // The four widened into blockers on 2026-07-28 keep their own wording. Their
+  // sentences state a fact and do not scold ("You have not said when you bill
+  // this"), which is still the right register now that they gate Send — the
+  // contractor is being told what is left, not told off.
+  no_photos: 'send.recommended.noPhotos',
+  no_billing_timing: 'send.recommended.noBillingTiming',
+  no_schedule_effect: 'send.recommended.noScheduleEffect',
+  no_exclusions: 'send.recommended.noExclusions',
 };
 
 const RECOMMENDATION_KEYS: Record<SendRecommendation, string> = {

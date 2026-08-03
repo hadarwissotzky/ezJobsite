@@ -53,7 +53,15 @@ export type RecordPerson = {
 };
 
 /** `atMs` is null when the event is real but its time was never recorded. */
-export type RecordEvent = { atMs: number | null; at: string; what: string; hot?: boolean };
+export type RecordEvent = {
+  atMs: number | null; at: string; what: string; hot?: boolean;
+  /** WHICH state change this line is, as a stable marker rather than its words.
+   *  Set only where a caller must be able to identify an event without matching a
+   *  translated string — the sealed screen renders the signature from the FROZEN
+   *  snapshot and must drop the timeline's copy of it, or the approval record shows
+   *  two signature times for one signature. */
+  kind?: 'signed';
+};
 
 export type RecordPhoto = {
   captureId: string;
@@ -119,6 +127,10 @@ export type ExtraRecord = {
   priced: boolean;
   nte: string | null;
   isMini: boolean;
+  /** THIS EXTRA'S NUMBER ON ITS JOB — "Extra #4". Null on a row that predates the
+   *  column and has not been backfilled yet; the kicker then omits the number rather
+   *  than inventing one. */
+  extraNo: number | null;
   /** The job this extra belongs to, for the header kicker (c5: "Extra · Miller —
    *  Hall Bath"). Null when the project row is not on this device. */
   jobName: string | null;
@@ -184,11 +196,13 @@ export async function extraRecord(
     created_at_ms: number; pending: number;
     sent_at_ms: number | null; approved_at_ms: number | null;
     declined_at_ms: number | null; superseded_at_ms: number | null;
+    co_number: number | null;
   }>(
     `SELECT co.id, co.decision_id, co.scope, co.summary, co.amount_cents, co.nte_cents, co.is_mini,
             co.who_directed, co.numbers_confirmed_at_ms, co.status, co.signed_by,
             co.created_at_ms,
             co.sent_at_ms, co.approved_at_ms, co.declined_at_ms, co.superseded_at_ms,
+            co.co_number,
             (SELECT p.name FROM project p WHERE p.id = co.project_id) AS job_name,
             EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending
        FROM change_order co WHERE co.id = ?`, [changeOrderId]))[0];
@@ -374,16 +388,16 @@ export async function extraRecord(
   // Both cases still exist, so both are still rendered.
   const unstamped: RecordEvent[] = [];
   const noTime = t('erec.noTime');
-  const push = (atMs: number | null | undefined, what: string) => {
+  const push = (atMs: number | null | undefined, what: string, kind?: RecordEvent['kind']) => {
     const when = at(atMs);
-    if (when) stamped.push({ atMs: atMs as number, at: when, what, hot: true });
-    else unstamped.push({ atMs: null, at: noTime, what, hot: true });
+    if (when) stamped.push({ atMs: atMs as number, at: when, what, hot: true, kind });
+    else unstamped.push({ atMs: null, at: noTime, what, hot: true, kind });
   };
   const wasSent = co.status === 'sent' || co.status === 'approved'
     || co.status === 'declined' || co.status === 'superseded';
   if (wasSent) push(co.sent_at_ms, t('erec.evSent'));
   if (co.signed_by) {
-    push(co.approved_at_ms, t({ k: 'erec.evSigned', p: { name: co.signed_by } } as any));
+    push(co.approved_at_ms, t({ k: 'erec.evSigned', p: { name: co.signed_by } } as any), 'signed');
   }
   if (co.status === 'declined') push(co.declined_at_ms, t('erec.evDeclined'));
   // The retirement was the one state change with no line at all on this screen — a
@@ -417,6 +431,7 @@ export async function extraRecord(
     status: co.status,
     amount: money(co.amount_cents),
     priced: co.amount_cents != null,
+    extraNo: co.co_number ?? null,
     jobName: co.job_name ?? null,
     nte: co.nte_cents == null ? null : money(co.nte_cents),
     isMini: co.is_mini === 1,

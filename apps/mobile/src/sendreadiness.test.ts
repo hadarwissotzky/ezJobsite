@@ -56,18 +56,24 @@ test('a complete extra is ready and complete', () => {
   assert.deepEqual(r.completeness, { have: 4, of: 4 });
 });
 
-test('D3: description and cost alone are enough — all four soft items may be missing', () => {
+// hadar 2026-07-28 reversed D3: ALL SIX items block Send, per the design's "these
+// are required for approval". These three tests asserted the old rule and are
+// rewritten to the new one — the assertions are inverted deliberately, not relaxed.
+test('all six are required — every one of the four former soft items blocks Send', () => {
   const r = sendReadiness({
     ...full, photoCount: 0, billingTiming: null, scheduleEffect: null, exclusions: null,
   });
-  assert.equal(r.ok, true, 'a recommended item that disables Send is a defect against D3');
-  assert.deepEqual(r.blockers, []);
+  assert.equal(r.ok, false, 'the four widened items must now disable Send');
+  assert.deepEqual(r.blockers,
+    ['no_photos', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions']);
+  // `recommended` still names WHICH four they are — the checklist's fraction and its
+  // softer mark are built from it, and reversing this is one line in sendReadiness.
   assert.deepEqual(r.recommended,
     ['no_photos', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions']);
   assert.deepEqual(r.completeness, { have: 0, of: 4 });
 });
 
-test('each recommended item is detected on its own and never touches ok', () => {
+test('each of the four is detected on its own and each one alone blocks Send', () => {
   const spoil: Record<SendRecommendation, object> = {
     no_photos: { photoCount: 0 },
     no_billing_timing: { billingTiming: null },
@@ -77,7 +83,8 @@ test('each recommended item is detected on its own and never touches ok', () => 
   for (const item of RECOMMENDED) {
     const r = sendReadiness({ ...full, ...spoil[item] });
     assert.deepEqual(r.recommended, [item], item);
-    assert.equal(r.ok, true, item);
+    assert.deepEqual(r.blockers, [item], item);
+    assert.equal(r.ok, false, item);
     assert.deepEqual(r.completeness, { have: 3, of: 4 }, item);
   }
 });
@@ -85,7 +92,8 @@ test('each recommended item is detected on its own and never touches ok', () => 
 test('whitespace is not an answer', () => {
   const r = sendReadiness({ ...full, exclusions: '   ', billingTiming: '  ' });
   assert.deepEqual(r.recommended, ['no_billing_timing', 'no_exclusions']);
-  assert.equal(r.ok, true);
+  assert.deepEqual(r.blockers, ['no_billing_timing', 'no_exclusions']);
+  assert.equal(r.ok, false);
 });
 
 test("'not sure' about the schedule is a COMPLETE answer, not a missing one", () => {

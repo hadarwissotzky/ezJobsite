@@ -6,12 +6,13 @@ import { PowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import * as Contacts from 'expo-contacts';
 import React from 'react';
-import { Dimensions, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Dimensions, Image, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
 import { ago, projectCards, staticMapUrl, type ProjectCard } from './src/ui/home';
 import { REJECT_DDL, SupabaseConnector } from './src/connector';
 import { getSeenOnboarding, setSeenOnboarding } from './src/auth';
+import { buildLine, useOta } from './src/otaclient';
 import { Onboarding } from './src/ui/onboarding';
 import { AuthScreen } from './src/ui/authscreen';
 import type { Session } from '@supabase/supabase-js';
@@ -45,11 +46,16 @@ import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { PhotoLightbox, RecordScreen, scheduleSentence,
          type RecordLifecycle } from './src/ui/recordscreen';
+import { FixtureDraft } from './src/ui/__fixturedraft';
+import { FixtureNegotiation } from './src/ui/__fixturenegotiation';
+import { FixtureLocked } from './src/ui/__fixturelocked';
 // SPEC-extra-lifecycle-v1 — the detail subscreens the three stage screens open.
 // They are OVERLAYS in the cascade (an early return above `record`), the same way
 // every other screen in this app navigates; a router introduced in one corner would
 // be a second navigation model nobody else obeys.
-import { FullHistory, PhotosAndProof, PriceScheduleEditor, ScopeOfWorkEditor,
+import { BillingSheet, ClientSheet, CostSheet, DescriptionSheet, ExclusionsSheet, ScheduleSheet } from './src/ui/extrasheets';
+import { ConfirmSheet } from './src/ui/kit';
+import { FullHistory, PhotosAndProof,
          type RewriteState } from './src/ui/extradetails';
 import type { ExtraDetailField } from './src/ui/extranegotiation';
 // REQ-LC10..13 — the CONTENT half of the send gate. Orthogonal to canSendExtra
@@ -128,7 +134,8 @@ import { DraftRecoveryCard } from './src/ui/draftrecovery';
 // neither would know it.
 import { ensureEventLogSchema, readEventLog, withEventLog, type ApprovalPanel } from './src/eventlog';
 import { unreadCount, unreadIds, type ActivityRow } from './src/activity';
-import { shareApprovalDoc } from './src/approvalrecordshare';
+import { buildApprovalDoc, shareApprovalDoc } from './src/approvalrecordshare';
+import { ApprovalDocSheet } from './src/ui/approvaldocsheet';
 import { useFonts } from 'expo-font';
 import { Barlow_400Regular, Barlow_500Medium, Barlow_600SemiBold, Barlow_700Bold } from '@expo-google-fonts/barlow';
 import { BarlowCondensed_600SemiBold, BarlowCondensed_700Bold } from '@expo-google-fonts/barlow-condensed';
@@ -166,7 +173,7 @@ import { renderCard, sendForConfirmation } from './src/confirmations';
 import { publishApprovalPhotos } from './src/approvalphotopublish';
 import {
   ensureApproverSchema, drainR5cOutbox, suggestFor, listRoster, addApprover,
-  markApproverUsed, setExtraType, reasonText, typeLabel, roleLabel,
+  markApproverUsed, setExtraType, reasonText, typeLabel, roleLabel, saveClientApprover,
   type RosterMember,
 } from './src/approvers';
 // R6b item 3. Actor facts are written at the moment they happen; nothing on the
@@ -174,19 +181,21 @@ import {
 import { drainExtraActorOutbox, ensureExtraActorSchema, noteActorNow, noteApprover,
          noteCapturedBy } from './src/recordactors';
 import {
-  EXTRA_TYPES, APPROVER_ROLES, isExtraType, type ExtraType, type ApproverRole, type Suggestion,
+  EXTRA_TYPES, APPROVER_ROLES, isExtraType,
+  type ClientType, type ExtraType, type ApproverRole, type Suggestion,
 } from './src/approverrouting';
 import { applyLocalApproval, centsFromInput, createChangeOrder, createLinkedExtra, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
          createdLabel, markLocalSent, money, moneyWhole, parseMoney, validateLines, CO_PHOTO_SUBQUERY,
-         type LineItem, type LedgerRow, priceDraftExtra, rehomeDraftExtra,
+         type LineItem, type LedgerRow, priceDraftExtra, setDraftFlowFields, rehomeDraftExtra,
+         backfillCoNumbers,
          type BillingTiming, type ScheduleEffect } from './src/changeorder';
 import { displayStatus, type LedgerStatus } from './src/extrastatus';
 // SPEC-extra-lifecycle-v1 §1 — the ONE authority on what may be done to a row at
 // its stage. The record screen's prop gating used to be a pile of local status
 // comparisons; each one is now this predicate, so the rule has a single owner.
 import { canDelete, stageOf } from './src/extralifecycle';
-import { ensureLedgerStatusSchema, hydrateQuestions, openQuestions, supersededBy,
+import { ensureLedgerStatusSchema, hydrateQuestions, openQuestions, supersededBy, versionNumber,
          supersedeExtra, drainSupersessions, reassertSupersessions } from './src/ledgerstatus';
 import { issueOtp, newOtpCode, renderApproval, signApproval, verifyOtp } from './src/signing';
 
@@ -221,6 +230,14 @@ const OWNER_FALLBACK = 'owner-local';
  * `const` declared several hundred lines below it.
  */
 type RecordLcState = {
+  /** The roster row behind this extra's client. Null until somebody is named. */
+  clientRow: RosterMember | null;
+  /** Everyone already known on this job — what the client drawer offers first, so
+   *  naming a client is a tap and not a keyboard. */
+  roster: RosterMember[];
+  /** WHICH VERSION this row is — derived from the supersession lineage, never stored
+   *  (see `versionNumber`). 1 = the original. */
+  version: number;
   view: RecordLifecycle;
   co: {
     id: string; decision_id: string; project_id: string; scope: string;
@@ -444,6 +461,11 @@ export default function App() {
   const [session, setSession] = React.useState<Session | null | undefined>(undefined);
   // The 4-slide intro is shown once to a logged-out newcomer, then never again.
   const [seenOnboarding, setSeen] = React.useState(false);
+
+  // OTA (SPEC-ota-updates-v1). The check runs in the background and never gates
+  // launch; `canRestart` is already gated on every outbox being empty, so the drawer
+  // row simply mirrors it rather than re-deciding.
+  const ota = useOta(ready ? db : null);
   const [delivery, setDelivery] = React.useState<{pending:number;parked:number}>({pending:0,parked:0});
   const [decisions, setDecisions] = React.useState<DecisionRow[]>([]);
   // The ONE confirm surface (REQ-VAL6). Null = not confirming anything.
@@ -572,6 +594,18 @@ const openRecord = async (changeOrderId: string) => {
   } catch { setRecordNextId(null); }
 };
 
+// DEV auto-open (EXPO_PUBLIC_OPENCO): opens a specific extra once on boot so the real
+// record screen can be screenshotted without tap access. Inert without the env flag;
+// removed with the fixtures.
+const autoOpenedRef = React.useRef(false);
+React.useEffect(() => {
+  const id = process.env.EXPO_PUBLIC_OPENCO;
+  if (id && ready && session && !autoOpenedRef.current) {
+    autoOpenedRef.current = true;
+    setTimeout(() => { void openRecord(id); }, 400);
+  }
+}, [ready, session]);
+
 /**
  * SPEC-extra-lifecycle-v1 — assemble everything the three stage screens need.
  *
@@ -614,13 +648,33 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
   // here: `remindExtra` returns `r8.noLink` at press time, which is the refusal the
   // contractor can actually read where he is looking.
   const link = await liveLinkFor(db, r.id);
+  // Derived from the lineage each load: a revision made on another phone must change
+  // this number here too, and a stored counter would not.
+  const version = await versionNumber(db, r.id);
+  // The client, from the ROSTER (the source of truth for people). Matched on the name
+  // the extra was directed by, case- and space-insensitively — the same rule
+  // `saveClientApprover` uses, so the lookup and the write can never disagree.
+  let clientRow: RosterMember | null = null;
+  let roster: RosterMember[] = [];
+  try {
+    roster = await listRoster(db, co.project_id);
+    const want = (co.who_directed ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (want) {
+      clientRow = roster.find(
+        (m) => m.name.trim().toLowerCase().replace(/\s+/g, ' ') === want) ?? null;
+    }
+  } catch { /* no roster on this device yet — the drawer opens empty, which is honest */ }
   return {
     timeline: mergeTimeline(r.history, events),
     state: {
       co,
+      clientRow,
+      roster,
+      version,
       remindCount: link?.remindCount ?? 0,
       remindLastMs: link?.lastRemindMs ?? null,
       view: {
+        version,
         // REQ-LC12. recordactors.ts states the derivation and it holds here for the
         // same reason: reaching a change_order row means this is an extra — R10's
         // Decision has no change order and cannot arrive on this screen.
@@ -1030,11 +1084,23 @@ const confirmPriced = async (): Promise<string | null> => {
                              subjectId: priced.existingCoId, act: 'priced' });
     return priced.existingCoId;
   }
+  // A REVISION KEEPS THE NUMBER IT IS REVISING. "CO #4 v2" is the second version of
+  // one change, not a fifth change — renumbering here would put a new number on a
+  // document the client already has under the old one. A fresh extra allocates its
+  // own (createChangeOrder does it when this is undefined).
+  let inheritedNo: number | null = null;
+  if (priced.supersedes) {
+    try {
+      inheritedNo = (await db.getAll<{ co_number: number | null }>(
+        `SELECT co_number FROM change_order WHERE id = ?`, [priced.supersedes]))[0]?.co_number ?? null;
+    } catch { /* pre-migration row: the new one allocates its own */ }
+  }
   const r = await createChangeOrder(db, {
     id: `co-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     decisionId: priced.decisionId, projectId, ownerId: data.user.id,
     scope: priced.scope, amountCents: cents, nteCents: nte, ...flow,
     whoDirected: priced.whoDirected, lineItems: lines,
+    coNumber: inheritedNo,
     // The read-back happened HERE. This timestamp is the proof, and the DB
     // refuses the row without it.
     numbersConfirmedAt: new Date(),
@@ -1089,6 +1155,74 @@ const pickContact = async () => {
       ? { ...p, adding: { ...p.adding, name: name || p.adding.name, phone: phone || p.adding.phone } }
       : p);
     if (!phone) setFiled('That contact has no phone number — type it in.');
+  } catch (e: any) {
+    setUi({ k: 'refused', why: e?.message ?? String(e) });
+  }
+};
+
+/**
+ * The contact picker as a VALUE, for the client drawer.
+ *
+ * `pickContact` above fills the send-flow's add-form by side effect; this returns what
+ * was tapped so a sheet can put it in its own draft. Same rules: the native picker is
+ * user-mediated (no permission prompt), and the MOBILE line wins because the approval
+ * link goes out by SMS.
+ */
+const pickContactValue = async (): Promise<{ name: string; phone: string } | null> => {
+  try {
+    const picked = await Contacts.presentContactPickerAsync();
+    if (!picked) return null;
+    let phones = picked.phoneNumbers ?? [];
+    if (!phones.length && picked.id) {
+      const perm = await Contacts.requestPermissionsAsync();
+      if (perm.status === 'granted') {
+        const full = await Contacts.getContactByIdAsync(picked.id,
+          [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers]);
+        phones = full?.phoneNumbers ?? [];
+      }
+    }
+    const mobile = phones.find((p) => /mobile|cell|iphone|móvil|celular/i.test(p.label ?? ''))
+      ?? phones[0];
+    const phone = (mobile?.number ?? mobile?.digits ?? '').trim();
+    const name = (picked.name
+      || [picked.firstName, picked.lastName].filter(Boolean).join(' ') || '').trim();
+    if (!phone) setFiled(T('client.noContactPhone'));
+    return { name, phone };
+  } catch (e: any) {
+    setUi({ k: 'refused', why: e?.message ?? String(e) });
+    return null;
+  }
+};
+
+/**
+ * Save the client. THE ROSTER IS THE SOURCE OF TRUTH (hadar, 2026-07-31): the person
+ * — name, phone, and which side of the chain they stand on — is written once to
+ * `project_approver` and every extra on the job reads that row. The extra keeps only
+ * the name it was directed by, so an already-sent record still resolves on its own.
+ */
+const saveClient = async (
+  changeOrderId: string,
+  v: { name: string; phone: string | null; clientType: ClientType },
+  mode: 'client' | 'contact' = 'client'
+) => {
+  const pid = recordLc?.co.project_id ?? projectId;
+  if (!pid) { setFiled(T('erec.errStillLoading')); return; }
+  try {
+    await saveClientApprover(db, {
+      projectId: pid, name: v.name, phone: v.phone || null, chainSide: v.clientType,
+    });
+    // ONLY the primary client moves `who_directed`. An additional contact is added to
+    // the job's roster and nothing else — the person who approves this extra does not
+    // change because somebody added the inspector.
+    if (mode === 'client') {
+      // Draft-mutable only; a sent extra already names who it went to.
+      await db.execute(
+        `UPDATE change_order SET who_directed = ? WHERE id = ? AND status = 'draft'`,
+        [v.name, changeOrderId]);
+    }
+    setClientOpen(null);
+    await openRecord(changeOrderId);
+    void refresh();
   } catch (e: any) {
     setUi({ k: 'refused', why: e?.message ?? String(e) });
   }
@@ -1539,6 +1673,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
    * open project, so a record reached from a push used to render read-only.
    */
   const [recordLc, setRecordLc] = React.useState<RecordLcState | null>(null);
+  // The client drawer, open over the record. Its own flag (not `detail`) because it
+  // edits the ROSTER, not a field of the change order.
+  // The client drawer, and WHAT it is naming. 'client' sets who this extra is FOR;
+  // 'contact' adds someone else on the chain (architect, inspector, the GC above you)
+  // WITHOUT touching the client — adding a person to keep in the loop must never
+  // silently re-point who approves the money.
+  const [clientOpen, setClientOpen] = React.useState<null | 'client' | 'contact'>(null);
+  // The signed document, shown BEFORE it is exported. Held as the assembled doc (not a
+  // flag) so the sheet renders the same object the PDF is built from.
+  const [approvalDoc, setApprovalDoc] = React.useState<
+    null | { doc: Awaited<ReturnType<typeof buildApprovalDoc>> }>(null);
   /** The merged local+server timeline for the Full history subscreen. Merged ONCE,
    *  here, from record.ts's local events and the server's — `mergeTimeline` already
    *  puts unstamped events last on purpose and re-merging its own output would
@@ -1727,6 +1872,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // spike had one project, load-bearing the moment there are two.)
   const projectIdRef = React.useRef(projectId);
   projectIdRef.current = projectId;
+
 
   const refresh = React.useCallback(async () => {
     try {
@@ -1937,6 +2083,25 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     } catch { /* pre-init */ }
   }, []);
 
+  /**
+   * PULL TO REFRESH (hadar, 2026-07-31) on Home / Jobs / Company.
+   *
+   * It re-reads every list from LOCAL SQLite, which is the honest thing for this
+   * gesture to do: the record of what happened is on the phone, and a pull that waited
+   * on the network would spin forever in a basement (mandate #7). The outbox drain and
+   * the server hydrate keep running on their own timers; this does not block on either,
+   * and each row still carries its own sync state — so the gesture never claims more
+   * than it knows.
+   *
+   * `refresh` is a stable useCallback declared just below; referencing it from inside
+   * this callback body is fine because nothing calls it during render.
+   */
+  const [pulling, setPulling] = React.useState(false);
+  const onPullRefresh = React.useCallback(async () => {
+    setPulling(true);
+    try { await refresh(); } finally { setPulling(false); }
+  }, [refresh]);
+
   // Reload the workspace whenever the selected project changes — opening a job from
   // the Projects home, or the auto-select above, both land the right captures.
   React.useEffect(() => { if (ready) void refresh(); }, [projectId, ready, refresh]);
@@ -2030,6 +2195,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       await ensureAppOwnedSchema(db);
       await ensureDecisionSchema(db);
       await ensureChangeOrderSchema(db);
+      // Number the extras that predate the column, oldest first per job. A no-op on
+      // every launch after the first.
+      await backfillCoNumbers(db);
       for (const s of REJECT_DDL) await db.execute(s);
       await ensureProjectSchema(db, OWNER);
       await ensureResolutionSchema(db);
@@ -2814,80 +2982,59 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // meant tapping Delete set state and put the confirmation somewhere below the
   // fold — the user saw nothing happen. A destructive confirmation that can be
   // scrolled past is not a confirmation.
-  if (discard) {
-    const plan = discard.plan;
-    return (
-      <View style={{ flex: 1, backgroundColor: '#f6f8fa' }}>
-        <View style={[s.detailHead, { paddingTop: 60, paddingHorizontal: 20 }]}>
-          <Pressable style={s.backBtn} onPress={() => setDiscard(null)}>
-            <Text style={s.backT}>‹ {T('common.close')}</Text>
-          </Pressable>
-        </View>
-        {/* SCROLLVIEW, and its absence was the bug. This was a plain View, so on
-            a small screen — hadar is on a 13 mini — the title, the scope line and
-            a two-sentence confirmation pushed the confirm button past the bottom
-            edge. It rendered, it was enabled, and it could not be reached by a
-            thumb or scrolled to. "The modal shows up but the secondary delete
-            button cannot be clicked" is exactly what that looks like.
+  // DELETE, as a drawer over whatever screen you were on (hadar, 2026-07-31).
+  //
+  // It used to be a full screen that scrolled, and on a 13 mini the confirm button
+  // had been pushed past the bottom edge — rendered, enabled, unreachable. A drawer
+  // is measured from the bottom, so the button is always under the thumb.
+  //
+  // NOT an early return any more: falling through lets the sheet sit OVER the list
+  // it was opened from, which is what makes it read as a confirmation rather than a
+  // place you navigated to. `onDelete` already closed the record, so the screen
+  // underneath is the honest one to return to if you cancel.
+  const discardSheet = discard ? (
+    <ConfirmSheet
+      visible
+      title={T('discard.title')}
+      // The CONSEQUENCE, specific to this row: what goes, what stays, and — when the
+      // row has already left the phone — why it cannot go at all.
+      body={!discard.plan.allowed
+        ? T(discard.plan.reason === 'has_link' ? 'discard.hasLink' : 'discard.alreadySent')
+        : [T(discardSummary(discard.plan)!),
+           discard.plan.needsServer.length > 0 ? T('discard.serverNote') : null]
+            .filter(Boolean).join(' ')}
+      confirmLabel={T('discard.yes')}
+      cancelLabel={T('common.cancel')}
+      busy={!discard.plan.allowed}
+      onClose={() => setDiscard(null)}
+      onConfirm={async () => {
+        // discardExtra re-plans from scratch: the extra can be sent between this
+        // sheet opening and the thumb landing.
+        // WRAPPED, because it once was not: discardCapture threw on a bad column and
+        // the exception went nowhere — nothing deleted, sheet just sitting there. A
+        // destructive action that fails MUST say so.
+        try {
+          const r = discard.captureId
+            ? await discardCapture(db, discard.captureId)
+            : await discardExtra(db, discard.co.id, connector.client);
+          setDiscard(null);
+          if (!r.ok) {
+            setFiled(T('discard.alreadySent'));
+          } else {
+            // Land on Home: the record was already closed, so there is nothing to
+            // return to — Home is the honest destination for a thing that no longer
+            // exists (hadar, 2026-07-27).
+            setNav('home'); setJobFilter(null);
+          }
+          await refresh();
+        } catch (e: any) {
+          setDiscard(null);
+          setFiled(`Delete failed: ${String(e?.message ?? e).slice(0, 90)}`);
+        }
+      }}
+    />
+  ) : null;
 
-            contentContainerStyle carries the padding so the button keeps a
-            comfortable margin above the home indicator. */}
-        <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 48 }}>
-        <View style={s.card}>
-          <Text style={s.cardH}>{T('discard.title')}</Text>
-          <Text style={s.frozen}>{discard.co.scope}</Text>
-          {!plan.allowed ? (
-            <Text style={s.warn}>
-              {T(plan.reason === 'has_link' ? 'discard.hasLink' : 'discard.alreadySent')}
-            </Text>
-          ) : (
-            <>
-              <Text style={s.cardNote}>{T(discardSummary(plan)!)}</Text>
-              {plan.needsServer.length > 0 && (
-                <Text style={s.dmeta}>{T('discard.serverNote')}</Text>
-              )}
-              <Pressable style={s.confirmWide} onPress={async () => {
-                // discardExtra re-plans from scratch: the extra can be sent
-                // between this sheet opening and the thumb landing.
-                // WRAPPED, because it was not. discardCapture threw on a bad
-                // column name and this handler had no catch: the exception went
-                // nowhere, nothing was deleted, and the sheet simply sat there.
-                // A destructive action that fails MUST say so — silence is what
-                // made this take five builds to find.
-                try {
-                  const r = discard.captureId
-                    ? await discardCapture(db, discard.captureId)
-                    : await discardExtra(db, discard.co.id, connector.client);
-                  setDiscard(null);
-                  if (!r.ok) {
-                    setFiled(T('discard.alreadySent'));
-                  } else {
-                    // Deleted: land on Home, not the job screen the record was opened
-                    // from (hadar, 2026-07-27: "take me back to Home Screen"). The
-                    // record was already closed in onDelete, so there is nothing to
-                    // return to — Home is the honest destination for a thing that no
-                    // longer exists.
-                    setNav('home'); setJobFilter(null);
-                  }
-                  // refresh() reloads the ledger AND the captures list.
-                  await refresh();
-                } catch (e: any) {
-                  setDiscard(null);
-                  setFiled(`Delete failed: ${String(e?.message ?? e).slice(0, 90)}`);
-                }
-              }}>
-                <Text style={s.confirmT}>{T('discard.yes')}</Text>
-              </Pressable>
-            </>
-          )}
-          <Pressable style={s.coSendRow} onPress={() => setDiscard(null)}>
-            <Text style={s.dmeta}>{T('common.close')}</Text>
-          </Pressable>
-        </View>
-        </ScrollView>
-      </View>
-    );
-  }
 
   if (viewer) {
     const W = Dimensions.get('window').width;
@@ -3116,6 +3263,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // through to the main screen; a logged-out newcomer sees the 4-slide intro once,
   // then sign-in / register. Held until `ready` (and no init failure) so we never
   // flash sign-in over a valid session still being read from storage.
+  // DEV FIXTURE — pixel-perfect visual work on the draft screen without a camera.
+  // Gated on an env flag, so it is inert in every real build. Scaffolding; removed
+  // with __fixturedraft.tsx when the screen matches the mockup.
+  if (process.env.EXPO_PUBLIC_FIXTURE === '1') return <FixtureDraft />;
+  if (process.env.EXPO_PUBLIC_FIXTURE === '2') return <FixtureNegotiation />;
+  if (process.env.EXPO_PUBLIC_FIXTURE === '3') return <FixtureLocked />;
+
   if (ready && !initError) {
     if (session === undefined) return <SplashScreen />;
     if (session === null) {
@@ -3371,6 +3525,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     return (
       <View style={s.c}>
         {quotaEl}
+        {discardSheet}
         {celebrateEl}
         {paywallEl}
         <Text style={s.h}>EZchangeorder</Text>
@@ -3862,6 +4017,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     return (
       <View style={s.assignC}>
         {quotaEl}
+        {discardSheet}
         {celebrateEl}
         {paywallEl}
         <View style={s.assignReceipt}>
@@ -4074,6 +4230,29 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   };
 
   /**
+   * Save ONE flow field from its drawer — schedule, billing or exclusions.
+   *
+   * Deliberately NOT `savePrice`: that path demands a price (and stamps the read-back
+   * proof), so answering "does this move the schedule?" on an unpriced draft was
+   * refused with "set a price first". `setDraftFlowFields` writes the three flow
+   * columns and leaves the money alone. Still one guarded UPDATE per save.
+   */
+  const saveFlow = async (changeOrderId: string, d: NonNullable<typeof detail>) => {
+    const days = parseInt(d.scheduleDaysText, 10);
+    const fin = await setDraftFlowFields(db, {
+      changeOrderId,
+      billingTiming: (d.billingTiming as BillingTiming) ?? null,
+      scheduleEffect: (d.scheduleEffect as ScheduleEffect) ?? null,
+      scheduleDays: d.scheduleEffect === 'adds_days' && days > 0 ? days : null,
+      exclusions: d.exclusions,
+    });
+    if (!fin.ok) { setUi({ k: 'refused', why: fin.reason }); return; }
+    setDetail(null);
+    await openRecord(changeOrderId);
+    void refresh();
+  };
+
+  /**
    * D6 / REQ-LC31 — a change after approval is a NEW INDEPENDENT EXTRA linked by
    * origin. It is NOT a supersession and must not reuse one: nothing is written to
    * the approved row at all. `createLinkedExtra` re-reads the origin's status and
@@ -4187,82 +4366,114 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       );
     }
 
-    if (d.field === 'scope') {
-      return (
-        <ScopeOfWorkEditor
-          status={record.status}
-          notes={record.voices.map((v, i) => ({
-            key: v.captureId,
-            heading: record.voices.length > 1
-              ? `${T({ k: 'erec.voiceN', p: { n: i + 1 } } as any)} · ${v.at}`
-              : `${T('erec.voice')} · ${v.at}`,
-            text: v.transcript,
-            present: v.present,
-            // The audio, so the Raw tab can play it. This is the only surface a
-            // SENT or APPROVED extra's recording is reachable from.
-            uri: v.uri,
-          }))}
-          value={d.scope}
-          // THE EDITOR'S CAP IS THE WRITER'S CAP, passed rather than defaulted. Its
-          // own default was 1500 and `retitleDraft` stored 200, so the counter said
-          // "612/1500", the save reported success, and 412 characters of the text
-          // that gets frozen into `shown_content` were dropped without a word.
-          maxChars={SCOPE_MAX_CHARS}
-          onChange={(next) => setDetail((x) => x && { ...x, scope: next })}
-          rewrite={d.rewrite}
-          // THERE IS NO REWRITE BACKEND. `supabase/functions` holds exactly
-          // revenuecat-webhook and send-sms, and nothing in this app invokes a
-          // rewrite endpoint. So the tap FAILS LOUDLY with a stated reason rather
-          // than spinning forever or quietly doing nothing — the proposal path
-          // itself is correct and lights up the day an Edge Function exists.
-          onRewrite={() => setDetail((x) => x && {
-            ...x, rewrite: { phase: 'failed', whyKey: 'det.improveNoService' } })}
-          onRewriteDone={() => setDetail((x) => x && { ...x, rewrite: { phase: 'idle' } })}
-          onBack={back}
-          onSave={() => { void saveScope(record.id, d.scope); }}
-        />
-      );
-    }
 
-    // cost · schedule · billing · exclusions — one editor. They are one save on one
-    // row (`priceDraftExtra` writes all of them in a single guarded UPDATE), so four
-    // screens would be four ways for the same write to disagree with itself.
-    return (
-      <PriceScheduleEditor
-        status={record.status}
-        kind={recordLc.view.kind}
-        priceMode={d.priceMode}
-        onPriceModeChange={(m) => setDetail((x) => x && { ...x, priceMode: m })}
-        amountText={d.amountText}
-        onAmountChange={(s) => setDetail((x) => x && { ...x, amountText: s })}
-        nteText={d.nteText}
-        onNteChange={(s) => setDetail((x) => x && { ...x, nteText: s })}
-        // Mandate #6's read-back, through the ONE money formatter. Null when the
-        // text resolves to no number, which is a different fact from zero.
-        amountReadback={centsFromInput(d.amountText) === null
-          ? null : money(centsFromInput(d.amountText))}
-        nteReadback={centsFromInput(d.nteText) === null
-          ? null : money(centsFromInput(d.nteText))}
-        reading={d.reading}
-        scheduleEffect={d.scheduleEffect}
-        onScheduleEffectChange={(v) => setDetail((x) => x && { ...x, scheduleEffect: v })}
-        scheduleDaysText={d.scheduleDaysText}
-        onScheduleDaysChange={(s) => setDetail((x) => x && { ...x, scheduleDaysText: s })}
-        billingTiming={d.billingTiming}
-        onBillingTimingChange={(v) => setDetail((x) => x && { ...x, billingTiming: v })}
-        exclusions={d.exclusions}
-        onExclusionsChange={(s) => setDetail((x) => x && { ...x, exclusions: s })}
-        // From the ONE readiness authority, never re-derived: the editor and the Send
-        // button must not be able to disagree about what is missing.
-        blockers={recordLc.view.readiness.blockers}
-        onBack={back}
-        onSave={() => { void savePrice(record.id, co, d); }}
-      />
-    );
+    // description · cost · schedule · billing · exclusions are NOT full screens any
+    // more (hadar, 2026-07-31): each opens a focused BOTTOM DRAWER over the record.
+    // Falling through here — rather than returning a screen — is what lets the record
+    // stay visible behind the sheet.
+    //
+    // THE ONE-WRITE RULE IS UNCHANGED, and it is the reason each sheet's save merges
+    // into the SAME draft before writing: `priceDraftExtra` puts all four fields on
+    // one row in a single guarded UPDATE, so every sheet commits the full set with its
+    // own field replaced. Four sheets, still one write.
   }
 
   if (record) {
+    // The focused field drawers, rendered OVER the record. `detail` still holds the
+    // draft (one object, so one save), and each sheet writes the whole set with its
+    // own field replaced — see the one-write rule above.
+    const sheetField = detail?.field;
+    const sd = detail;
+    const sheetCo = recordLc?.co;
+    const closeSheet = () => setDetail(null);
+    const sheetsEditable = stageOf(record.status) === 'draft';
+    // The client drawer stands apart from the field sheets: it writes the ROSTER, and
+    // it must be reachable even when no `detail` draft is open.
+    const clientRow = recordLc?.clientRow ?? null;
+    const clientSheet = clientOpen ? (
+      <ClientSheet
+        visible
+        editable={stageOf(record.status) === 'draft'}
+        name={clientRow?.name ?? recordLc?.view.requestedBy ?? null}
+        clientType={clientRow?.chainSide ?? null}
+        // The job's people first: picking one costs no typing and no contact picker.
+        known={(recordLc?.roster ?? []).map((m) => ({
+          id: m.id, name: m.name, phone: m.phone, clientType: m.chainSide,
+        }))}
+        onPickContact={pickContactValue}
+        onClose={() => setClientOpen(null)}
+        onSave={(v) => { void saveClient(record.id, v, clientOpen ?? 'client'); }}
+      />
+    ) : null;
+    const sheets = sd && recordLc && sheetField ? (
+      <>
+        {sheetField === 'scope' && <DescriptionSheet
+          visible
+          editable={sheetsEditable}
+          value={sd.scope}
+          // THE EDITOR'S CAP IS THE WRITER'S CAP, passed rather than defaulted:
+          // `retitleDraft` stores SCOPE_MAX_CHARS, and a sheet that counted to a
+          // different number would report a save that silently truncated.
+          maxChars={SCOPE_MAX_CHARS}
+          notesText={record.voices.map((v) => v.transcript?.trim())
+            .filter((s): s is string => !!s).join('\n\n')}
+          rewrite={sd.rewrite}
+          // THERE IS NO REWRITE BACKEND. Nothing in this app invokes a rewrite
+          // endpoint, so the tap FAILS LOUDLY with a stated reason rather than
+          // spinning forever — the proposal path is correct and lights up the day an
+          // Edge Function exists.
+          onRewrite={() => setDetail((x) => x && {
+            ...x, rewrite: { phase: 'failed', whyKey: 'det.improveNoService' } })}
+          onRewriteDone={() => setDetail((x) => x && { ...x, rewrite: { phase: 'idle' } })}
+          onClose={closeSheet}
+          onSave={(next) => { void saveScope(record.id, next); }}
+        />}
+        {sheetField === 'cost' && <CostSheet
+          visible
+          editable={sheetsEditable}
+          priceMode={sd.priceMode}
+          amountText={sd.amountText}
+          nteText={sd.nteText}
+          // Mandate #6's read-back, through the ONE money formatter. Null when the
+          // text resolves to no number, which is a different fact from zero.
+          amountReadback={centsFromInput(sd.amountText) === null
+            ? null : money(centsFromInput(sd.amountText))}
+          nteReadback={centsFromInput(sd.nteText) === null
+            ? null : money(centsFromInput(sd.nteText))}
+          reading={sd.reading}
+          // From the ONE readiness authority, never re-derived.
+          blockers={recordLc.view.readiness.blockers}
+          onClose={closeSheet}
+          onSave={(v) => { void savePrice(record.id, sheetCo!, { ...sd, ...v }); }}
+        />}
+        {sheetField === 'schedule' && <ScheduleSheet
+          visible
+          editable={sheetsEditable}
+          scheduleEffect={sd.scheduleEffect}
+          scheduleDaysText={sd.scheduleDaysText}
+          onClose={closeSheet}
+          onSave={(v) => { void saveFlow(record.id, { ...sd, ...v }); }}
+        />}
+        {sheetField === 'billing' && <BillingSheet
+          visible
+          editable={sheetsEditable}
+          billingTiming={sd.billingTiming}
+          onClose={closeSheet}
+          onSave={(v) => { void saveFlow(record.id, { ...sd, ...v }); }}
+        />}
+        {sheetField === 'exclusions' && <ExclusionsSheet
+          visible
+          editable={sheetsEditable}
+          exclusions={sd.exclusions}
+          onClose={closeSheet}
+          onSave={(v) => { void saveFlow(record.id, { ...sd, ...v }); }}
+        />}
+      </>
+    ) : null;
     return (
+      <>
+      {clientSheet}
+      {sheets}
       <RecordScreen
         rec={record}
         db={db}
@@ -4291,6 +4502,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         undelivered={recordUndelivered}
         onBack={closeRecord}
         onCapture={() => augmentExtra(record.id)}
+        // KNOWN LIMITATION, stated rather than hidden: there is no voice-ONLY capture
+        // mode. `augmentExtra` opens the fused REQ-CAP-FUSED screen, which does record
+        // voice — so this is the right destination, not a stand-in. What it is not is a
+        // shortcut straight to the recorder. The button previously carried the camera's
+        // accessibility label, so a screen reader announced "add photo" on the mic.
+        onAddVoice={() => augmentExtra(record.id)}
         // THE GATES ARE NOT RE-STATED HERE. The draft screen composes all three
         // (stage `canSend` · content `sendReadiness` · pipeline `canSendExtra`) and
         // disables its own button with the reason printed above it, so this handler
@@ -4339,6 +4556,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           closeRecord(); startRevision(c);
         }}
         onOpenDetail={(field) => openDetail(field)}
+        // Rename from the header, in place. `retitleDraft`'s own WHERE status='draft'
+        // is the guard (REQ-LC14/LC8) — a refused write is REPORTED, never swallowed.
+        onRetitle={(next) => { void saveScope(record.id, next); }}
+        onEditClient={() => setClientOpen('client')}
+        onAddContact={() => setClientOpen('contact')}
+        // What they ARE on this job, from the roster answer. Absent until somebody
+        // has chosen — the row then says the generic "Approver" rather than
+        // inventing a position nobody picked.
+        clientTypeLabel={clientRow?.chainSide
+          ? T(`client.type.${clientRow.chainSide}` as any) : null}
         onViewHistory={() => openDetail('history')}
         // The whole price/details composer — FLOW step 3, the same one the ledger
         // and the post-capture path use.
@@ -4358,7 +4585,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         }}
         // Mandate #2: this writes a file and opens the OS share sheet. It does not
         // transmit anything to a client, and must never be changed to.
-        onViewSignedApproval={() => { void shareApprovalDoc(db, record.id); }}
+        onViewSignedApproval={() => {
+          // SHOW it, then let the reader decide to export. Going straight to the share
+          // sheet exported a document nobody had seen.
+          void (async () => {
+            try { setApprovalDoc({ doc: await buildApprovalDoc(db, record.id) }); }
+            catch { setApprovalDoc({ doc: null }); }
+          })();
+        }}
         onOpenCurrent={recordNextId
           ? () => { void openRecord(recordNextId); } : undefined}
         // REQ-LC14 / T5: destruction is legal in Stage 1 only, and `canDelete` is the
@@ -4379,6 +4613,19 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           }
         } : undefined}
       />
+      {discardSheet}
+      {/* The signed document. Mounted AFTER the screen: a Modal declared before its
+          sibling content does not present on iOS (found the hard way, 2026-07-31). */}
+      {approvalDoc && (
+        <ApprovalDocSheet
+          visible
+          doc={approvalDoc.doc?.doc ?? null}
+          labels={approvalDoc.doc?.labels ?? null}
+          onClose={() => setApprovalDoc(null)}
+          onShare={() => { void shareApprovalDoc(db, record.id); }}
+        />
+      )}
+      </>
     );
   }
 
@@ -4455,6 +4702,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         setLang(n); setLangState(n); await saveLang(db, n);
       }}
       appVersion={(appJson as any)?.expo?.version ?? '1.0.0'}
+      buildLabel={buildLine({
+        version: (appJson as any)?.expo?.version ?? '1.0.0',
+        updateId: ota.updateId,
+        embedded: ota.embedded,
+      })}
+      updateReady={ota.canRestart}
+      onApplyUpdate={() => { setMenuOpen(false); void ota.restart(db); }}
       confirmBase={CONFIRM_BASE}
       onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
     />
@@ -4474,7 +4728,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           <Text style={s.hdrTitle}>{T('feed.title')}</Text>
           <View style={s.hdrBtn} />
         </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}
+          refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPullRefresh} tintColor={C.steel} />}>
           {feedItems.length === 0 && <Text style={s.homeEmpty}>{T('feed.empty')}</Text>}
           {(() => {
           // Group the (already newest-first) feed by calendar day: Today, Yesterday,
@@ -4730,6 +4985,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     const disabled = !!gate || !!initError;
     return (
       <View style={s.homeC}>
+        {discardSheet}
         {/* Header: menu · Home · activity bell (mockup 2026-07-23). */}
         <View style={s.dashHdr}>
           <Pressable style={s.hdrBtn} onPress={() => setMenuOpen(true)}
@@ -4747,7 +5003,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           </Pressable>
         </View>
 
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}
+          refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPullRefresh} tintColor={C.steel} />}>
           {/* Hero — the money outstanding on the client, across every job. Design
               system: Oswald caps label, huge Oswald figure, Inter sub. The house
               illustration (assets/house-hero.png) sits top-right. */}
@@ -4900,6 +5157,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     return (
       <View style={s.homeC}>
         {quotaEl}
+        {discardSheet}
         {celebrateEl}
         {paywallEl}
         {/* Header: title · new job (the ＋ opens the create-job screen, an early
@@ -4913,7 +5171,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           </Pressable>
         </View>
         <ScrollView style={{ flex: 1 }}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}>
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}
+          refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPullRefresh} tintColor={C.steel} />}>
           {/* REQ-PM4 — Active vs Archived. Archived jobs are retained, out of the way. */}
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 2 }}>
             <Pressable hitSlop={6} onPress={() => setJobsArchived(false)}
@@ -5132,6 +5391,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   return (
     <View style={s.c}>
       {quotaEl}
+        {discardSheet}
       {celebrateEl}
       {paywallEl}
       {/* Header: back · Job · bell (mockup 2026-07-23). Fixed above the scroll. */}
@@ -5400,16 +5660,32 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             //
             // CONTENT BEFORE PIPELINE, the order sendreadiness.ts states: this is
             // the refusal he can act on standing where he is.
+            // THE PHOTO COUNT COMES FROM `extraRecord`, THE ONE DERIVATION.
+            // My first attempt at this counted `capture_commit` joined through
+            // `decision_version.capture_id` and returned 0 for a record with seven
+            // photos: a fused session writes each photo as its own commit row and ties
+            // them to the narration through `capture_pair`, which that join never
+            // walks. `extraRecord` already walks it — and a second, subtly different
+            // count feeding a send gate is precisely the class of bug this audit found.
+            let photoCountForSend = 0;
+            try {
+              const rec = await extraRecord(db, id);
+              photoCountForSend = rec ? rec.photos.length + rec.photosTruncated : 0;
+            } catch { /* stays 0 — the gate then refuses, the safe way to be wrong */ }
             const ready = row ? sendReadiness({
               kind: 'extra',
               scope: row.scope,
               amountCents: row.amount_cents,
               nteCents: row.nte_cents,
               priceMode: row.nte_cents == null ? 'fixed' : 'nte',
-              // Only `ok`/`blockers` is read here, and D3 guarantees no recommended
-              // item can affect either — so the photo count is not queried for a
-              // value that cannot change the answer.
-              photoCount: 0,
+              // THE REAL COUNT. This was hardcoded 0 under a comment claiming "D3
+              // guarantees no recommended item can affect either" — true when written,
+              // FALSE since 2026-07-28, when all six items became gating
+              // (sendreadiness.ts). The stale shortcut made `no_photos` fire on every
+              // extra, so `ready.ok` was never true and this whole path — the main
+              // capture → price → review → Send flow — silently bounced to the record
+              // screen and never sent anything.
+              photoCount: photoCountForSend,
               billingTiming: row.billing_timing,
               scheduleEffect: row.schedule_effect,
               exclusions: row.exclusions,

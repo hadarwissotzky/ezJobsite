@@ -277,7 +277,7 @@ function RawNotes({ notes }: { notes: readonly RawNote[] }) {
 
 /** "368/1500". Turns red only when the text is at the cap, because the cap is the
  *  only condition the writer can do anything about. */
-function Counter({ n, of }: { n: number; of: number }) {
+export function Counter({ n, of }: { n: number; of: number }) {
   const full = n >= of;
   return (
     <Text style={[st.counter, full && { color: C.danger }]}>
@@ -287,7 +287,7 @@ function Counter({ n, of }: { n: number; of: number }) {
   );
 }
 
-function RewriteActions({ rewrite, canUseNotes, onUseNotes, onRewrite }: {
+export function RewriteActions({ rewrite, canUseNotes, onUseNotes, onRewrite }: {
   rewrite: RewriteState;
   canUseNotes: boolean;
   onUseNotes: () => void;
@@ -327,7 +327,7 @@ function RewriteActions({ rewrite, canUseNotes, onUseNotes, onRewrite }: {
  * is being asked to check. Labelling both "suggested wording" would put the app's
  * invention and the man's own sentence on the same footing.
  */
-function ProposalCard({ fromAi, text, onAccept, onDismiss }: {
+export function ProposalCard({ fromAi, text, onAccept, onDismiss }: {
   fromAi: boolean;
   text: string;
   onAccept: () => void;
@@ -542,7 +542,7 @@ export function PriceScheduleEditor(props: PriceScheduleEditorProps) {
  * even when the field is read-only, because on a frozen record the question "what
  * exactly did I send?" is the one being asked.
  */
-function MoneyField({ label, value, onChange, editable, readback, alarm }: {
+export function MoneyField({ label, value, onChange, editable, readback, alarm }: {
   label: string;
   value: string;
   onChange: (s: string) => void;
@@ -574,7 +574,7 @@ function MoneyField({ label, value, onChange, editable, readback, alarm }: {
 /** R3's mandatory clause, from the module that owns the mode. Rendered with a
  *  placeholder until the cap resolves — a clause reading "$0.00" would be a lie on
  *  a record someone signs. */
-function NteClause({ mode, cap }: { mode: PriceMode; cap: string | null }) {
+export function NteClause({ mode, cap }: { mode: PriceMode; cap: string | null }) {
   const clause = nteClause(mode, cap ?? t('r2.nteAmountPending'));
   if (!clause) return null;
   return (
@@ -587,7 +587,7 @@ function NteClause({ mode, cap }: { mode: PriceMode; cap: string | null }) {
 /** What the recording said about money — the sentence the number came from, quoted.
  *  Same keys `voicepricecard.tsx` uses, so there is one wording for one finding
  *  even though the two cards are drawn differently. */
-function HeardBlock({ reading }: { reading: VoicePriceReading | null }) {
+export function HeardBlock({ reading }: { reading: VoicePriceReading | null }) {
   if (!reading) return null;
   return (
     <Card>
@@ -1023,7 +1023,11 @@ function Frame({ title, status, onBack, children, footer }: {
         contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 32 }}
         keyboardShouldPersistTaps="handled"
       >
-        <ScreenHeader title={title} onBack={onBack} backLabel={t('erec.back')} />
+        {/* A detail screen names itself in the NAV ROW, not as a display title
+            underneath — the design does this, and it is right: these screens are
+            one job each, and a 22pt heading repeating the bar directly above it
+            spends the top of a 375pt phone saying the same thing twice. */}
+        <ScreenHeader navTitle={title} onBack={onBack} backLabel={t('erec.back')} />
         <View style={{ marginTop: 10 }}>{children}</View>
         <Text style={st.footerState}>{stateFooter(status)}</Text>
       </ScrollView>
@@ -1101,7 +1105,7 @@ function Tabs<K extends string>({ value, onChange, options }: {
  * two-word abbreviations of a term someone signs. The selected row carries a CHECK as
  * well as the fill — colour never carries meaning alone.
  */
-function Choice<K extends string>({ value, onChange, options, disabled }: {
+export function Choice<K extends string>({ value, onChange, options, disabled }: {
   value: K | null;
   onChange: (k: K) => void;
   options: readonly { key: K; label: string; sub?: string }[];

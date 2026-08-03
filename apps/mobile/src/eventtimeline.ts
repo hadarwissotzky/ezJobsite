@@ -210,9 +210,17 @@ export function describeEvent(e: ServerEvent): { k: string; p?: Record<string, s
 export function mergeTimeline(
   local: readonly LocalEvent[], server: readonly ServerEvent[]
 ): MergedEvent[] {
-  const fromServer: MergedEvent[] = server.map((e) => {
+  // AN UNKNOWN KIND IS SKIPPED, NEVER THROWN ON (2026-07-30). `describeEvent`'s switch
+  // covers `ServerEventKind` and returns undefined for anything else — and the DB is
+  // not bound by that type: a row written by a newer client, a future server kind, or
+  // bad data all arrive here as a plain string. Reading `.k` off that undefined threw,
+  // which took out `mergeTimeline` → `lifecycleFor` → the WHOLE record screen, leaving
+  // a contractor staring at blank paper on the one screen that settles a dispute.
+  // Dropping the line we cannot describe loses one row; throwing lost the record.
+  const fromServer: MergedEvent[] = server.flatMap((e) => {
     const d = describeEvent(e);
-    return { atMs: e.atMs, k: d.k, p: d.p, hot: d.hot, fromServer: true };
+    if (!d || !d.k) return [];
+    return [{ atMs: e.atMs, k: d.k, p: d.p, hot: d.hot, fromServer: true }];
   });
 
   const keepUnstamped = server.length === 0;

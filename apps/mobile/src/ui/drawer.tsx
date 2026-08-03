@@ -32,6 +32,7 @@ export function Drawer({
   visible, onClose, onProfile, onCompanySettings, onInbox, onPlans,
   inboxCount, planName, isFreePlan, isOwner,
   lang, onToggleLang, appVersion, confirmBase, onSignOut,
+  buildLabel, updateReady, onApplyUpdate,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -48,6 +49,14 @@ export function Drawer({
   lang: Lang;
   onToggleLang: () => void;
   appVersion: string;
+  /** From `buildLine()` — the native version PLUS the running update id (REQ-OTA5).
+   *  Falls back to the bare version when OTA is disabled or the base bundle is live. */
+  buildLabel?: string;
+  /** An update is downloaded AND nothing is in flight. Only then may we offer the
+   *  restart: reloading the runtime with an unsent outbox row is the loss mandate #1
+   *  forbids, so this is the gate, not a hint. */
+  updateReady?: boolean;
+  onApplyUpdate?: () => void;
   confirmBase: string;
   onSignOut: () => Promise<void>;
 }) {
@@ -144,6 +153,12 @@ export function Drawer({
           <Text style={st.groupLab}>{T('set.about')}</Text>
           <MiniRow label={T('set.terms')} onPress={() => openLegal('terms')} />
           <MiniRow label={T('set.privacy')} onPress={() => openLegal('privacy')} />
+          {/* Shown ONLY when the update is downloaded and no work is queued. Absent
+              rather than disabled: a greyed row invites a tap and a question, and the
+              honest answer ("finish syncing first") is not one to make someone hunt for. */}
+          {updateReady && onApplyUpdate && (
+            <MiniRow label={T('set.restartToUpdate')} onPress={onApplyUpdate} />
+          )}
           <Pressable style={st.signOut} onPress={confirmSignOut} accessibilityRole="button">
             <Text style={st.signOutT}>{T('set.signOut')}</Text>
           </Pressable>
@@ -151,7 +166,7 @@ export function Drawer({
             <Pressable style={st.langBtn} onPress={onToggleLang} accessibilityRole="button">
               <Text style={st.langT}>{lang === 'en' ? 'Español' : 'English'}</Text>
             </Pressable>
-            <Text style={st.version}>v{appVersion}</Text>
+            <Text style={st.version}>{buildLabel ?? `v${appVersion}`}</Text>
           </View>
         </View>
       </Animated.View>

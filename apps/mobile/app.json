@@ -13,8 +13,9 @@
       "infoPlist": {
         "NSCameraUsageDescription": "EZjobsite uses the camera so you can snap a photo of a jobsite decision instead of writing it up.",
         "NSPhotoLibraryUsageDescription": "EZjobsite attaches photos you pick to the decision they belong to.",
-        "NSMicrophoneUsageDescription": "EZjobsite records what you say on site so you do not have to type it.",
-        "NSLocationWhenInUseUsageDescription": "EZjobsite stamps each photo with where it was taken, so it is evidence of what happened on this job."
+        "NSMicrophoneUsageDescription": "EZjobsite records what you say on site so nothing gets lost.",
+        "NSLocationWhenInUseUsageDescription": "EZjobsite stamps each photo with where it was taken, so it is evidence of what happened on this job.",
+        "NSSpeechRecognitionUsageDescription": "EZjobsite turns what you said into text on this phone, so your notes fill themselves in."
       }
     },
     "android": {
@@ -25,7 +26,20 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.hilo.ezjobsite"
+      "package": "com.hilo.ezjobsite",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -69,7 +83,22 @@
         {
           "color": "#4E6243"
         }
-      ]
-    ]
+      ],
+      "expo-web-browser"
+    ],
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/2627bce9-ca41-4f4e-b50f-6d810818e651",
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
+    },
+    "owner": "hiloventuresgroup",
+    "extra": {
+      "eas": {
+        "projectId": "2627bce9-ca41-4f4e-b50f-6d810818e651"
+      }
+    }
   }
 }

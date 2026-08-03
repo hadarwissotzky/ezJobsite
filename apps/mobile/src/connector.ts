@@ -129,7 +129,79 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   }
 
   /**
-   * Send a 6-digit code by SMS (REQ-ID1).
+   * Email + password sign-in. RESTORED 2026-08-02 (hadar): phone-only login was
+   * reversed after SMS proved to be a hard dependency we do not control — a
+   * misconfigured provider locked the account holder out of his own app, and a
+   * changed number would do the same to a real user with no way back.
+   * Phone verification survives as a SEPARATE, SKIPPABLE step (see phoneverify).
+   */
+  async login(email: string, password: string) {
+    const { error } = await this.client.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  }
+
+  /**
+   * Registration. Returns whether a session came back immediately: with email
+   * confirmation OFF, signUp logs the user straight in (session present); with it
+   * ON, no session yet and the caller must tell the user to check their email.
+   */
+  async signUp(email: string, password: string): Promise<{ needsEmailConfirm: boolean }> {
+    const { data, error } = await this.client.auth.signUp({ email, password });
+    if (error) throw error;
+    return { needsEmailConfirm: !data.session };
+  }
+
+  /**
+   * Sign in with Google, via the system browser rather than the Google native SDK.
+   *
+   * WHY THE BROWSER FLOW. The native SDK would mean another native module, a reversed
+   * client id in Info.plist, and a rebuild every time that changes. This needs neither:
+   * Supabase mints the consent URL, iOS opens it in an ASWebAuthenticationSession, and
+   * the app's own scheme (`ezjobsite://`) catches the redirect. Fewer moving native
+   * parts is worth a great deal in a project where every rebuild costs a cable.
+   *
+   * The caller supplies the opener so this file stays free of UI imports and remains
+   * testable; `authscreen` passes expo-web-browser's session opener.
+   */
+  async signInWithGoogle(o: {
+    redirectTo: string;
+    openAuth: (url: string, redirectTo: string) => Promise<{ type: string; url?: string }>;
+  }): Promise<void> {
+    const { data, error } = await this.client.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: o.redirectTo, skipBrowserRedirect: true },
+    });
+    if (error) throw error;
+    if (!data?.url) throw new Error('google_no_url');
+
+    const res = await o.openAuth(data.url, o.redirectTo);
+    // The user closed the sheet. NOT an error — say nothing and leave them where
+    // they were, rather than showing a failure for a decision they made.
+    if (res.type !== 'success' || !res.url) return;
+
+    // Supabase returns either a PKCE `code` or a token fragment, depending on flow.
+    const url = res.url;
+    const code = /[?&]code=([^&]+)/.exec(url)?.[1];
+    if (code) {
+      const { error: e2 } = await this.client.auth.exchangeCodeForSession(decodeURIComponent(code));
+      if (e2) throw e2;
+      return;
+    }
+    const at = /[#&]access_token=([^&]+)/.exec(url)?.[1];
+    const rt = /[#&]refresh_token=([^&]+)/.exec(url)?.[1];
+    if (at && rt) {
+      const { error: e3 } = await this.client.auth.setSession({
+        access_token: decodeURIComponent(at), refresh_token: decodeURIComponent(rt),
+      });
+      if (e3) throw e3;
+      return;
+    }
+    throw new Error('google_no_session');
+  }
+
+  /**
+   * Send a 6-digit code by SMS. NO LONGER the way in — this now backs the
+   * skippable phone-verification step, not login.
    *
    * THERE IS NO SEPARATE REGISTRATION (REQ-ID2). `signInWithOtp` creates the account
    * on first use and returns a session on every use after, so the user never has to

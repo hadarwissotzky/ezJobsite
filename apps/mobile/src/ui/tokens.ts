@@ -9,17 +9,33 @@
  * with an icon + plain-language label (colour never carries status alone).
  */
 
-/** Raw palette — the kit's colors.json, verbatim. */
+/**
+ * Raw palette — hadar's tokens, verbatim (2026-07-28).
+ *
+ * These REPLACE the previous set, which was close enough to look intentional and
+ * wrong enough to never match the design. The drift ran one way: every neutral was
+ * a shade BLUER than the spec. Secondary text was `#5E666E` against a specified
+ * `#555B57` — blue-grey where the design is green-grey — and the card was `#FFFDFC`,
+ * effectively white, against a specified `#FBF8F1` cream. On a warm-cream page a
+ * blue-grey label reads as a different family of colour, which is why the screens
+ * kept looking off after each individual fix.
+ *
+ * The page should feel WARM CREAM, NOT PURE WHITE. That is the whole rule.
+ */
 export const palette = {
-  background: '#F7F4EE',   // warm off-white app background
-  surface: '#FFFDFC',      // cards / sheets
+  background: '#F5F1E8',   // warm cream app background
+  surface: '#FBF8F1',      // cards / sheets — cream, never white
+  surfaceRaised: '#FFFDF8',// raised surface above a card (sheets, popovers)
   surfaceMuted: '#EFEBE3', // insets, pressed states, neutral chips
-  ink: '#151A1E',          // primary text + primary (dark) action
-  textSecondary: '#5E666E',// secondary text
-  border: '#D5D0C7',       // hairlines / card borders
-  brand: '#4E6243',        // olive — the brand accent (selected, brand action)
-  brandDark: '#34412E',    // pressed brand
-  brandSoft: '#E7ECDD',    // brand-tinted fill (approved chip bg, selected chip bg)
+  ink: '#161918',          // primary text + primary (dark) action
+  textSecondary: '#555B57',// secondary text
+  textMuted: '#777C78',    // metadata — timestamps, counts, section headings
+  textDisabled: '#A4A7A3', // disabled labels. NEVER for information a user needs.
+  border: '#D8D1C4',       // dividers / hairlines / card borders
+  brand: '#506A45',        // green — the brand accent (selected, brand action)
+  brandDark: '#354B31',    // pressed brand
+  brandSoft: '#E8EEE2',    // brand-tinted fill (approved chip bg, selected chip bg)
+  brandBorder: '#B9C6AF',  // hairline on a brand-tinted surface
   statusNoSignal: '#4F565D',   // charcoal — offline
   statusSavedLocal: '#6D7F89',  // blue-grey — saved on this phone
   statusSyncing: '#718796',     // steel — sending
@@ -43,7 +59,14 @@ export const palette = {
  * box and a tinted one are the same component with one lookup.
  */
 export const statusTints = {
-  caution:  { soft: '#F6EBD9', line: '#E0C79B', ink: '#6E4E1F' },
+  // THE DESIGN'S PEACH (hadar, 2026-07-28). These three are the values the approved
+  // mockup uses, and they were already in this repo — hardcoded into the old record
+  // screen's state card, which is where they were verified against the design. The
+  // tint table had a different, more olive tan (#F6EBD9/#E0C79B/#6E4E1F) mixed
+  // independently, so the one screen that used the tokens looked wrong beside the
+  // one that had not been migrated yet. Peach, not tan: it is warmer and much paler,
+  // which is what lets the pills read as white on top of it.
+  caution:  { soft: '#FFF3EA', line: '#FFD9C2', ink: '#7A3A12' },
   approved: { soft: palette.brandSoft, line: '#C3D0B4', ink: palette.brandDark },
   danger:   { soft: '#F6E5E1', line: '#DDBAB2', ink: '#6B372F' },
   neutral:  { soft: palette.surfaceMuted, line: palette.border, ink: palette.ink },
