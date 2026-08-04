@@ -4815,6 +4815,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         </ScrollView>
         {bottomNav('company', false)}
         {drawerEl}
+        {/* Feed can open the drawer too, so it needs the modals the drawer opens. */}
+        {quotaEl}
+        {paywallEl}
       </View>
     );
   }
@@ -5169,6 +5172,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             destinations only. Each row navigates to a screen that already exists.
             Also reachable from the Profile tab in the bottom bar (2026-07-28). */}
         {drawerEl}
+        {/* MOUNTED HERE OR THE DRAWER'S "Upgrade" DOES NOTHING (hadar 2026-08-04:
+            "it takes me nowhere, just closes the drawer"). setShowPaywall(true) only
+            flips state — if <PaywallScreen> is not in THIS screen's tree there is
+            nothing to render, and the tap is silently swallowed. The drawer is
+            reachable from home, jobs and activity, so the modals it can open have to
+            be mounted on all three; jobs already had them, home and activity did not.
+            AFTER {drawerEl} deliberately: a Modal declared before its sibling content
+            does not present on iOS. */}
+        {quotaEl}
+        {paywallEl}
       </View>
     );
   }
@@ -5390,6 +5403,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         </ScrollView>
         {bottomNav('activity', false)}
         {drawerEl}
+        {/* Same reason as home — the drawer opens from here too. */}
+        {quotaEl}
+        {paywallEl}
         {(bell || drafts.length > 0) && (
           <View style={s.homeScrim}>
             <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}

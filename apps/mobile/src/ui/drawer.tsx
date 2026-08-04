@@ -75,6 +75,8 @@ export function Drawer({
   // `visible` goes false, which would snap the panel away with no slide.
   const [mounted, setMounted] = React.useState(visible);
   const slide = React.useRef(new Animated.Value(0)).current;
+  // An action to run once this panel has FULLY closed. See `go` below.
+  const pending = React.useRef<null | (() => void)>(null);
 
   React.useEffect(() => {
     if (visible) {
@@ -85,14 +87,26 @@ export function Drawer({
     } else if (mounted) {
       Animated.timing(slide, {
         toValue: 0, duration: 180, easing: Easing.in(Easing.cubic), useNativeDriver: true,
-      }).start(({ finished }) => { if (finished) setMounted(false); });
+      }).start(({ finished }) => {
+        if (!finished) return;
+        setMounted(false);
+        // NOW run whatever the tapped row wanted. iOS refuses to present a modal while
+        // another is still dismissing, so firing this alongside onClose() meant every
+        // row that opens a Modal — Upgrade, and any future one — closed the drawer and
+        // did nothing visible. The bug reads as "the button is dead", which is why it
+        // is worth the ref rather than a setTimeout guess at the animation length.
+        const fn = pending.current;
+        pending.current = null;
+        fn?.();
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   if (!mounted) return null;
 
-  const go = (fn: () => void) => () => { onClose(); fn(); };
+  // Close first, act after. Anything that opens a Modal MUST go through this.
+  const go = (fn: () => void) => () => { pending.current = fn; onClose(); };
   const mailTo = (subject: string) =>
     Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}`).catch(() => {});
   const openLegal = (path: string) =>
