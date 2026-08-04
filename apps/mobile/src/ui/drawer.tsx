@@ -20,6 +20,7 @@
  */
 import React from 'react';
 import { Alert, Animated, Easing, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { UsageCard } from './usagecard';
 import { C, F } from './theme';
 import { radii, shadows } from './tokens';
 import { Icon, type IconName } from './icon';
@@ -32,7 +33,7 @@ export function Drawer({
   visible, onClose, onProfile, onCompanySettings, onInbox, onPlans,
   inboxCount, planName, isFreePlan, isOwner,
   lang, onToggleLang, appVersion, confirmBase, onSignOut,
-  buildLabel, updateReady, onApplyUpdate,
+  buildLabel, updateReady, onApplyUpdate, usage,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -49,6 +50,9 @@ export function Drawer({
   lang: Lang;
   onToggleLang: () => void;
   appVersion: string;
+  /** Plan + what is left of each metered cap. Null until the first read completes;
+   *  the card renders nothing rather than guessing at zeros. */
+  usage?: import('../usage').UsageSummary | null;
   /** From `buildLine()` — the native version PLUS the running update id (REQ-OTA5).
    *  Falls back to the bare version when OTA is disabled or the base bundle is live. */
   buildLabel?: string;
@@ -147,6 +151,16 @@ export function Drawer({
           <MiniRow label={T('set.contact')} onPress={() => mailTo('EZchangeorder — support')} />
           <MiniRow label={T('set.feedback')} onPress={() => mailTo('EZchangeorder — feedback')} />
         </ScrollView>
+
+        {/* WHERE YOU STAND, before the wall. Sits above About so it reads as part of
+            the account, not as a footnote. Shown on EVERY tier — a Core owner has a
+            3-seat cap worth seeing, and hiding it until the fourth hire is refused
+            wastes the upgrade. */}
+        <UsageCard
+          summary={usage ?? null}
+          planLabel={planName}
+          onSeePlans={() => { onClose(); onPlans(); }}
+        />
 
         {/* ---- About ---- pinned to the bottom of the drawer. */}
         <View style={st.about}>

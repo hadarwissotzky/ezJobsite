@@ -18,10 +18,17 @@ import { Icon } from './icon';
 import { C, F } from './theme';
 
 // Which feature bullets each tier shows (i18n keys under paywall.f.*).
+//
+// KEPT HONEST AGAINST plans.ts (2026-08-04). These previously read "Up to 2 active
+// jobs" and "Unlimited jobs & extras" — written when jobs were the metered thing. The
+// free tier now meters sent change orders, photos, recording and seats, so those
+// bullets had become a sales claim the product does not make. A paywall that
+// misdescribes the tier is worse than one with fewer bullets: the user discovers the
+// truth at the moment they are refused, having already paid attention to the lie.
 const FEATURES: Record<PlanId, string[]> = {
-  free: ['jobs2', 'evidence', 'inApp', 'typedName'],
-  core: ['jobsUnlim', 'sms', 'evidence', 'inApp'],
-  crew: ['jobsUnlim', 'collab', 'integrations', 'sms'],
+  free: ['free1', 'free2', 'free3', 'evidence'],
+  core: ['unlim', 'seats3', 'sms', 'evidence'],
+  crew: ['unlim', 'seatsUnlim', 'collab', 'integrations'],
 };
 
 export function PaywallScreen(props: {

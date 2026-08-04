@@ -26,7 +26,9 @@ import { readCapture,
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { photoCapture, pickFromLibrary, textCapture, voiceCapture } from './src/modality';
-import { checkJobs, currentPlan, type QuotaKind } from './src/quota';
+import { checkChangeOrders, checkJobs, currentPlan, type QuotaKind } from './src/quota';
+import { usageSummary, type UsageSummary } from './src/usage';
+import { UsageCard, UsageNudge } from './src/ui/usagecard';
 import { QuotaModal } from './src/ui/quotamodal';
 import { PaywallScreen } from './src/ui/paywallscreen';
 import { PLANS, type PlanId } from './src/plans';
@@ -354,6 +356,9 @@ export default function App() {
   const [showCapture, setShowCapture] = React.useState(false);   // REQ-CAP-FUSED screen
   const [showSettings, setShowSettings] = React.useState(false); // Settings/Team screen
   const [quota, setQuota] = React.useState<{ kind: QuotaKind; limit: number } | null>(null); // free-tier cap hit
+  // What the user has used, for the nudge + drawer. REPORTING ONLY — quota.ts still
+  // owns every yes/no, so this can never disagree with what actually blocks.
+  const [usage, setUsage] = React.useState<UsageSummary | null>(null);
   const [showPaywall, setShowPaywall] = React.useState(false);
   const [paywallPlan, setPaywallPlan] = React.useState<PlanId>('free');
   const [showFeed, setShowFeed] = React.useState(false);         // REQ-PM9 Company feed
@@ -2133,9 +2138,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         setPlanId(await currentPlan(db));
         const co = await myCompany(db, OWNER);
         setIsOwner(!!co?.isOwner);
-      } catch { setPlanId('free'); setIsOwner(false); }
+        // Usage rides the SAME refresh as the plan, on purpose: the two are read
+        // together everywhere they are shown, and refreshing them separately is how
+        // a drawer ends up displaying free-tier lines beside a paid plan name for a
+        // frame. `quota` (the blocking decision) is deliberately not touched here.
+        setUsage(await usageSummary(db, co?.id ?? null));
+      } catch { setPlanId('free'); setIsOwner(false); setUsage(null); }
     })();
-  }, [ready, OWNER, menuOpen, db]);
+  }, [ready, OWNER, menuOpen, db, quota]);
 
   // R5b AC1 / R8: tapping the notification opens THAT extra, not the app's last
   // screen. Registered once and kept for the app's life — a listener torn down
@@ -4709,7 +4719,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       onPlans={() => void openPaywall()}
       onInbox={async () => { setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true); }}
       inboxCount={inbox}
-      planName={PLANS[planId].name}
+      planName={T(('plan.' + planId) as any)}
+      usage={usage}
       isFreePlan={planId === 'free'}
       isOwner={isOwner}
       lang={lang}
@@ -5048,6 +5059,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               </View>
             )}
           </View>
+
+          {/* SUBSCRIPTION STATE, one line, only when it matters (hadar 2026-08-04).
+              BELOW the hero deliberately: above it, a banner pushes the money figure
+              down and reads as an error state. Here it is the first thing after the
+              headline number, which is where a decision about the account belongs.
+              Renders nothing at all while there is room — an always-on usage bar
+              becomes furniture, and furniture does not convert. */}
+          <UsageNudge summary={usage} onUpgrade={() => void openPaywall()} />
 
           {/* CAPTURE FIRST — the trigger moment is "get this down before it slips",
               so recording starts before any job is chosen. GPS files it after. */}
@@ -5709,6 +5728,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             if (!ready?.ok) {
               // The record screen is where the blockers are named, one tap each.
               await openRecord(id);
+              return;
+            }
+            // FREE-TIER SEND GATE (hadar 2026-08-04). Checked HERE — after readiness,
+            // before the composer — because this is the last point where nothing has
+            // left the phone. It gates SENDING, never capturing: every byte of this
+            // extra is already committed and stays that way whatever the plan says.
+            const coq = await checkChangeOrders(db);
+            if (!coq.ok) {
+              setQuota({ kind: coq.kind, limit: coq.limit });
               return;
             }
             // MUST BE PROCESSED FIRST (hadar, 2026-07-24): the evidence has to be
