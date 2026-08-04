@@ -27,9 +27,16 @@ import { C, F } from './theme';
 // truth at the moment they are refused, having already paid attention to the lie.
 const FEATURES: Record<PlanId, string[]> = {
   free: ['free1', 'free2', 'free3', 'evidence'],
-  core: ['unlim', 'seats3', 'sms', 'evidence'],
-  crew: ['unlim', 'seatsUnlim', 'collab', 'integrations'],
+  core: ['unlim', 'seats3', 'sms'],
+  // Crew INHERITS Core rather than restating it (Handoff's "All FLEX features plus:",
+  // 2026-08-04). Repeating shared bullets makes two tiers look similar when the whole
+  // job of the card is to show what changes — and it buries the one line that actually
+  // differs. What Crew adds over Core is seats, collaboration and integrations.
+  crew: ['seatsUnlim', 'collab', 'integrations'],
 };
+
+/** The tier whose features this one builds on, for the "everything in X, plus" line. */
+const INHERITS: Partial<Record<PlanId, PlanId>> = { crew: 'core' };
 
 export function PaywallScreen(props: {
   visible: boolean;
@@ -91,6 +98,11 @@ export function PaywallScreen(props: {
           <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.steel, marginTop: 2 }}>{t('paywall.annualNote')}</Text>
         )}
         <View style={{ marginTop: 12, gap: 8 }}>
+          {INHERITS[plan] && (
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.steel, marginBottom: 2 }}>
+              {t({ k: 'paywall.everythingIn', p: { plan: t(('plan.' + INHERITS[plan]) as any) } } as any)}
+            </Text>
+          )}
           {FEATURES[plan].map((f) => (
             <View key={f} style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
               <Icon name="approved" size={16} color={C.approve} />

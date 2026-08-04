@@ -142,3 +142,37 @@ export function UsageCard({ summary, planLabel, onSeePlans }: {
     </View>
   );
 }
+
+/**
+ * The crown that marks a row as needing a paid plan.
+ *
+ * BORROWED FROM HANDOFF, WITH RESTRAINT (hadar 2026-08-04). Their settings screen
+ * crowns seven-plus rows — Templates, Catalogs, QuickBooks, Roles, Project statuses —
+ * and at that density the mark stops meaning "premium" and starts meaning "most of
+ * this app is not for you". For a user who by definition does not think in software
+ * (CLAUDE.md §1), a mostly-locked settings screen reads as broken rather than
+ * aspirational.
+ *
+ * So: crown ONLY what is genuinely gated, and prefer showing the row to hiding it. A
+ * hidden feature teaches nothing; a crowned one is an advertisement the user can act
+ * on, which is the whole reason the pattern is worth taking at all.
+ *
+ * THE STRUCTURAL DIFFERENCE, stated because it decides where this may be used:
+ * Handoff gates FEATURES (you have Catalogs or you don't). We gate VOLUME (2 change
+ * orders, 30 photos). A crown on a volume-metered row would be a lie — the user is
+ * not locked out of sending, they have a number remaining. Volume belongs in
+ * <UsageCard>/<UsageNudge>; the crown is for capabilities a plan does not include.
+ */
+export function LockCrown({ size = 18 }: { size?: number }) {
+  return (
+    <View
+      accessibilityLabel={t('usage.paidFeature')}
+      style={{
+        width: size + 8, height: size + 8, borderRadius: (size + 8) / 2,
+        backgroundColor: '#FBF0DA', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <Text style={{ fontSize: size - 4, color: '#C8871A' }}>♛</Text>
+    </View>
+  );
+}

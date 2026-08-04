@@ -26,6 +26,7 @@ import { t } from '../i18n';
 import type { Lang } from '../i18n';
 import { registerPushToken } from '../push';
 import { checkMembers, type QuotaKind } from '../quota';
+import { LockCrown } from './usagecard';
 import { QuotaModal } from './quotamodal';
 import { C, F, T as TH, label } from './theme';
 import { TRADES, type Profile } from '../profile';
@@ -108,6 +109,18 @@ export function SettingsScreen(props: {
       }
     } catch { /* best-effort — mandate #7, push is opportunistic */ }
   };
+
+  // Whether another seat is included in this plan. Read from the SAME check the tap
+  // performs, so a crowned button always refuses and an uncrowned one always works.
+  const [seatsLocked, setSeatsLocked] = React.useState(false);
+  React.useEffect(() => {
+    if (!co) { setSeatsLocked(false); return; }
+    let live = true;
+    checkMembers(db, co.id)
+      .then((q) => { if (live) setSeatsLocked(!q.ok); })
+      .catch(() => { if (live) setSeatsLocked(false); });   // unknown -> do not crown
+    return () => { live = false; };
+  }, [db, co]);
 
   const invite = async () => {
     if (!co) return;
@@ -264,9 +277,23 @@ export function SettingsScreen(props: {
               </View>
             ))}
             {co.isOwner && (
-              <Pressable onPress={invite} disabled={busy} style={{ ...saveBtn, backgroundColor: C.ink }}>
-                <Text style={saveBtnT}>{t('set.invite')}</Text>
-              </Pressable>
+              <>
+                {/* CROWNED WHEN THE SEAT IS NOT INCLUDED (Handoff's pattern, 2026-08-04).
+                    The button is SHOWN, not hidden: hiding it teaches the owner nothing
+                    and they never learn a bigger team is possible. Crowned, it is an
+                    advertisement they can act on — and tapping still runs checkMembers,
+                    so the modal explains the cap rather than the button lying about it. */}
+                <Pressable onPress={invite} disabled={busy}
+                  style={{ ...saveBtn, backgroundColor: C.ink, flexDirection: 'row', gap: 10 }}>
+                  <Text style={saveBtnT}>{t('set.invite')}</Text>
+                  {seatsLocked && <LockCrown size={16} />}
+                </Pressable>
+                {seatsLocked && (
+                  <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 6, textAlign: 'center' }}>
+                    {t('set.seatsLocked')}
+                  </Text>
+                )}
+              </>
             )}
           </>
         ) : (
