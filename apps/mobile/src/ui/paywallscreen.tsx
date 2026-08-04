@@ -22,14 +22,13 @@ const FEATURES: Record<PlanId, string[]> = {
   free: ['jobs2', 'evidence', 'inApp', 'typedName'],
   core: ['jobsUnlim', 'sms', 'evidence', 'inApp'],
   crew: ['jobsUnlim', 'collab', 'integrations', 'sms'],
-  enterprise: [],
 };
 
 export function PaywallScreen(props: {
   visible: boolean;
   currentPlan: PlanId;
   onClose: () => void;
-  onContact: () => void;   // mailto — Enterprise + the not-yet-live case
+  onContact: () => void;   // mailto — the fallback when billing is not yet live
   /** Fired after a successful purchase/restore so the caller can re-read the plan.
    *  The AUTHORITY is still company.plan written by the RevenueCat webhook — this is
    *  only the cue to go look, not the entitlement itself. */
@@ -130,19 +129,6 @@ export function PaywallScreen(props: {
 
           {card('free')}
           {PAID_TIERS.map(card)}
-
-          {/* Enterprise — contact, never IAP. */}
-          <Pressable onPress={props.onContact}
-            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-              backgroundColor: C.card, borderWidth: 1, borderColor: C.line, borderRadius: 16, padding: 16, marginBottom: 12 }}>
-            <View>
-              <Text style={{ fontFamily: F.bodyBold, fontSize: 17, color: C.ink }}>{t('plan.enterprise')}</Text>
-              <Text style={{ fontFamily: F.body, fontSize: 13, color: C.steel }}>{t('paywall.enterpriseSub')}</Text>
-            </View>
-            <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: props.currentPlan === 'enterprise' ? C.steel : C.brand }}>
-              {props.currentPlan === 'enterprise' ? t('paywall.current') : t('paywall.enterpriseCta')}
-            </Text>
-          </Pressable>
 
           {note && <Text style={{ fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 4 }}>{note}</Text>}
 
