@@ -466,6 +466,22 @@ export default function App() {
   // launch; `canRestart` is already gated on every outbox being empty, so the drawer
   // row simply mirrors it rather than re-deciding.
   const ota = useOta(ready ? db : null);
+
+  // THE EMAILED SIGN-IN LINK LANDS HERE (hadar, 2026-08-03). Tapping the link in
+  // Mail opens `ezjobsite://auth-callback#access_token=…`; without this listener the
+  // app would foreground and do nothing, which reads as the link being broken.
+  // Handles both the cold start (getInitialURL — app was not running) and the warm
+  // case (addEventListener). Errors are swallowed deliberately: a stray deep link
+  // that carries no credentials is not a failure the user caused.
+  React.useEffect(() => {
+    const take = (url: string | null) => {
+      if (!url) return;
+      connector.sessionFromUrl(url).catch(() => { /* not a sign-in link */ });
+    };
+    void Linking.getInitialURL().then(take);
+    const sub = Linking.addEventListener('url', ({ url }) => take(url));
+    return () => sub.remove();
+  }, []);
   const [delivery, setDelivery] = React.useState<{pending:number;parked:number}>({pending:0,parked:0});
   const [decisions, setDecisions] = React.useState<DecisionRow[]>([]);
   // The ONE confirm surface (REQ-VAL6). Null = not confirming anything.

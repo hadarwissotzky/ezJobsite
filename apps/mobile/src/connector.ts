@@ -129,30 +129,7 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   }
 
   /**
-   * Email + password sign-in. RESTORED 2026-08-02 (hadar): phone-only login was
-   * reversed after SMS proved to be a hard dependency we do not control — a
-   * misconfigured provider locked the account holder out of his own app, and a
-   * changed number would do the same to a real user with no way back.
-   * Phone verification survives as a SEPARATE, SKIPPABLE step (see phoneverify).
-   */
-  async login(email: string, password: string) {
-    const { error } = await this.client.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  }
-
-  /**
-   * Registration. Returns whether a session came back immediately: with email
-   * confirmation OFF, signUp logs the user straight in (session present); with it
-   * ON, no session yet and the caller must tell the user to check their email.
-   */
-  async signUp(email: string, password: string): Promise<{ needsEmailConfirm: boolean }> {
-    const { data, error } = await this.client.auth.signUp({ email, password });
-    if (error) throw error;
-    return { needsEmailConfirm: !data.session };
-  }
-
-  /**
-   * Sign in with Google, via the system browser rather than the Google native SDK.
+   * Sign in with Google or Apple, via the system browser rather than a native SDK.
    *
    * WHY THE BROWSER FLOW. The native SDK would mean another native module, a reversed
    * client id in Info.plist, and a rebuild every time that changes. This needs neither:
@@ -163,16 +140,17 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
    * The caller supplies the opener so this file stays free of UI imports and remains
    * testable; `authscreen` passes expo-web-browser's session opener.
    */
-  async signInWithGoogle(o: {
+  async signInWithOAuth(o: {
+    provider: 'google' | 'apple';
     redirectTo: string;
     openAuth: (url: string, redirectTo: string) => Promise<{ type: string; url?: string }>;
   }): Promise<void> {
     const { data, error } = await this.client.auth.signInWithOAuth({
-      provider: 'google',
+      provider: o.provider,
       options: { redirectTo: o.redirectTo, skipBrowserRedirect: true },
     });
     if (error) throw error;
-    if (!data?.url) throw new Error('google_no_url');
+    if (!data?.url) throw new Error('oauth_no_url');
 
     const res = await o.openAuth(data.url, o.redirectTo);
     // The user closed the sheet. NOT an error — say nothing and leave them where
@@ -196,7 +174,55 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
       if (e3) throw e3;
       return;
     }
-    throw new Error('google_no_session');
+    throw new Error('oauth_no_session');
+  }
+
+  /**
+   * Email a sign-in LINK — no password anywhere in this app (hadar, 2026-08-03).
+   *
+   * `shouldCreateUser: true` makes this one call cover both sign-in and sign-up:
+   * an unknown address gets an account, a known one gets a session. The user is
+   * never asked to know which they are, which is the same reasoning as the phone
+   * path (REQ-ID2).
+   *
+   * OPERATIONAL BOUNDARY, stated because it WILL bite: Supabase's built-in SMTP is
+   * rate-limited to a handful of messages per hour. That is survivable for testing
+   * and unusable as a production login path — custom SMTP (Resend/SendGrid) is
+   * required before real users, or people will be locked out by a quota.
+   */
+  async sendEmailLink(email: string, redirectTo: string): Promise<void> {
+    const { error } = await this.client.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: redirectTo, shouldCreateUser: true },
+    });
+    if (error) throw error;
+  }
+
+  /**
+   * Turn a redirect URL into a session. Used by BOTH the OAuth sheet and the
+   * deep-link handler that catches an emailed link — one parser, because two would
+   * be two places for the token formats to drift.
+   *
+   * Returns false when the URL carries no credentials at all (a stray deep link),
+   * so callers can ignore it rather than surface a failure the user did not cause.
+   */
+  async sessionFromUrl(url: string): Promise<boolean> {
+    const code = /[?&]code=([^&]+)/.exec(url)?.[1];
+    if (code) {
+      const { error } = await this.client.auth.exchangeCodeForSession(decodeURIComponent(code));
+      if (error) throw error;
+      return true;
+    }
+    const at = /[#&]access_token=([^&]+)/.exec(url)?.[1];
+    const rt = /[#&]refresh_token=([^&]+)/.exec(url)?.[1];
+    if (at && rt) {
+      const { error } = await this.client.auth.setSession({
+        access_token: decodeURIComponent(at), refresh_token: decodeURIComponent(rt),
+      });
+      if (error) throw error;
+      return true;
+    }
+    return false;
   }
 
   /**
