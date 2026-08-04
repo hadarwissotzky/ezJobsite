@@ -4736,6 +4736,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       })}
       updateReady={ota.canRestart}
       onApplyUpdate={() => { setMenuOpen(false); void ota.restart(db); }}
+      onCheckUpdates={ota.checkNow}
       confirmBase={CONFIRM_BASE}
       onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
     />

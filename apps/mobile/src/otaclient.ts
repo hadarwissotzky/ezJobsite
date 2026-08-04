@@ -39,6 +39,8 @@ export type OtaState = {
   enabled: boolean;
   /** Apply now. Caller must gate on `canRestart`; this re-checks anyway. */
   restart: (db: AbstractPowerSyncDatabase) => Promise<void>;
+  /** Ask the server right now. Never throws; reports what happened. */
+  checkNow: () => Promise<'downloaded' | 'none' | 'error'>;
 };
 
 export function useOta(db: AbstractPowerSyncDatabase | null): OtaState {
@@ -65,7 +67,27 @@ export function useOta(db: AbstractPowerSyncDatabase | null): OtaState {
     await Updates.reloadAsync();
   }, []);
 
+  /**
+   * A manual "check now", for the drawer link. The automatic check already runs on
+   * every launch; this exists because a user who has been TOLD an update is coming
+   * wants a way to ask, and "wait for the next cold start" is not an answer they will
+   * accept. Returns what happened so the caller can say something truthful rather
+   * than spinning and going quiet.
+   */
+  const checkNow = React.useCallback(async (): Promise<'downloaded' | 'none' | 'error'> => {
+    if (!Updates.isEnabled) return 'none';
+    try {
+      const r = await Updates.checkForUpdateAsync();
+      if (!r.isAvailable) return 'none';
+      await Updates.fetchUpdateAsync();
+      return 'downloaded';
+    } catch {
+      return 'error';
+    }
+  }, []);
+
   return {
+    checkNow,
     pending: !!isUpdatePending,
     canRestart: !!isUpdatePending && safe,
     updateId: currentlyRunning?.updateId ?? null,
