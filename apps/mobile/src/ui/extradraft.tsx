@@ -92,6 +92,10 @@ const st = StyleSheet.create({
   sendTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sendLabel: { fontFamily: F.bodyBold, fontSize: 17, color: C.card, letterSpacing: 0.2 },
   sendSub: { fontFamily: F.body, fontSize: 12.5, color: C.card, opacity: 0.72, marginTop: 2, textAlign: 'center' },
+  // No fill and no border: Send owns the weight in this bar. 44pt of height is the
+  // touch budget (mandate #3), not the ink.
+  deleteBtn: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  deleteLabel: { fontFamily: F.bodySemi, fontSize: 15, color: C.danger },
 });
 
 export type ExtraDraftProps = {
@@ -922,6 +926,31 @@ function BottomBar(p: ExtraDraftProps & {
         </View>
         <SendSubtitle {...p} />
       </Pressable>
+
+      {/* DELETE, AT THE BOTTOM OF THE EXTRA (hadar, 2026-08-05). This reverses the
+          2026-07-28 decision that moved Delete into the header ⋯ because the mockup
+          had no red button under the checklist — the ⋯ is kept, so this ADDS a route
+          rather than replacing one. Asked for because a destructive action hidden
+          behind a glyph is not discoverable by someone who does not think in
+          software (CLAUDE.md §1), and the overflow menu was where it went to be
+          tidy, not to be found.
+
+          Gated on `canDelete` — the SAME predicate as the ⋯ — so the two entry
+          points cannot disagree about legality; an approved or sent extra shows
+          neither. Deliberately a quiet text link rather than a filled red button:
+          it must be findable, not competitive with Send, and nothing is destroyed
+          by tapping it — `onDelete` opens the confirmation that names what goes
+          (mandate #2). 44pt minimum per mandate #3. */}
+      {canDelete(p.rec.status) && p.onDelete && (
+        <Pressable
+          onPress={p.onDelete}
+          accessibilityRole="button"
+          accessibilityLabel={t('discard.action')}
+          style={({ pressed }) => [st.deleteBtn, pressed && { opacity: 0.6 }]}
+        >
+          <Text style={st.deleteLabel}>{t('discard.action')}</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
