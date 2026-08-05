@@ -83,12 +83,34 @@ export function renderCard(o: {
       : `Price: ${money(o.amountCents as number)} (time & materials)\n` +
         `Not to exceed: ${money(nte)}\n` +
         `Work will not exceed ${money(nte)} without a new approval.\n`;
-    return `${asker}Approval requested — an extra outside the original scope.\n\n` +
-      `${o.value}\n\n` +
+    // THE ORDER IS THE POINT (hadar, 2026-08-05: "the recipient needs to be clear
+    // and upfront with the SOW, who is it from and what are the terms — but first
+    // the SOW"). This used to open with the company name and an unlabelled
+    // paragraph, then put the money above the facts and "Directed by / Job / Date"
+    // in an unheaded run at the bottom. A homeowner opening it on a phone met a
+    // wall of prose and had to work out which sentence was the work and which was
+    // the price.
+    //
+    // Now: WHAT THE WORK IS, then WHO IS ASKING, then WHAT IT COSTS AND ON WHAT
+    // TERMS. Scope first because it is the only part the reader can actually judge
+    // — a price means nothing until you know what it buys, and a document that
+    // leads with a figure reads as a bill rather than a request.
+    //
+    // Every existing line survives WORD FOR WORD; only the order and the headings
+    // changed. That is deliberate: 240_shown_content_integrity.sql requires the
+    // displayed figure to appear literally in the frozen text, and the wording of
+    // the NTE clause and the flow terms is contractual language nobody should be
+    // re-drafting as a layout change. Already-sent instruments are untouched —
+    // this runs once, at send, and the frozen copy is what a signer saw.
+    return `CHANGE ORDER — APPROVAL REQUESTED\n` +
+      `An extra outside the original scope.\n\n` +
+      `SCOPE OF WORK\n${o.value}\n\n` +
+      `FROM\n${asker}Job: ${o.projectName}\n` +
+      `Directed by: ${o.directedBy}\nDate: ${when}\n\n` +
+      `TERMS\n` +
       priceBlock +
       flowTerms +
-      `Directed by: ${o.directedBy}\nJob: ${o.projectName}\nDate: ${when}\n\n` +
-      `Nothing proceeds until you approve.`;
+      `\nNothing proceeds until you approve.`;
   }
   return o.kind === 'confirm'
     ? `Please confirm this is what we agreed.\n\n` +

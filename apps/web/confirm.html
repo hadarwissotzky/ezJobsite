@@ -100,6 +100,10 @@
   /* Frozen legal wording, available but not shouting. */
   .exact { margin-top: 10px; }
   .exact summary { font-size: 13px; color: var(--steel); cursor: pointer; }
+  .sow { white-space: pre-wrap; font-size: 15.5px; line-height: 1.55; color: #26292e; margin-top: 8px; }
+  .fromline { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .terms { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .tline { font-size: 14px; line-height: 1.5; color: #26292e; margin-top: 4px; }
   .exact .doc { white-space: pre-wrap; background: #F3F4F2; border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 13.5px; line-height: 1.55; margin-top: 8px; color: #26292e; }
 
   /* Actions. Big, thumb-sized — answered one-handed, outdoors. */
@@ -403,6 +407,32 @@ function threadHtml(d) {
   </div>`;
 }
 
+/**
+ * Pull one labelled section out of the FROZEN wording.
+ *
+ * WHY READ THE INSTRUMENT INSTEAD OF ADDING FIELDS (hadar, 2026-08-05: "the
+ * recipient needs to be clear and upfront with the SOW, who is it from and what are
+ * the terms -- but first the SOW"). This page received `scope_title` and a price and
+ * nothing else: the actual scope text AND every flow term -- what is not included,
+ * when payment is due, what it does to the schedule -- existed only inside the
+ * collapsed "See the exact wording" box. A client could approve a priced change
+ * order having never seen the exclusions.
+ *
+ * Adding frozen columns for each would work and would also create a second copy of
+ * contractual text that can disagree with the instrument. Reading the sections OUT
+ * of shown_content cannot drift by construction: what is rendered IS what is signed
+ * and hashed (240_shown_content_integrity).
+ *
+ * Returns null for anything sent before the sections existed, and every caller falls
+ * back to the previous layout rather than showing an empty heading.
+ */
+function docSection(txt, heading) {
+  if (!txt) return null;
+  var re = new RegExp('(?:^|\n)' + heading + '\n([\s\S]*?)(?=\n\n[A-Z][A-Z &]{2,}\n|\n\nNothing proceeds|$)');
+  var m = txt.match(re);
+  return m && m[1].trim() ? m[1].trim() : null;
+}
+
 function renderPriced(d) {
   const company = d.company_name || 'Your contractor';
   const priced = usd(d.amount_cents);
@@ -417,6 +447,18 @@ function renderPriced(d) {
     ? `<div class="clause"><b>Not to exceed ${esc(usd(d.nte_cents))}.</b>
          Work will not exceed ${esc(usd(d.nte_cents))} without a new approval.</div>` : '';
 
+  // Read straight out of the instrument. Null on anything sent before the sections
+  // existed, and each falls back to the previous layout rather than an empty heading.
+  const sow = docSection(d.shown_content, 'SCOPE OF WORK');
+  const termsBlock = docSection(d.shown_content, 'TERMS');
+  // Everything under TERMS except the price lines, which the page already renders
+  // large above -- repeating them as small grey rows would read as a second, quieter
+  // number beside the one being agreed to.
+  const termLines = (termsBlock || '').split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !/^Price:/.test(l) && !/^Not to exceed:/.test(l)
+                    && !/^Work will not exceed /.test(l));
+
   screen(`
     <div class="brand">
       <div class="logo">${esc(initials(company))}</div>
@@ -426,16 +468,29 @@ function renderPriced(d) {
       </div>
     </div>
     <div class="wrap">
+      <!-- THE SCOPE FIRST, AND IN FULL. This card carried a title and a generic
+           sentence about extras; the work itself was only inside the collapsed exact
+           wording. A price means nothing until you know what it buys, so the scope
+           leads and the money follows it. -->
       <div class="card">
         <div class="kicker">Approval requested</div>
         <div class="title">${esc(d.scope_title || 'Extra work')}</div>
-        <div class="scope">This is an extra, outside the original scope. Please review the price and approve before the work goes ahead.</div>
+        ${sow ? `<div class="sow">${esc(sow)}</div>` : ''}
+        <div class="scope">This is an extra, outside the original scope. Please review it and approve before the work goes ahead.</div>
+        <div class="fromline">From <b>${esc(company)}</b>${d.job_label ? ` &middot; ${esc(d.job_label)}` : ''}</div>
       </div>
 
       <div class="card">
         <div class="price"><span class="pl">${isNte ? 'Time &amp; materials' : 'Fixed price'}</span><span class="pv">${esc(priced)}</span></div>
         <div class="clause">This work is outside the contracted scope and is billed as an extra. Nothing proceeds until you approve.</div>
         ${nte}
+        <!-- THE TERMS, ON THE PAGE. Exclusions, payment timing and schedule impact are
+             contractual and were previously visible only to a client who thought to
+             expand the raw wording. Rendered FROM the frozen text, so they cannot
+             disagree with what is signed. -->
+        ${termLines.length
+          ? `<div class="terms">${termLines.map((l) => `<div class="tline">${esc(l)}</div>`).join('')}</div>`
+          : ''}
         <div class="totals">
           <div class="trow"><span>This request</span><b>${esc(priced)}${isNte ? ` <span style="font-weight:400">(max ${esc(usd(d.nte_cents))})</span>` : ''}</b></div>
           ${priorApproved}

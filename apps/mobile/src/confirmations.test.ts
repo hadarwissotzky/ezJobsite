@@ -37,9 +37,25 @@ test('flow terms render as owner-facing sentences', () => {
   assert.ok(t.includes('Not included: Any drywall repair, paint outside of ceiling area, or permit fees.'));
   assert.ok(t.includes('Payment is due when the work is completed.'));
   assert.ok(t.includes('Schedule: adds 2 days.'));
-  // Terms sit between the price block and the identity block.
+  // Flow terms sit under the price, inside the TERMS block.
   assert.ok(t.indexOf('Price:') < t.indexOf('Not included:'));
-  assert.ok(t.indexOf('Not included:') < t.indexOf('Directed by:'));
+});
+
+test('the document leads with the scope, then who is asking, then the terms', () => {
+  // hadar, 2026-08-05: "the recipient needs to be clear and upfront with the SOW,
+  // who is it from and what are the terms -- but first the SOW". This ORDER is the
+  // requirement, so it is asserted rather than left to whoever next edits the
+  // template. A price ahead of the scope reads as a bill instead of a request.
+  const t = renderCard({ ...BASE, amountCents: 185000 });
+  assert.ok(t.indexOf('SCOPE OF WORK') < t.indexOf('FROM'), 'scope must precede the sender');
+  assert.ok(t.indexOf('FROM') < t.indexOf('TERMS'), 'sender must precede the terms');
+  assert.ok(t.indexOf('SCOPE OF WORK') < t.indexOf('Price:'), 'scope must precede the price');
+  // The scope text itself is under its heading, not floating above it.
+  assert.ok(t.indexOf('SCOPE OF WORK') < t.indexOf('Upgrade the main electrical panel.'));
+  // Who it is from stays present and above the money.
+  assert.ok(t.indexOf('EZ Remodeling') < t.indexOf('Price:'));
+  // The closing promise is still last.
+  assert.ok(t.trimEnd().endsWith('Nothing proceeds until you approve.'));
 });
 
 test('"not sure yet" renders honestly as to-be-confirmed (decision 3)', () => {
