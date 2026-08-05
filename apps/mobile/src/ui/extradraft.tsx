@@ -282,6 +282,22 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
           overflowLabel={t('erec.moreActions')}
         />
 
+        {/* 391 — THE SCOPE OF WORK LEADS, above the price.
+            It rendered 620px down the screen, below the money, the blocker banner and
+            the raw-capture card, clipped at five lines behind "Show more" — measured
+            on a real screenshot, not guessed. A scope you have to scroll to and then
+            tap to read is a scope nobody proofreads before it goes to a client, which
+            is exactly how 15 change orders reached an average scope length of 27
+            characters. And a price above the work reads as a bill rather than a
+            request: the owner cannot judge $2,400 until he knows what it buys.
+            Same component and same position on all three lifecycle screens. */}
+        <ScopeBlock
+          text={rec.scopeOfWork}
+          stage="draft"
+          onEdit={props.onEditDescription}
+          missing={props.readiness.blockers.includes('no_description')}
+        />
+
         {props.kind === 'extra'
           ? <DraftMoney rec={rec} priceMode={props.priceMode} />
           : (
@@ -762,16 +778,9 @@ function ScopeSection(p: ExtraDraftProps) {
           for the fixture). REQ-LC43's rule still holds — the frozen instrument is
           `co.scope` — but the row the owner reads shows the full scope prose, not a
           one-line title. Open item for hadar: confirm which column feeds this. */}
-      {/* 391 — ONE ScopeBlock, shared with the negotiation and locked screens, so the
-          three stages cannot render the agreed text three different ways. Reads
-          `scopeOfWork` and NOT `description`: description appends the voice augments,
-          and what the client signed is the scope alone. */}
-      <ScopeBlock
-        text={rec.scopeOfWork}
-        stage="draft"
-        onEdit={p.onEditDescription}
-        missing={blocked('no_description')}
-      />
+      {/* The scope of work itself now sits at the TOP of the screen, above the money —
+          see the ScopeBlock rendered under the header. What stays here are the terms
+          it is priced on. */}
 
       {p.kind === 'extra' && (
         <Row
