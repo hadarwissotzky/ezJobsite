@@ -92,6 +92,23 @@ export function ClientSheet(props: {
    * costs a permission prompt, a system sheet and a search.
    */
   everyone?: readonly { id: string; name: string; phone: string | null; clientType: ClientType | null }[];
+  /**
+   * WHICH QUESTION THIS SHEET IS ASKING (hadar, 2026-08-05: "when I click on add
+   * someone else it opens up the window to edit the existing record").
+   *
+   *   'client'  — who is this extra FOR. One per extra; re-opening jumps straight
+   *               to the type question about the person already named, because
+   *               that is the thing they came back to change.
+   *   'contact' — ADD ANOTHER person on the chain. There is no person yet, so it
+   *               must start on the picker. Prefilling `chosen` here is what made
+   *               "Add someone else" open as "How is Sarah involved?" — the same
+   *               sheet, asking about the wrong human, with no way to reach the
+   *               list underneath.
+   *
+   * The two modes always differed in what SAVING them meant (App.tsx passes the
+   * mode to saveClient); only the UI failed to know.
+   */
+  mode: 'client' | 'contact';
   onPickContact: () => Promise<{ name: string; phone: string } | null>;
   onClose: () => void;
   /** Called once, with everything, when the type is tapped. */
@@ -104,10 +121,13 @@ export function ClientSheet(props: {
     if (props.visible) {
       setQuery('');
       // Re-opening on an extra that already names someone jumps straight to the
-      // question that can still change — which is what they came to change.
-      setChosen(props.name ? { name: props.name, phone: null } : null);
+      // question that can still change — which is what they came to change. ONLY in
+      // 'client' mode: adding someone else is a new person every time, so it always
+      // starts at the list.
+      setChosen(props.mode === 'client' && props.name
+        ? { name: props.name, phone: null } : null);
     }
-  }, [props.visible, props.name]);
+  }, [props.visible, props.name, props.mode]);
 
   const q = query.trim().toLowerCase();
   const matches = q
@@ -135,7 +155,7 @@ export function ClientSheet(props: {
       // "What are they?" over a list of trades reads as a non-sequitur (hadar).
       title={chosen
         ? t({ k: 'client.howInvolved', p: { name: firstName(chosen.name) } })
-        : t('client.title')}
+        : t(props.mode === 'contact' ? 'client.addContact' : 'client.title')}
       onClose={props.onClose}
       // CHOOSING wants the screen; answering does not. A short drawer over a list of
       // people hides most of them behind a scroll nobody knows is there.
@@ -201,7 +221,9 @@ export function ClientSheet(props: {
           <Text style={st.whyLine}>{t('client.whyType')}</Text>
           {/* One tap answers and saves. Plain words, no slugs, no jargon. */}
           {CLIENT_TYPES.map((ct) => {
-            const on = props.clientType === ct;
+            // Never in 'contact' mode: that is a DIFFERENT person, and showing the
+            // client's answer already ticked invites a tap that agrees with it.
+            const on = props.mode === 'client' && props.clientType === ct;
             return (
               <Pressable
                 key={ct}

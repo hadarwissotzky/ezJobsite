@@ -4496,6 +4496,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         everyone={(recordLc?.known ?? []).map((m) => ({
           id: m.id, name: m.name, phone: m.phone, clientType: m.chainSide,
         }))}
+        // WHICH question the sheet asks. Without it "Add someone else" opened on
+        // the existing client's type question (hadar, 2026-08-05).
+        mode={clientOpen ?? 'client'}
         onPickContact={pickContactValue}
         onClose={() => setClientOpen(null)}
         onSave={(v) => { void saveClient(record.id, v, clientOpen ?? 'client'); }}
