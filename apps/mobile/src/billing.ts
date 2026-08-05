@@ -25,9 +25,32 @@ import { PLANS, type PlanId } from './plans';
 export type BillingStatus = 'not_configured' | 'ready';
 
 /** Public SDK keys are publishable by design (they identify the app, not the account). */
-const KEY = (Platform.OS === 'ios'
+const RAW_KEY = (Platform.OS === 'ios'
   ? process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY
   : process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY) ?? '';
+
+/**
+ * A RevenueCat TEST STORE key (`test_…`) CRASHES A RELEASE BUILD. Not "fails to
+ * configure" — the SDK calls a Swift assertion inside
+ * `Configuration.APIKeyValidationResult.checkForSimulatedStoreAPIKey`, which is
+ * EXC_BREAKPOINT/SIGTRAP: the process dies on launch, before any JS error handler
+ * exists to report it.
+ *
+ * HOW WE LEARNED THIS (hadar 2026-08-04, from the device crash report). The key had
+ * silently been empty in every bundle because Metro cached billing.ts's transform from
+ * before the key existed. Fixing that cache made the key REAL for the first time — and
+ * the app immediately crashed on launch for every user of that bundle. OTA could not
+ * undo it either, since every subsequent publish carried the same key.
+ *
+ * So the key is filtered HERE rather than trusted from the environment: a test key is
+ * accepted only in a debug build, where the Test Store is legitimate and useful for
+ * exercising the purchase flow without App Store Connect. In release it is discarded,
+ * `billingStatus()` stays 'not_configured', and the paywall keeps its honest
+ * "coming soon" state — which is exactly what it should say, because a release build
+ * with no real store key genuinely cannot sell anything.
+ */
+const IS_TEST_KEY = RAW_KEY.startsWith('test_');
+const KEY = IS_TEST_KEY && !__DEV__ ? '' : RAW_KEY;
 
 let configured = false;
 
