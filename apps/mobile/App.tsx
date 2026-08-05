@@ -5255,6 +5255,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             AFTER {drawerEl} deliberately: a Modal declared before its sibling content
             does not present on iOS. */}
         {quotaEl}
+        {/* AND THE SAME OMISSION BIT THE SWIPE-DELETE (hadar 2026-08-05: "the button
+            is there but it doesn't delete once I confirm"). Home is the ONLY screen
+            that renders <SwipeRow> (extraRow), so it is the only screen where
+            askDeleteExtra runs — and it was the one screen without {discardSheet}.
+            setDiscard() flipped state into a tree that had nothing to draw it, so the
+            confirmation never appeared and the tap looked like a dead button. Same
+            failure as Upgrade, seven lines up, for the same reason. */}
+        {discardSheet}
         {paywallEl}
       </View>
     );
