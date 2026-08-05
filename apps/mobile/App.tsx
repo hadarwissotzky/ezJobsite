@@ -26,7 +26,7 @@ import { readCapture,
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { photoCapture, pickFromLibrary, textCapture, voiceCapture } from './src/modality';
-import { checkChangeOrders, checkJobs, currentPlan, type QuotaKind } from './src/quota';
+import { checkJobs, checkSendQuota, currentPlan, type QuotaKind } from './src/quota';
 import { usageSummary, type UsageSummary } from './src/usage';
 import { UsageCard, UsageNudge } from './src/ui/usagecard';
 import { QuotaModal } from './src/ui/quotamodal';
@@ -5801,7 +5801,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             // before the composer — because this is the last point where nothing has
             // left the phone. It gates SENDING, never capturing: every byte of this
             // extra is already committed and stays that way whatever the plan says.
-            const coq = await checkChangeOrders(db);
+            // All three caps (sent change orders, photos, recording) report through
+            // this one call, so the user meets whichever they hit first with copy that
+            // names it rather than a generic refusal.
+            const coq = await checkSendQuota(db);
             if (!coq.ok) {
               setQuota({ kind: coq.kind, limit: coq.limit });
               return;

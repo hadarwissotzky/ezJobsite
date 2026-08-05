@@ -238,3 +238,31 @@ export async function checkRecording(db: AbstractPowerSyncDatabase): Promise<Quo
 export function recordingByteBudget(minutes: number): number {
   return Number.isFinite(minutes) ? minutes * AUDIO_BYTES_PER_MINUTE : Infinity;
 }
+
+/**
+ * Every cap that stands between a free account and SENDING a change order, checked in
+ * one call and reported as the first thing to hit.
+ *
+ * WHY ALL THREE GATE THE SAME ACT (hadar 2026-08-04, resolving a question flagged
+ * twice). The obvious home for a photo cap is the shutter and for a recording cap the
+ * record button — and both are wrong here. Mandate #1 permits refusing to START when
+ * capacity cannot be reserved, so a hard block would not strictly violate it; but this
+ * product's entire promise is that a contractor standing in front of a finished job
+ * can get it down before it slips. An app that refuses the photo is an app that let
+ * the evidence evaporate, whatever the quota said.
+ *
+ * So capture is ALWAYS free and always safe, and the meter is read at the one moment
+ * the product delivers its paid value: something leaving the phone for a client. The
+ * evidence is already committed by then; what is withheld is the outcome.
+ *
+ * ORDER MATTERS. Change orders first because it is the cap the user actually
+ * understands ("2 free change orders"); photos and minutes are consequences of working,
+ * not choices they made, and leading with those reads as punishment for using the app.
+ */
+export async function checkSendQuota(db: AbstractPowerSyncDatabase): Promise<QuotaResult> {
+  for (const check of [checkChangeOrders, checkPhotos, checkRecording]) {
+    const r = await check(db);
+    if (!r.ok) return r;
+  }
+  return { ok: true };
+}

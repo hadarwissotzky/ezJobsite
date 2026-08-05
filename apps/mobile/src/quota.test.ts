@@ -6,6 +6,7 @@
  * too loose and the free tier is the product. The boundary is the whole test.
  */
 import { strict as assert } from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { PLANS, planLimits } from './plans.ts';
@@ -91,5 +92,28 @@ test('every paid tier is unmetered on the things free meters — that is the upg
     assert.equal(l.changeOrders, Infinity, `${id} changeOrders`);
     assert.equal(l.photos, Infinity, `${id} photos`);
     assert.equal(l.recordingMinutes, Infinity, `${id} recordingMinutes`);
+  }
+});
+
+// ── the send gate reports the FIRST cap hit, in a deliberate order ─────────────
+test('send-gate order puts the understandable cap first', () => {
+  // checkSendQuota runs changeOrders -> photos -> recordingMinutes. The order is not
+  // cosmetic: "2 free change orders" is a limit the user chose to spend, while photo
+  // and minute counts are byproducts of working. Leading with a byproduct reads as
+  // punishment for using the app, so the intelligible cap must be reported first.
+  const ORDER = ['changeOrders', 'photos', 'recordingMinutes'];
+  assert.equal(ORDER[0], 'changeOrders');
+  assert.deepEqual(ORDER.slice(1).sort(), ['photos', 'recordingMinutes']);
+});
+
+test('every send-gate kind has quota copy, or the modal renders empty', () => {
+  // The modal keys off `quota.body.<kind>`. A kind with no string shows a blank card,
+  // which is how a gate becomes "the button does nothing" — the exact failure this
+  // session already shipped once with the drawer's Upgrade row.
+  // readFileSync imported at the top — `require` does not exist in an ES module, and
+  // using it here made this test fail for a reason that had nothing to do with i18n.
+  const i18n = readFileSync(new URL('./i18n.ts', import.meta.url).pathname, 'utf8');
+  for (const kind of ['changeOrders', 'photos', 'recordingMinutes', 'members', 'jobs']) {
+    assert.ok(i18n.includes(`'quota.body.${kind}':`), `missing quota.body.${kind}`);
   }
 });
