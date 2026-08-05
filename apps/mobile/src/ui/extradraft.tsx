@@ -326,9 +326,10 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
                   <Text style={st.draftTitle}>{t('draft.bannerTitle')}</Text>
                 </View>
                 <Text style={st.draftCount}>{bannerDetail(readiness)}</Text>
-                {bannerNote(readiness) !== '' && (
-                  <Text style={st.draftWhy}>{bannerNote(readiness)}</Text>
-                )}
+                {/* The banner's second line is gone (hadar, 2026-08-05: "overwhelming — there are
+                    a lot of things and text here"). "These are required for approval"
+                    restated the line above it, which already says "N things left before
+                    you can send it". Two sentences, one fact. */}
                 <View style={st.draftActions}>
                   {bannerActions(readiness, items).map((a) => (
                     <Pressable key={a.key} style={st.draftAdd} onPress={a.onPress}
@@ -432,15 +433,33 @@ function DraftMoney({ rec, priceMode }: { rec: ExtraRecord; priceMode: 'fixed' |
  *  and the one place D3 is most likely to be broken by a well-meaning edit. A
  *  recommended item is NEVER described as required here; the two counts come from
  *  the two separate lists and are worded as a wall and as help. */
+/**
+ * The blockers the BANNER should speak for.
+ *
+ * `no_description` is deliberately not among them (391). The ScopeBlock states that
+ * gap inline — "Too short to send. Describe the work the way you would explain it on
+ * site." — directly under the scope it is about, roughly 200pt above the banner. Once
+ * the scope moved to the top of the screen, listing "Description" again as one of "5
+ * things left" reported one gap twice, in two vocabularies, on one screenful. A
+ * contractor counting his remaining work should get one number and each item once.
+ *
+ * The GATE is untouched: sendReadiness still blocks on no_description and Send still
+ * refuses. This only decides who SAYS it.
+ */
+function bannerBlockers(r: SendReadiness): readonly SendBlocker[] {
+  return r.blockers.filter((b) => b !== 'no_description');
+}
+
 function bannerDetail(r: SendReadiness): string {
   // Singular and plural are SEPARATE KEYS, not one string carrying "thing(s)".
   // `t()` interpolates and does not decline, so a single string has to hedge — and
   // "1 required thing(s) still missing" is what shipped. A contractor reading that
   // learns the app was written by someone who was not picturing him.
-  if (r.blockers.length > 0) {
-    return t(r.blockers.length === 1
+  const blocking = bannerBlockers(r);
+  if (blocking.length > 0) {
+    return t(blocking.length === 1
       ? 'draft.bannerBlocked1'
-      : { k: 'draft.bannerBlockedN', p: { n: r.blockers.length } });
+      : { k: 'draft.bannerBlockedN', p: { n: blocking.length } });
   }
   if (r.recommended.length > 0) {
     return t(r.recommended.length === 1
@@ -450,16 +469,6 @@ function bannerDetail(r: SendReadiness): string {
   return t('draft.bannerReady');
 }
 
-/** The banner's THIRD line — why the count matters. D3 is the whole reason this is a
- *  separate function from `bannerDetail`: a blocker is a wall and a recommendation is
- *  help, and the two must never be given the same sentence. Nothing is said at all
- *  once the extra is ready and complete — a banner that keeps talking when there is
- *  nothing owed teaches him to stop reading it. */
-function bannerNote(r: SendReadiness): string | undefined {
-  if (r.blockers.length > 0) return t('draft.bannerBlockedNote');
-  if (r.recommended.length > 0) return t('draft.bannerGapsNote');
-  return undefined;
-}
 
 /** The names behind the count. Blockers when there are any — they are what Send is
  *  waiting on — otherwise the recommended gaps, which are what a yes is waiting on.
@@ -478,7 +487,8 @@ function bannerActions(
   r: SendReadiness, items: readonly ChecklistItem[]
 ): readonly { key: string; label: string; onPress: () => void }[] {
   const byKey = new Map(items.map((i) => [i.key as string, i]));
-  const src: readonly string[] = r.blockers.length > 0 ? r.blockers : r.recommended;
+  const blocking = bannerBlockers(r);
+  const src: readonly string[] = blocking.length > 0 ? blocking : r.recommended;
   return src.map((k) => {
     const it = byKey.get(k);
     return { key: k, label: it?.label ?? k, onPress: it?.onPress ?? (() => {}) };
@@ -493,7 +503,8 @@ function bannerPills(r: SendReadiness, items: readonly ChecklistItem[]): readonl
   // pills under a headline that said four. A count with the wrong things named under
   // it is worse than a count alone.
   const label = new Map(items.map((i) => [i.key as string, i.label]));
-  const src: readonly string[] = r.blockers.length > 0 ? r.blockers : r.recommended;
+  const blocking = bannerBlockers(r);
+  const src: readonly string[] = blocking.length > 0 ? blocking : r.recommended;
   return src.map((k) => label.get(k) ?? k);
 }
 
