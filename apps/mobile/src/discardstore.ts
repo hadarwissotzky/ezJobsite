@@ -157,7 +157,7 @@ export async function discardExtra(
   let serverDone = false;
   if (client) {
     try {
-      const { error } = await client.rpc('discard_extra_own', {
+      const { data, error } = await client.rpc('discard_extra_own', {
         p_change_order_id: changeOrderId,
       });
       if (error) {
@@ -176,7 +176,12 @@ export async function discardExtra(
           return { ok: false, reason: 'already_sent', deleted: 0, freedBytes: 0,
                    serverPending: 0, serverDone: false };
         }
-      } else serverDone = true;
+      } else {
+        // The server dropped its row; now its bytes (389). Best-effort — see
+        // removeApprovedKeys — so a storage hiccup cannot un-delete the extra.
+        await removeApprovedKeys(db, client, data, 'discardExtra');
+        serverDone = true;
+      }
     } catch (e: any) {
       // rpc() THREW (a network or auth exception, not a returned error). Before this
       // catch existed, the throw propagated out of discardExtra and the local delete
@@ -297,6 +302,45 @@ export async function discardedCaptureIds(
  * after this device deleted its draft copy; the local delete stands, the server keeps
  * its sent record, and we stop retrying and log it rather than hammer a no forever.
  */
+/**
+ * Turn the object keys `discard_extra_own` APPROVED into absent bytes.
+ *
+ * THE SPLIT THE PLATFORM DEMANDS, applied to the extra path (389). Supabase
+ * forbids SQL deletes on storage tables, so the RPC names the bytes it has
+ * authorized and this removes them. Identical in shape to what
+ * drainServerDiscards does for captures — including the count check, because
+ * `remove()` reports success with an EMPTY result when RLS filters every row,
+ * and reading "no error" as done is how 12 tombstones were once confirmed over
+ * bytes still sitting in the bucket.
+ *
+ * Best-effort ON PURPOSE. The change order row is already gone server-side by
+ * the time this runs; leftover bytes are an orphan the recovery sweep can still
+ * collect, and refusing the whole delete over them would put the phone and the
+ * server back into disagreement — the exact thing this path exists to avoid.
+ */
+async function removeApprovedKeys(
+  db: AbstractPowerSyncDatabase, client: SupabaseClient, data: any, where: string
+): Promise<number> {
+  const keys: string[] = Array.isArray(data?.keys) ? data.keys : [];
+  if (!keys.length) return 0;
+  try {
+    const rm = await client.storage.from('captures').remove(keys);
+    if (rm.error) {
+      void logDiag(db, `${where}.storage`, String(rm.error.message ?? rm.error).slice(0, 200));
+      return 0;
+    }
+    const removed = Array.isArray(rm.data) ? rm.data.length : 0;
+    if (removed === 0) {
+      void logDiag(db, `${where}.storage`,
+        `removed=0 of ${keys.length} — API ok but RLS filtered; first=${keys[0]?.slice(0, 60)}`);
+    }
+    return removed;
+  } catch (e: any) {
+    void logDiag(db, `${where}.storage`, `threw ${String(e?.message ?? e).slice(0, 160)}`);
+    return 0;
+  }
+}
+
 export async function drainDiscardedExtras(
   db: AbstractPowerSyncDatabase, client: SupabaseClient
 ): Promise<{ attempted: number; done: number; kept: number }> {
@@ -308,10 +352,13 @@ export async function drainDiscardedExtras(
   for (const { change_order_id } of pending) {
     let confirmed = false;
     try {
-      const { error } = await client.rpc('discard_extra_own', {
+      const { data, error } = await client.rpc('discard_extra_own', {
         p_change_order_id: change_order_id,
       });
-      if (!error) confirmed = true;
+      if (!error) {
+        await removeApprovedKeys(db, client, data, 'ddrain.extra');
+        confirmed = true;
+      }
       else if (/no such extra/i.test(error.message ?? '')) confirmed = true;   // already gone = done
       else if (/not your extra|was sent/i.test(error.message ?? '')) {
         // The offline race. Stop retrying — the answer will not change — but record it.
