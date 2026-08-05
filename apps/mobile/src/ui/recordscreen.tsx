@@ -160,6 +160,8 @@ export type RecordScreenProps = {
   /** The job's other people, already translated — passed straight to the draft
    *  screen, which explains why it shows them. Display only. */
   jobPeople?: readonly { id: string; name: string; role: string }[];
+  /** Take somebody off the job. Passed to the draft screen, which owns the gesture. */
+  onRemovePerson?: (id: string, name: string) => void;
   /** REQ-LC14 / T5: legal in Stage 1 only. `canDelete` is re-checked inside the
    *  draft screen; the caller offers it or does not. */
   onDelete?: () => void;
@@ -247,6 +249,7 @@ export function RecordScreen(props: RecordScreenProps) {
           onPressPhoto={(uri) => setZoom(uri)}
           onSend={props.onSend}
           jobPeople={props.jobPeople}
+          onRemovePerson={props.onRemovePerson}
           onDelete={props.onDelete}
         />
       );

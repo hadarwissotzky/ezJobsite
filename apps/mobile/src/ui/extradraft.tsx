@@ -95,6 +95,10 @@ const st = StyleSheet.create({
   // No fill and no border: Send owns the weight in this bar. 44pt of height is the
   // touch budget (mandate #3), not the ink.
   deleteBtn: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  // Muted until touched: findable without turning a list of people into a row of
+  // delete buttons.
+  removeX: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  removeXT: { fontFamily: F.body, fontSize: 17, color: C.muted },
   deleteLabel: { fontFamily: F.bodySemi, fontSize: 15, color: C.danger },
 });
 
@@ -187,6 +191,17 @@ export type ExtraDraftProps = {
    * useful.
    */
   jobPeople?: readonly { id: string; name: string; role: string }[];
+  /**
+   * Take somebody off the job (hadar, 2026-08-05: "i need to be able to remove
+   * people from the job"). Swipe-left on their row, same gesture as deleting an
+   * extra on Home — the app now has one vocabulary for "get this off my list"
+   * rather than a second control invented for the second place.
+   *
+   * NOT a delete, and the wording says so: `retireApprover` flips status to
+   * 'removed' and keeps the row, because an extra already sent to that person
+   * still has to resolve their name. Omit and the rows do not move.
+   */
+  onRemovePerson?: (id: string, name: string) => void;
   /** REQ-LC14 / T5: legal in this stage only. Rendered only when the caller offers
    *  it AND `canDelete` agrees — `planDiscard` remains the arbiter of the act. */
   onDelete?: () => void;
@@ -667,7 +682,32 @@ function RawSection(p: ExtraDraftProps) {
           <View style={{ borderTopWidth: 1, borderTopColor: C.line, paddingTop: 6 }}>
             <Text style={labelStyle}>{t('draft.alsoOnJob')}</Text>
             {(p.jobPeople ?? []).map((m) => (
-              <PersonRow key={m.id} name={m.name} role={m.role} kind="crew" />
+              <View key={m.id} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <PersonRow name={m.name} role={m.role} kind="crew" />
+                </View>
+                {/* A VISIBLE ✕, not a swipe (hadar, 2026-08-05). The swipe this
+                    replaces was never shipped, and it was the wrong instinct here: a
+                    hidden gesture is what CLAUDE.md §1 rules out — someone who does
+                    not think in software has no reason to believe a row can be
+                    swiped, so the ability may as well not exist. On Home the swipe
+                    earns its keep because those rows are already tappable and a
+                    button would compete with the card; these rows do nothing at all,
+                    so the ✕ has the space and is the only affordance it needs.
+                    44pt (mandate #3). Nothing is removed by the tap itself — it
+                    opens the confirmation. */}
+                {p.onRemovePerson && (
+                  <Pressable
+                    onPress={() => p.onRemovePerson?.(m.id, m.name)}
+                    accessibilityRole="button"
+                    accessibilityLabel={t({ k: 'client.removePerson', p: { name: m.name } } as any)}
+                    hitSlop={8}
+                    style={({ pressed }) => [st.removeX, pressed && { opacity: 0.5 }]}
+                  >
+                    <Text style={st.removeXT}>✕</Text>
+                  </Pressable>
+                )}
+              </View>
             ))}
           </View>
         )}

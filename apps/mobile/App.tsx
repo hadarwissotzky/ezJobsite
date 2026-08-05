@@ -6,7 +6,7 @@ import { PowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import * as Contacts from 'expo-contacts';
 import React from 'react';
-import { Dimensions, Image, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Dimensions, Image, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
 import { ago, projectCards, staticMapUrl, type ProjectCard } from './src/ui/home';
@@ -177,6 +177,7 @@ import { publishApprovalPhotos } from './src/approvalphotopublish';
 import {
   ensureApproverSchema, drainR5cOutbox, suggestFor, listRoster, listKnownPeople, addApprover,
   markApproverUsed, setExtraType, reasonText, typeLabel, roleLabel, saveClientApprover,
+  retireApprover,
   type RosterMember,
 } from './src/approvers';
 // R6b item 3. Actor facts are written at the moment they happen; nothing on the
@@ -1236,6 +1237,42 @@ const pickContactValue = async (): Promise<{ name: string; phone: string } | nul
  * `project_approver` and every extra on the job reads that row. The extra keeps only
  * the name it was directed by, so an already-sent record still resolves on its own.
  */
+/**
+ * Take somebody off this job (hadar, 2026-08-05). `retireApprover` flips status to
+ * 'removed' and enqueues the mutation; it never deletes, because an extra already
+ * sent to that person still has to resolve their name.
+ *
+ * CONFIRMED FIRST, and the confirmation says what removal does NOT do — the fear it
+ * has to answer is "will this erase them from the extra I already sent", and the
+ * answer is no. A native alert is proportionate: mandate #2 governs price and
+ * commitment, and the discard sheet is for destroying evidence, which this is not.
+ */
+const removePerson = (approverId: string, name: string) => {
+  Alert.alert(
+    T({ k: 'client.removeTitle', p: { name } } as any),
+    T('client.removeBody'),
+    [
+      { text: T('common.cancel'), style: 'cancel' },
+      {
+        text: T('client.removeConfirm'),
+        style: 'destructive',
+        onPress: () => { void (async () => {
+          try {
+            const moved = await retireApprover(db, approverId);
+            // `false` = already retired. Not an error, and not worth a message that
+            // implies something failed.
+            if (moved) setFiled(T({ k: 'client.removed', p: { name } } as any));
+            if (recordLc?.co.id) await openRecord(recordLc.co.id);
+            void refresh();
+          } catch (e: any) {
+            setUi({ k: 'refused', why: e?.message ?? String(e) });
+          }
+        })(); },
+      },
+    ]
+  );
+};
+
 const saveClient = async (
   changeOrderId: string,
   v: { name: string; phone: string | null; clientType: ClientType },
@@ -4662,6 +4699,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // rendered above as "Requested by". Matched on the same normalised name the
         // client lookup uses, so the person named at the top is never repeated in the
         // list below. Display only: nothing here is an actor on this extra.
+        onRemovePerson={removePerson}
         jobPeople={(recordLc?.roster ?? [])
           .filter((m) => {
             const norm = (x: string) => x.trim().toLowerCase().replace(/\s+/g, ' ');
