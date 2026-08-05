@@ -560,6 +560,7 @@ const EN: Record<string, string> = {
   'r2.liveRough': 'Hearing you… (rough, not saved yet)',
   // Discard. The counts are in the sentence because a confirmation that does not
   // name what it destroys is a speed bump, not a confirmation (mandate #2).
+  'discard.swipeDelete': 'Delete',
   'discard.action': 'Delete this extra',
   'discard.title': 'Delete this extra?',
   'discard.confirm': 'This deletes the extra and its {n} recording(s) and photo(s) from this phone. It cannot be undone.',
@@ -1877,6 +1878,7 @@ const ES: Record<string, string> = {
   'r8.markAllRead': 'Marcar todo como leído',
   // R8 / R5b avisos. Notificaciones locales: sin proveedor, sin servidor.
   'r2.liveRough': 'Escuchando… (aproximado, todavía no se guarda)',
+  'discard.swipeDelete': 'Eliminar',
   'discard.action': 'Eliminar este extra',
   'discard.title': '¿Eliminar este extra?',
   'discard.confirm': 'Esto elimina el extra y sus {n} grabación(es) y foto(s) de este teléfono. No se puede deshacer.',

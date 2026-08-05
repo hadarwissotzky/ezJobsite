@@ -30,6 +30,7 @@ import { checkJobs, checkSendQuota, currentPlan, type QuotaKind } from './src/qu
 import { usageSummary, type UsageSummary } from './src/usage';
 import { UsageCard, UsageNudge } from './src/ui/usagecard';
 import { QuotaModal } from './src/ui/quotamodal';
+import { SwipeRow } from './src/ui/swiperow';
 import { PaywallScreen } from './src/ui/paywallscreen';
 import { PLANS, type PlanId } from './src/plans';
 import { Icon } from './src/ui/icon';
@@ -4934,10 +4935,28 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // status emoji when a capture has no photo yet), scope + project, the price, and
   // an outlined status chip. A draft keeps its "Finish & send →" call to action
   // instead of a chip — it is the creator's to move, not the client's.
+  /**
+   * Ask the store what deleting this row would actually do, then open the SAME
+   * confirmation every other delete path uses. previewDiscard gathers the facts and
+   * planDiscard decides — so a row that was sent, or whose captures are shared with a
+   * revision, is refused with its real reason rather than by a guess made here.
+   */
+  const askDeleteExtra = async (e: Extra) => {
+    try {
+      const plan = await previewDiscard(db, e.id);
+      setDiscard({ co: { id: e.id, scope: e.scope || T('home.draftsSec') } as any, plan });
+    } catch {
+      // Could not read the facts -> do not offer a destructive action on a guess.
+    }
+  };
+
   const extraRow = (e: Extra) => {
     const st = stateOf(e);
     const cp = chipStyle[st];
-    return (
+    // Only a DRAFT is the owner's alone to destroy (discard.ts): once an extra is
+    // sent, a counterparty may have opened it and answered, and that is their
+    // evidence too. A non-draft row simply does not move.
+    const row = (
       <Pressable key={e.id} style={s.exRow}
         onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
         {e.photo_relpath
@@ -4957,6 +4976,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               <Text style={[s.exChipT, { color: cp.text }]}>{stateColor[st].label}</Text>
             </View>}
       </Pressable>
+    );
+    return (
+      <SwipeRow key={e.id} enabled={st === 'draft'} onDelete={() => void askDeleteExtra(e)}>
+        {row}
+      </SwipeRow>
     );
   };
 
