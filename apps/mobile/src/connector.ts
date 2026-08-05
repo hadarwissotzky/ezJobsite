@@ -3,7 +3,7 @@ import {
   PowerSyncBackendConnector,
   UpdateType,
 } from '@powersync/react-native';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, type Session } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
@@ -175,6 +175,38 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
       return;
     }
     throw new Error('oauth_no_session');
+  }
+
+  /**
+   * The session already on disk, WITHOUT a network round-trip.
+   *
+   * WHY THIS EXISTS (hadar 2026-08-04: "it takes 30 seconds ... until the home page is
+   * displayed", already logged in). `getSession()` does not just read storage — with an
+   * expired access token it REFRESHES over the network, and the app's auth gate renders
+   * nothing until it resolves. On a weak jobsite connection that single call is the
+   * whole cold start: everything local is ready and the user stares at a splash.
+   *
+   * That is mandate #7 inverted. The network is supposed to be opportunistic; here it
+   * was a precondition to seeing your own data. This reads the persisted session
+   * directly so a logged-in user is in immediately, and the refresh happens behind them.
+   *
+   * Returns null when there is nothing stored, which is the honest answer for a
+   * logged-out device — it does NOT fabricate a session, and an expired token still
+   * gets refreshed by supabase-js in the background before any request uses it.
+   */
+  async storedSession(): Promise<Session | null> {
+    try {
+      const key = `sb-${new URL(SUPABASE_URL).hostname.split('.')[0]}-auth-token`;
+      const raw = await AsyncStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      // supabase-js has stored this under two shapes across versions; accept both
+      // rather than silently returning null on the one we did not expect.
+      const sess = parsed?.currentSession ?? parsed?.session ?? parsed;
+      return sess?.access_token ? (sess as Session) : null;
+    } catch {
+      return null;   // unreadable/corrupt -> fall back to the network path
+    }
   }
 
   /**

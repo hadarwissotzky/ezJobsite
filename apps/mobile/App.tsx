@@ -2218,6 +2218,19 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       const sessionPromise = connector.client.auth.getSession()
         .then((r) => r.data.session ?? null)
         .catch(() => null);
+      // PAINT ON THE STORED SESSION, DON'T WAIT FOR THE NETWORK (hadar 2026-08-04:
+      // "it takes 30 seconds ... until the home page is displayed", already logged in).
+      //
+      // The auth gate renders NOTHING while `session === undefined`, and getSession()
+      // refreshes an expired token over the network before it resolves. So on a weak
+      // connection the entire cold start was one HTTP round-trip that the user could
+      // not see, could not skip, and did not need: their data is already on the device.
+      //
+      // Reading the persisted session costs a single AsyncStorage get. It unblocks the
+      // gate immediately; `sessionPromise` still resolves below and applies the fresh
+      // one, and supabase-js refreshes the token before any request uses it. A device
+      // with nothing stored gets null and falls through to the network path unchanged.
+      const stored = await connector.storedSession();
       await ensureAppOwnedSchema(db);
       await ensureDecisionSchema(db);
       await ensureChangeOrderSchema(db);
@@ -2392,9 +2405,27 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           }
         }
       };
-      // Await the session that was already in flight since right after db.init(), so its
-      // network refresh overlapped the schema setup rather than adding to it.
-      applySession(await sessionPromise);
+      // THE SESSION MUST NOT GATE FIRST PAINT (hadar 2026-08-04: 30s cold start while
+      // already logged in).
+      //
+      // This used to be `applySession(await sessionPromise)` immediately before
+      // setReady(true) — so however long getSession()'s network token refresh took,
+      // the splash sat there. Overlapping it with the schema work (2026-07-27) helped
+      // only when the refresh was FASTER than the schema; on a weak connection it is
+      // not, and the whole launch became one invisible HTTP round-trip.
+      //
+      // Now: if a session is already on disk, apply THAT and let the refresh land
+      // whenever it lands. The user is in immediately with their own local data, which
+      // is what mandate #7 requires — the network is opportunistic, never a
+      // precondition. With nothing stored we still wait, because a logged-out device
+      // genuinely has nothing to show and flashing sign-in at a returning user is the
+      // failure this gate was built to prevent.
+      if (stored) {
+        applySession(stored);
+        void sessionPromise.then((fresh) => { if (fresh) applySession(fresh); });
+      } else {
+        applySession(await sessionPromise);
+      }
       // Keep session + sync in step on later sign-in / sign-out. Skip INITIAL_SESSION:
       // getSession above already applied the startup state.
       const { data: authSub } = connector.client.auth.onAuthStateChange((event, s) => {
