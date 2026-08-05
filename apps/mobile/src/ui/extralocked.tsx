@@ -50,6 +50,7 @@ import {
 } from './kit';
 import { RecordApproval } from './recordapproval';
 import { RecordingsCard } from './recordings';
+import { ScopeBlock } from './scopeblock';
 import { C, F, T, label as labelStyle, money as moneyStyle, tint, type Tone } from './theme';
 import { radii, touchTargets } from './tokens';
 
@@ -249,14 +250,15 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
         {/* What was agreed — a plain card of rows (no section header). Scope/included/
             excluded open the signed document; the flow terms show their agreed value. */}
         <Card style={st.card12}>
-          <Row
-            icon="doc"
-            label={t('elock.rowScope')}
-            value={t('draft.showMore')}
-            chevron
-            divider
-            onPress={props.onViewSignedApproval}
-          />
+          {/* 391 — THE AGREED SCOPE, ON THE SCREEN. This was a row reading "Show
+                more" that opened the signed PDF: on the one screen built to settle a
+                dispute, the agreed scope was the single thing you could not read
+                without leaving it. Legitimate here now and not before — `scope_of_work`
+                is in change_order_guard's frozen set on BOTH sides (391), so it meets
+                this file's own rule that nothing outside the frozen columns may appear
+                under "what was agreed". `description` is still excluded, for the reason
+                the header gives: it is built from `summary`, which is mutable. */}
+            <ScopeBlock text={props.rec.scopeOfWork} stage="signed" />
           <Row
             icon="checklist"
             label={t('elock.rowIncluded')}

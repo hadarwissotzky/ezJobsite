@@ -113,6 +113,17 @@ export const UNTITLED_SCOPE = 'Untitled extra — still being written up';
  * of every document an owner reads, and nothing in the spec carves any kind out;
  * a per-kind exemption would need evidence this file does not have.
  */
+/**
+ * The shortest thing that can honestly be called a scope of work.
+ *
+ * Calibrated against the real data, not taste: every change order in the system has
+ * a scope of 22-39 characters ("Loop check lc-mrwdq1fo", "Firewall salvage: sanding
+ * and staining"), and all of them would pass any lower bar. 40 clears the entire
+ * observed population of titles-masquerading-as-scopes while still admitting one
+ * honest sentence.
+ */
+export const MIN_SCOPE_OF_WORK_CHARS = 40;
+
 export function sendReadiness(x: {
   kind: 'extra' | 'decision' | 'ewa';
   scope: string;
@@ -123,11 +134,27 @@ export function sendReadiness(x: {
   billingTiming: string | null;
   scheduleEffect: string | null;
   exclusions: string | null;
+  /** 391 — the detailed client-facing scope. Optional so a caller that has not been
+   *  migrated yet falls back to `scope` and behaves exactly as it did before. */
+  scopeOfWork?: string | null;
 }): SendReadiness {
   const blockers: SendBlocker[] = [];
 
-  const scope = (x.scope ?? '').trim();
-  if (!scope || scope === UNTITLED_SCOPE) blockers.push('no_description');
+  // THE GATE MOVED TO THE SCOPE OF WORK (391). It used to test `scope`, which is the
+  // TITLE — so "Firewall salvage: sanding and staining", 38 characters, passed as a
+  // description of $1,500 of work. The field that must be sufficient is the one the
+  // client signs.
+  //
+  // A MINIMUM LENGTH, and it is the point of the change rather than a nicety: without
+  // it a three-word scope of work satisfies the gate exactly as a three-word title
+  // did, and nothing has improved. 40 characters is deliberately low -- it refuses
+  // "Fix the wall" and accepts a short but real sentence, because this gate must not
+  // become a word-count argument with a contractor on a ladder. The banner names what
+  // is missing; it does not grade prose.
+  const sow = (x.scopeOfWork ?? x.scope ?? '').trim();
+  if (!sow || sow === UNTITLED_SCOPE || sow.length < MIN_SCOPE_OF_WORK_CHARS) {
+    blockers.push('no_description');
+  }
 
   if (x.kind === 'extra') {
     // `== null` and not `=== null`: an undefined field from an untyped row is the

@@ -20,6 +20,20 @@ const photos: RecordPhoto[] = [
 const rec: ExtraRecord = {
   id: 'fixture-locked',
   title: 'Panel upgrade — code required',
+  // 391 — the fixtures carry the worked fireplace example so the three lifecycle
+  // screens are exercised against a REAL scope of work rather than a one-line
+  // title. The length is the whole point of the split.
+  scopeOfWork: `Move the original 1910 fireplace mantel and surround from the downstairs bedroom into the living room, move the living room's existing mantel down into the bedroom, and refinish the 1910 piece in its new position.
+
+1 · Protect both rooms. Dust barriers at both doorways, negative-air fan while sanding, both fireboxes sealed.
+2 · Document and remove the 1910 mantel by hand — plaster-keyed and cut-nailed, not screwed.
+3 · Move the living room mantel down to the bedroom and make good the opening.
+4 · Install the 1910 mantel in the living room — blocking, level, scribed to the wall.
+5 · Strip and sand: hand-sand all profiles and carving, machine only the flat faces, to 180.
+6 · Stain to a sample you approve on an offcut of the actual mantel, then two coats clear satin.
+7 · Reinstate, caulk, touch up and clean both rooms.
+
+ASSUMING · Both chimney breasts sound · The 1910 piece comes off intact — if not we stop and call you · Paint assumed to contain LEAD until tested.`,
   status: 'approved',
   amount: '$2,400',
   priced: true,

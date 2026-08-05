@@ -29,6 +29,8 @@
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { createChangeOrder } from './changeorder.ts';
 import { recordDecision } from './decisions.ts';
+// The queued-payload refresh rehashes the JSON, same as changeorder.ts does.
+import { sha256 } from 'js-sha256';
 
 /**
  * The placeholder title, and why it is a placeholder rather than a guess.
@@ -178,6 +180,78 @@ export async function retitleDraft(
  * send — which is why it is a WHERE and not a caller's promise. A voice added to a
  * SENT extra grows the description through the append-only augment log instead.
  */
+/**
+ * Write a DRAFT's SCOPE OF WORK — the detailed client-facing text that becomes the
+ * body of the frozen instrument (391).
+ *
+ * SEPARATE FROM `retitleDraft`, which writes `scope`, the title. Before 391 both
+ * acts wrote the same column: App.tsx wired the description editor AND the header
+ * rename to one `saveScope`, so renaming an extra overwrote the scope of work and
+ * editing the scope of work renamed it. One of those silently destroyed the other.
+ *
+ * SEEDS FROM THE SUMMARY, ONCE. When the field still holds the birth value (a copy
+ * of the title) and the pipeline has produced a summary, the summary is the better
+ * starting text and there is nothing of the contractor's to lose. After he has
+ * touched it, nothing overwrites it — `seedOnly` is how the caller says "only if he
+ * has not written his own", and mandate #2 is why: a model may draft, but the text a
+ * client signs is only ever there because a human left it there and then confirmed
+ * the send.
+ *
+ * DRAFT-ONLY, same as the title and the summary: once sent, the instrument is frozen
+ * and the scope the client read must not move underneath them.
+ */
+export async function saveScopeOfWork(
+  db: AbstractPowerSyncDatabase, changeOrderId: string, text: string,
+  opts?: { seedOnly?: boolean }
+): Promise<boolean> {
+  const t = text.trim();
+  if (!t) return false;
+  const sql = opts?.seedOnly
+    // "Untouched" = still equal to the title it was born as, or empty. Anything else
+    // is the contractor's and is not seed material.
+    ? `UPDATE change_order SET scope_of_work = ?
+        WHERE id = ? AND status = 'draft'
+          AND (scope_of_work IS NULL OR trim(scope_of_work) = '' OR scope_of_work = scope)`
+    : `UPDATE change_order SET scope_of_work = ? WHERE id = ? AND status = 'draft'`;
+  const r = await db.execute(sql, [t.slice(0, SCOPE_OF_WORK_MAX_CHARS), changeOrderId]);
+  if (!r.rowsAffected) return false;
+  await refreshQueuedScope(db, changeOrderId, t.slice(0, SCOPE_OF_WORK_MAX_CHARS));
+  return true;
+}
+
+/**
+ * Keep the still-queued create payload in step with the edit.
+ *
+ * The outbox holds ONE insert per extra and the server applies it once, so an edit
+ * made before the drain has to land IN that payload or the server's only sight of
+ * this extra is the pre-edit text. `priceDraftExtra` already does this for the
+ * money; the scope of work needs it for the same reason and more urgently, because
+ * this is the string the client signs.
+ */
+async function refreshQueuedScope(
+  db: AbstractPowerSyncDatabase, changeOrderId: string, scopeOfWork: string
+): Promise<void> {
+  const q = await db.getAll<{ mutation_id: string; payload_json: string }>(
+    `SELECT mutation_id, payload_json FROM change_order_outbox WHERE change_order_id = ?`,
+    [changeOrderId]);
+  if (!q.length) return;                       // already drained; nothing queued to fix
+  let p: any = null;
+  try { p = JSON.parse(q[0].payload_json); } catch { return; }  // corrupt: the drain parks it
+  const json = JSON.stringify({ ...p, scope_of_work: scopeOfWork });
+  await db.execute(
+    `UPDATE change_order_outbox SET payload_json = ?, payload_sha256 = ? WHERE mutation_id = ?`,
+    [json, sha256(json), q[0].mutation_id]);
+}
+
+/**
+ * The cap on the scope of work. Far larger than SCOPE_MAX_CHARS (the title) because
+ * this one IS the document body: the worked fireplace example runs to 2,651
+ * characters and is not unusual for a job with steps, assumptions and exclusions.
+ * Passed to the editor as `maxChars` so the counter and the storage cannot drift —
+ * the exact failure SCOPE_MAX_CHARS was widened to fix.
+ */
+export const SCOPE_OF_WORK_MAX_CHARS = 8000;
+
 export async function setDraftSummary(
   db: AbstractPowerSyncDatabase, changeOrderId: string, summary: string
 ): Promise<boolean> {

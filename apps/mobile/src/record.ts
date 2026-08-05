@@ -146,6 +146,15 @@ export type ExtraRecord = {
   stateLineParams?: Record<string, string>;
   people: RecordPerson[];
   description: string;
+  /**
+   * 391 — the detailed client-facing SCOPE OF WORK, on its own.
+   *
+   * `title` is the short name; `description` is this plus any appended voice
+   * augments. This field is the one the editor writes and the one `renderCard`
+   * freezes into the instrument, so a screen that wants to show "what the client
+   * signs" must render THIS and not `description`.
+   */
+  scopeOfWork: string;
   photos: RecordPhoto[];
   /** True when photos were dropped by the render cap. */
   photosTruncated: number;
@@ -188,7 +197,8 @@ export async function extraRecord(
   db: AbstractPowerSyncDatabase, changeOrderId: string
 ): Promise<ExtraRecord | null> {
   const co = (await db.getAll<{
-    id: string; decision_id: string; scope: string; summary: string | null;
+    id: string; decision_id: string; scope: string; scope_of_work: string | null;
+    summary: string | null;
     amount_cents: number | null;
     job_name: string | null;
     nte_cents: number | null; is_mini: number; who_directed: string;
@@ -198,7 +208,8 @@ export async function extraRecord(
     declined_at_ms: number | null; superseded_at_ms: number | null;
     co_number: number | null;
   }>(
-    `SELECT co.id, co.decision_id, co.scope, co.summary, co.amount_cents, co.nte_cents, co.is_mini,
+    `SELECT co.id, co.decision_id, co.scope, co.scope_of_work, co.summary,
+            co.amount_cents, co.nte_cents, co.is_mini,
             co.who_directed, co.numbers_confirmed_at_ms, co.status, co.signed_by,
             co.created_at_ms,
             co.sent_at_ms, co.approved_at_ms, co.declined_at_ms, co.superseded_at_ms,
@@ -423,10 +434,19 @@ export async function extraRecord(
   const addenda = augEvents
     .filter((e) => e.kind === 'voice' && e.descText)
     .map((e) => e.descText as string);
-  const description = [co.summary?.trim() || co.scope, ...addenda].join('\n\n');
+  // 391 — THE SCOPE OF WORK IS THE SOURCE, not the summary. `description` is what the
+  // draft screen renders under "SCOPE OF WORK (SENT TO CLIENT)", and that label was a
+  // promise the code did not keep: it showed the AI summary while the client signed
+  // `co.scope`, the title. Now the field displayed, edited, gated on and frozen is one
+  // and the same. Falls back through summary then title so a pre-391 row reads as it did.
+  const scopeOfWork = co.scope_of_work?.trim() || co.summary?.trim() || co.scope;
+  const description = [scopeOfWork, ...addenda].join('\n\n');
 
   return {
     id: co.id,
+    /** 391 — the detailed client-facing scope, WITHOUT the appended augments that
+     *  `description` carries. The editor writes this; the instrument freezes it. */
+    scopeOfWork,
     title: co.scope,
     status: co.status,
     amount: money(co.amount_cents),

@@ -123,7 +123,11 @@ export const CHANGE_ORDER_DDL = [
            OR new.billing_timing IS NOT old.billing_timing
            OR new.schedule_effect IS NOT old.schedule_effect
            OR new.schedule_days IS NOT old.schedule_days
-           OR new.exclusions IS NOT old.exclusions)
+           OR new.exclusions IS NOT old.exclusions
+            -- 391: the scope of work IS the instrument's body now, so it freezes
+            -- with everything else. Without this a sent extra's signed scope could
+            -- be rewritten underneath the person who signed it.
+            OR new.scope_of_work IS NOT old.scope_of_work)
      BEGIN SELECT RAISE(ABORT, 'a sent change order is frozen: supersede it'); END`,
 
   `CREATE TABLE IF NOT EXISTS change_order_outbox (
@@ -189,6 +193,15 @@ async function ensureFlowFields(db: AbstractPowerSyncDatabase) {
     // fifth change. The title is not an identifier: two extras can be called the same
     // thing, and a retitle would silently rename a document already in someone's inbox.
     ['co_number', 'INTEGER'],
+    // 391 — THE DETAILED CLIENT-FACING SCOPE, split out of `scope`.
+    //
+    // `scope` was doing three jobs: the list-row title, the send-readiness gate, and
+    // the body of the frozen instrument (App.tsx passed it to renderCard as both
+    // subject AND value). A field short enough for a list row cannot also be a scope
+    // of work, and the data proved it -- 15 change orders, average scope length 27
+    // characters, longest 39, none approved. The client was signing a title.
+    // `scope` stays the title; this is what the owner reads and signs.
+    ['scope_of_work', 'TEXT'],
   ];
   for (const [name, ddl] of adds) {
     if (!have.has(name)) {
@@ -220,7 +233,11 @@ async function ensureFlowFields(db: AbstractPowerSyncDatabase) {
            OR new.billing_timing IS NOT old.billing_timing
            OR new.schedule_effect IS NOT old.schedule_effect
            OR new.schedule_days IS NOT old.schedule_days
-           OR new.exclusions IS NOT old.exclusions)
+           OR new.exclusions IS NOT old.exclusions
+            -- 391: the scope of work IS the instrument's body now, so it freezes
+            -- with everything else. Without this a sent extra's signed scope could
+            -- be rewritten underneath the person who signed it.
+            OR new.scope_of_work IS NOT old.scope_of_work)
      BEGIN SELECT RAISE(ABORT, 'a sent change order is frozen: supersede it'); END`);
 }
 
@@ -558,6 +575,7 @@ export async function createChangeOrder(
     exclusions: o.exclusions?.trim() || null,
     origin_change_order_id: o.originChangeOrderId ?? null,
     co_number: coNumber,
+    scope_of_work: o.scope.trim(),
   };
   const payloadJson = JSON.stringify(payload);
 
@@ -568,15 +586,19 @@ export async function createChangeOrder(
            line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate,
            numbers_confirmed_at_ms, status, created_at_ms,
            billing_timing, schedule_effect, schedule_days, exclusions,
-           origin_change_order_id, co_number)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           origin_change_order_id, co_number, scope_of_work)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [o.id, o.decisionId, o.projectId, o.ownerId, o.scope.trim(),
          JSON.stringify(lineItems), o.amountCents, o.nteCents ?? null,
          o.isMini ? 1 : 0, o.whoDirected, o.refEstimate ?? null, confirmedMs,
          BORN_AS, now,
          o.billingTiming ?? null, o.scheduleEffect ?? null,
          o.scheduleDays ?? null, o.exclusions?.trim() || null,
-         o.originChangeOrderId ?? null, coNumber]
+         o.originChangeOrderId ?? null, coNumber,
+         // Seeded to the title at birth so the field is never null: a capture not yet
+         // summarised still signs SOMETHING, and it is the same string it would have
+         // signed before 391. The summary and the contractor's edits replace it.
+         o.scope.trim()]
       );
       // Atomic with the record. Never after it.
       await tx.execute(
@@ -700,6 +722,9 @@ export async function drainChangeOrderOutbox(
         p_schedule_effect: p.schedule_effect ?? null,
         p_schedule_days: p.schedule_days ?? null,
         p_exclusions: p.exclusions ?? null,
+        // 391. Defaulted server-side, so a payload queued before this shipped still
+        // ingests -- the RPC falls back to p_scope, which is what it signed anyway.
+        p_scope_of_work: p.scope_of_work ?? null,
       });
       if (error) throw error;
 
@@ -769,6 +794,10 @@ async function parkCO(db: AbstractPowerSyncDatabase, mutationId: string, code: s
  */
 export type LedgerRow = {
   id: string; scope: string; amount: string; nte: string | null;
+  /** 391 — the detailed client-facing scope. `scope` is the title. This is the text
+   *  frozen into the instrument at send; null on rows created before 391, and the
+   *  sender falls back to the title for exactly those. */
+  scope_of_work: string | null;
   status: string; is_mini: number; signed_by: string | null;
   approved_running: string; synced: number;
   // Raw cents alongside the formatted string: the c4 ledger totals (approved sum,
@@ -850,6 +879,7 @@ export function createdLabel(ms: number): string {
 export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): Promise<LedgerRow[]> {
   const rows = await db.getAll<{
     id: string; decision_id: string; who_directed: string; scope: string;
+    scope_of_work: string | null;
     amount_cents: number; nte_cents: number | null;
     status: string; is_mini: number; signed_by: string | null;
     created_at_ms: number; pending: number; extra_type: string | null;
@@ -857,7 +887,8 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     schedule_days: number | null; exclusions: string | null;
     photo_relpath: string | null;
   }>(
-    `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.amount_cents, co.nte_cents,
+    `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.scope_of_work,
+            co.amount_cents, co.nte_cents,
             co.status, co.is_mini, co.signed_by, co.created_at_ms, co.extra_type,
             co.billing_timing, co.schedule_effect, co.schedule_days, co.exclusions,
             ${CO_PHOTO_SUBQUERY} AS photo_relpath,
@@ -877,7 +908,8 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     if (r.status === 'approved') running += r.amount_cents;
     return {
       id: r.id, decision_id: r.decision_id, who_directed: r.who_directed,
-      scope: r.scope, amount: money(r.amount_cents),
+      scope: r.scope, scope_of_work: r.scope_of_work ?? null,
+      amount: money(r.amount_cents),
       nte: r.nte_cents == null ? null : money(r.nte_cents),
       nte_cents: r.nte_cents,
       status: r.status, is_mini: r.is_mini, signed_by: r.signed_by,

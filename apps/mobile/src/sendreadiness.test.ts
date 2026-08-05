@@ -19,6 +19,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   sendReadiness, sendGate, blockerKey, recommendationKey, UNTITLED_SCOPE, RECOMMENDED,
+  MIN_SCOPE_OF_WORK_CHARS,
   type SendRecommendation,
 } from './sendreadiness.ts';
 
@@ -111,6 +112,50 @@ test('an empty or whitespace scope blocks', () => {
   assert.deepEqual(sendReadiness({ ...full, scope: '' }).blockers, ['no_description']);
   assert.deepEqual(sendReadiness({ ...full, scope: '   \n' }).blockers, ['no_description']);
   assert.equal(sendReadiness({ ...full, scope: '' }).ok, false);
+});
+
+test('391: the gate reads the SCOPE OF WORK, not the title', () => {
+  // The whole point of the split. A perfectly good title must not satisfy a gate
+  // that exists to make sure the CLIENT has something to read — that is exactly the
+  // state every change order in the database was in: 27 characters on average,
+  // longest 39, none approved.
+  const shortSow = { ...full, scopeOfWork: 'Firewall salvage: sanding and staining' };
+  assert.deepEqual(sendReadiness(shortSow).blockers, ['no_description'],
+    'a 38-character scope of work is a title wearing a different hat');
+
+  const realSow = {
+    ...full,
+    scopeOfWork: 'Move the original 1910 fireplace mantel from the downstairs bedroom '
+      + 'into the living room and refinish it in place.',
+  };
+  assert.deepEqual(sendReadiness(realSow).blockers, [], 'a real scope of work passes');
+});
+
+test('391: scopeOfWork wins over scope when both are present', () => {
+  // The failure this prevents: a long title masking an empty scope of work, so the
+  // gate passes and the client signs nothing.
+  const r = sendReadiness({ ...full, scopeOfWork: 'Too short' });
+  assert.deepEqual(r.blockers, ['no_description'],
+    'a long title must not rescue a two-word scope of work');
+});
+
+test('391: a row with no scopeOfWork falls back to scope, unchanged', () => {
+  // Back-compat, and it matters: every extra created before 391 has a null column.
+  // Those rows must behave exactly as they did rather than becoming unsendable.
+  const { scopeOfWork, ...noSow } = { ...full, scopeOfWork: undefined };
+  assert.deepEqual(sendReadiness(noSow).blockers, [],
+    'the pre-391 row still sends on the strength of its scope');
+  assert.deepEqual(sendReadiness({ ...noSow, scope: '' }).blockers, ['no_description']);
+});
+
+test('391: the minimum is exactly MIN_SCOPE_OF_WORK_CHARS, boundary included', () => {
+  const at = 'x'.repeat(MIN_SCOPE_OF_WORK_CHARS);
+  const under = 'x'.repeat(MIN_SCOPE_OF_WORK_CHARS - 1);
+  assert.deepEqual(sendReadiness({ ...full, scopeOfWork: at }).blockers, []);
+  assert.deepEqual(sendReadiness({ ...full, scopeOfWork: under }).blockers, ['no_description']);
+  // Trimmed before measuring: padding is not scope.
+  assert.deepEqual(
+    sendReadiness({ ...full, scopeOfWork: `   ${under}   ` }).blockers, ['no_description']);
 });
 
 test('the UNTITLED placeholder is not a description', () => {

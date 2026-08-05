@@ -54,6 +54,7 @@ import {
 import { C, F, T, label as labelStyle, money as moneyStyle, tint } from './theme';
 import { touchTargets } from './tokens';
 import { Icon } from './icon';
+import { ScopeBlock } from './scopeblock';
 
 const CAUTION = tint('caution');
 
@@ -761,10 +762,15 @@ function ScopeSection(p: ExtraDraftProps) {
           for the fixture). REQ-LC43's rule still holds — the frozen instrument is
           `co.scope` — but the row the owner reads shows the full scope prose, not a
           one-line title. Open item for hadar: confirm which column feeds this. */}
-      <DescriptionBlock
-        text={rec.description || rec.title}
-        blocked={blocked('no_description')}
-        onPress={p.onEditDescription}
+      {/* 391 — ONE ScopeBlock, shared with the negotiation and locked screens, so the
+          three stages cannot render the agreed text three different ways. Reads
+          `scopeOfWork` and NOT `description`: description appends the voice augments,
+          and what the client signed is the scope alone. */}
+      <ScopeBlock
+        text={rec.scopeOfWork}
+        stage="draft"
+        onEdit={p.onEditDescription}
+        missing={blocked('no_description')}
       />
 
       {p.kind === 'extra' && (

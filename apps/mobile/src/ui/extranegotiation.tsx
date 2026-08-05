@@ -42,6 +42,7 @@
  * already.
  */
 import React from 'react';
+import { ScopeBlock } from './scopeblock';
 import { ActionSheetIOS, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { ExtraRecord } from '../record';
 import { truncate, type ThreadState } from '../discussion';
@@ -794,14 +795,12 @@ function DocumentSection({ rec, terms, onOpenDetail, onPressPhoto }: {
   // real values on the right. Only "Recent activity" is a separate card (ActivitySection).
   return (
     <Card style={st.cardTight}>
-      <Row
-        icon="doc"
-        label={t('neg.rowScope')}
-        value={rec.description ? truncate(rec.description, 90) : t('draft.showMore')}
-        chevron
-        divider
-        onPress={() => onOpenDetail('scope')}
-      />
+      {/* 391 — THE SCOPE IS NOT A ROW. It was `truncate(rec.description, 90)` with a
+            chevron: on the one screen where the client is deciding and the contractor
+            is answering questions, the thing under negotiation was 90 characters and an
+            arrow. Same ScopeBlock as the draft and locked screens, frozen styling, so
+            the reader can see the text has not moved since it was sent. */}
+        <ScopeBlock text={rec.scopeOfWork} stage="sent" />
       <Row
         icon="cost"
         label={t('neg.rowCost')}

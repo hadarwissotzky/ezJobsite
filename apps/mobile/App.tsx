@@ -91,6 +91,7 @@ import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from '
 import { fetchLatestProposalForCaptures, type Proposal } from './src/proposals';
 import { discardCapture, discardExtra, drainServerDiscards, drainDiscardedExtras, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
 import { startExtraFromCapture, titleExtraIfUntitled, retitleDraft, setDraftSummary,
+         saveScopeOfWork, SCOPE_OF_WORK_MAX_CHARS,
          SCOPE_MAX_CHARS } from './src/startextra';
 import { cleanupTestData } from './src/testdatacleanup';
 import { logDiag } from './src/diaglog';
@@ -249,6 +250,8 @@ type RecordLcState = {
   view: RecordLifecycle;
   co: {
     id: string; decision_id: string; project_id: string; scope: string;
+    /** 391 — the detailed client-facing scope; `scope` is the title. */
+    scope_of_work: string | null;
     who_directed: string; amount_cents: number | null; nte_cents: number | null;
     billing_timing: string | null; schedule_effect: string | null;
     schedule_days: number | null; exclusions: string | null;
@@ -646,11 +649,12 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
 }> => {
   const raw = (await db.getAll<{
     id: string; decision_id: string; project_id: string; scope: string;
+    scope_of_work: string | null;
     who_directed: string; amount_cents: number | null; nte_cents: number | null;
     billing_timing: string | null; schedule_effect: string | null;
     schedule_days: number | null; exclusions: string | null; line_items: string | null;
   }>(
-    `SELECT id, decision_id, project_id, scope, who_directed, amount_cents, nte_cents,
+    `SELECT id, decision_id, project_id, scope, scope_of_work, who_directed, amount_cents, nte_cents,
             billing_timing, schedule_effect, schedule_days, exclusions, line_items
        FROM change_order WHERE id = ?`, [r.id]))[0];
   if (!raw) throw new Error(`no change_order ${r.id}`);
@@ -719,6 +723,8 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
         readiness: sendReadiness({
           kind: 'extra',
           scope: co.scope,
+          // 391 — the gate tests the text the client signs, not the title.
+          scopeOfWork: co.scope_of_work,
           amountCents: co.amount_cents,
           nteCents: co.nte_cents,
           priceMode,
@@ -1372,7 +1378,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const r = await sendForConfirmation(connector.client, {
     kind: 'confirm', decisionId: c.decision_id, projectId,
     projectName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
-    subject: c.scope, value: c.scope,
+    // 391 — THE SUBJECT IS THE TITLE, THE VALUE IS THE SCOPE OF WORK. Both were
+    // `c.scope`, so the document's body and its heading were one 30-character string
+    // and the client signed a title. Falls back to the title for any row created
+    // before 391 whose scope_of_work never got written: that row then signs exactly
+    // what it would have signed before, never an empty scope.
+    subject: c.scope,
+    value: (c.scope_of_work || '').trim() || c.scope,
     directedBy: c.who_directed || 'Owner',
     // The APPROVER, not who asked for the work. These are different people
     // and conflating them is how a request reaches someone who cannot
@@ -4279,7 +4291,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     if (!c) return;
     setDetail({
       field,
-      scope: c.scope,
+      // 391 — the description editor edits the SCOPE OF WORK, so it must be seeded
+      // with it. Seeding from `c.scope` (the title) meant opening the editor
+      // silently replaced a written scope with the title the moment you saved.
+      scope: (c.scope_of_work || '').trim() || c.scope,
       priceMode: c.nte_cents == null ? 'fixed' : 'nte',
       // EMPTY, not "0.00", when no price was ever given (370). The app never types a
       // number into the price field on his behalf (mandate #6).
@@ -4308,12 +4323,28 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   /** REQ-LC14: the client-facing scope is editable in Stage 1 only, and
    *  `retitleDraft`'s own `WHERE status = 'draft'` is the guard — not this caller.
    *  REQ-LC8: a write that moved no row is REPORTED, never swallowed. */
+  /**
+   * 391 — the DESCRIPTION editor writes the SCOPE OF WORK.
+   *
+   * It used to call `retitleDraft`, i.e. write `scope`, the title — the same
+   * function the header rename calls. So editing the scope of work renamed the
+   * extra, and renaming the extra destroyed the scope of work, and neither said so.
+   */
   const saveScope = async (changeOrderId: string, text: string) => {
-    const ok = await retitleDraft(db, changeOrderId, text);
+    const ok = await saveScopeOfWork(db, changeOrderId, text);
     if (!ok) {
       setFiled(T('erec.errSaveScope'));
       return;
     }
+    setDetail(null);
+    await openRecord(changeOrderId);
+    void refresh();
+  };
+
+  /** Rename the extra from the header — `change_order.scope`, the title only. */
+  const saveTitle = async (changeOrderId: string, text: string) => {
+    const ok = await retitleDraft(db, changeOrderId, text);
+    if (!ok) { setFiled(T('erec.errSaveScope')); return; }
     setDetail(null);
     await openRecord(changeOrderId);
     void refresh();
@@ -4694,7 +4725,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         onOpenDetail={(field) => openDetail(field)}
         // Rename from the header, in place. `retitleDraft`'s own WHERE status='draft'
         // is the guard (REQ-LC14/LC8) — a refused write is REPORTED, never swallowed.
-        onRetitle={(next) => { void saveScope(record.id, next); }}
+        // The HEADER rename writes the title. Separate from saveScope since 391;
+        // before that both wrote `scope` and each silently overwrote the other.
+        onRetitle={(next) => { void saveTitle(record.id, next); }}
         // The job's OTHER people — everyone on the roster except whoever is already
         // rendered above as "Requested by". Matched on the same normalised name the
         // client lookup uses, so the person named at the top is never repeated in the
