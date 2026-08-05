@@ -565,12 +565,67 @@ export async function recoverySweep(db: AbstractPowerSyncDatabase): Promise<{
   }
 
   // Commitment with missing/mismatched media -> stays visible, flagged. Never hidden.
+  //
+  // MEASURED 2026-08-04: this loop was the ENTIRE cold start. It re-hashed every
+  // committed file on every launch — 65 files / ~20MB on the test device — and took
+  // 15,486ms of a 15,546ms startup. Everything else in the launch totalled 60ms. It
+  // also grew linearly with the archive, so the app got slower the more a contractor
+  // used it, which is the worst possible shape for this curve.
+  //
+  // NOW TWO TIERS, cheapest first:
+  //   1. SIZE, every launch, every file. getInfoAsync is a stat — effectively free —
+  //      and a wrong size is what truncation, a failed write, or a half-copied
+  //      restore actually look like. This is the check that catches real corruption.
+  //   2. SHA-256, once per file, remembered. Hashing only detects damage that keeps
+  //      the byte count identical (bit rot), which is rare and does not become more
+  //      likely by being re-checked hourly. So each file is hashed the first time it
+  //      is seen and recorded; later launches trust that plus the size check.
+  //
+  // The trade-off is stated plainly: we no longer detect same-size corruption that
+  // appears AFTER a file's first verification. Against that, the previous behaviour
+  // spent 15 seconds and a battery's worth of CPU on every launch re-proving bytes
+  // nobody had touched — and a check nobody waits for is worth more than one that
+  // makes the app unusable.
+  await db.execute(
+    `CREATE TABLE IF NOT EXISTS capture_verified (
+        capture_id  TEXT NOT NULL PRIMARY KEY,
+        sha256      TEXT NOT NULL,
+        bytes       INTEGER NOT NULL,
+        verified_at_ms INTEGER NOT NULL
+     ) STRICT`).catch(() => { /* cache only; the sweep still works without it */ });
+  const verified = new Map<string, { sha256: string; bytes: number }>();
+  try {
+    for (const r of await db.getAll<{ capture_id: string; sha256: string; bytes: number }>(
+      `SELECT capture_id, sha256, bytes FROM capture_verified`)) {
+      verified.set(r.capture_id, { sha256: r.sha256, bytes: r.bytes });
+    }
+  } catch { /* no cache -> everything gets hashed once, as before */ }
+
   for (const c of await listCommittedCaptures(db)) {
     const src = FS.documentDirectory + c.media_relpath;
     const info = await FS.getInfoAsync(src);
     if (!info.exists) { integrityErrors.push(c.capture_id); continue; }
+
+    // Tier 1 — size. `size` is present on an existing file; when the platform omits
+    // it we fall through to hashing rather than assuming the file is fine.
+    const onDisk = (info as { size?: number }).size;
+    if (typeof onDisk === 'number' && onDisk !== c.media_bytes) {
+      integrityErrors.push(c.capture_id);
+      continue;
+    }
+
+    // Tier 2 — hash, only if this file has never been verified.
+    const seen = verified.get(c.capture_id);
+    if (seen && seen.sha256 === c.media_sha256 && seen.bytes === c.media_bytes) continue;
+
     const { hex, bytes } = await hashFileFromDisk(src);
-    if (hex !== c.media_sha256 || bytes !== c.media_bytes) integrityErrors.push(c.capture_id);
+    if (hex !== c.media_sha256 || bytes !== c.media_bytes) {
+      integrityErrors.push(c.capture_id);
+      continue;
+    }
+    await db.execute(
+      `INSERT OR REPLACE INTO capture_verified (capture_id, sha256, bytes, verified_at_ms)
+       VALUES (?,?,?,?)`, [c.capture_id, hex, bytes, Date.now()]).catch(() => {});
   }
   return { tmpDeleted, orphansDeleted, orphansQuarantined, integrityErrors };
 }

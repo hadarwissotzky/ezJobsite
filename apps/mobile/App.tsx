@@ -2370,10 +2370,27 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       }
 
       // Recovery runs before anything else can be recorded.
-      const rec = await recoverySweep(db);
-      if (rec.integrityErrors.length) {
-        console.warn('captures with unreadable media:', rec.integrityErrors);
-      }
+      // RUN AFTER FIRST PAINT, NOT BEFORE IT (hadar 2026-08-04, measured: this call
+      // was 15,486ms of a 15,546ms cold start).
+      //
+      // Nothing renders from its result — the only consumer is a console.warn — and
+      // what it DOES is cleanup plus detection: delete temp scraps, quarantine crash
+      // orphans, flag media that no longer matches its commitment. None of that is
+      // something a user waits for, and none of it protects anything by happening
+      // 15 seconds earlier. Mandate #1 is unaffected: the sweep never destroys
+      // evidence (an unproven orphan is quarantined, never deleted), so running it a
+      // beat later cannot lose a capture — it can only report one later.
+      //
+      // Deliberately fire-and-forget, deliberately AFTER setReady below.
+      const runRecoverySweep = () => {
+        void recoverySweep(db)
+          .then((rec) => {
+            if (rec.integrityErrors.length) {
+              console.warn('captures with unreadable media:', rec.integrityErrors);
+            }
+          })
+          .catch((e) => console.warn('recovery sweep failed', e?.message ?? e));
+      };
 
       // AUTH (replaces the bakeoff hardcoded login). A stored token -> straight to
       // the main screen; no token -> the onboarding/sign-in flow renders. The intro
@@ -2439,6 +2456,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // it the instant setReady flips, so the home shell paints immediately and its
       // content fills a beat later instead of gating the whole launch.
       setReady(true);
+      // The shell is on screen; now do the housekeeping.
+      runRecoverySweep();
 
       // Drain the outbox. Runs on a timer, not on a network event, because
       // "online" is a lie you find out about by trying. Offline is the normal
