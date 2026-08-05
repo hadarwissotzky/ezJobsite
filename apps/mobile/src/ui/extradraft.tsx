@@ -168,6 +168,25 @@ export type ExtraDraftProps = {
    *  grows its own modal, so there is one lightbox in the app, not three. */
   onPressPhoto?: (uri: string) => void;
   onSend: () => void;
+  /**
+   * The OTHER people already on this job (the roster, minus whoever is shown above
+   * as "Requested by"). Labels arrive translated — this screen does no t() over
+   * role slugs.
+   *
+   * WHY IT EXISTS (hadar, 2026-08-05: "the section works but the record is not
+   * updated upon selection"). "Add someone else" writes a project_approver row and
+   * deliberately touches neither `who_directed` nor the extra's actor facts — an
+   * inspector does not become the approver. That is right, but it meant the act had
+   * NO visible result anywhere: the person went into a list the draft never showed,
+   * so adding one read as a no-op. Showing the job's people here is what makes the
+   * add land somewhere the eye can find it.
+   *
+   * DISPLAY ONLY, and that is deliberate. These are not actors on this extra and no
+   * evidence row is written for them; extra_actor stays the record of who captured,
+   * priced, sent and approved. This is the JOB's contact list, rendered where it is
+   * useful.
+   */
+  jobPeople?: readonly { id: string; name: string; role: string }[];
   /** REQ-LC14 / T5: legal in this stage only. Rendered only when the caller offers
    *  it AND `canDelete` agrees — `planDiscard` remains the arbiter of the act. */
   onDelete?: () => void;
@@ -640,6 +659,19 @@ function RawSection(p: ExtraDraftProps) {
             all need to be reachable on this job. Offered only after the client is
             named: before that, the thing to do is name the client, not collect
             bystanders. Adding here NEVER changes who approves (see `saveClient`). */}
+        {/* Everyone else on the job. Rendered exactly like the two rows above so
+            the section reads as one list of humans, not two features. Not tappable:
+            there is nothing to change about them from here, and a chevron that
+            opened an editor would suggest this extra owns them — it does not. */}
+        {(p.jobPeople ?? []).length > 0 && (
+          <View style={{ borderTopWidth: 1, borderTopColor: C.line, paddingTop: 6 }}>
+            <Text style={labelStyle}>{t('draft.alsoOnJob')}</Text>
+            {(p.jobPeople ?? []).map((m) => (
+              <PersonRow key={m.id} name={m.name} role={m.role} kind="crew" />
+            ))}
+          </View>
+        )}
+
         {p.requestedBy && p.onAddContact && (
           <Row
             icon="people"

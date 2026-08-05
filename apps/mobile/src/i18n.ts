@@ -1064,6 +1064,7 @@ const EN: Record<string, string> = {
   // The AI's write-up. It sits under `draft.rawNote` ("the owner does not see this
   // part") because REQ-LC43 puts `change_order.summary` outside the instrument.
   'draft.writeUp': 'What the app made of it',
+  'draft.alsoOnJob': 'ALSO ON THIS JOB',
   'draft.requestedBy': 'Client',
   'draft.capturedWith': 'How this was captured',
   'draft.scope': 'Scope of work (sent to client)',
@@ -2362,6 +2363,7 @@ const ES: Record<string, string> = {
   'draft.notesShow': 'Mostrar las grabaciones',
   'draft.notesHide': 'Ocultar las grabaciones',
   'draft.writeUp': 'Lo que entendió la app',
+  'draft.alsoOnJob': 'TAMBIÉN EN ESTE TRABAJO',
   'draft.requestedBy': 'Cliente',
   'draft.capturedWith': 'Cómo se capturó',
   'draft.scope': 'Trabajo a realizar (lo que ve el cliente)',

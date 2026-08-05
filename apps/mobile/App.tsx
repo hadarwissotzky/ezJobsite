@@ -4658,6 +4658,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // Rename from the header, in place. `retitleDraft`'s own WHERE status='draft'
         // is the guard (REQ-LC14/LC8) — a refused write is REPORTED, never swallowed.
         onRetitle={(next) => { void saveScope(record.id, next); }}
+        // The job's OTHER people — everyone on the roster except whoever is already
+        // rendered above as "Requested by". Matched on the same normalised name the
+        // client lookup uses, so the person named at the top is never repeated in the
+        // list below. Display only: nothing here is an actor on this extra.
+        jobPeople={(recordLc?.roster ?? [])
+          .filter((m) => {
+            const norm = (x: string) => x.trim().toLowerCase().replace(/\s+/g, ' ');
+            const client = clientRow?.name ?? recordLc?.view.requestedBy ?? '';
+            return !client || norm(m.name) !== norm(client);
+          })
+          .map((m) => ({ id: m.id, name: m.name, role: roleLabel(m.role) }))}
         onEditClient={() => setClientOpen('client')}
         onAddContact={() => setClientOpen('contact')}
         // What they ARE on this job, from the roster answer. Absent until somebody

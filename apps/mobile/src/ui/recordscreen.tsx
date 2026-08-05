@@ -157,6 +157,9 @@ export type RecordScreenProps = {
   onViewSignedApproval: () => void;
   /** On a superseded record: open the version that replaced it. */
   onOpenCurrent?: () => void;
+  /** The job's other people, already translated — passed straight to the draft
+   *  screen, which explains why it shows them. Display only. */
+  jobPeople?: readonly { id: string; name: string; role: string }[];
   /** REQ-LC14 / T5: legal in Stage 1 only. `canDelete` is re-checked inside the
    *  draft screen; the caller offers it or does not. */
   onDelete?: () => void;
@@ -243,6 +246,7 @@ export function RecordScreen(props: RecordScreenProps) {
           onAddPhotos={props.onCapture ?? (() => props.onOpenDetail('photos'))}
           onPressPhoto={(uri) => setZoom(uri)}
           onSend={props.onSend}
+          jobPeople={props.jobPeople}
           onDelete={props.onDelete}
         />
       );
