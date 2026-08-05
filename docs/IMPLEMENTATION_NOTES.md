@@ -616,3 +616,120 @@ CONFIRMED REAL, converged:
 DROPPED (Codex CONCEDED): #8 paywall "cannot purchase" — the RevenueCat stub is
 intentional + honestly labeled (DEC-11); a release blocker only once IAP is declared
 live, not a correctness defect. No 376/381/382 signature conflict (382 replaces).
+
+---
+
+## §6 — 2026-08-05: the local store is not partitioned by identity — FOUND, UNFIXED
+
+**How it surfaced.** hadar: "it is still not deleting." Three sessions of misdiagnosis
+(a missing modal mount, then a wrong instruction to sign in by email) before reading the
+device's own `diag_log`, which had said the same thing eleven times since 08:51:
+
+```
+10:02:42  discardExtra.rpc  refused: not your extra
+09:48:04  discardExtra.rpc  refused: not your extra
+08:51:39  discardExtra.rpc  refused: not your extra
+```
+
+The phone was signed in as `58593170…` (phone `14154979641`, created 2026-08-03 during
+the phone-auth work) — an account owning **nothing**. Every draft on screen belonged to
+`11c7660e…` (hadarwissotzky@me.com): 31 drafts, 1 sent, 3 projects.
+`discard_extra_own` (sql/369) raised `not your extra` (42501), `discardExtra` honoured
+the refusal, and the local delete correctly never ran. **The server was right every
+time.** The bug was that the phone was showing one account's evidence to another.
+
+**Resolved for this device** by folding the phone identity into the email user
+(`auth.identities` moved, `auth.users.phone` set, the empty duplicate user + its empty
+company deleted; backups in the session scratchpad). No evidence row was touched. But
+that fixed the *instance*, not the *class*.
+
+### The defect
+
+`onSignOut` is the whole teardown:
+
+```ts
+onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
+```
+
+`connector.signOut()` is `client.auth.signOut()` and nothing more. There is no
+`disconnectAndClear()` anywhere in the codebase — grepped. So on sign-out:
+
+- **45 app-owned SQLite tables survive** (`change_order`, `capture_commit`,
+  `voice_transcript_cache`, `thread_message`, `scope_boundary`, `device_settings`, the
+  11 outboxes, …), as do the `ps_*` PowerSync tables.
+- **Media survives** in `Documents/` (photos, audio) — plain files, no key to lose.
+- **`device_settings` survives**, carrying `profile_name`, `profile_company`,
+  `profile_trade` — the previous user's identity, not just their work.
+
+Home reads local SQLite, not the server. So a new signup **on a device that has been
+used before** lands on a Home screen listing the previous user's extras: scopes, prices,
+photos, transcripts. They cannot *act* on any of it (every server call refuses — that is
+this whole finding's proof), but they can **read** all of it.
+
+**Blast radius is device reuse, not the fleet.** A fresh install on a fresh device has an
+empty local store and correct server RLS (`owner_id = auth.uid()` on `change_order`,
+`project`, `capture`, plus company-scoped read policies), so nothing leaks there. This
+is a shared-phone / re-signup / crew-handover bug. In residential construction — where a
+phone gets handed to whoever is on site — that is not an exotic scenario.
+
+### Why the obvious fix is wrong
+
+"Wipe local data on sign-out" collides head-on with **mandate #1**. A capture that has
+not uploaded exists *only* on that device; the outboxes are the proof it has not. Purging
+on sign-out would silently destroy evidence the app has already told someone was saved —
+converting a confidentiality bug into a durability bug, which is the strictly worse
+trade. Sign-out is also the wrong *trigger*: it is a routine act, often followed by the
+same person signing back in, and it must stay cheap.
+
+### The fix, specified
+
+**Bind the store to an identity, and act at sign-IN, not sign-out.**
+
+1. **Record the owner.** Add `device_settings.bound_user_id`, written on the first
+   successful sign-in against an empty store. This is the fact the device currently has
+   no way to state.
+
+2. **Compare at sign-in.** In the `onAuthStateChange` handler, before any screen renders
+   data: if `bound_user_id` is set and differs from the new session's `sub`, the store
+   belongs to someone else. Three outcomes, in this order:
+
+   a. **Outbox non-empty → REFUSE the switch.** Block with a screen naming what is
+      unsent (`inFlight()` from `ota.ts` already computes this across all 11 outboxes)
+      and offering only "sign back in as <previous user> to finish uploading". Never
+      destroy; never silently proceed. This is mandate #1 outranking the leak.
+
+   b. **Outbox empty → PURGE, then bind.** Delete every app-owned table, call
+      PowerSync's `disconnectAndClear()`, delete the media directories under
+      `Documents/`, then set `bound_user_id` to the new `sub`. Everything is durably on
+      the server by definition of (a), so this destroys no evidence.
+
+   c. **Store empty → bind, no purge.** The normal first-run path.
+
+3. **Log every branch** to `diag_log` (`identity.switch`: refused · purged · bound).
+   This finding cost three sessions precisely because the refusal reason was legible only
+   to someone who thought to look; the *next* identity question should be answerable from
+   the flight recorder alone.
+
+**Deliberately NOT in scope:** filtering the UI by `owner_id` instead of purging. It
+cannot work — `voice_transcript_cache`, `scope_boundary`, `thread_message` and
+`device_settings` carry no owner column at all, so a filter would leak exactly the
+free-text content (transcripts, thread replies, scope language) that matters most. Adding
+owner columns to 45 tables to support multi-tenancy on one phone is a larger design
+question and is not what v1 needs; one device, one identity at a time, is.
+
+### Verification gate
+
+| Case | Expected |
+|---|---|
+| First sign-in, empty store | binds, no purge, no prompt |
+| Same user signs out / back in | no purge, no prompt, drafts intact |
+| Different user, outbox empty | store + media purged, new user sees an empty Home |
+| Different user, outbox non-empty | switch REFUSED, nothing deleted, unsent count named |
+| Purge path | `capture_commit` = 0, `Documents/` media gone, `ps_*` cleared |
+
+The fourth row is the one that matters: it is the case where confidentiality and
+durability disagree, and durability must win.
+
+**Status: unfixed.** Written up 2026-08-05 so it is not rediscovered by a user. The
+identity merge that unblocked this device is not a fix for this — it removed the second
+account, and the next second account will reproduce it exactly.
