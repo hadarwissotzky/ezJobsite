@@ -28,6 +28,10 @@
  * the same principle as R7's implicit project creation.
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+// The cross-job identity rule lives in its own leaf so it can be unit-tested
+// (this module imports ./i18n, which the node test runner cannot resolve).
+import { personKey } from './personkey.ts';
+export { personKey };
 import { sha256 } from 'js-sha256';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { t as t2 } from './i18n';
@@ -166,6 +170,65 @@ export type RosterMember = Approver & {
   /** Which side of me they stand on. null = never asked (a third state). */
   chainSide: ChainSide | null;
 };
+
+/**
+ * Everyone this account has ever named, MINUS the job already on screen.
+ *
+ * WHY (hadar, 2026-08-05: "quickly identify and add a source / owner from the
+ * contact list or the local company list that is built up"). `listRoster` is
+ * scoped `WHERE project_id = ?`, so the picker only ever offered THIS job's
+ * people. The same homeowner on last month's job was invisible: the contractor
+ * had to go back through the phone's contact picker for somebody the app already
+ * knew, and that re-entry wrote a SECOND project_approver row for one human.
+ *
+ * The list a solo operator actually has is not per-job, it is everyone he works
+ * with — the GC he subs for, the inspector, the three homeowners on the street.
+ * That list builds itself as a side effect of using the app, and it was being
+ * thrown away at the job boundary.
+ *
+ * DEDUPED, because the same person legitimately has one row per job. `personKey`
+ * decides identity and the MOST RECENTLY USED row wins, so the phone number and
+ * chain side shown are the freshest facts on record rather than the oldest.
+ *
+ * This is a CONVENIENCE list, not an authority. Picking someone here copies their
+ * name/phone onto this extra exactly as the contact picker would; it does not
+ * grant them a role on this job, and `project_approver` is still written per job
+ * by whatever the caller does next. Nothing about who may bind money is decided
+ * here (bindsMoney/approverrouting still own that).
+ */
+export async function listKnownPeople(
+  db: AbstractPowerSyncDatabase, excludeProjectId: string | null, limit = 60
+): Promise<RosterMember[]> {
+  const rows = await db.getAll<{
+    id: string; name: string; role: string;
+    phone_e164: string | null; email: string | null; last_used_ms: number;
+    can_bind_money: number | null; chain_side: string | null;
+  }>(
+    `SELECT id, name, role, phone_e164, email, last_used_ms, can_bind_money, chain_side
+       FROM project_approver
+      WHERE status = 'active'
+        AND (? IS NULL OR project_id <> ?)
+        AND length(trim(name)) > 0
+      ORDER BY last_used_ms DESC, name`,
+    [excludeProjectId, excludeProjectId]
+  );
+  const seen = new Set<string>();
+  const out: RosterMember[] = [];
+  for (const r of rows) {
+    if (!isApproverRole(r.role)) continue;          // same rule as listRoster
+    const key = personKey(r.name, r.phone_e164);
+    if (seen.has(key)) continue;                    // rows arrive newest-first
+    seen.add(key);
+    out.push({
+      id: r.id, name: r.name, role: r.role as ApproverRole,
+      lastUsedMs: r.last_used_ms, phone: r.phone_e164, email: r.email,
+      canBindMoney: r.can_bind_money == null ? undefined : r.can_bind_money === 1,
+      chainSide: isChainSide(r.chain_side) ? r.chain_side : null,
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
 
 export async function listRoster(
   db: AbstractPowerSyncDatabase, projectId: string

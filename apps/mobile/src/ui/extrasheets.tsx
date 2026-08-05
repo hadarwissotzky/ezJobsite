@@ -49,6 +49,33 @@ import { C, F, T, label as labelStyle } from './theme';
  * Bringing someone in from the phone ADDS THEM TO THE JOB'S LIST, so the second extra
  * for the same client is one tap with no contact picker at all.
  */
+/** One tappable person. Extracted only because it is now rendered from two lists —
+ *  a copy per section is how the two would drift apart. */
+function PickRow({ p, onPick }: {
+  p: { id: string; name: string; phone: string | null; clientType: ClientType | null };
+  onPick: (v: { name: string; phone: string | null }) => void;
+}) {
+  return (
+    <Pressable
+      style={st.pickRow}
+      onPress={() => onPick({ name: p.name, phone: p.phone })}
+      accessibilityRole="button"
+      accessibilityLabel={p.name}
+    >
+      <View style={st.pickAvatar}>
+        <Text style={st.pickAvatarT}>{initial(p.name)}</Text>
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={st.pickName} numberOfLines={1}>{p.name}</Text>
+        <Text style={st.pickSub} numberOfLines={1}>
+          {p.clientType ? t(`client.type.${p.clientType}`) : (p.phone ?? t('client.noNumber'))}
+        </Text>
+      </View>
+      <Text style={st.pickChev}>›</Text>
+    </Pressable>
+  );
+}
+
 export function ClientSheet(props: {
   visible: boolean;
   editable: boolean;
@@ -57,6 +84,14 @@ export function ClientSheet(props: {
   clientType: ClientType | null;
   /** People already known on this job — shown first, because they cost no typing. */
   known: readonly { id: string; name: string; phone: string | null; clientType: ClientType | null }[];
+  /**
+   * Everyone else this account has named, on any other job (`listKnownPeople`).
+   * Second, not first: the person you want is far more often already on the job in
+   * front of you, and a long global list above the short relevant one would bury it.
+   * Still ahead of the contact picker, because these cost one tap and the picker
+   * costs a permission prompt, a system sheet and a search.
+   */
+  everyone?: readonly { id: string; name: string; phone: string | null; clientType: ClientType | null }[];
   onPickContact: () => Promise<{ name: string; phone: string } | null>;
   onClose: () => void;
   /** Called once, with everything, when the type is tapped. */
@@ -78,6 +113,14 @@ export function ClientSheet(props: {
   const matches = q
     ? props.known.filter((k) => k.name.toLowerCase().includes(q))
     : props.known;
+  // The wider list is filtered by the SAME query — a search that only looked at
+  // this job would answer "no such person" about someone the app knows, which is
+  // the exact failure this section exists to fix. Anyone already shown above is
+  // dropped so nobody appears twice in one list.
+  const onJob = new Set(props.known.map((k) => k.name.trim().toLowerCase()));
+  const others = (props.everyone ?? []).filter((e) =>
+    !onJob.has(e.name.trim().toLowerCase())
+    && (!q || e.name.toLowerCase().includes(q)));
 
   const fromPhone = async () => {
     const picked = await props.onPickContact();
@@ -111,28 +154,26 @@ export function ClientSheet(props: {
             accessibilityLabel={t('client.searchPlaceholder')}
           />
 
+          {/* Only labelled once there is a second section to tell it apart from —
+              a lone "On this job" header over the only list is a word to read for
+              nothing. */}
+          {matches.length > 0 && others.length > 0 && (
+            <Text style={st.sectionH}>{t('client.onThisJob')}</Text>
+          )}
           {matches.map((k) => (
-            <Pressable
-              key={k.id}
-              style={st.pickRow}
-              onPress={() => setChosen({ name: k.name, phone: k.phone })}
-              accessibilityRole="button"
-              accessibilityLabel={k.name}
-            >
-              <View style={st.pickAvatar}>
-                <Text style={st.pickAvatarT}>{initial(k.name)}</Text>
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={st.pickName} numberOfLines={1}>{k.name}</Text>
-                <Text style={st.pickSub} numberOfLines={1}>
-                  {k.clientType ? t(`client.type.${k.clientType}`) : (k.phone ?? t('client.noNumber'))}
-                </Text>
-              </View>
-              <Text style={st.pickChev}>›</Text>
-            </Pressable>
+            <PickRow key={k.id} p={k} onPick={setChosen} />
           ))}
 
-          {props.known.length === 0 && (
+          {others.length > 0 && (
+            <>
+              <Text style={st.sectionH}>{t('client.fromOtherJobs')}</Text>
+              {others.map((k) => (
+                <PickRow key={k.id} p={k} onPick={setChosen} />
+              ))}
+            </>
+          )}
+
+          {props.known.length === 0 && others.length === 0 && (
             <Text style={st.emptyBody}>{t('client.emptyBody')}</Text>
           )}
 
@@ -552,6 +593,12 @@ const st = StyleSheet.create({
   emptyBody: {
     fontFamily: F.body, fontSize: 14, color: C.steel, lineHeight: 20,
     textAlign: 'center', marginTop: 6,
+  },
+  // A quiet divider-by-typography. Loud enough to separate two lists, quiet enough
+  // that the NAMES stay the thing being read.
+  sectionH: {
+    fontFamily: F.bodySemi, fontSize: 12, color: C.steel,
+    letterSpacing: 0.6, marginTop: 14, marginBottom: 4,
   },
   search: {
     fontFamily: F.body, fontSize: 15.5, color: C.ink, minHeight: 48,

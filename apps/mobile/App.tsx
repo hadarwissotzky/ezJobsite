@@ -175,7 +175,7 @@ import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisio
 import { renderCard, sendForConfirmation } from './src/confirmations';
 import { publishApprovalPhotos } from './src/approvalphotopublish';
 import {
-  ensureApproverSchema, drainR5cOutbox, suggestFor, listRoster, addApprover,
+  ensureApproverSchema, drainR5cOutbox, suggestFor, listRoster, listKnownPeople, addApprover,
   markApproverUsed, setExtraType, reasonText, typeLabel, roleLabel, saveClientApprover,
   type RosterMember,
 } from './src/approvers';
@@ -238,6 +238,10 @@ type RecordLcState = {
   /** Everyone already known on this job — what the client drawer offers first, so
    *  naming a client is a tap and not a keyboard. */
   roster: RosterMember[];
+  /** Everyone named on any OTHER job (`listKnownPeople`), deduped. The picker's
+   *  second section, so a person the app already knows never needs the phone's
+   *  contact picker a second time. */
+  known: RosterMember[];
   /** WHICH VERSION this row is — derived from the supersession lineage, never stored
    *  (see `versionNumber`). 1 = the original. */
   version: number;
@@ -678,6 +682,12 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
   // `saveClientApprover` uses, so the lookup and the write can never disagree.
   let clientRow: RosterMember | null = null;
   let roster: RosterMember[] = [];
+  // Everyone named on any OTHER job. Read here, beside the roster, because the two
+  // are one question for the picker ("who could this be?") and a second read
+  // somewhere else is how the drawer ends up showing one list refreshed and one
+  // stale. Its own try: a failure to load the convenience list must never cost the
+  // job's own roster, which is the one the client lookup below depends on.
+  let known: RosterMember[] = [];
   try {
     roster = await listRoster(db, co.project_id);
     const want = (co.who_directed ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -686,12 +696,16 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
         (m) => m.name.trim().toLowerCase().replace(/\s+/g, ' ') === want) ?? null;
     }
   } catch { /* no roster on this device yet — the drawer opens empty, which is honest */ }
+  try {
+    known = await listKnownPeople(db, co.project_id);
+  } catch { /* the wider list is a convenience; without it the drawer still works */ }
   return {
     timeline: mergeTimeline(r.history, events),
     state: {
       co,
       clientRow,
       roster,
+      known,
       version,
       remindCount: link?.remindCount ?? 0,
       remindLastMs: link?.lastRemindMs ?? null,
@@ -4475,6 +4489,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         clientType={clientRow?.chainSide ?? null}
         // The job's people first: picking one costs no typing and no contact picker.
         known={(recordLc?.roster ?? []).map((m) => ({
+          id: m.id, name: m.name, phone: m.phone, clientType: m.chainSide,
+        }))}
+        // …then everyone from other jobs. Same shape, second section — see
+        // ClientSheet for why this order and not merged into one list.
+        everyone={(recordLc?.known ?? []).map((m) => ({
           id: m.id, name: m.name, phone: m.phone, clientType: m.chainSide,
         }))}
         onPickContact={pickContactValue}
