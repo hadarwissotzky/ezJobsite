@@ -58,6 +58,12 @@ export const CHANGE_ORDER_DDL = [
       project_id    TEXT NOT NULL,
       owner_id      TEXT NOT NULL,
       scope         TEXT NOT NULL CHECK (length(scope) > 0),
+      -- 391 — the detailed client-facing scope; the column above is the title.
+      -- Declared HERE as well as in the ALTER list so a FRESH install has it from the
+      -- first statement rather than only once ensureFlowFields has run. The test
+      -- harness applies this DDL alone, so hydrate INSERTing the column failed there
+      -- silently until discardextra.test.ts caught it.
+      scope_of_work TEXT,
       line_items    TEXT NOT NULL DEFAULT '[]',
       -- INTEGER cents. Never float. Money in floats is a bug with a lawyer attached.
       --
@@ -1307,17 +1313,27 @@ export async function hydrateChangeOrders(
     let res;
     try {
       res = await db.execute(
+      // 391 + the flow terms. `scope_of_work` was missing from this pull, so a SECOND
+      // device rendered the title where the scope of work belongs — the exact confusion
+      // the split exists to end, reintroduced by the sync path. The four flow terms had
+      // the same hole: they are frozen terms of the deal (REQ-LC41) and a second phone
+      // showed them as "Not set".
       `INSERT OR IGNORE INTO change_order (id, decision_id, project_id, owner_id, scope,
-         line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate,
-         numbers_confirmed_at_ms, status, signed_by, created_at_ms,
-         origin_change_order_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         scope_of_work, line_items, amount_cents, nte_cents, is_mini, who_directed,
+         ref_estimate, numbers_confirmed_at_ms, status, signed_by, created_at_ms,
+         origin_change_order_id,
+         billing_timing, schedule_effect, schedule_days, exclusions)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [co.id, co.decision_id, co.project_id, ownerId, co.scope,
+       // Falls back to the title for a row written before 391 existed.
+       co.scope_of_work ?? co.scope,
        JSON.stringify(co.line_items ?? []), co.amount_cents, co.nte_cents,
        co.is_mini ?? 0, co.who_directed, co.ref_estimate,
        new Date(co.numbers_confirmed_at).getTime(), co.status,
        signedBy.get(co.id) ?? null, new Date(co.created_at).getTime(),
-       origins.get(co.id) ?? null]
+       origins.get(co.id) ?? null,
+       co.billing_timing ?? null, co.schedule_effect ?? null,
+       co.schedule_days ?? null, co.exclusions ?? null]
       );
     } catch (e: any) {
       skipped++;

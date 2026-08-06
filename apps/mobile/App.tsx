@@ -1019,6 +1019,17 @@ const applyProposalToExtra = async (
   // not set, the record falls back to the title and the raw transcript still stands.
   if (prop.confidence === 'high' && prop.value) {
     await setDraftSummary(db, changeOrderId, prop.value);
+    // AND THE SCOPE OF WORK ITSELF (391). Writing only `summary` left the pipeline's
+    // prose in a column that is NOT the instrument: record.ts displays it by falling
+    // back, so the contractor READ the model's scope while renderCard still froze
+    // `scope_of_work` — which, unwritten, fell back to the title. The client would
+    // have signed a title while the app showed him a paragraph — precisely the defect
+    // 391 exists to end, surviving inside my own change until this was wired.
+    //
+    // seedOnly: writes only while the field is still the birth copy of the title. Once
+    // the contractor has touched his scope nothing overwrites it — mandate #2, and why
+    // a re-run cannot silently re-author what a human already approved for sending.
+    await saveScopeOfWork(db, changeOrderId, prop.value, { seedOnly: true });
   }
   if (prop.extraType && isExtraType(prop.extraType) && await setExtraType(db, changeOrderId, prop.extraType)) {
     tag = prop.extraType;
