@@ -1031,6 +1031,27 @@ const applyProposalToExtra = async (
     // a re-run cannot silently re-author what a human already approved for sending.
     await saveScopeOfWork(db, changeOrderId, prop.value, { seedOnly: true });
   }
+  // THE SEARCH TAGS (392), applied to the captures this decision was built from.
+  //
+  // On the CAPTURES and not the change order, because that is where tags live
+  // (tags.ts / REQ-GAL3) and what the photo grid filters on — a tag exists so a
+  // contractor can find "that subfloor job" six weeks later, and the media is what he
+  // will be looking through.
+  //
+  // author: 'ai' so they are distinguishable from the ones he typed. tags.ts is
+  // append-only: he can retract any of them and the retraction is itself recorded,
+  // which is what makes it safe to apply a model's proposal without asking first —
+  // nothing is destroyed and nothing is hidden. High-confidence only, the same gate
+  // as the title and the scope of work.
+  if (prop.confidence === 'high' && prop.tags.length) {
+    for (const captureId of ids) {
+      for (const tag of prop.tags) {
+        // Best-effort and never fatal: a tag that fails to write is a search aid that
+        // did not land, not evidence that did.
+        try { await addTag(db, { captureId, tag, author: 'ai' }); } catch { /* keep going */ }
+      }
+    }
+  }
   if (prop.extraType && isExtraType(prop.extraType) && await setExtraType(db, changeOrderId, prop.extraType)) {
     tag = prop.extraType;
   }

@@ -45,6 +45,10 @@ export type StructureResult = {
   value: string;
   whoDirected: string | null;
   extraType: (typeof EXTRA_TYPES)[number] | null;
+  /** Search tags proposed from the transcript. Normalised lowercase, deduped,
+   *  capped — a model that returns forty tags has stopped tagging and started
+   *  listing, and the grid it feeds has finite room. */
+  tags: string[];
   confidence: 'high' | 'low' | 'none';
   tasks: StructureTask[];
 };
@@ -85,7 +89,7 @@ const TASK_SCHEMA = {
 export const STRUCTURE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['subject', 'value', 'who_directed', 'extra_type', 'confidence', 'tasks'],
+  required: ['subject', 'value', 'who_directed', 'extra_type', 'tags', 'confidence', 'tasks'],
   properties: {
     subject: {
       type: 'string',
@@ -93,7 +97,7 @@ export const STRUCTURE_SCHEMA = {
     },
     value: {
       type: 'string',
-      description: 'The owner-facing scope of change: clear professional prose, grouped by task when there are several, covering what was found, what work is needed, materials, and timing the contractor mentioned. NO prices.',
+      description: 'THE SCOPE OF WORK — the document the client reads and signs. Clear professional prose covering, from the transcript only: what was found or asked for, what will be done (numbered steps when the contractor described a sequence), the materials named, and any condition or uncertainty he voiced. Write it out properly: this is the binding description of the job, not a label. NO prices anywhere.',
     },
     who_directed: {
       anyOf: [{ type: 'string' }, { type: 'null' }],
@@ -102,6 +106,11 @@ export const STRUCTURE_SCHEMA = {
     extra_type: {
       anyOf: [{ type: 'string', enum: [...EXTRA_TYPES] }, { type: 'null' }],
       description: 'The kind of extra overall, or null when unsure.',
+    },
+    tags: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Three to eight short lowercase search tags drawn FROM THE TRANSCRIPT — room, trade, material, or condition (e.g. "kitchen", "electrical", "subfloor", "water damage"). One or two words each. No prices, no names of people, nothing the transcript does not support. Empty array when confidence is none.',
     },
     confidence: {
       type: 'string',
@@ -122,11 +131,12 @@ Rules, in order of importance:
 2. NEVER write prices, dollar amounts, hourly rates, or cost figures into subject, value, title, or scope. Pricing is handled by a separate human-confirmed flow. Price mentions are captured ONLY as verbatim quotes in price_words.
 3. The *_words fields (price_words, time_words, start_words) must be EXACT VERBATIM SPANS copied from the transcript. Never rewrite, round, convert, or normalize them — "eighteen fifty" stays "eighteen fifty". If no such mention exists, use null. Never guess.
 4. TASKS: if the narration describes more than one distinct piece of work, produce one task entry per piece and group each task's own materials, price mention, time mention, and start mention with THAT task. A mention that clearly belongs to one task must not leak onto another. If an element's task is ambiguous, attach it to the task discussed nearest to it in the transcript.
-5. value: the owner-facing scope of change. Clear professional English a homeowner understands (the transcript may be in any language; trade terms the contractor used stay). Cover, per task: what was found or requested, what work will be done, materials involved, and any labor-time or start-timing the contractor mentioned — in words, without dollar figures. When there are several tasks, present them as clearly separated numbered parts.
+5. value — THE SCOPE OF WORK. The single most important field you produce: it is the text the homeowner reads and signs, and it is frozen into a binding document. Write it as a scope of work, not as a summary. Clear professional English a homeowner understands (the transcript may be in any language; trade terms the contractor used stay). Cover, from the transcript only: what was found or requested; what will be done, as numbered steps when he described a sequence; the materials he named; and any condition, dependency or uncertainty he voiced ("if the framing is rotten we stop and call you") — those belong in the scope, because they are part of what the client is agreeing to. Several tasks become clearly separated numbered parts. Never one sentence restating the title, and never dollar figures. If the transcript genuinely supports only one sentence, write that one sentence: rule 1 outranks this one, and inventing scope to look thorough is the worst thing you can do here.
 6. subject: a short title naming the work overall (e.g. "Subfloor rot repair under tub"), 60 characters or fewer. For several tasks, name the dominant work (e.g. "Bath rough-in extras: panel upgrade and subfloor repair").
 7. who_directed: the person who asked for or authorized the work, ONLY if the transcript names one; otherwise null.
 8. extra_type: structural | mep (mechanical/electrical/plumbing) | finish (finish or fixture selection) | code_permit | site_condition (something discovered on site) | scope_clarification — or null when none clearly fits.
-9. confidence: "high" only when the transcript clearly describes extra work and your output is directly supported by it. "low" when the audio seems garbled or ambiguous. "none" when the transcript does not describe jobsite work at all (then tasks is an empty array).`;
+9. tags: three to eight short lowercase search tags taken from the transcript — the room, the trade, the material, the condition. They exist so this capture can be found again later ("kitchen", "electrical", "subfloor", "water damage"). One or two words each. No prices, no people's names, nothing the transcript does not support. Empty array when confidence is none.
+10. confidence: "high" only when the transcript clearly describes extra work and your output is directly supported by it. "low" when the audio seems garbled or ambiguous. "none" when the transcript does not describe jobsite work at all (then tasks is an empty array).`;
 
 function str(v: unknown, max: number): string | null {
   return typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
@@ -169,7 +179,17 @@ export function parseStructure(raw: unknown): StructureResult | null {
   const tasks = Array.isArray(r.tasks)
     ? r.tasks.map(parseTask).filter((t): t is StructureTask => t !== null).slice(0, 12)
     : [];
-  return { subject, value, whoDirected, extraType, confidence, tasks };
+  // Same defensive re-check as everything else crossing this boundary: lowercase,
+  // trimmed, deduped, length-capped, and 8 at most. Non-strings are dropped rather
+  // than coerced — "3" is not a tag.
+  const tags = Array.isArray(r.tags)
+    ? [...new Set(
+        (r.tags as unknown[])
+          .filter((x): x is string => typeof x === 'string' && !!x.trim())
+          .map((x) => x.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 40)))]
+        .slice(0, 8)
+    : [];
+  return { subject, value, whoDirected, extraType, tags, confidence, tasks };
 }
 
 export function hasLlmKey(): boolean {

@@ -124,3 +124,51 @@ test('the taxonomy matches the app: six slugs', () => {
     'structural', 'mep', 'finish', 'code_permit', 'site_condition', 'scope_clarification',
   ]);
 });
+
+// ── tags (392) ────────────────────────────────────────────────────────────────
+// They cross a network boundary from a model, so parseStructure re-checks them the
+// same way it re-checks everything else. These pin the rules the grid depends on.
+
+test('tags are lowercased, trimmed and deduped', () => {
+  const r = parseStructure({
+    subject: 'Panel upgrade', value: 'Replace the panel.', confidence: 'high', tasks: [],
+    tags: ['Kitchen', '  kitchen  ', 'ELECTRICAL', 'electrical'],
+  });
+  assert.deepEqual(r?.tags, ['kitchen', 'electrical']);
+});
+
+test('at most eight tags — a model listing is not tagging', () => {
+  const many = Array.from({ length: 20 }, (_, i) => `tag${i}`);
+  const r = parseStructure({
+    subject: 'x', value: 'y', confidence: 'high', tasks: [], tags: many,
+  });
+  assert.equal(r?.tags.length, 8);
+  assert.equal(r?.tags[0], 'tag0', 'keeps the first, which the model ranked highest');
+});
+
+test('non-strings are dropped, not coerced — "3" is not a tag', () => {
+  const r = parseStructure({
+    subject: 'x', value: 'y', confidence: 'high', tasks: [],
+    tags: ['kitchen', 3, null, undefined, {}, '', '   '],
+  });
+  assert.deepEqual(r?.tags, ['kitchen']);
+});
+
+test('a proposal with no tags field parses to an empty list, not a failure', () => {
+  // Every proposal written before 392 has no tags. It must still parse — the field
+  // is an addition, not a new requirement on old rows.
+  const r = parseStructure({ subject: 'x', value: 'y', confidence: 'high', tasks: [] });
+  assert.deepEqual(r?.tags, []);
+});
+
+test('internal whitespace is collapsed so one tag cannot masquerade as two', () => {
+  const r = parseStructure({
+    subject: 'x', value: 'y', confidence: 'high', tasks: [],
+    tags: ['water   damage'],
+  });
+  assert.deepEqual(r?.tags, ['water damage']);
+});
+
+test('the schema demands tags, so the model cannot silently omit them', () => {
+  assert.ok((STRUCTURE_SCHEMA.required as readonly string[]).includes('tags'));
+});

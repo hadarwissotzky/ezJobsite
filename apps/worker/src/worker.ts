@@ -138,6 +138,10 @@ export async function runStep(
       proposed_value: s?.value ?? null,
       proposed_who_directed: s?.whoDirected ?? null,
       proposed_extra_type: s?.extraType ?? null,
+      // Search tags from the transcript (hadar, 2026-08-05). Stored on the PROPOSAL
+      // like every other proposed field — the app decides whether to apply them,
+      // because a proposal is not a record.
+      proposed_tags: s?.tags?.length ? s.tags : null,
       // Verbatim-quote task grouping (374). price_words in here is a QUOTE of
       // the transcript, never a figure — the app's parser + read-back remain
       // the only path a number takes into a field.

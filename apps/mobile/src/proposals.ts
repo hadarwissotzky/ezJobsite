@@ -66,6 +66,10 @@ export type Proposal = {
   /** R5c type the model proposed (373). A suggestion for the send preview's
    *  contractor-set picker — never applied without the human seeing it. */
   extraType: string | null;
+  /** Search tags the model proposed from the transcript (392). A PROPOSAL: the app
+   *  promotes them onto the capture as `author: 'ai'` tags, so a human can retract
+   *  any of them and the retraction is itself recorded (tags.ts is append-only). */
+  tags: string[];
   /** Grouped tasks (374). Empty when the proposal predates them. */
   tasks: ProposalTask[];
   confidence: Confidence;
@@ -77,7 +81,7 @@ export type Proposal = {
 
 const PROPOSAL_COLS =
   'id, capture_id, proposed_subject, proposed_value, proposed_scope, ' +
-  'proposed_who_directed, proposed_amount_cents, proposed_extra_type, ' +
+  'proposed_who_directed, proposed_amount_cents, proposed_extra_type, proposed_tags, ' +
   'proposed_tasks, confidence, engine, engine_model, from_transcript, created_at';
 
 /** The latest proposal for a capture, or null if the pipeline hasn't produced one. */
@@ -123,6 +127,9 @@ function rowToProposal(r: any): Proposal {
     whoDirected: r.proposed_who_directed ?? null,
     amountCents: r.proposed_amount_cents ?? null,
     extraType: r.proposed_extra_type ?? null,
+    // Older proposals carry no column; an absent list is not an empty opinion, but
+    // there is nothing to apply either way.
+    tags: Array.isArray(r.proposed_tags) ? r.proposed_tags.filter((x: unknown): x is string => typeof x === 'string') : [],
     tasks: parseTasks(r.proposed_tasks),
     confidence: (['high', 'low', 'none'].includes(r.confidence) ? r.confidence : 'low') as Confidence,
     engine: r.engine,
