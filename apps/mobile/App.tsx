@@ -1870,7 +1870,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // Home's summary-chip filter. Filters the Home list IN PLACE — tapping a chip must
   // never navigate away (hadar 2026-07-27: "it takes me to another page"). null = show
   // every section; a value shows only that one, and tapping the live chip clears it.
-  const [homeFilter, setHomeFilter] = React.useState<null | 'needs' | 'waiting' | 'approved'>(null);
+  // Opens on 'needs' (hadar 2026-08-05): what needs YOU is the reason to open the app,
+  // so it is selected by default; tapping the live chip still clears to every section.
+  const [homeFilter, setHomeFilter] = React.useState<null | 'needs' | 'waiting' | 'approved'>('needs');
   const [cards, setCards] = React.useState<ProjectCard[]>([]);
   const [search, setSearch] = React.useState('');
   const [picker, setPicker] = React.useState(false);
@@ -5349,10 +5351,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 </React.Fragment>
               );
             };
+            // A filter that matches nothing would otherwise paint a blank page — and
+            // 'needs' is now the DEFAULT, so that is the common case for a user with
+            // extras but nothing awaiting them. Say so, and say how to get out.
+            const shown = { needs, waiting: waitingList, approved: approvedList };
             return (<>
               {bucket('home.waitingForYes', 'waiting', waitingList)}
               {bucket('home.needsResponse', 'needs', needs)}
               {bucket('home.approvedSec', 'approved', approvedList)}
+              {homeFilter && shown[homeFilter].length === 0 && homeExtras.length > 0 && (
+                <Text style={s.homeEmpty}>{T('home.emptyFilter')}</Text>
+              )}
             </>);
           })()}
 
