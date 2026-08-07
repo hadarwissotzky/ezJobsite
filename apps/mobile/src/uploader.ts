@@ -250,6 +250,12 @@ export async function drainOutbox(
 
       // --- 3. ONLY NOW may the intent be removed -----------------------------
       await db.writeTransaction(async (tx) => {
+        // THE RECEIPT AND THE DELETE ARE ONE TRANSACTION. Separately, a crash between
+        // them would leave a capture with no intent and no proof of delivery — which
+        // reads as "never sent" and invites a duplicate create.
+        await tx.execute(
+          `INSERT OR REPLACE INTO capture_delivered (capture_id, at_ms) VALUES (?,?)`,
+          [payload.capture_id, Date.now()]);
         await tx.execute(`DELETE FROM capture_outbox WHERE mutation_id = ?`, [row.mutation_id]);
       });
 

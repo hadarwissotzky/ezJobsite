@@ -217,7 +217,12 @@ export const db = new PowerSyncDatabase({
 // Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
 // graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
 // wrong" until this could be read back off the device. One string, no data exposed.
-(globalThis as any).__EZ_BUILD__ = 'v30-priority';
+(globalThis as any).__EZ_BUILD__ = 'v33-codexp1';
+// DEV-ONLY read handle. Stripped from any release build by the __DEV__ guard, which
+// Metro constant-folds to false — so this cannot ship. It exists because three separate
+// bugs today were diagnosed in seconds by asking the DEVICE what it holds, and guessed
+// at for far longer whenever it was absent.
+if (__DEV__) (globalThis as any).__db = db;
 
 const connector = new SupabaseConnector();
 // The job the app is currently showing. Was a hardcoded constant -- every capture
@@ -2513,7 +2518,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       //    server (the project sync lagged/stalled) get freed: the drain now pushes
       //    the project itself and retries, so these can finally land (hadar,
       //    2026-07-25 — nothing had uploaded since the project queue wedged).
-      const rdc = await redriveParkedCaptures(db, ['23503']);
+      //  - AWAITING_FILING parks are freed too (Codex P1, 2026-08-07). `park()` sets
+      //    next_attempt_at_ms to the year 275760, and the drain only SELECTs rows due
+      //    now — so the self-heal branch that re-points a filed capture at its job was
+      //    UNREACHABLE for exactly the rows it was written for. Freeing them makes them
+      //    schedulable again; if the capture is still unfiled the drain simply re-parks
+      //    it, which costs one attempt and changes nothing.
+      const rdc = await redriveParkedCaptures(db, ['23503', 'AWAITING_FILING']);
       if (rdc) console.log('redrive captures:', rdc);
       //  - captures parked on 23505 are asked about rather than assumed: a duplicate
       //    key on this path means the SERVER ALREADY HAS the capture, so the retry it

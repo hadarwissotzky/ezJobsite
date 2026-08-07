@@ -91,6 +91,24 @@ export const APP_OWNED_DDL = [
   `CREATE TRIGGER IF NOT EXISTS capture_commit_no_delete
      BEFORE DELETE ON capture_commit
      BEGIN SELECT RAISE(ABORT, 'capture_commit is append-only'); END`,
+  // 397 — THE DELIVERY RECEIPT (Codex review, 2026-08-07, P1).
+  //
+  // "Has the server got this?" had no durable answer. The absence of an outbox row was
+  // used as the signal, disambiguated by `capture_commit.project_id` — but that column
+  // is APPEND-ONLY and keeps its birth value forever, so a capture committed to the
+  // Inbox reads as 'inbox' for the rest of its life even after it is filed and
+  // delivered. Re-filing one therefore minted a second create mutation and parked it on
+  // the server's capture-id duplicate constraint: the precise failure the guard existed
+  // to prevent, still firing for exactly the captures it was written for.
+  //
+  // A receipt states the fact directly instead of inferring it from two columns that
+  // were never meant to answer it. Written when the RPC succeeds, in the same
+  // transaction that removes the intent.
+  `CREATE TABLE IF NOT EXISTS capture_delivered (
+      capture_id TEXT NOT NULL PRIMARY KEY,
+      at_ms      INTEGER NOT NULL
+   ) STRICT`,
+
   `CREATE TABLE IF NOT EXISTS capture_outbox (
       mutation_id        TEXT NOT NULL PRIMARY KEY,
       capture_id         TEXT NOT NULL UNIQUE,

@@ -446,12 +446,16 @@ export async function mintUploadForFiledCapture(
     let queuedProject: string | null = null;
     try { queuedProject = JSON.parse(q.payload_json)?.project_id ?? null; } catch { /* corrupt */ }
     if (queuedProject !== INBOX_ID) return;
-  } else if (c.project_id !== INBOX_ID) {
+  } else if ((await db.getAll<{ capture_id: string }>(
+      `SELECT capture_id FROM capture_delivered WHERE capture_id = ?`, [captureId])).length) {
     // ALREADY DELIVERED — DO NOT RE-QUEUE (hadar 2026-08-07: "duplicate key value
     // violates").
     //
-    // No outbox row and a real project on the commit means exactly one thing:
-    // `drainOutbox` deleted the row after the server accepted it. Queueing a fresh
+    // A DELIVERY RECEIPT, not an inference (Codex P1, 2026-08-07). This used to read
+    // `capture_commit.project_id !== 'inbox'` — but that column is append-only and keeps
+    // its birth value forever, so every capture that was HELD and later filed still read
+    // as 'inbox' and sailed past the guard into a duplicate create. `capture_delivered`
+    // is written by drainOutbox in the same transaction that removes the intent. Queueing a fresh
     // mutation_id for a capture the server already holds sends a second INSERT for the
     // same capture_id, which is a 23505 — and 23505 is in PERMANENT, so the capture
     // PARKS. Re-filing an already-uploaded capture would take a delivered capture and

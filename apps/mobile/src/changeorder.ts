@@ -1281,7 +1281,7 @@ export async function hydrateChangeOrders(
 ) {
   const { data, error } = await supabase
     .from('change_order')
-    .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at, scope_of_work, scope_of_work_ai, price_heard')
+    .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at, scope_of_work, scope_of_work_ai, price_heard, schedule_effect, schedule_days, billing_timing, exclusions, extra_type')
     .eq('project_id', projectId);
   if (error || !data) return { pulled: 0, statusUpdated: 0, skipped: 0, conflicts: 0 };
 
@@ -1441,14 +1441,37 @@ export async function hydrateChangeOrders(
     const ai = (co as { scope_of_work_ai?: string | null }).scope_of_work_ai;
     if (!sow || !sow.trim() || sow !== ai) continue;   // not the server's AI text: leave it
     const upd = await db.execute(
+      // THE TERMS COME DOWN WITH IT (2026-08-07). `apply_proposal_v1` writes schedule
+      // effect, payment timing, exclusions and type on the SERVER, and this loop learned
+      // only the scope and the price quote — so a change order that had been correctly
+      // filled in the cloud showed empty fields on the phone, which is exactly what
+      // hadar saw ("it didn't pick up the cost, impact on schedule, payment timing").
+      //
+      // COALESCE on every one: an answer this device already holds always wins. The
+      // server may only fill a blank, never overwrite the contractor — the same rule
+      // apply_proposal_v1 enforces on its side, restated here because a hydrate that
+      // clobbered a local answer would be the cloud editing his document while he was
+      // writing it.
       `UPDATE change_order SET scope_of_work = ?, scope_of_work_ai = ?, scope = ?,
-              price_heard = COALESCE(?, price_heard)
+              price_heard      = COALESCE(?, price_heard),
+              schedule_effect  = COALESCE(schedule_effect, ?),
+              schedule_days    = COALESCE(schedule_days, ?),
+              billing_timing   = COALESCE(billing_timing, ?),
+              exclusions       = COALESCE(exclusions, ?),
+              extra_type       = COALESCE(extra_type, ?)
         WHERE id = ? AND status = 'draft'
           AND (scope_of_work IS NULL OR trim(scope_of_work) = ''
                OR scope_of_work = scope OR scope_of_work = ?
                OR (scope_of_work_ai IS NOT NULL AND scope_of_work = scope_of_work_ai))
           AND NOT EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = change_order.id)`,
-      [sow, sow, co.scope, (co as { price_heard?: string | null }).price_heard ?? null, co.id, UNTITLED_SCOPE_TEXT]
+      [sow, sow, co.scope,
+       (co as { price_heard?: string | null }).price_heard ?? null,
+       (co as { schedule_effect?: string | null }).schedule_effect ?? null,
+       (co as { schedule_days?: number | null }).schedule_days ?? null,
+       (co as { billing_timing?: string | null }).billing_timing ?? null,
+       (co as { exclusions?: string | null }).exclusions ?? null,
+       (co as { extra_type?: string | null }).extra_type ?? null,
+       co.id, UNTITLED_SCOPE_TEXT]
     );
     if (upd.rowsAffected) scopesLearned++;
   }
