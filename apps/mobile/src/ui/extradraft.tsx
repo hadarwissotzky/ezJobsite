@@ -46,6 +46,7 @@ import {
   type SendBlocker, type SendGate, type SendReadiness, type SendRecommendation,
 } from '../sendreadiness';
 import { canDelete, canSend, chipKey, displayStatus, stageOf } from '../extralifecycle';
+import { canSendExtra } from '../extraprocstate';
 import { t } from '../i18n';
 import {
   APP_NAME, Button, Card, MoneyBlock, ChecklistRow, PersonRow, PhotoGrid, Row, ScreenHeader, Section,
@@ -55,6 +56,7 @@ import { C, F, T, label as labelStyle, money as moneyStyle, tint } from './theme
 import { touchTargets } from './tokens';
 import { Icon } from './icon';
 import { ScopeBlock } from './scopeblock';
+import type { CaptureDelivery } from '../uploader';
 
 const CAUTION = tint('caution');
 
@@ -76,21 +78,20 @@ const st = StyleSheet.create({
   },
   draftCount: { fontFamily: F.bodySemi, fontSize: 14, color: C.ink, marginTop: 10 },
   draftWhy: { fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 2 },
-  draftActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  draftAdd: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    borderWidth: 1, borderColor: CAUTION.line, borderRadius: 10,
-    backgroundColor: C.card, paddingHorizontal: 12, minHeight: 42,
-  },
-  draftAddPlus: { fontFamily: F.bodySemi, fontSize: 16, color: CAUTION.ink },
-  draftAddText: { fontFamily: F.bodySemi, fontSize: 13, color: CAUTION.ink },
-  draftAddChev: { fontFamily: F.body, fontSize: 16, color: CAUTION.ink },
   // Send, with its reason as a second line inside the button.
   sendBtn: {
     backgroundColor: C.ink, borderRadius: 14, minHeight: 58,
     alignItems: 'center', justifyContent: 'center', paddingVertical: 10,
   },
+  // Not merely faded: a paler FILL, so it reads as "not yet" rather than as the same
+  // button rendered badly. Text stays legible — the reason is the point.
+  sendBtnOff: { backgroundColor: C.steel, opacity: 0.55 },
+  heard: { marginTop: 10, gap: 8 },
+  heardSaid: { fontFamily: F.body, fontSize: 14, color: C.steel, fontStyle: 'italic' },
   sendTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // The closing timestamp line. Quiet on purpose: it is provenance, not an action.
+  stamp: { marginTop: 22, alignItems: 'center', gap: 2 },
+  stampT: { fontFamily: F.body, fontSize: 12.5, color: C.muted, textAlign: 'center' },
   sendLabel: { fontFamily: F.bodyBold, fontSize: 17, color: C.card, letterSpacing: 0.2 },
   sendSub: { fontFamily: F.body, fontSize: 12.5, color: C.card, opacity: 0.72, marginTop: 2, textAlign: 'center' },
   // No fill and no border: Send owns the weight in this bar. 44pt of height is the
@@ -174,6 +175,32 @@ export type ExtraDraftProps = {
   onPressPhoto?: (uri: string) => void;
   onSend: () => void;
   /**
+   * Run the write-up again — the button that REPLACES Send while the extra is still
+   * in the pipeline (hadar 2026-08-06). Offering a disabled "Send for approval" there
+   * asks a man to press the thing he cannot have; this offers the thing he actually
+   * wants, which is for the app to get on with reading his recording.
+   *
+   * Optional: without it the pipeline state still swaps the button, and it renders
+   * disabled rather than lying about what a tap would do.
+   */
+  onGenerate?: () => void;
+  /** 396 — the spoken cost, its parsed figure, and the tap that accepts it. Null when
+   *  he said no price, or when one is already set. The screen never parses: the caller
+   *  owns `parseMoney` so there is one parser in the app, not one per screen. */
+  priceHeard?: { words: string; label: string; onUse: () => void } | null;
+  /**
+   * THE STUCK-EXTRA WORKFLOW (hadar 2026-08-06). Files on the phone but no scope means
+   * exactly one of two things, and the user must be able to act on either:
+   *   1. the files never got up      → retry, or permit cellular, and it resolves
+   *   2. they got up but nothing came back → nothing on this phone can force the
+   *      server pass, so the honest out is to write the scope himself
+   * `delivery` is the evidence for which one it is; null while it is being read.
+   */
+  delivery?: CaptureDelivery | null;
+  /** Turn on cellular uploading, from the one screen where it is blocking something
+   *  the user is looking at. Absent = the setting is only reachable in Settings. */
+  onAllowCellular?: () => void;
+  /**
    * The OTHER people already on this job (the roster, minus whoever is shown above
    * as "Requested by"). Labels arrive translated — this screen does no t() over
    * role slugs.
@@ -220,6 +247,45 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
   // routing bug, and offering Send there would be the app promising a transition
   // the database has already decided to refuse (REQ-LC7).
   const canSendNow = canSend(rec.status) && gate.ok;
+  // STILL IN THE PIPELINE. Not a content gap and not the contractor's to fix — the
+  // recording is on its way up, or up and being read. Every "we are not finished
+  // yet" on this screen keys off this one value so they cannot disagree.
+  const notProcessed = isDraft && props.proc !== 'processed';
+  /**
+   * HAS ANYONE ACTUALLY WRITTEN THIS UP YET? ASK THE ONE AUTHORITY.
+   *
+   * `sendReadiness` already decides this — `no_description` fires when the scope is
+   * empty, is the machine placeholder (`UNTITLED_SCOPE`), or is under
+   * `MIN_SCOPE_OF_WORK_CHARS`. Reading it here means the caption, the empty state, the
+   * banner and the Send gate cannot disagree about whether a scope exists.
+   *
+   * I GOT THIS WRONG TWICE, AND BOTH WRONG VERSIONS ARE WHY (hadar, on device):
+   *   1. `!scopeOfWork` — but the column is seeded with a copy of the title at birth,
+   *      so it is never empty and every extra looked written.
+   *   2. `scopeOfWork !== title` — but the AI RETITLES a draft the moment it is
+   *      confident ("Fireplace facing replacement and staining") while leaving
+   *      `scope_of_work` as the placeholder. The two then differ, and the check called
+   *      an unwritten scope written. That is the exact row this screen was failing on.
+   * Both were me re-deriving a rule that already existed twenty lines away.
+   */
+  const scopeWritten = !props.readiness.blockers.includes('no_description');
+  /** The write-up is owed — either still coming, or it ran and produced nothing. Both
+   *  are "the app has not done its part", and both offer Generate rather than Send. */
+  const needsGenerate = isDraft && (notProcessed || !scopeWritten);
+  /**
+   * IS THE EVIDENCE EVEN ON THIS PHONE?
+   *
+   * It is not always. A change order syncs down from the server; the captures behind it
+   * do not — they are local-first by design (mandate #7) and live in this app's own
+   * storage. Reinstall the app, or open an extra a crew-mate recorded on their handset,
+   * and you get the row without its recording.
+   *
+   * That state must not be dressed as a wait. "Still being written up" promises
+   * something is coming; with nothing to read, nothing is coming, ever, and a Generate
+   * button that no-ops is the same lie with a tap in it (hadar 2026-08-06: "clicked on
+   * generate and it returned in less than a second but didn't process").
+   */
+  const hasEvidence = rec.voices.length > 0 || rec.photos.length > 0;
   const items = checklist(props);
 
   const scrollRef = React.useRef<ScrollView>(null);
@@ -282,42 +348,26 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
           overflowLabel={t('erec.moreActions')}
         />
 
-        {/* 391 — THE SCOPE OF WORK LEADS, above the price.
-            It rendered 620px down the screen, below the money, the blocker banner and
-            the raw-capture card, clipped at five lines behind "Show more" — measured
-            on a real screenshot, not guessed. A scope you have to scroll to and then
-            tap to read is a scope nobody proofreads before it goes to a client, which
-            is exactly how 15 change orders reached an average scope length of 27
-            characters. And a price above the work reads as a bill rather than a
-            request: the owner cannot judge $2,400 until he knows what it buys.
-            Same component and same position on all three lifecycle screens. */}
-        <ScopeBlock
-          text={rec.scopeOfWork}
-          stage="draft"
-          onEdit={props.onEditDescription}
-          missing={props.readiness.blockers.includes('no_description')}
-        />
-
-        {props.kind === 'extra'
-          ? <DraftMoney rec={rec} priceMode={props.priceMode} />
-          : (
-            // R6b AC2: a Decision shows no figure anywhere on the screen.
-            <Text style={[moneyStyle, { fontSize: 24, color: C.ink, marginTop: 8 }]}>
-              {t('erec.noCostChange')}
-            </Text>
-          )}
-
-        {!rec.synced && (
-          <Text style={[T.bodySteel, { fontSize: 12, marginTop: 8 }]}>{t('erec.onPhone')}</Text>
-        )}
-
+        {/* WHERE IT STANDS, FIRST (hadar 2026-08-06: "the draft not sent notice needs
+            to move above the scope of work"). It used to sit three blocks down, under
+            the scope and the price, so the first thing on screen was a document that
+            looked finished. The state is the frame you read the rest through: a scope
+            you are proofreading and a scope that has already gone to a client are the
+            same words meaning different things. */}
         <View style={{ marginTop: 14 }}>
           {isDraft
             ? (
               // The design's draft banner: a FILLED ochre disc with the hourglass, the
-              // state beside it, then the count/why, then each gap as a tappable
-              // "+ Add …" button. The gaps are actions here, not labels — the whole
-              // point of the banner is to get them filled.
+              // state beside it, and the count. It SAYS where the extra stands; it is
+              // no longer a place to act.
+              //
+              // The "+ Cost › / + Payment timing ›" buttons were removed here (hadar
+              // 2026-08-06). They were a third copy of the same list: the count above
+              // them names how many gaps there are, the checklist below names each one
+              // and opens it, and Send at the bottom names the count again. Four
+              // buttons in a warning-coloured card also read as the thing to press on
+              // a screen whose actual next step is Edit or Send — which is how a
+              // status banner turned into the busiest control on the page.
               <View style={st.draftBanner}>
                 <View style={st.draftHead}>
                   <View style={st.draftDisc}>
@@ -325,21 +375,20 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
                   </View>
                   <Text style={st.draftTitle}>{t('draft.bannerTitle')}</Text>
                 </View>
-                <Text style={st.draftCount}>{bannerDetail(readiness)}</Text>
+                {/* While the pipeline is still running, the gap count is not the
+                    honest headline — nothing is owed by the contractor yet, the app
+                    simply has not finished reading his recording. Say THAT instead of
+                    "4 things left", which blames him for a wait that is ours. */}
+                <Text style={st.draftCount}>
+                  {!hasEvidence && !scopeWritten ? t('draft.noEvidenceHere')
+                    : notProcessed ? t(procWhyKey(props.proc))
+                    : !scopeWritten ? t('draft.notWrittenUp')
+                    : bannerDetail(readiness)}
+                </Text>
                 {/* The banner's second line is gone (hadar, 2026-08-05: "overwhelming — there are
                     a lot of things and text here"). "These are required for approval"
                     restated the line above it, which already says "N things left before
                     you can send it". Two sentences, one fact. */}
-                <View style={st.draftActions}>
-                  {bannerActions(readiness, items).map((a) => (
-                    <Pressable key={a.key} style={st.draftAdd} onPress={a.onPress}
-                      accessibilityRole="button" accessibilityLabel={a.label}>
-                      <Text style={st.draftAddPlus}>+</Text>
-                      <Text style={st.draftAddText} numberOfLines={1}>{a.label}</Text>
-                      <Text style={st.draftAddChev}>›</Text>
-                    </Pressable>
-                  ))}
-                </View>
               </View>
             )
             : (
@@ -352,6 +401,55 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
               />
             )}
         </View>
+
+        {/* 391 — THE SCOPE OF WORK LEADS, above the price.
+            It rendered 620px down the screen, below the money, the blocker banner and
+            the raw-capture card, clipped at five lines behind "Show more" — measured
+            on a real screenshot, not guessed. A scope you have to scroll to and then
+            tap to read is a scope nobody proofreads before it goes to a client, which
+            is exactly how 15 change orders reached an average scope length of 27
+            characters. And a price above the work reads as a bill rather than a
+            request: the owner cannot judge $2,400 until he knows what it buys.
+            Same component and same position on all three lifecycle screens. */}
+        <ScopeBlock
+          // THE PLACEHOLDER IS NOT A SCOPE. Passing it through rendered "Untitled extra
+          // — still being written up" in the box as if a person had written it there,
+          // under a caption telling him it was too short. Null hands ScopeBlock the
+          // honest input and lets it draw the waiting state.
+          text={scopeWritten ? rec.scopeOfWork : null}
+          stage="draft"
+          onEdit={props.onEditDescription}
+          missing={props.readiness.blockers.includes('no_description')}
+          // NOT YET WRITTEN vs WRITTEN BADLY are different facts and now read
+          // differently: "Too short to send" over a scope the AI has not produced yet
+          // is the app blaming the contractor for its own unfinished work.
+          pending={needsGenerate}
+          pendingLabel={!hasEvidence ? t('draft.noEvidenceHere')
+            : notProcessed ? t(procWhyKey(props.proc))
+            : t('draft.notWrittenUp')}
+          // Nothing is coming, so do not draw the hourglass: this is a gap to type
+          // into, not a wait to sit out.
+          pendingIsWait={hasEvidence}
+          // THE WAY OUT LIVES INSIDE THE BLOCK IT IS ABOUT (hadar 2026-08-06: "it just
+          // needs to be an integral part of the scope section"). It was a second card
+          // further down the page, under the price — so the screen stated the problem
+          // in one place and offered the fix in another, with a dollar figure between
+          // them. One object: the heading, the state, the reason, the buttons.
+          footer={isDraft && hasEvidence && !scopeWritten ? <StuckBlock {...props} /> : null}
+        />
+
+        {props.kind === 'extra'
+          ? <DraftMoney rec={rec} priceMode={props.priceMode} heard={props.priceHeard ?? null} />
+          : (
+            // R6b AC2: a Decision shows no figure anywhere on the screen.
+            <Text style={[moneyStyle, { fontSize: 24, color: C.ink, marginTop: 8 }]}>
+              {t('erec.noCostChange')}
+            </Text>
+          )}
+
+        {!rec.synced && (
+          <Text style={[T.bodySteel, { fontSize: 12, marginTop: 8 }]}>{t('erec.onPhone')}</Text>
+        )}
 
         <RawSection {...props} />
         <ScopeSection {...props} />
@@ -392,11 +490,117 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             the scroll at the checklist, and a destructive red button beneath it was
             not in the mockup. It is still legal in this stage only (REQ-LC14); the
             overflow handler above gates it on `canDelete`. */}
+
+        {/* WHEN, at the bottom (hadar 2026-08-06). Every other fact on this screen is
+            about the work; this one is about the document, so it closes the page
+            rather than competing above. Two different moments when both are known:
+            when the WORK was captured on site, and when this change order was
+            created. They are usually minutes apart and occasionally days — an extra
+            written up from a recording made last Tuesday — and on a record that
+            settles disputes, "which day are we talking about" is the whole question.
+            Each is omitted when absent (record.ts's rule) rather than shown empty. */}
+        <View style={st.stamp}>
+          {!!rec.capturedAt && (
+            <Text style={st.stampT}>{t({ k: 'erec.capturedWhen', p: { when: rec.capturedAt } })}</Text>
+          )}
+          <Text style={st.stampT}>{t({ k: 'erec.created', p: { when: rec.created } })}</Text>
+        </View>
       </ScrollView>
 
-      <BottomBar {...props} gate={gate} canSendNow={canSendNow} isDraft={isDraft} />
+      <BottomBar {...props} gate={gate} canSendNow={canSendNow} isDraft={isDraft}
+        notProcessed={needsGenerate} stillRunning={notProcessed} hasEvidence={hasEvidence} />
     </View>
   );
+}
+
+/**
+ * "THERE ARE FILES BUT NO WRITE-UP" — the diagnosis, and the buttons that end it.
+ *
+ * The whole point is that the two causes get DIFFERENT remedies (hadar 2026-08-06):
+ *
+ *   files not up yet        → Upload now. If the block is the cellular setting, the
+ *                             fix is a permission this screen can grant, so it does —
+ *                             sending him to Settings to find a toggle he has never
+ *                             heard of is how a stuck extra stays stuck.
+ *   files up, nothing back  → no button on this phone can make the server pass run
+ *                             again, so it says so and offers the out that always
+ *                             works: write the scope yourself. Try again is still
+ *                             there, because a pass that failed once may not fail
+ *                             twice, but it is not dressed up as the answer.
+ *
+ * WRITE IT MYSELF IS ALWAYS PRESENT. Every branch above can fail permanently — a
+ * parked upload, a model that will not produce prose for a 4-second recording, an
+ * extra whose audio is gone. A screen that explains a problem and offers only fixes
+ * that might not work has still trapped him. The scope is his to type at any time,
+ * and that is the door that is never locked.
+ */
+function StuckBlock(p: ExtraDraftProps) {
+  const d = p.delivery;
+  // Not read yet: say nothing. A diagnosis invented from missing data is worse than
+  // waiting a tick for the real one.
+  if (!d) return null;
+  const waitingToUpload = d.pending > 0 || d.parked > 0;
+  const cellBlocked = d.gate?.upload === false && d.gate.blockedBy === 'needs_cell_consent';
+  const offline = d.gate?.upload === false && d.gate.blockedBy === 'no_connection';
+
+  // NOTHING WAS SAID, and that is a different sentence from "our side produced
+  // nothing" (hadar 2026-08-07). A recording with no speech in it is a valid thing to
+  // have made — he may have been adding photos and never meant to talk — so the screen
+  // must not imply a fault, ours or his. It states what happened and offers the two
+  // things that actually help: say it again, or write it himself.
+  const heardNothing = !waitingToUpload
+    && p.rec.voices.length > 0
+    && p.rec.voices.every((v) => !(v.transcript ?? '').trim());
+
+  const title = waitingToUpload ? t('stuck.filesTitle')
+    : heardNothing ? t('stuck.silentTitle')
+    : t('stuck.analysisTitle');
+  const why = heardNothing ? t('stuck.silent')
+    : d.parked > 0 ? t('stuck.parked')
+    : cellBlocked ? t('stuck.needsCell')
+    : offline ? t('stuck.offline')
+    : waitingToUpload ? t({ k: 'stuck.uploading', p: { n: d.pending } })
+    : t('stuck.noAnalysis');
+
+  return (
+    <View style={st.draftBanner}>
+      <View style={st.draftHead}>
+        <View style={st.draftDisc}>
+          <Icon name="failed" size={17} color={C.card} />
+        </View>
+        <Text style={st.draftTitle}>{title}</Text>
+      </View>
+      <Text style={st.draftCount}>{why}</Text>
+      {/* The queue's own words, when it has any. Small and last: it is the detail a
+          second person needs to help, not the sentence he acts on. */}
+      {!!d.lastError && d.parked > 0 && (
+        <Text style={st.draftWhy} numberOfLines={3}>{d.lastError}</Text>
+      )}
+      <View style={{ gap: 8, marginTop: 12 }}>
+        {cellBlocked && p.onAllowCellular && (
+          <Button label={t('stuck.allowCell')} icon="offline" onPress={p.onAllowCellular} />
+        )}
+        {p.onGenerate && (
+          <Button
+            label={waitingToUpload ? t('stuck.uploadNow')
+              : heardNothing ? t('stuck.recordAgain') : t('stuck.tryAgain')}
+            icon="waiting"
+            variant={cellBlocked ? 'secondary' : 'primary'}
+            onPress={heardNothing ? p.onAddPhotos : p.onGenerate}
+          />
+        )}
+        <Button label={t('stuck.writeItMyself')} icon="edit" variant="secondary"
+          onPress={p.onEditDescription} />
+      </View>
+    </View>
+  );
+}
+
+/** The plain sentence for a pipeline state — deliberately the SAME words the Send
+ *  gate already refuses with (`canSendExtra`), so the banner, the scope caption and
+ *  the button cannot describe one wait three different ways. */
+function procWhyKey(p: ProcState): string {
+  return canSendExtra(p).whyKey ?? 'send.notReady.processing';
 }
 
 /* ------------------------------------------------------------------ header -- */
@@ -414,9 +618,33 @@ function kicker({ kind, extraNo, rec }: ExtraDraftProps): string {
  *  confirmed by a human — the label says so, and the system never authors one.
  *  An unpriced extra says "No price given yet" at full size, never a dash: a dash
  *  reads as a rendering fault, and "no cost change" would tell an owner it is free. */
-function DraftMoney({ rec, priceMode }: { rec: ExtraRecord; priceMode: 'fixed' | 'nte' }) {
+function DraftMoney({ rec, priceMode, heard }: {
+  rec: ExtraRecord; priceMode: 'fixed' | 'nte';
+  heard?: { words: string; label: string; onUse: () => void } | null;
+}) {
   if (!rec.priced) {
-    return <MoneyBlock amount={t('erec.priceToCome')} muted />;
+    return (
+      <>
+        <MoneyBlock amount={t('erec.priceToCome')} muted />
+        {/* THE READ-BACK (396, mandate #6). He said "probably $1,800" into the phone and
+            the pipeline kept those words verbatim — and until now nothing ever showed
+            them to him, so the extra sat priceless and Send refused on a hard blocker
+            with the answer two tables away.
+            HIS WORDS FIRST, THEN THE FIGURE, THEN A TAP. Never the figure alone: the
+            parse is ours and it can be wrong ("fourteen fifty" is two readings), so the
+            quote has to be visible for him to judge it against. Nothing is written
+            until he presses — a model given "four fifty" invented $450 at high
+            confidence, and this is the machinery that exists so that can never reach a
+            document unread. */}
+        {heard && (
+          <View style={st.heard}>
+            <Text style={st.heardSaid}>{t({ k: 'price.youSaid', p: { words: heard.words } })}</Text>
+            <Button label={t({ k: 'price.useIt', p: { amount: heard.label } })}
+              icon="approved" onPress={heard.onUse} />
+          </View>
+        )}
+      </>
+    );
   }
   const mode = priceMode === 'nte' && rec.nte
     ? t({ k: 'erec.nte', p: { amount: rec.nte } })
@@ -480,21 +708,6 @@ function bannerDetail(r: SendReadiness): string {
  *  keys are full sentences ("Nobody has written up what the work is yet — that is
  *  the part the owner reads"), which are right under a checklist row and impossible
  *  in a pill. */
-/** The gaps as ACTIONS — each one tappable straight to the field that fills it, which
- *  is what the design draws ("+ Add schedule impact ›"). Same source array as the
- *  count above, so the headline and the buttons can never disagree. */
-function bannerActions(
-  r: SendReadiness, items: readonly ChecklistItem[]
-): readonly { key: string; label: string; onPress: () => void }[] {
-  const byKey = new Map(items.map((i) => [i.key as string, i]));
-  const blocking = bannerBlockers(r);
-  const src: readonly string[] = blocking.length > 0 ? blocking : r.recommended;
-  return src.map((k) => {
-    const it = byKey.get(k);
-    return { key: k, label: it?.label ?? k, onPress: it?.onPress ?? (() => {}) };
-  });
-}
-
 function bannerPills(r: SendReadiness, items: readonly ChecklistItem[]): readonly string[] {
   // Driven off `r.blockers` — THE SAME ARRAY the count above is length-of. Reading
   // the checklist's `state` instead let the two disagree: since 2026-07-28 all six
@@ -523,8 +736,15 @@ function RawSection(p: ExtraDraftProps) {
   // Starts OPEN when no recording produced a transcript: the collapsed row's job is
   // to stand in for words you can already read, and with none of them it would be
   // hiding the only copy of what was said behind a control nobody knows to tap.
-  const noWords = rec.voices.length > 0 && rec.voices.every((v) => !v.transcript);
-  const [notesOpen, setNotesOpen] = React.useState(noWords);
+  //
+  // 2026-08-06 (hadar: "I don't see the transcription of the text in the draft
+  // details"): it now starts open whenever there IS a recording, not only when
+  // transcription failed. On a voice-led product the words the contractor spoke are
+  // the source the scope was written from — the one thing to check when the write-up
+  // reads wrong — and hiding them behind a row he has to know to tap made the draft
+  // look as though the app had thrown the recording away. Space was the argument for
+  // collapsing it; being able to see what you said outranks it on this screen.
+  const [notesOpen, setNotesOpen] = React.useState(rec.voices.length > 0);
   // No per-tile captions on the draft. The mockup's raw card shows clean thumbnails
   // and the timestamp lives on the "Captured notes" row above — captions widened
   // each cell to fit "Jan 18 · 8:33 am", which is why the "+ Add" tile wrapped to a
@@ -999,6 +1219,14 @@ function BottomBar(p: ExtraDraftProps & {
   gate: SendGate;
   canSendNow: boolean;
   isDraft: boolean;
+  /** Generate is the offer: the write-up is still coming, or never arrived. */
+  notProcessed: boolean;
+  /** …and specifically, is the pipeline still running? Decides the second line: a
+   *  wait to sit out reads differently from a job that produced nothing. */
+  stillRunning: boolean;
+  /** Is there anything on THIS phone to generate from? No → the button refuses up
+   *  front and says why, instead of running a job with an empty input list. */
+  hasEvidence: boolean;
 }) {
   return (
     <View style={{
@@ -1006,17 +1234,62 @@ function BottomBar(p: ExtraDraftProps & {
       padding: 12, paddingBottom: 22, gap: 10,
     }}>
       <Button label={t('draft.editDetails')} icon="edit" variant="secondary" onPress={p.onEditDetails} />
-      {/* The refusal rides INSIDE the button as its second line — the design puts
+      {/* WHILE THE PIPELINE IS STILL RUNNING, SEND IS NOT THE OFFER (hadar 2026-08-06:
+          "if the draft was not processed, the send for approval button needs to be
+          hidden and a different button asking to generate the change order").
+          A greyed-out Send with "It reached the cloud, your words are being written
+          down" under it is a dead control explaining someone else's job. The one act
+          that makes sense here is to get the write-up made, so that is the button.
+          It cannot become a send by accident: `canSendNow` still gates the real one,
+          and this branch never calls `onSend`. */}
+      {p.notProcessed ? (
+        <Pressable
+          onPress={p.onGenerate}
+          // REFUSES UP FRONT when the recording is not on this phone. A button that
+          // runs, finds an empty input list and returns in under a second is
+          // indistinguishable from a broken one — and the user is the one left
+          // guessing which it was.
+          disabled={!p.onGenerate || !p.hasEvidence}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !p.onGenerate || !p.hasEvidence }}
+          accessibilityLabel={t('draft.generate')}
+          style={({ pressed }) => [st.sendBtn, !p.hasEvidence && { opacity: 0.55 },
+            pressed && p.onGenerate && p.hasEvidence && { opacity: 0.85 }]}
+        >
+          <View style={st.sendTop}>
+            <Icon name="waiting" size={19} color={C.card} />
+            <Text style={st.sendLabel}>{t('draft.generate')}</Text>
+          </View>
+          <Text style={st.sendSub}>
+            {!p.hasEvidence ? t('draft.noEvidenceHere')
+              : p.stillRunning ? t(procWhyKey(p.proc))
+              : t('draft.generateSub')}
+          </Text>
+        </Pressable>
+      ) : (
+      /* The refusal rides INSIDE the button as its second line — the design puts
           "Add 2 missing details to send" under "Send for approval" rather than as a
           separate red sentence above. The rule that a refused Send must always SAY
-          why is kept; it just says it where the tap happens. */}
+          why is kept; it just says it where the tap happens. */
       <Pressable
         onPress={p.onSend}
         disabled={!p.canSendNow}
         accessibilityRole="button"
         accessibilityState={{ disabled: !p.canSendNow }}
         accessibilityLabel={t('erec.send')}
-        style={({ pressed }) => [st.sendBtn, pressed && p.canSendNow && { opacity: 0.85 }]}
+        // A REFUSED SEND MUST LOOK REFUSED (hadar 2026-08-07: "when I click on send for
+        // approval nothing happens").
+        //
+        // It was `disabled` with NO visual difference: the same full-strength black
+        // button, tapping it did nothing, and the only signal was a grey line of
+        // subtitle text under a control that looked live. So the honest reading of the
+        // screen was "this app is broken" — and mandate #3's touch budget makes that
+        // worse, because a man in gloves taps it three more times to be sure.
+        //
+        // The subtitle already says WHY (`SendSubtitle`: "Add 2 missing details to
+        // send"). This makes the button agree with it.
+        style={({ pressed }) => [st.sendBtn, !p.canSendNow && st.sendBtnOff,
+          pressed && p.canSendNow && { opacity: 0.85 }]}
       >
         <View style={st.sendTop}>
           <Icon name="send" size={19} color={C.card} />
@@ -1024,6 +1297,7 @@ function BottomBar(p: ExtraDraftProps & {
         </View>
         <SendSubtitle {...p} />
       </Pressable>
+      )}
 
       {/* DELETE, AT THE BOTTOM OF THE EXTRA (hadar, 2026-08-05). This reverses the
           2026-07-28 decision that moved Delete into the header ⋯ because the mockup

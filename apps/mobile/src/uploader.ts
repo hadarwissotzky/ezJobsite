@@ -260,6 +260,39 @@ export async function redriveParkedCaptures(
 }
 
 /**
+ * Bring THESE captures forward for an immediate retry — the SOMEONE IS WATCHING case.
+ *
+ * WHY THIS HAS TO EXIST (hadar 2026-08-06: "it's stuck"). `backoff()` puts a failed
+ * row 2 minutes out after ONE transient failure, 4 after two, up to 30 minutes. That
+ * is right for a background drain on a tailgate. It is wrong for the capture screen,
+ * which polls for 90 SECONDS and calls drainOutbox every ~5s to push the upload along:
+ * every one of those calls filters on `next_attempt_at_ms <= now`, so after the first
+ * blip the row the user is literally watching is not even SELECTED. The screen then
+ * spends 90 seconds re-asking a question it has already excluded itself from, gives up,
+ * and tells a contractor with full bars that he is offline.
+ *
+ * So a foreground retry does not obey a background schedule. `attempt_count` is
+ * deliberately NOT reset: the ladder still grows for the background drain, and a row
+ * that keeps failing keeps backing off once nobody is watching it any more.
+ *
+ * PARKED ROWS ARE NOT TOUCHED (`< 8640000000000`). Parked means permanently refused,
+ * and impatience is not new evidence — freeing those needs `redriveParkedCaptures`,
+ * which names the error codes it believes are now fixable.
+ */
+export async function redriveNow(
+  db: AbstractPowerSyncDatabase, captureIds: readonly string[]
+): Promise<number> {
+  if (!captureIds.length) return 0;
+  const marks = captureIds.map(() => '?').join(',');
+  const r = await db.execute(
+    `UPDATE capture_outbox SET next_attempt_at_ms = 0
+      WHERE capture_id IN (${marks}) AND next_attempt_at_ms < 8640000000000`,
+    [...captureIds]
+  );
+  return r.rowsAffected ?? 0;
+}
+
+/**
  * Push a project row straight to the server from the local PowerSync table, the
  * same shape the connector's uploadData sends: every synced column except `status`,
  * which the server owns (its column-level grant refuses a client write, and the
@@ -306,6 +339,73 @@ async function backoff(db: AbstractPowerSyncDatabase, row: OutboxRow, code: stri
       WHERE mutation_id = ?`,
     [n, Date.now(), Date.now() + delay, code, msg, row.mutation_id]
   );
+}
+
+/**
+ * WHY THIS EXTRA HAS NO WRITE-UP — the diagnosis, for THESE captures.
+ *
+ * hadar 2026-08-06: "if we have files (photos and audio) but no scope it means either
+ * 1. files were not uploaded, 2. files were not analyzed and scope was not created —
+ * either way that needs to be fixed with a workflow and a user intervention."
+ *
+ * Both causes look identical on screen today (an extra that never wrote itself up),
+ * and they have OPPOSITE remedies: one is a transfer this device can retry or that the
+ * user must permit over cellular; the other is a server-side pass no button on this
+ * phone can force, where the honest options are wait or write it yourself. Guessing
+ * between them is what leaves a contractor tapping a button that cannot help him.
+ *
+ * READ-ONLY and LOCAL. The queue IS the state (status.ts's rule): a capture in
+ * `capture_outbox` has not been accepted by the server, and one that is absent has —
+ * `drainOutbox` deletes the row only after the RPC returns success. So this needs no
+ * network to answer the upload half, which matters because the case it explains is
+ * usually happening offline.
+ */
+export type CaptureDelivery = {
+  /** How many of the asked-about captures exist locally at all. */
+  total: number;
+  /** Still queued and schedulable — the transfer has not finished. */
+  pending: number;
+  /** Permanently refused (`park`). These never retry on their own; the error says why. */
+  parked: number;
+  /** The most recent failure text across the queued rows, for the "and it said…" line. */
+  lastError: string | null;
+  /** Why nothing is moving right now, when that is a policy/network fact rather than
+   *  a per-row one. Null when uploads are permitted. */
+  gate: UploadGate | null;
+};
+
+export async function captureDelivery(
+  db: AbstractPowerSyncDatabase, captureIds: readonly string[]
+): Promise<CaptureDelivery> {
+  const empty: CaptureDelivery = { total: 0, pending: 0, parked: 0, lastError: null, gate: null };
+  if (!captureIds.length) return empty;
+  const marks = captureIds.map(() => '?').join(',');
+  const rows = await db.getAll<{ n: number; parked: number; err: string | null }>(
+    `SELECT count(*) AS n,
+            sum(CASE WHEN next_attempt_at_ms >= 8640000000000 THEN 1 ELSE 0 END) AS parked,
+            max(last_error_text) AS err
+       FROM capture_outbox WHERE capture_id IN (${marks})`,
+    [...captureIds]
+  );
+  const r = rows[0] ?? { n: 0, parked: 0, err: null };
+  const parked = r.parked ?? 0;
+  const queued = (r.n ?? 0) - parked;
+
+  // Only ask the radio when something is actually waiting: on a fully-delivered extra
+  // the answer changes nothing and this runs on every record open.
+  let gate: UploadGate | null = null;
+  if (queued > 0) {
+    try {
+      const state = await Network.getNetworkStateAsync();
+      const g = uploadGate(
+        { isConnected: !!state.isConnected,
+          isCellular: state.type === Network.NetworkStateType.CELLULAR },
+        await getCellularConsent(db)
+      );
+      gate = g.upload ? null : g;
+    } catch { /* can't tell → say nothing rather than invent a reason */ }
+  }
+  return { total: captureIds.length, pending: queued, parked, lastError: r.err ?? null, gate };
 }
 
 /** Delivery status for the UI. Never conflate with "saved". */

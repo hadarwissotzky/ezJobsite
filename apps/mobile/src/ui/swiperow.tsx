@@ -47,13 +47,30 @@ export function SwipeRow({ children, onDelete, enabled = true, deleteLabel }: {
   // The committed resting offset, kept outside Animated so the responder can reason
   // about where the row already is without reading animated state mid-gesture.
   const open = React.useRef(false);
+  /**
+   * IS THE BUTTON EVEN MOUNTED (hadar 2026-08-06: "I can still see the delete button
+   * bleeding under the record").
+   *
+   * It used to be mounted always, and merely COVERED by the row on top of it. That is
+   * one accidental pixel away from visible — any gap, margin, rounding or clip the row
+   * does not fill lets red through, and on the dashboard it did. Covering something
+   * red with something white is not the same as it not being there.
+   *
+   * So: nothing is rendered until a swipe actually begins, and it unmounts again when
+   * the row settles closed. At rest the subtree is EMPTY, which makes the bleed
+   * impossible rather than merely unlikely — the same reasoning as `enabled`, which
+   * already refuses to mount a button for a row that cannot be deleted.
+   */
+  const [armed, setArmed] = React.useState(false);
 
   const settle = React.useCallback((toOpen: boolean) => {
     open.current = toOpen;
     Animated.spring(x, {
       toValue: toOpen ? -REVEAL : 0,
       useNativeDriver: true, bounciness: 0, speed: 18,
-    }).start();
+      // Unmount only AFTER the row has finished sliding back, or the button would
+      // vanish out from under the animation and flash the page behind it.
+    }).start(({ finished }) => { if (finished && !toOpen) setArmed(false); });
   }, [x]);
 
   const pan = React.useMemo(() => PanResponder.create({
@@ -63,6 +80,8 @@ export function SwipeRow({ children, onDelete, enabled = true, deleteLabel }: {
       // row is deleted, so the ambiguous case must belong to the scroll view.
       return Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy) * AXIS_BIAS;
     },
+    // The gesture is ours — NOW there is something to reveal.
+    onPanResponderGrant: () => setArmed(true),
     onPanResponderMove: (_e, g) => {
       const base = open.current ? -REVEAL : 0;
       // Clamped: never past the button, never right of closed. Rubber-banding here
@@ -81,9 +100,9 @@ export function SwipeRow({ children, onDelete, enabled = true, deleteLabel }: {
 
   return (
     <View style={st.wrap}>
-      {/* Behind the row. Rendered only when the row can actually move, so a locked
-          row has nothing hidden under it at all. */}
-      {enabled && (
+      {/* Behind the row. Rendered only when the row can actually move AND a swipe is
+          under way — at rest there is nothing behind the row at all. */}
+      {enabled && armed && (
         <View style={st.behind}>
           <Pressable
             onPress={() => { settle(false); onDelete(); }}

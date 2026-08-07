@@ -52,6 +52,7 @@ import { C, F } from './theme';
 import { useRecordFacts } from './recordfacts';
 import { Button } from './kit';
 import { ExtraDraftScreen } from './extradraft';
+import type { CaptureDelivery } from '../uploader';
 import {
   ExtraNegotiationScreen,
   type ExtraDetailField,
@@ -121,6 +122,16 @@ export type RecordScreenProps = {
   /** Open the R5c send preview. Always passed; the draft screen composes all three
    *  gates itself and disables its own button, so no caller-side condition here. */
   onSend: () => void;
+  /** Re-run the write-up. Replaces Send on a draft the pipeline has not finished. */
+  onGenerate?: () => void;
+  /** 396 — the read-back of a spoken price, composed by the caller (which owns
+   *  `parseMoney`). Null when there is nothing to confirm. */
+  priceHeard?: { words: string; label: string; onUse: () => void } | null;
+  /** Upload state for THIS extra's captures — the evidence behind the stuck-extra
+   *  diagnosis. Null while it is being read. */
+  delivery?: CaptureDelivery | null;
+  /** Grant cellular uploading from the screen it is blocking. */
+  onAllowCellular?: () => void;
   /** A reply is a MESSAGE: it commits nothing and prices nothing. REQ-LC23's
    *  `canReply` is enforced inside the screen by `threadState`, so this is passed
    *  unconditionally — the old caller-side status test was a second copy of it. */
@@ -248,6 +259,10 @@ export function RecordScreen(props: RecordScreenProps) {
           onAddPhotos={props.onCapture ?? (() => props.onOpenDetail('photos'))}
           onPressPhoto={(uri) => setZoom(uri)}
           onSend={props.onSend}
+          onGenerate={props.onGenerate}
+          priceHeard={props.priceHeard}
+          delivery={props.delivery}
+          onAllowCellular={props.onAllowCellular}
           jobPeople={props.jobPeople}
           onRemovePerson={props.onRemovePerson}
           onDelete={props.onDelete}

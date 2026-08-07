@@ -29,14 +29,15 @@
  * the same block reads differently at each stage without the TEXT changing.
  */
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../i18n';
 import { C, F, label as labelStyle } from './theme';
+import { Icon } from './icon';
 
 export type ScopeStage = 'draft' | 'sent' | 'signed';
 
-export function ScopeBlock({ text, stage, onEdit, missing }: {
+export function ScopeBlock({ text, stage, onEdit, missing, pending, pendingLabel, pendingIsWait = true, footer }: {
   /** The scope of work. Empty renders the gap, never a blank box. */
   text: string | null | undefined;
   stage: ScopeStage;
@@ -44,9 +45,40 @@ export function ScopeBlock({ text, stage, onEdit, missing }: {
   onEdit?: () => void;
   /** True when readiness counts this as a blocker — the caller owns that verdict. */
   missing?: boolean;
+  /**
+   * The write-up has not been produced YET — the recording is still going up, or up
+   * and being read (hadar 2026-08-06: "if scope of work was not yet processed, a
+   * better message needs to be told").
+   *
+   * It outranks `missing` on purpose. Both can be true at once — an unwritten scope
+   * is of course too short — but they are different facts with different audiences.
+   * "Too short to send. Describe the work the way you would explain it on site." is
+   * an instruction to a man who has not done his part; printing it while the app is
+   * still transcribing his recording blames him for our wait, on the exact screen
+   * where he is waiting for us.
+   */
+  pending?: boolean;
+  /** The words for that wait, already translated — the caller owns which stage of the
+   *  pipeline it is in, since only it knows. */
+  pendingLabel?: string;
+  /** Is the pending state a WAIT (something is coming) or a GAP that will stay a gap
+   *  until a person fills it? Only the wait gets the hourglass; drawing one over a
+   *  recording that is not on this device promises an arrival that cannot happen. */
+  pendingIsWait?: boolean;
+  /**
+   * Rendered INSIDE this block, under the box, when the caller has something to say
+   * about why the scope is missing and what to do about it.
+   *
+   * A prop rather than a sibling because the two are one object on screen: a card that
+   * says "no write-up came back" belongs against the empty scope it is describing, not
+   * below the price with a dollar figure in between (hadar 2026-08-06). ScopeBlock
+   * stays dumb about WHAT the fix is — it owns the frame, the caller owns the words.
+   */
+  footer?: React.ReactNode;
 }) {
   const body = (text ?? '').trim();
   const frozen = stage !== 'draft';
+  const waiting = !!pending && !body;
 
   return (
     <View style={st.wrap}>
@@ -61,31 +93,71 @@ export function ScopeBlock({ text, stage, onEdit, missing }: {
       </View>
 
       {body ? (
-        // A BOX THAT SCROLLS, not a paragraph that clips. `nestedScrollEnabled` so a
-        // long scope can be read inside the screen's own ScrollView on Android; iOS
-        // handles it natively.
-        <ScrollView
-          style={[st.box, frozen && st.boxFrozen]}
-          nestedScrollEnabled
-          showsVerticalScrollIndicator
-        >
+        // A SECTION THAT GROWS, not a window that scrolls (hadar 2026-08-07: "the scope
+        // should not be a scrollable section").
+        //
+        // It was a nested ScrollView capped at 320pt. That made sense when the scope was
+        // a paragraph; since 393 it is a structured document — WHY THIS IS NEEDED, the
+        // numbered steps, what is and is not included, the conditions — and a 320pt
+        // window over it shows about a third at a time. The reader most likely to be
+        // hurt is the one who matters: someone checking the exclusions before a client
+        // signs, who cannot see them without discovering that this particular grey box
+        // scrolls independently of the page.
+        //
+        // A scroll view inside a scroll view is also a gesture fight — a drag that
+        // starts here moves the inner box while the page stands still, which reads as a
+        // stuck screen. The page scrolls; the document is simply all there.
+        <View style={[st.box, frozen && st.boxFrozen]}>
           <Text style={st.body} selectable>{body}</Text>
-        </ScrollView>
+        </View>
       ) : (
-        // THE GAP, NAMED. An empty scope is the single most consequential thing
-        // missing from an extra, so it says what to do rather than showing nothing.
-        <Pressable onPress={onEdit} disabled={!onEdit} style={[st.box, st.empty]}
-          accessibilityRole={onEdit ? 'button' : undefined}>
-          <Text style={st.emptyT}>{t('scope.empty')}</Text>
+        // THE GAP, DRAWN AS AN EMPTY STATE (hadar 2026-08-06, with a competitor's
+        // "Client details / Add client information to keep track of who you're working
+        // with / [Add client]" card as the reference: "needs to be clear").
+        //
+        // It used to be one red line in a grey box — the shape of a validation error,
+        // which is what it read as: something you did wrong, in a place you cannot see
+        // what is missing. An absence is not an error. Three parts, the way the whole
+        // industry draws them and for the reason they do: a MARK so the eye stops, a
+        // HEADING that names the state in three words, and ONE sentence saying what
+        // goes here and why it matters. No button — the act lives once, in the bottom
+        // bar (Generate, or Edit above), and this screen has already been through one
+        // round of the same offer appearing three times.
+        // Tappable unless something really is on its way: a gap nobody is going to fill
+        // for him must stay one tap from the editor, or the screen states a problem and
+        // then withholds the only fix.
+        <Pressable onPress={onEdit} disabled={!onEdit || (waiting && pendingIsWait)}
+          style={[st.box, st.empty]}
+          accessibilityRole={onEdit && !(waiting && pendingIsWait) ? 'button' : undefined}
+          accessibilityLabel={waiting ? t('scope.workingTitle') : t('scope.emptyTitle')}>
+          <Icon name={waiting && pendingIsWait ? 'waiting' : 'doc'} size={26} color={C.muted} />
+          <Text style={st.emptyTitle}>
+            {waiting && pendingIsWait ? t('scope.workingTitle') : t('scope.emptyTitle')}
+          </Text>
+          {/* Suppressed when a footer is present: the footer says the same thing with
+              more precision AND offers the fix, so printing both is the "one fact, two
+              sentences" this screen has already been trimmed for twice. */}
+          {!footer && (
+            <Text style={st.emptyBody}>
+              {waiting ? (pendingLabel ?? t('scope.working')) : t('scope.emptyBody')}
+            </Text>
+          )}
         </Pressable>
       )}
 
-      <Text style={[st.caption, missing && st.captionWarn]}>
-        {missing
-          ? t('scope.tooShort')
-          : t(stage === 'draft' ? 'scope.capDraft'
-            : stage === 'sent' ? 'scope.capSent' : 'scope.capSigned')}
-      </Text>
+      {/* No caption under the empty state: it just said all of this, at full size and
+          in the middle of the box. A second, smaller copy underneath is the "one fact,
+          two sentences" the draft banner was already trimmed for. */}
+      {!!footer && <View style={{ marginTop: 10 }}>{footer}</View>}
+
+      {!!body && (
+        <Text style={[st.caption, missing && st.captionWarn]}>
+          {missing
+            ? t('scope.tooShort')
+            : t(stage === 'draft' ? 'scope.capDraft'
+              : stage === 'sent' ? 'scope.capSent' : 'scope.capSigned')}
+        </Text>
+      )}
     </View>
   );
 }
@@ -97,9 +169,6 @@ const st = StyleSheet.create({
   edit: { fontFamily: F.bodySemi, fontSize: 14.5, color: C.brand },
   box: {
     marginTop: 7,
-    // Tall enough that a real scope reads as prose rather than a preview, capped so
-    // it cannot push the price and the terms off the screen entirely.
-    maxHeight: 320,
     backgroundColor: C.raised,
     borderWidth: 1, borderColor: C.line, borderRadius: 10,
     paddingHorizontal: 12, paddingVertical: 10,
@@ -108,8 +177,16 @@ const st = StyleSheet.create({
   // for "this is a record, not a field".
   boxFrozen: { backgroundColor: C.surfaceMuted },
   body: { fontFamily: F.body, fontSize: 15, lineHeight: 22, color: C.ink },
-  empty: { minHeight: 64, justifyContent: 'center', backgroundColor: C.surfaceMuted },
-  emptyT: { fontFamily: F.bodySemi, fontSize: 14.5, color: C.danger },
+  // Centred, with room to breathe — an empty state is a small poster, not a row.
+  empty: {
+    minHeight: 132, alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingHorizontal: 22, paddingVertical: 20,
+    backgroundColor: C.surfaceMuted,
+  },
+  emptyTitle: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.ink, textAlign: 'center' },
+  // NOT `C.danger`. Red said "you broke something" about a field nobody has filled in
+  // yet — and while the pipeline is running it is not even his to fill.
+  emptyBody: { fontFamily: F.body, fontSize: 13.5, lineHeight: 19, color: C.muted, textAlign: 'center' },
   caption: { fontFamily: F.body, fontSize: 12.5, color: C.muted, marginTop: 7 },
   captionWarn: { color: C.danger, fontFamily: F.bodySemi },
 });

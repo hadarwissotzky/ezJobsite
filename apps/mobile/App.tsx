@@ -169,10 +169,11 @@ import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
          setTermsAccepted } from './src/consent';
 import { buildDisputeBundle, buildProgressUpdate, shareBundle, shareLink,
          shareProgressUpdate } from './src/bundle';
-import { drainOutbox, outboxStatus, redriveParkedCaptures } from './src/uploader';
+import { captureDelivery, drainOutbox, outboxStatus, redriveNow, redriveParkedCaptures,
+         type CaptureDelivery } from './src/uploader';
 import * as Network from 'expo-network';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
-         listDecisions, recordDecision, type DecisionRow } from './src/decisions';
+         listDecisions, linkCaptureToDecision, recordDecision, type DecisionRow } from './src/decisions';
 import { renderCard, sendForConfirmation } from './src/confirmations';
 import { publishApprovalPhotos } from './src/approvalphotopublish';
 import {
@@ -194,7 +195,9 @@ import { applyLocalApproval, centsFromInput, createChangeOrder, createLinkedExtr
          createdLabel, markLocalSent, money, moneyWhole, parseMoney, validateLines, CO_PHOTO_SUBQUERY,
          type LineItem, type LedgerRow, priceDraftExtra, setDraftFlowFields, rehomeDraftExtra,
          backfillCoNumbers,
-         type BillingTiming, type ScheduleEffect } from './src/changeorder';
+         shortDate,
+         type BillingTiming, type ScheduleEffect,
+} from './src/changeorder';
 import { displayStatus, type LedgerStatus } from './src/extrastatus';
 // SPEC-extra-lifecycle-v1 §1 — the ONE authority on what may be done to a row at
 // its stage. The record screen's prop gating used to be a pile of local status
@@ -210,6 +213,11 @@ export const db = new PowerSyncDatabase({
   // auto-detect it and falls back to quick-sqlite, which throws at runtime.
   database: new OPSqliteOpenFactory({ dbFilename: 'ezjobsite.db' }),
 });
+
+// Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
+// graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
+// wrong" until this could be read back off the device. One string, no data exposed.
+(globalThis as any).__EZ_BUILD__ = 'v24-silence';
 
 const connector = new SupabaseConnector();
 // The job the app is currently showing. Was a hardcoded constant -- every capture
@@ -578,7 +586,7 @@ const openRecord = async (changeOrderId: string) => {
   // record's now, or its evidence renders under the new title until each read
   // lands (Codex review, 2026-07-22).
   setApproval(null); setRecordLc(null); setRecordTimeline([]);
-  setRecordThread(null); setRecordUndelivered(new Set());
+  setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
   setRecordNextId(null); setDetail(null); setZoomUri(null);
   // SPEC-extra-lifecycle-v1 — the stage layer, and it goes FIRST for a reason: it is
   // the only layer the screen cannot render without (it decides which of D1's three
@@ -622,6 +630,13 @@ const openRecord = async (changeOrderId: string) => {
   try {
     setRecordNextId(r.status === 'superseded' ? await supersededBy(db, changeOrderId) : null);
   } catch { setRecordNextId(null); }
+  // WHY THERE IS NO WRITE-UP, if there is none. Local-only and last: it explains a
+  // state the layers above have already rendered, and it must never delay them.
+  try {
+    const ids = [...r.voices.map((v) => v.captureId), ...r.photos.map((ph) => ph.captureId)];
+    const d = await captureDelivery(db, ids);
+    if (recordIdRef.current === changeOrderId) setRecordDelivery(d);
+  } catch { /* no diagnosis is better than a wrong one — StuckBlock renders nothing */ }
 };
 
 // DEV auto-open (EXPO_PUBLIC_OPENCO): opens a specific extra once on boot so the real
@@ -762,7 +777,7 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
 const closeRecord = () => {
   recordIdRef.current = null;
   setRecord(null); setApproval(null); setRecordLc(null); setRecordTimeline([]);
-  setRecordThread(null); setRecordUndelivered(new Set());
+  setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
   setRecordNextId(null); setDetail(null); setZoomUri(null);
   // If this extra was opened FROM the company feed, go back to the feed (fresh) — not
   // to whatever nav was underneath (review 2026-07-25: don't lose the user's place).
@@ -1010,27 +1025,21 @@ const applyProposalToExtra = async (
   if (!prop || prop.confidence === 'none') return { title: null, tag: null };
   let title: string | null = null;
   let tag: string | null = null;
-  if (prop.confidence === 'high' && prop.subject && await retitleDraft(db, changeOrderId, prop.subject)) {
-    title = prop.subject;
-  }
-  // The owner-facing SUMMARY (hadar, 2026-07-27). High-confidence only, same
-  // mandate-#2 gate as the title: a low-confidence value is a guess, and a guess
-  // must not be presented to the client as the summary of the change. When it is
-  // not set, the record falls back to the title and the raw transcript still stands.
+  // TITLE, SCOPE OF WORK AND THE FLOW TERMS ARE NO LONGER WRITTEN HERE (394).
+  //
+  // `apply_proposal_v1` does it on the server, the moment the write-up exists, under
+  // one SQL predicate — because the web app is coming and the rule that decides what a
+  // binding document says must exist ONCE. This device learns the result through
+  // `hydrateChangeOrders`, which re-states the same guard locally before adopting it
+  // (a draft edited offline can legitimately be ahead of the server).
+  //
+  // What is still applied from here is what the server does not own: the extra's
+  // owner-facing SUMMARY, which is a device-only column, and the AI search tags, which
+  // live on the CAPTURES rather than the change order.
   if (prop.confidence === 'high' && prop.value) {
     await setDraftSummary(db, changeOrderId, prop.value);
-    // AND THE SCOPE OF WORK ITSELF (391). Writing only `summary` left the pipeline's
-    // prose in a column that is NOT the instrument: record.ts displays it by falling
-    // back, so the contractor READ the model's scope while renderCard still froze
-    // `scope_of_work` — which, unwritten, fell back to the title. The client would
-    // have signed a title while the app showed him a paragraph — precisely the defect
-    // 391 exists to end, surviving inside my own change until this was wired.
-    //
-    // seedOnly: writes only while the field is still the birth copy of the title. Once
-    // the contractor has touched his scope nothing overwrites it — mandate #2, and why
-    // a re-run cannot silently re-author what a human already approved for sending.
-    await saveScopeOfWork(db, changeOrderId, prop.value, { seedOnly: true });
   }
+
   // THE SEARCH TAGS (392), applied to the captures this decision was built from.
   //
   // On the CAPTURES and not the change order, because that is where tags live
@@ -1055,7 +1064,40 @@ const applyProposalToExtra = async (
   if (prop.extraType && isExtraType(prop.extraType) && await setExtraType(db, changeOrderId, prop.extraType)) {
     tag = prop.extraType;
   }
+
   return { title, tag };
+};
+
+/**
+ * GENERATE, step 3 — write the model's read onto the change order and go back to it.
+ *
+ * The whole act is the three steps hadar stated (2026-08-06): the files go up (step 1,
+ * the transition screen's drain, now with `redriveNow` so a backed-off row does not
+ * make the user wait out a 30-minute schedule), the words are written down and the AI
+ * produces the scope (step 2, what the screen waits for), and this is step 3.
+ *
+ * IT REUSES `applyProposalToExtra` RATHER THAN WRITING THE COLUMNS AGAIN. That
+ * function is where mandate #2 lives for this data: high confidence only, `seedOnly`
+ * on the scope of work so nothing the contractor typed is overwritten, tags appended
+ * (never destructive), and the price deliberately NOT set — the model is not allowed
+ * to author a number (mandate #6). A second copy of those rules here is a second
+ * place for them to rot.
+ *
+ * IT ENDS ON THE RECORD, not the composer: the extra already exists and the
+ * contractor asked for its write-up, not for a pricing form.
+ */
+const finishGenerateById = async (changeOrderId: string) => {
+  const rows = await db.getAll<{ decision_id: string }>(
+    `SELECT decision_id FROM change_order WHERE id = ? AND status = 'draft'`, [changeOrderId]);
+  // Not a draft any more (sent or answered while this ran): its instrument is frozen
+  // and nothing may be rewritten onto it. Reopen it and say nothing — the record
+  // itself now shows the state that makes this refusal obvious.
+  if (rows.length) {
+    try { await applyProposalToExtra(changeOrderId, rows[0].decision_id); }
+    catch (e: any) { void logDiag(db, 'generate.apply', String(e?.message ?? e).slice(0, 200)); }
+  }
+  await refresh();
+  await openRecord(changeOrderId);
 };
 
 /**
@@ -1078,6 +1120,28 @@ const applyProposalToExtra = async (
  * re-derived — an edit adds evidence, not money.
  */
 const finishAugmentById = async (changeOrderId: string, addedIds: string[]) => {
+  // FIRST: join the added clips to the extra's decision, so the server knows they
+  // describe the same work. Without this the structure step sees each clip alone and
+  // the write-up gets worse the more the contractor says (see linkCaptureToDecision).
+  // Best-effort and never fatal — the evidence is already committed, and a link that
+  // failed to write is retried the next time this runs.
+  try {
+    const co = (await db.getAll<{ decision_id: string; project_id: string; scope: string;
+                                 who_directed: string | null }>(
+      `SELECT decision_id, project_id, scope, who_directed FROM change_order WHERE id = ?`,
+      [changeOrderId]))[0];
+    if (co) {
+      for (const captureId of addedIds) {
+        const said = (await db.getAll<{ text: string }>(
+          `SELECT text FROM voice_transcript_cache WHERE capture_id = ?`, [captureId]))[0];
+        await linkCaptureToDecision(db, {
+          decisionId: co.decision_id, captureId, projectId: co.project_id,
+          ownerId: OWNER, subject: co.scope, directedBy: co.who_directed,
+          value: said?.text ?? '',
+        });
+      }
+    }
+  } catch (e: any) { void logDiag(db, 'augment.link', String(e?.message ?? e).slice(0, 160)); }
   try {
     const prop: Proposal | null =
       await fetchLatestProposalForCaptures(connector.client, addedIds);
@@ -1567,6 +1631,22 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     // said (hadar 2026-07-27) — the price is never re-derived — and reopens the
     // extra's record instead of the priced composer.
     isAugment: boolean;
+    /**
+     * GENERATE mode (hadar 2026-08-06, the concept stated in three steps): "1. make
+     * sure that all of the files local to the phone associated with the change order
+     * are uploaded. 2. transcribe & AI create scope. 3. update the change order
+     * records."
+     *
+     * Steps 1 and 2 are exactly what this screen already watches, which is why it is
+     * the same machinery and not a second one. Step 3 is what differs: a NEW extra
+     * ends in the priced composer (a human still has to type the number), an AUGMENT
+     * ends by appending to the description — a GENERATE ends by writing the model's
+     * title, summary, scope of work and tags onto the change order and reopening the
+     * record. It is the finish for an extra that already exists but never got its
+     * write-up, so dropping the contractor into the composer would be answering a
+     * question he did not ask.
+     */
+    isGenerate?: boolean;
   }>(null);
 
   // The transition's watcher. Polls the real signals: capture_outbox emptying
@@ -1608,6 +1688,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         const { data } = await connector.client.auth.getSession();
         const uid = data?.session?.user?.id;
         if (uid) {
+          // BEFORE the drain, every time: one transient failure schedules this row
+          // 2+ minutes out, and this screen only lives for 90 seconds — without this
+          // the retry it is about to run cannot even see the capture it is waiting on.
+          await redriveNow(db, transition.ids);
           const r = await drainOutbox(db, connector.client, uid);
           if (r.blocked) blockedSeen = true;
         }
@@ -1658,7 +1742,14 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // is no anchor capture, so a photos-only edit still reduces to "ready when up".
         // An edit with a voice now waits for transcription + analysis exactly like a new
         // extra (hadar, 2026-07-27) — the augment path no longer short-circuits on upload.
-        const ready = up && tr && analyzedSeen;
+        // THE AI PASS OUTRANKS THE ON-DEVICE TRANSCRIPT (hadar 2026-08-07: an empty
+        // recording is a valid outcome, not a fault). `tr` watches the LOCAL cache that
+        // on-device STT fills; `analyzedSeen` means the SERVER has finished reading the
+        // recording. When the server has answered, waiting on the device's own copy adds
+        // nothing — and on a recording with nothing in it, on-device STT writes no cache
+        // row at all, so `tr` could never turn true and the screen sat out its full 90
+        // seconds telling a contractor it was slow when it was finished.
+        const ready = up && (tr || analyzedSeen) && analyzedSeen;
         // Only ask the radio once we've actually waited a beat and are still not
         // ready — and if we're online, re-kick the push.
         let offline = false;
@@ -1717,7 +1808,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             // New extra → open the priced composer; augment → grow the description
             // from the added voice (same rules as a new extra), then reopen the record.
             if (t) {
-              if (t.isAugment) void finishAugmentById(t.coId, t.ids);
+              if (t.isGenerate) void finishGenerateById(t.coId);
+              else if (t.isAugment) void finishAugmentById(t.coId, t.ids);
               else void finishExtraById(t.coId);
             }
             return null;
@@ -1779,6 +1871,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // may fail without costing the rest.
   const [recordThread, setRecordThread] = React.useState<ThreadMessage[] | null>(null);
   const [recordUndelivered, setRecordUndelivered] = React.useState<ReadonlySet<string>>(new Set());
+  // The stuck-extra diagnosis for the OPEN record: are its captures still queued, are
+  // they parked, is the radio or the cellular setting holding them? Read per record so
+  // the draft screen can NAME the cause instead of offering one button for two
+  // different problems.
+  const [recordDelivery, setRecordDelivery] = React.useState<CaptureDelivery | null>(null);
   const [recordNextId, setRecordNextId] = React.useState<string | null>(null);
   /**
    * SPEC-extra-lifecycle-v1 — the stage screens' inputs, its own hydration layer.
@@ -2615,6 +2712,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // Tie walkthrough photos to the sentences spoken over them, once the
           // transcript (with segments) has landed server-side. Idempotent per pair.
           try { await runAutoTags(db, connector.client); } catch { /* offline is normal */ }
+          // The late-proposal sweep that used to live here is gone (394): the server
+          // applies a write-up the moment it exists, so there is nothing for the app to
+          // catch up on except the hydrate below, which learns it.
           const hy = await hydrateChangeOrders(db, connector.client, pid, data.user.id);
           // MUST follow the hydrate. hydrateChangeOrders adopts the server's status for
           // any row with no change_order_outbox entry; a supersession queues in
@@ -4110,7 +4210,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           {trouble && (
             <View style={s.trWarn}>
               <Text style={s.trWarnT}>{T(warnKey)}</Text>
-              {t.lastError && <Text style={s.trWarnErr}>{t.lastError}</Text>}
+              {/* …and for a plain network retry it is not shown AT ALL (hadar
+                  2026-08-06, screenshot: "TRANSIENT: Network request failed
+                  [job: prj-ms5do1fx-ft284]" under a sentence that already said, in
+                  English, that the internet was the problem). Demoting the dev string
+                  to a smaller line still left it on screen, and the code plus a job id
+                  is not debugging information to the person holding the phone — it is
+                  evidence that something broke. A genuine stall keeps it: there the
+                  detail is the only clue anyone has. */}
+              {t.lastError && !netRetry && <Text style={s.trWarnErr}>{t.lastError}</Text>}
               <Pressable
                 onPress={() => {
                   // Augment came FROM an extra, so Done returns to it — not Home (the
@@ -4709,6 +4817,80 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // shortcut straight to the recorder. The button previously carried the camera's
         // accessibility label, so a screen reader announced "add photo" on the mic.
         onAddVoice={() => augmentExtra(record.id)}
+        delivery={recordDelivery}
+        // GRANTED FROM THE SCREEN IT IS BLOCKING (hadar 2026-08-06: the user has to be
+        // able to solve this). The cellular default is OFF for a good reason — a 200 MB
+        // walkthrough over a hotspot is a bill nobody agreed to — but a contractor who
+        // has decided THIS extra is worth the data should not have to find a toggle in
+        // Settings he has never seen. Same act, same store, offered where it bites; and
+        // it kicks the drain immediately so the permission has a visible result.
+        onAllowCellular={async () => {
+          await setCellularConsent(db, true);
+          setCellOn(true);
+          const ids = [...record.voices.map((v) => v.captureId),
+                       ...record.photos.map((ph) => ph.captureId)];
+          await redriveNow(db, ids);
+          const { data } = await connector.client.auth.getSession();
+          const uid = data?.session?.user?.id;
+          if (uid) await drainOutbox(db, connector.client, uid);
+          setRecordDelivery(await captureDelivery(db, ids));
+        }}
+        // GENERATE THE CHANGE ORDER — the draft screen's button while the pipeline is
+        // still running. It re-enters the SAME processing screen a fresh capture uses
+        // rather than inventing a second path: that screen pushes what is still queued
+        // (now with `redriveNow`, so a backed-off row is retried immediately), watches
+        // for the transcript and the AI pass, and hands off to the composer when they
+        // land. `isAugment: false` because this extra has never been finished — the
+        // outcome is the composer, not an appended description.
+        // 396 — THE READ-BACK. Composed here because this is where `parseMoney` lives
+        // (one parser in the app, not one per screen) and where the write happens. The
+        // screen shows his words and the figure; this is the only thing that can turn a
+        // tap into an amount, and it goes through `priceDraftExtra` — the same path the
+        // composer uses — so a confirmed price is stamped `numbers_confirmed_at` like
+        // every other one. Null when nothing was said, or a price already exists.
+        priceHeard={(() => {
+          const words = record.priceHeard;
+          if (!words) return null;
+          const parsed = parseMoney(words);
+          // A quote we cannot read CONFIDENTLY is not shown as a figure. It stays in the
+          // transcript where he can see it, and he types the number himself — offering
+          // a shaky reading of "fourteen fifty" as a tappable price is the exact failure
+          // mandate #6 names, and `parseMoney` reports its own confidence for this.
+          if (parsed.cents == null || parsed.confidence !== 'high') return null;
+          const cents = parsed.cents;
+          return {
+            words,
+            label: money(cents),
+            onUse: async () => {
+              const co = coRowsRef.current.find((c) => c.id === record.id);
+              await priceDraftExtra(db, {
+                changeOrderId: record.id,
+                amountCents: cents,
+                whoDirected: co?.who_directed || 'Owner',
+                numbersConfirmedAt: new Date(),
+              });
+              await refresh();
+              await openRecord(record.id);
+            },
+          };
+        })()}
+        onGenerate={() => {
+          const r = record;
+          if (!r) return;
+          const ids = [...r.voices.map((v) => v.captureId), ...r.photos.map((ph) => ph.captureId)];
+          // Nothing to push and nothing to watch: a text-only extra has no capture the
+          // poller could wait on, so the screen would sit at 0 of 0 forever. Say so
+          // instead of opening it.
+          if (!ids.length) { setFiled(T('draft.generateNothing')); return; }
+          const coId = r.id;
+          setRecord(null); setApproval(null); setRecordLc(null); setRecordTimeline([]);
+          setTransition({
+            ids, anchorCaptureId: r.voices[0]?.captureId ?? null, coId,
+            uploaded: false, transcribed: r.voices.length === 0, analyzed: false,
+            offline: false, stalled: false, uploadDone: 0, uploadTotal: ids.length,
+            lastError: null, blocked: false, isAugment: false, isGenerate: true,
+          });
+        }}
         // THE GATES ARE NOT RE-STATED HERE. The draft screen composes all three
         // (stage `canSend` · content `sendReadiness` · pipeline `canSendExtra`) and
         // disables its own button with the reason printed above it, so this handler
@@ -5088,31 +5270,49 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     }
   };
 
-  const extraRow = (e: Extra) => {
+  // ONE ROW = WHAT IT IS · WHERE · HOW MUCH · WHOSE COURT (hadar 2026-08-06:
+  // "simplify them"). The 64pt thumbnail is gone: on a list of extras it was a
+  // photo of a wall, repeated ten times, and it pushed the three facts that
+  // actually distinguish one row from another into a narrow column. Where a photo
+  // matters is the record itself, one tap away — which is what the chevron says.
+  // `i` is the index map() already passes; it only decides the hairline, so the
+  // first row of a group does not draw a rule against the container's own edge.
+  const extraRow = (e: Extra, i: number) => {
     const st = stateOf(e);
     const cp = chipStyle[st];
     // Only a DRAFT is the owner's alone to destroy (discard.ts): once an extra is
     // sent, a counterparty may have opened it and answered, and that is their
     // evidence too. A non-draft row simply does not move.
     const row = (
-      <Pressable key={e.id} style={s.exRow}
+      <Pressable key={e.id} style={[s.exRow, i > 0 && s.exRowRule]}
         onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
-        {e.photo_relpath
-          ? <Image source={{ uri: FS.documentDirectory + e.photo_relpath }}
-              style={s.exThumb} resizeMode="cover" />
-          : <View style={[s.exThumb, s.exThumbEmpty]}>
-              <Text style={{ fontSize: 22 }}>{stateColor[st].emoji}</Text>
-            </View>}
         <View style={{ flex: 1 }}>
-          <Text style={s.exName} numberOfLines={1}>{e.scope || T('home.draftsSec')}</Text>
-          {!!e.pname && <Text style={s.exSub} numberOfLines={1}>{e.pname}</Text>}
+          {/* Two lines, not one: a real scope ("Panel upgrade — code required")
+              is longer than one phone line, and truncating it hides the words
+              that tell the two panel extras apart. */}
+          <Text style={s.exName} numberOfLines={2}>{e.scope || T('home.draftsSec')}</Text>
+          {/* WHERE · WHEN, on one line. The date was missing entirely, so two extras
+              on the same job were told apart only by their price — and "which one did
+              I send last week" had no answer on this screen at all. Built by joining
+              what exists rather than nesting conditionals, so an extra with no job
+              still shows its date instead of dropping the whole line. */}
+          {(() => {
+            const meta = [e.pname, shortDate(e.created_at_ms)].filter(Boolean).join(' · ');
+            return meta ? <Text style={s.exSub} numberOfLines={1}>{meta}</Text> : null;
+          })()}
           {e.amount_cents != null && <Text style={s.exPrice}>{money(e.amount_cents)}</Text>}
         </View>
-        {st === 'draft'
-          ? <Text style={s.exDraft}>{T('home.finishSend')}</Text>
-          : <View style={[s.exChip, { borderColor: cp.border }]}>
-              <Text style={[s.exChipT, { color: cp.text }]}>{stateColor[st].label}</Text>
-            </View>}
+        {/* EVERY row ends the same way: a status, not an action (hadar 2026-08-06).
+            A draft used to carry a green "Finish & send →" button, which read as the
+            one thing on the row you were meant to press — while the row itself, the
+            chevron, and the button all did exactly the same thing. One tap target,
+            stated once. What a draft needs to say here is where it stands: not sent. */}
+        <View style={[s.exChip, { borderColor: cp.border }]}>
+          <Text style={[s.exChipT, { color: cp.text }]}>
+            {st === 'draft' ? T('home.notSent') : stateColor[st].label}
+          </Text>
+        </View>
+        <Text style={s.exChev}>›</Text>
       </Pressable>
     );
     return (
@@ -5347,7 +5547,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                       </Pressable>
                     )}
                   </View>
-                  {list.map(extraRow)}
+                  {/* ONE card per section, not one per row. Ten bordered cards on a
+                      cream page is ten edges, ten gutters and ten shadows competing
+                      with the content; a section is a single quiet surface with
+                      hairlines inside it (hadar 2026-08-06: "make the background
+                      cleaner"). */}
+                  <View style={s.exGroup}>{list.map(extraRow)}</View>
                 </React.Fragment>
               );
             };
@@ -7062,18 +7267,21 @@ const s = StyleSheet.create({
   secBadgeMuted: { backgroundColor: '#6B7280' },
   secBadgeOk: { backgroundColor: '#2DA44E' },
   secBadgeT: { color: '#fff', fontSize: 12, fontFamily: 'Barlow_700Bold' },
-  exDraft: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#157a47' },
-  // Mockup-parity extra row: thumbnail · scope + project + price · outlined chip.
-  exRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff',
-    borderColor: '#e2dbd4', borderWidth: 1, borderRadius: 14, paddingVertical: 12,
-    paddingHorizontal: 12, marginHorizontal: 16, marginBottom: 10 },
-  exThumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#f0ebe6' },
-  exThumbEmpty: { alignItems: 'center', justifyContent: 'center' },
-  exName: { fontFamily: 'Inter_600SemiBold', fontSize: 15.5, color: '#131110' },
-  exSub: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#6b625b', marginTop: 1 },
+  // Extra row: scope + job + price · outlined status pill · chevron. One section =
+  // one white surface (exGroup); rows divide with a hairline, not with their own
+  // borders. `overflow: hidden` is load-bearing — it clips the first and last row's
+  // square corners to the group's radius, and SwipeRow's reveal to the card.
+  exGroup: { backgroundColor: '#fff', borderColor: '#ece5de', borderWidth: 1,
+    borderRadius: 14, marginHorizontal: 16, marginBottom: 14, overflow: 'hidden' },
+  exRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff',
+    paddingVertical: 14, paddingHorizontal: 16 },
+  exRowRule: { borderTopWidth: 1, borderTopColor: '#f0ebe6' },  // ink-100 hairline
+  exName: { fontFamily: 'Inter_600SemiBold', fontSize: 15.5, lineHeight: 20, color: '#131110' },
+  exSub: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#6b625b', marginTop: 2 },
   exPrice: { fontFamily: 'Oswald_700Bold', fontSize: 18, color: '#131110', marginTop: 3, letterSpacing: -0.3 },
   exChip: { borderWidth: 1.5, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 12 },
   exChipT: { fontFamily: 'Inter_600SemiBold', fontSize: 12.5 },
+  exChev: { fontFamily: 'Inter_400Regular', fontSize: 22, color: '#c3bab2', marginLeft: 2 },
   tabBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     borderTopWidth: 1, borderTopColor: '#E9EAE7', backgroundColor: '#fff',
     paddingTop: 8, paddingBottom: 26, paddingHorizontal: 8 },
