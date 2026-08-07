@@ -425,13 +425,13 @@ export async function fileCapture(
  * 'inbox'` remain as the true record of what the device believed at capture time; the
  * human's decision lives in `capture_resolution`, exactly as the read path expects.
  */
-async function mintUploadForFiledCapture(
+export async function mintUploadForFiledCapture(
   db: AbstractPowerSyncDatabase, captureId: string, projectId: string
 ): Promise<void> {
   if (projectId === INBOX_ID) return;   // filing INTO the inbox changes nothing
 
   const c = (await db.getAll<any>(
-    `SELECT capture_id, attachment_id, owner_id, media_sha256, media_bytes,
+    `SELECT capture_id, attachment_id, owner_id, project_id, media_sha256, media_bytes,
             media_mime_type, modality, captured_at_ms,
             gps_lat, gps_lng, gps_accuracy_m, gps_fix_age_ms, stamp_status
        FROM capture_commit WHERE capture_id = ?`, [captureId]))[0];
@@ -446,6 +446,23 @@ async function mintUploadForFiledCapture(
     let queuedProject: string | null = null;
     try { queuedProject = JSON.parse(q.payload_json)?.project_id ?? null; } catch { /* corrupt */ }
     if (queuedProject !== INBOX_ID) return;
+  } else if (c.project_id !== INBOX_ID) {
+    // ALREADY DELIVERED — DO NOT RE-QUEUE (hadar 2026-08-07: "duplicate key value
+    // violates").
+    //
+    // No outbox row and a real project on the commit means exactly one thing:
+    // `drainOutbox` deleted the row after the server accepted it. Queueing a fresh
+    // mutation_id for a capture the server already holds sends a second INSERT for the
+    // same capture_id, which is a 23505 — and 23505 is in PERMANENT, so the capture
+    // PARKS. Re-filing an already-uploaded capture would take a delivered capture and
+    // make it look broken, which is the worst possible trade.
+    //
+    // The absence of a row means two different things depending on the commit's own
+    // project, and that is the distinction this branch draws: 'inbox' means it was
+    // HELD and never sent (queue it), anything else means it was SENT (leave it).
+    // Re-filing still records the human's decision — `capture_resolution` is written by
+    // the caller before this runs — it simply does not re-transmit the media.
+    return;
   }
 
   const mutationId = `mut-${captureId}-${Date.now().toString(36)}`;

@@ -217,7 +217,7 @@ export const db = new PowerSyncDatabase({
 // Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
 // graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
 // wrong" until this could be read back off the device. One string, no data exposed.
-(globalThis as any).__EZ_BUILD__ = 'v26-filing';
+(globalThis as any).__EZ_BUILD__ = 'v28-nodup';
 
 const connector = new SupabaseConnector();
 // The job the app is currently showing. Was a hardcoded constant -- every capture

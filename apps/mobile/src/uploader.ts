@@ -35,6 +35,7 @@ import { Buffer } from 'buffer';
 import * as Network from 'expo-network';
 import { getCellularConsent, uploadGate, type UploadGate } from './consent';
 import { INBOX_ID } from './captureddl.ts';
+import { mintUploadForFiledCapture } from './projects';
 
 const BUCKET = 'captures';
 
@@ -130,6 +131,35 @@ export async function drainOutbox(
     // attempt might work, and this one cannot. `fileCapture()` replaces the row with a
     // real destination the moment a human picks one.
     if (payload.project_id === INBOX_ID) {
+      // SELF-HEAL BEFORE PARKING (hadar 2026-08-07, twice). A human may already have
+      // filed this capture — `fileCapture` writes `capture_resolution` and mints a
+      // fresh outbox row — but any queue entry still carrying the Inbox sentinel would
+      // sit here parked forever, and the capture screen would report a hold that is no
+      // longer true. The resolution IS the human's answer; if it exists, use it rather
+      // than making him answer again.
+      //
+      // Only the destination changes. `capture_commit` is untouched — its original
+      // payload and digest stay the true record of what the device believed at capture
+      // time — and the mutation_id is left alone because this row was never accepted by
+      // the server (the FK refused it before any insert took effect), so there is no
+      // prior success to conflict with.
+      const filed = (await db.getAll<{ project_id: string }>(
+        `SELECT project_id FROM capture_resolution WHERE capture_id = ?`,
+        [payload.capture_id]))[0];
+      if (filed?.project_id && filed.project_id !== INBOX_ID) {
+        // REUSE THE MINT, do not hand-rewrite the row. I wrote the rewrite inline
+        // first and it was wrong in the one way that matters here: it changed the
+        // payload while keeping the mutation_id AND the stored digest, and the server
+        // keys idempotency on (mutation_id, digest) — a changed payload under a reused
+        // id is precisely the conflicting replay it refuses with 23505.
+        // `mintUploadForFiledCapture` already handles this exact case (its case 2,
+        // "STUCK — queued with project_id 'inbox' baked into the payload"), mints a
+        // fresh id and digest, and leaves capture_commit untouched. One implementation
+        // of a durability rule, not two.
+        await mintUploadForFiledCapture(db, payload.capture_id, filed.project_id);
+        r.retryable++;
+        continue;   // the next pass sends it to the job he picked
+      }
       await park(db, row, 'AWAITING_FILING',
         'held: this capture has no job yet — file it and it will upload');
       r.parked++;
