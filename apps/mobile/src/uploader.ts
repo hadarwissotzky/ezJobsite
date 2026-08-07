@@ -77,7 +77,23 @@ export function objectKey(ownerId: string, captureId: string, sha256: string, ex
 export async function drainOutbox(
   db: AbstractPowerSyncDatabase,
   supabase: SupabaseClient,
-  ownerId: string
+  ownerId: string,
+  /**
+   * Captures a human is WATCHING right now — they go first.
+   *
+   * WHY (hadar 2026-08-07: "3 of 7 backed up ... it feels like uploading takes a very
+   * long time per file"). It did not. Each pass takes ten rows in `queued_at_ms` order,
+   * oldest first, and the queue held photos from 25 and 27 July that had never gone up.
+   * A capture recorded thirty seconds ago therefore waited behind an eleven-day backlog
+   * it could not see, while the screen it was on counted to ninety and reported a stall.
+   *
+   * Oldest-first is right for the BACKGROUND drain — it is the fairest order when
+   * nobody is waiting. It is wrong for the drain the capture screen kicks, where the
+   * only rows that matter are the ones being watched. Same function, same rules, one
+   * ordering hint: `redriveNow` already clears their backoff, and this makes sure the
+   * slots go to them.
+   */
+  preferIds?: readonly string[]
 ): Promise<DrainResult> {
   const r: DrainResult = { attempted: 0, uploaded: 0, alreadyApplied: 0, parked: 0, retryable: 0,
                            blocked: null };
@@ -103,13 +119,16 @@ export async function drainOutbox(
     return r;
   }
 
+  const prefer = (preferIds ?? []).filter(Boolean);
+  const marks = prefer.map(() => '?').join(',');
   const rows = await db.getAll<OutboxRow>(
     `SELECT mutation_id, capture_id, payload_json, payload_sha256, attempt_count
        FROM capture_outbox
       WHERE next_attempt_at_ms <= ?
-      ORDER BY queued_at_ms
+      ORDER BY ${prefer.length ? `CASE WHEN capture_id IN (${marks}) THEN 0 ELSE 1 END, ` : ''}
+               queued_at_ms
       LIMIT 10`,
-    [now]
+    [now, ...prefer]
   );
 
   for (const row of rows) {
@@ -436,6 +455,54 @@ export async function captureDelivery(
     } catch { /* can't tell → say nothing rather than invent a reason */ }
   }
   return { total: captureIds.length, pending: queued, parked, lastError: r.err ?? null, gate };
+}
+
+/**
+ * Clear parks that the SERVER has already made moot — and only after asking it.
+ *
+ * WHY (hadar 2026-08-07: "it keeps showing up"). A 23505 on this path means one thing:
+ * the server already holds this capture_id, so the upload it was retrying has in fact
+ * happened. But 23505 is in PERMANENT, so the row parks — and a parked row never
+ * clears itself. The contractor is then shown a permanent failure about a capture that
+ * is safely in the cloud, on every screen that reads outbox errors, forever.
+ *
+ * IT VERIFIES RATHER THAN ASSUMES, and that distinction is the whole reason this is
+ * allowed to delete anything. Rule 3 of this file says the intent survives until the
+ * server confirms; here we ASK the server whether the capture exists, and only a `yes`
+ * removes the row. A network failure, an ambiguous answer, or a capture the server does
+ * not have leaves the park exactly as it was. Deleting on a guess would be the one
+ * unforgivable thing in this file.
+ *
+ * Rule 1 is what makes the delete safe once confirmed: `capture_outbox` is TRANSPORT
+ * state, `capture_commit` is the record, and removing a transport row destroys no
+ * evidence. The row is not lost — it is finished.
+ */
+export async function reconcileDuplicateParks(
+  db: AbstractPowerSyncDatabase, supabase: SupabaseClient
+): Promise<{ checked: number; cleared: number }> {
+  // ANY row whose capture the server already holds — not only the ones that parked on
+  // 23505. A backlog of old captures that were in fact delivered keeps re-attempting,
+  // burns every drain slot ahead of what a human is waiting for, and re-reports itself
+  // as failure. Bounded per pass so this stays a background tidy, never a batch job.
+  const parked = await db.getAll<{ mutation_id: string; capture_id: string }>(
+    `SELECT mutation_id, capture_id FROM capture_outbox
+      ORDER BY queued_at_ms LIMIT 50`);
+  if (!parked.length) return { checked: 0, cleared: 0 };
+
+  const ids = [...new Set(parked.map((p) => p.capture_id))];
+  const { data, error } = await supabase.from('capture').select('id').in('id', ids);
+  // Offline, or refused: say nothing and change nothing. The park is the safe state.
+  if (error || !data) return { checked: ids.length, cleared: 0 };
+
+  const onServer = new Set(data.map((r: { id: string }) => r.id));
+  let cleared = 0;
+  for (const p of parked) {
+    if (!onServer.has(p.capture_id)) continue;
+    const r = await db.execute(
+      `DELETE FROM capture_outbox WHERE mutation_id = ?`, [p.mutation_id]);
+    cleared += r.rowsAffected ?? 0;
+  }
+  return { checked: ids.length, cleared };
 }
 
 /** Delivery status for the UI. Never conflate with "saved". */

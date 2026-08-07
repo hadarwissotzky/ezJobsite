@@ -169,8 +169,8 @@ import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
          setTermsAccepted } from './src/consent';
 import { buildDisputeBundle, buildProgressUpdate, shareBundle, shareLink,
          shareProgressUpdate } from './src/bundle';
-import { captureDelivery, drainOutbox, outboxStatus, redriveNow, redriveParkedCaptures,
-         type CaptureDelivery } from './src/uploader';
+import { captureDelivery, drainOutbox, outboxStatus, reconcileDuplicateParks, redriveNow,
+         redriveParkedCaptures, type CaptureDelivery } from './src/uploader';
 import * as Network from 'expo-network';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, linkCaptureToDecision, recordDecision, type DecisionRow } from './src/decisions';
@@ -217,7 +217,7 @@ export const db = new PowerSyncDatabase({
 // Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
 // graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
 // wrong" until this could be read back off the device. One string, no data exposed.
-(globalThis as any).__EZ_BUILD__ = 'v28-nodup';
+(globalThis as any).__EZ_BUILD__ = 'v30-priority';
 
 const connector = new SupabaseConnector();
 // The job the app is currently showing. Was a hardcoded constant -- every capture
@@ -1692,7 +1692,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // 2+ minutes out, and this screen only lives for 90 seconds — without this
           // the retry it is about to run cannot even see the capture it is waiting on.
           await redriveNow(db, transition.ids);
-          const r = await drainOutbox(db, connector.client, uid);
+          // THESE captures first: the background drain is fair, this one is urgent.
+          const r = await drainOutbox(db, connector.client, uid, transition.ids);
           if (r.blocked) blockedSeen = true;
         }
       } catch { /* the capture is safe locally; a failed push just retries */ }
@@ -2514,6 +2515,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       //    2026-07-25 — nothing had uploaded since the project queue wedged).
       const rdc = await redriveParkedCaptures(db, ['23503']);
       if (rdc) console.log('redrive captures:', rdc);
+      //  - captures parked on 23505 are asked about rather than assumed: a duplicate
+      //    key on this path means the SERVER ALREADY HAS the capture, so the retry it
+      //    was holding is finished, not lost. `reconcileDuplicateParks` confirms
+      //    presence with the server before removing anything, and leaves the park
+      //    untouched when offline or unsure. Without it a delivered capture reports a
+      //    permanent failure on every screen that reads outbox errors, forever
+      //    (hadar 2026-08-07: "it keeps showing up").
+      try {
+        const dup = await reconcileDuplicateParks(db, connector.client);
+        if (dup.cleared) console.log('cleared duplicate parks:', JSON.stringify(dup));
+      } catch { /* offline: the park is the safe state, leave it */ }
       await db.execute(
         `DELETE FROM capture_outbox WHERE capture_id IN
            (SELECT capture_id FROM capture_discarded)`);
