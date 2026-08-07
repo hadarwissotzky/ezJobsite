@@ -72,8 +72,22 @@
    * @param d      confirmation_fetch payload (frozen: shown_content, company, job…)
    * @param terms  ewa_terms_fetch payload (proceed term, rate, cap, window)
    * @param h      helpers from confirm.html: esc, usd, screen, initials, answer,
-   *               askQuestion, declineFlow. Passed in rather than re-implemented so
-   *               there is ONE money formatter and ONE answer path on this page.
+   *               askQuestion, declineFlow, photoStrip, threadHtml, notice. Passed in
+   *               rather than re-implemented so there is ONE money formatter, ONE
+   *               answer path and ONE thread renderer on this page.
+   *
+   * PHOTOS AND THE DISCUSSION ARRIVE THROUGH `h`, and both were missing (DEF-5).
+   * confirm.html returned at the `kind === 'ewa'` dispatch before it fetched the
+   * thread, and this file never rendered the photo strip, so an EWA — the ONE
+   * instrument whose entire content is a photographed condition, since it carries no
+   * price — was the only document on this page with neither its evidence nor its
+   * conversation. An owner could be asked to authorize work on a condition they were
+   * never shown, and could ask a question they would then never see answered.
+   *
+   * They are rendered by the SAME functions the priced page uses, passed in rather
+   * than copied, for the reason this file's header already gives about the clause
+   * text: a second renderer is a second thing to keep in step, and this page has one
+   * documented duplication too many already.
    */
   function renderEwa(d, terms, h) {
     var c = clauses(terms || {}, h.usd);
@@ -102,12 +116,24 @@
       // a fixed price, which is the one thing this instrument must never look like.
       : h.esc(h.usd(terms.cap_cents)) + '<span class="pvq">max</span>';
 
+    // The helpers are OPTIONAL at the call boundary and each has a no-op fallback.
+    // confirm.html and this file are two separately uploaded static objects, and
+    // DEF-6 is the standing proof they can be out of step on the host: a deploy that
+    // shipped a new ewa.js against an older confirm.html must degrade to the page it
+    // used to draw, never throw on `h.threadHtml is not a function` and leave a
+    // homeowner on a blank screen holding an authorization.
+    var photos = typeof h.photoStrip === 'function' ? h.photoStrip(d.photos) : '';
+    var thread = typeof h.threadHtml === 'function' ? h.threadHtml(d) : '';
+    var notice = (h.notice && typeof h.esc === 'function')
+      ? '<div class="wrap"><div class="notice">' + h.esc(h.notice) + '</div></div>' : '';
+
     h.screen(
       '<div class="brand">' +
         '<div class="logo">' + h.esc(h.initials(company)) + '</div>' +
         '<div><div class="cn">' + h.esc(company) + '</div>' +
         '<div class="cs">' + h.esc(d.job_label || '') + '</div></div>' +
       '</div>' +
+      notice +
       '<div class="wrap">' +
         '<div class="card">' +
           // AC2's labelling. The words "change order" appear nowhere on this page.
@@ -127,6 +153,12 @@
           '<details class="exact"><summary>See the exact wording</summary>' +
             '<div class="doc">' + h.esc(d.shown_content) + '</div></details>' +
         '</div>' +
+
+        // The condition being authorized, then the conversation about it — both above
+        // the signature, in the same order the priced page uses. A photo shown under
+        // the Approve button is a photo seen after the decision.
+        photos +
+        thread +
 
         '<input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">' +
         '<button class="approve" id="approve" disabled>✓ Approve this authorization</button>' +

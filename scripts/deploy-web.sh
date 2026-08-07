@@ -28,24 +28,54 @@ TOKEN=$(curl -s -X POST "${URL}/auth/v1/token?grant_type=password" \
   | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))")
 [ -n "$TOKEN" ] || { echo "could not sign in as ${EMAIL}"; exit 1; }
 
-OUT="$(mktemp -d)/confirm.html"
+TMP="$(mktemp -d)"
+OUT="${TMP}/confirm.html"
 sed -e "s|__SUPABASE_URL__|${URL}|g" -e "s|__ANON_KEY__|${ANON}|g" \
   apps/web/confirm.html > "$OUT"
+# ewa.js needs no substitution -- it holds no keys and reaches no network. Copied
+# rather than uploaded from the repo path only so both objects go up the same way.
+cp apps/web/ewa.js "${TMP}/ewa.js"
 
-# Upload with the service role: only the owner deploys the page. x-upsert so a
-# redeploy replaces it rather than failing.
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
-  "${URL}/storage/v1/object/public-web/confirm.html" \
-  -H "apikey: ${ANON}" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: text/html; charset=utf-8" \
-  -H "cache-control: max-age=300" \
-  -H "x-upsert: true" \
-  --data-binary "@${OUT}")
-rm -rf "$(dirname "$OUT")"
+# Upload as the signed-in owner. x-upsert so a redeploy replaces rather than fails.
+upload() {   # $1 = filename, $2 = content type
+  curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "${URL}/storage/v1/object/public-web/$1" \
+    -H "apikey: ${ANON}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: $2" \
+    -H "cache-control: max-age=300" \
+    -H "x-upsert: true" \
+    --data-binary "@${TMP}/$1"
+}
 
-if [ "$code" = "200" ]; then
-  echo "deployed: ${URL}/storage/v1/object/public/public-web/confirm.html"
-else
-  echo "deploy failed: HTTP ${code}"; exit 1
-fi
+# ── BOTH FILES, ALWAYS. DEF-6, THE HALF OF IT THAT WAS STILL OPEN. ──────────
+# This script uploaded confirm.html alone. ewa.js is loaded by confirm.html with a
+# plain <script src="ewa.js">, so on a host where it was never uploaded EVERY Extra
+# Work Authorization link failed closed at confirm.html's `typeof window.renderEwa
+# !== 'function'` check -- "This authorization could not load". Failing closed is
+# CORRECT and must stay: a page that cannot render the proceed term must never render
+# a signable document. The defect was that nothing put the file where the page looks.
+#
+# STATED PRECISELY, so this is not read as a bigger fix than it is: the LIVE deploy is
+# `.github/workflows/deploy-confirm-page.yml` (GitHub Pages), and that workflow has
+# copied ewa.js since it was written -- Supabase Storage refuses to serve HTML, which
+# is why Pages exists at all. So the production path was never broken. THIS script is
+# the second, hand-run path to the `public-web` bucket, and it was still shipping a
+# page whose EWA renderer could not be there. Two deploy paths that disagree about
+# what a deploy contains is the same one-object-two-owners problem the SQL checker
+# exists for; they now agree.
+#
+# ewa.js goes FIRST, deliberately. If the second upload fails, the host is left
+# holding an older confirm.html alongside a newer ewa.js -- and ewa.js's helper
+# fallbacks are written for exactly that pairing. The reverse order would leave a new
+# confirm.html calling into an ewa.js that predates the helpers it passes.
+ok=1
+code_js=$(upload ewa.js "application/javascript; charset=utf-8")
+[ "$code_js" = "200" ] || { echo "deploy failed (ewa.js): HTTP ${code_js}"; ok=0; }
+code=$(upload confirm.html "text/html; charset=utf-8")
+[ "$code" = "200" ] || { echo "deploy failed (confirm.html): HTTP ${code}"; ok=0; }
+rm -rf "${TMP}"
+
+[ "$ok" = "1" ] || exit 1
+echo "deployed: ${URL}/storage/v1/object/public/public-web/confirm.html"
+echo "deployed: ${URL}/storage/v1/object/public/public-web/ewa.js"

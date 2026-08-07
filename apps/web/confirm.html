@@ -132,6 +132,18 @@
   .decline { background: none; color: var(--danger); border: 1.5px solid #E4C4C4; }
   .recordnote { font-size: 12px; color: var(--steel); text-align: center; margin-top: 12px; line-height: 1.5; }
 
+  /* The "your question was sent" acknowledgement, at the top of the redrawn document.
+     It replaces a full-screen terminal confirmation, so it has to carry the same
+     weight without taking the page: a green rule and a filled background, above the
+     fold, where the eye lands after a screen transition. Not a toast — a toast that
+     fades is exactly the wrong shape for a client who looks up from the page and back
+     down again ten seconds later. */
+  .notice {
+    background: #E8F5EE; border: 1px solid #BFE3CE; border-left: 4px solid var(--approve);
+    border-radius: 12px; padding: 12px 14px; margin: 12px 0 0;
+    font-size: 15px; line-height: 1.45; color: #14432B;
+  }
+
   textarea { width: 100%; font-family: var(--body); font-size: 16px; padding: 12px; border-radius: 12px; border: 1.5px solid var(--line); background: #fff; color: var(--ink); margin: 10px 0; min-height: 88px; resize: none; }
 
   /* Legacy plain-confirm fallback (no price). */
@@ -174,6 +186,13 @@ const root = document.getElementById('root');
 // choice of host never silently breaks every link.
 const token = new URLSearchParams(location.search).get('t')
   || (location.pathname.match(/\/c\/([^/?#]+)/) || [])[1] || null;
+
+// The EWA's structured terms, held at module scope so a redraw (Back, or the return
+// from the question screen) does not need to re-fetch them and cannot redraw the
+// authorization without them. `renderEwa` fails closed on null, which is the correct
+// outcome if they were never fetched — an authorization missing its proceed term must
+// not be signable.
+let ewaTerms = null;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -263,11 +282,65 @@ async function load() {
   // never delay or block what the client came here to do. The RPC no-ops on an
   // unknown token rather than erroring, so a bad link still shows "not valid"
   // instead of a network failure.
-  supabase.rpc('confirmation_opened', { p_token: token, p_user_agent: navigator.userAgent })
-    .catch(() => { /* 366 not applied yet, or offline. The page is unaffected. */ });
+  //
+  // ── `Promise.resolve(...)` IS LOAD-BEARING. IT IS THE FIX FOR A TOTAL OUTAGE ──
+  // This line read `supabase.rpc(...).catch(...)`. What `rpc()` returns is a
+  // PostgrestFilterBuilder — a THENABLE, not a Promise. It has `.then()`; it does not
+  // have `.catch()`. So the line threw `supabase.rpc(...).catch is not a function`
+  // SYNCHRONOUSLY, inside `load()`, which is called at the bottom of this module with
+  // no error handling — and an async function that throws returns a rejected promise
+  // nobody is listening to.
+  //
+  // The consequence: EVERY approval link, of every kind, stopped at "Loading…" and
+  // never rendered anything. No error on screen, nothing in the console (an unhandled
+  // rejection is not a console error), and the three RPCs above visibly succeeded in
+  // the network tab — so the page looked like a slow server rather than a dead one.
+  // Reproduced against the live database and the token in `confirmation_request` on
+  // 2026-08-06, on the page as committed, before any change in this pass.
+  //
+  // The version drift that caused it is the second half of the lesson, recorded
+  // because the fix does not remove it: this page imports
+  // `https://esm.sh/@supabase/supabase-js@2` — an UNPINNED major range, resolved at
+  // page load, off a CDN. The builder used to extend Promise; it no longer does. So a
+  // patch release on someone else's server disabled the entire client-facing half of
+  // this product with no deploy, no commit and no signal. See docs/CLIENT-PORTAL.md
+  // §"Open questions" — pinning is a decision, not a cleanup.
+  //
+  // `Promise.resolve(thenable)` adopts it and gives back a real Promise, so this is
+  // correct against both the old shape and the new one.
+  Promise.resolve(
+    supabase.rpc('confirmation_opened', { p_token: token, p_user_agent: navigator.userAgent })
+  ).catch(() => { /* 366 not applied yet, or offline. The page is unaffected. */ });
 
   if (data.status === 'not_found') { done('⚠️', 'This link is not valid', 'It may have been mistyped. Ask for a new one.'); return; }
   if (data.status === 'expired') { done('⏰', 'This link has expired', 'Ask for a new one — nothing is lost.'); return; }
+
+  // Photos are OPTIONAL and their absence is never an error. On a database where
+  // 304_approval_photos.sql has not been applied the RPC does not exist and `ph.error`
+  // is set — the approval must still render and still be signable. An extra with no
+  // photos is a legal extra (PRD R4 says "0-8"), so the two cases collapse to the
+  // same empty list rather than to a failure screen.
+  data.photos = (ph && ph.data && Array.isArray(ph.data.photos)) ? ph.data.photos : [];
+
+  // THE CONVERSATION IS FETCHED BEFORE ANY BRANCH (DEF-5).
+  //
+  // It used to be fetched between the EWA dispatch and the priced render, which meant
+  // exactly two of the three documents this page can draw ever had a thread:
+  //   * an EWA returned at the `kind === 'ewa'` dispatch, above the fetch, so an owner
+  //     holding an authorization link could not see a single message either side had
+  //     written about it;
+  //   * an ANSWERED link returned even earlier, so the moment a client signed, the
+  //     discussion that led to the signature disappeared from the only copy they have.
+  // Both are REQ-LC33 — "Stage 3 is readable forever, BY BOTH PARTIES, at the same
+  // address" — and the party with the least access and the most at stake is the one
+  // who signed. So the fetch is hoisted above every branch that renders a document,
+  // and each of them renders it.
+  //
+  // confirmation_thread (308) supersedes confirmation_questions (220): it returns the
+  // contractor's replies too and walks the revision lineage, so a conversation
+  // survives a Revise & Resend instead of restarting at the new link.
+  await loadThread(data);
+
   if (data.status === 'already_answered') {
     // R6 AC2, the CLIENT's half. This used to be a bare "done" screen: an emoji, a
     // line of text, and nothing else. The client had just typed their name onto a
@@ -297,15 +370,17 @@ async function load() {
           <p class="recordnote">This is the exact wording, kept as it was when you
             answered. It does not change.</p>
         </div>
+        ${/* The photos and the discussion are PART of what was signed, so they stay
+              at this address too. REQ-LC43 puts the photos inside the instrument by a
+              different mechanism (media is immutable and bound to the request), and
+              R5b AC3 makes the discussion part of the record. Dropping either the
+              moment somebody signs would leave the signer holding less evidence than
+              the party they signed with. */''}
+        ${photoStrip(data.photos)}
+        ${threadHtml(data)}
       </div>`);
     return;
   }
-  // Photos are OPTIONAL and their absence is never an error. On a database where
-  // 304_approval_photos.sql has not been applied the RPC does not exist and `ph.error`
-  // is set — the approval must still render and still be signable. An extra with no
-  // photos is a legal extra (PRD R4 says "0-8"), so the two cases collapse to the
-  // same empty list rather than to a failure screen.
-  data.photos = (ph && ph.data && Array.isArray(ph.data.photos)) ? ph.data.photos : [];
 
   // R3 AC2: an EWA is a DIFFERENT INSTRUMENT and gets a different page. Dispatch on
   // `kind`, which confirmation_fetch already returns, NOT on the absence of a price:
@@ -313,6 +388,55 @@ async function load() {
   // authorization as one of those would drop the proceed term and the settlement
   // window — the two clauses that decide whether work starts today.
   if (data.kind === 'ewa') {
+    // Terms live in their own table (303) and are frozen alongside shown_content.
+    // A fetch failure leaves them null, and renderEwa refuses to render an incomplete
+    // authorization rather than showing a signable page with clauses missing.
+    try {
+      const { data: t } = await supabase.rpc('ewa_terms_fetch', { p_token: token });
+      ewaTerms = t ?? null;
+    } catch { ewaTerms = null; }
+  }
+
+  renderDocument(data);
+  watchForReplies(data);
+}
+
+/**
+ * Fetch the conversation onto `d.__thread`.
+ *
+ * Separated from `load()` so the same call serves three moments: the first render,
+ * the return trip after the client asks something, and the poll that notices the
+ * contractor answered. One fetch, one shape, no second parser.
+ *
+ * A failure leaves the PREVIOUS thread in place rather than blanking it. Losing
+ * signal mid-poll must never make a client's own question disappear off the page
+ * they are looking at — that reads as "it did not send".
+ */
+async function loadThread(d) {
+  try {
+    const { data: th } = await supabase.rpc('confirmation_thread', { p_token: token });
+    if (Array.isArray(th)) d.__thread = th;
+    else if (!Array.isArray(d.__thread)) d.__thread = [];
+  } catch { if (!Array.isArray(d.__thread)) d.__thread = []; }
+  return d.__thread;
+}
+
+/**
+ * Draw whichever document this token carries.
+ *
+ * ONE dispatch, called from three places — the first load, the return from the
+ * question screen, and the Back buttons — because there used to be three copies of
+ * `d.amount_cents != null ? renderPriced : renderPlain` and none of them knew about
+ * the EWA branch, which lived only inside `load()`. An EWA that reached a Back button
+ * was therefore redrawn as a priced approval with no price: the proceed term and the
+ * settlement window silently gone from a page still offering a signature.
+ *
+ * `notice` is a one-line banner ("Your question was sent"), rendered by the document
+ * renderers above the thread. It is a parameter and not state, so it appears once and
+ * does not survive a reload — a stale "sent ✓" is a claim about the past.
+ */
+function renderDocument(d, notice) {
+  if (d.kind === 'ewa') {
     if (typeof window.renderEwa !== 'function') {
       // ewa.js failed to load. Refuse rather than fall through to a renderer that
       // would silently omit the terms this document turns on.
@@ -320,31 +444,60 @@ async function load() {
         'Please open the link again. Nothing here was recorded.');
       return;
     }
-    // Terms live in their own table (303) and are frozen alongside shown_content.
-    // A fetch failure passes null, and renderEwa refuses to render an incomplete
-    // authorization rather than showing a signable page with clauses missing.
-    let terms = null;
-    try {
-      const { data: t } = await supabase.rpc('ewa_terms_fetch', { p_token: token });
-      terms = t ?? null;
-    } catch { terms = null; }
-    window.renderEwa(data, terms, { screen, done, esc, usd, initials, answer,
-                                    askQuestion, declineFlow });
+    window.renderEwa(d, ewaTerms, { screen, done, esc, usd, initials, answer,
+                                    askQuestion, declineFlow, photoStrip, threadHtml,
+                                    notice: notice || null });
     return;
   }
-  // R5b: the conversation so far, BOTH SIDES. Without this the loop is one-way — a
-  // contractor could reply and the client would never see it, which is the exact
-  // mirror of the bug where a client's question was invisible to the contractor.
-  // confirmation_thread (308) supersedes confirmation_questions (220): it returns
-  // the contractor's replies too and walks the revision lineage, so a conversation
-  // survives a Revise & Resend instead of restarting at the new link.
-  try {
-    const { data: th } = await supabase.rpc('confirmation_thread', { p_token: token });
-    data.__thread = Array.isArray(th) ? th : [];
-  } catch { data.__thread = []; }
-
   // A price present means this is a priced approval; otherwise the legacy confirm.
-  (data.amount_cents != null) ? renderPriced(data) : renderPlain(data);
+  (d.amount_cents != null) ? renderPriced(d, notice) : renderPlain(d, notice);
+}
+
+/**
+ * NOTICE WHEN THE CONTRACTOR ANSWERS, without asking the client to do anything.
+ *
+ * The gap this closes: the client asks "does that include the permit?", the
+ * contractor replies from his phone, and the client — who has no account, no app and
+ * no notification — sits on a page that will never change. The only way they learned
+ * a reply existed was to go back into their messages and tap the link again, which is
+ * precisely the "would someone who does not think in software succeed here" test in
+ * CLAUDE.md. Most people simply wait, and the contractor reads that as being ignored.
+ *
+ * Two triggers, and the first is the one that matters:
+ *   * `visibilitychange` — the phone was locked, or they switched to Messages to text
+ *     the contractor, and came back. That is when a reply has most likely landed.
+ *   * a slow poll while the page is genuinely on screen.
+ *
+ * ONLY THE THREAD CARD IS REPLACED, never the page. A re-render would wipe a
+ * half-typed signature out of the name field under the client's thumb, and this page
+ * exists to collect exactly that signature. `#thread` is the seam.
+ *
+ * It stops the moment the document is answered: a terminal record does not change,
+ * and polling it forever is battery spent on a question already settled.
+ */
+const REPLY_POLL_MS = 25000;
+function watchForReplies(d) {
+  let stopped = false;
+  const stop = () => { stopped = true; };
+  // Re-read after any answer this page itself records. `answer()` and the decline
+  // path both replace the whole screen, so the poller would be updating an element
+  // that no longer exists.
+  window.addEventListener('ezjb:answered', stop);
+
+  const tick = async () => {
+    if (stopped || document.visibilityState !== 'visible') return;
+    const before = (d.__thread || []).length;
+    await loadThread(d);
+    const host = document.getElementById('thread');
+    if (!host || (d.__thread || []).length === before) return;
+    // Replace the card in place and say so. Without the cue a reply can appear
+    // above the fold while the client is reading the price and never be noticed.
+    host.outerHTML = threadHtml(d, true);
+  };
+
+  document.addEventListener('visibilitychange', () => { void tick(); });
+  const timer = setInterval(() => { if (stopped) clearInterval(timer); else void tick(); },
+                            REPLY_POLL_MS);
 }
 
 // PRD R4 — the photo strip.
@@ -389,21 +542,71 @@ function photoStrip(photos) {
  * thing most likely to change the answer they give, and putting it under the
  * Approve button means they decide before they read it.
  *
- * Renders nothing when the thread is empty — a "Discussion" heading with no
- * messages under it reads like something failed to load.
+ * ALWAYS RENDERS THE CARD, even when the thread is empty. It used to return '' on an
+ * empty thread, on the reasoning that a heading with nothing under it looks broken —
+ * true of a heading, and wrong of a seam. `watchForReplies` replaces `#thread` in
+ * place when a reply lands, and with no element on the page there was nothing to
+ * replace: the first reply to a client who had not yet asked anything could never
+ * appear. The empty state now says what is true ("no messages yet") and, more
+ * usefully, says what asking does — which is the affordance a homeowner who wants to
+ * negotiate is looking for and could previously only find by reading a button label.
+ *
+ * `highlight` marks a card redrawn by the poller, so a reply that lands above the
+ * fold while the client is reading the price is not silently absorbed into the page.
  */
-function threadHtml(d) {
+function threadHtml(d, highlight) {
   const t = d.__thread || [];
-  if (!t.length) return '';
-  return `<div class="card">
-    <div class="kicker">Discussion</div>
-    ${t.map((m) => `<div class="clause" style="margin-top:10px">
-        <b>${m.side === 'client' ? 'You asked' : esc(d.company_name || 'The contractor')}</b>
-        · ${esc(m.at ? new Date(m.at).toLocaleString() : '')}
-        <div style="margin-top:3px;color:#26292e">${esc(m.body)}</div>
-      </div>`).join('')}
-    <p class="recordnote" style="margin-top:12px">This discussion is part of the
-      project record.</p>
+  const waitingOnThem = t.length && t[t.length - 1].side === 'client';
+  const msgs = t.map((m) => `<div class="clause" style="margin-top:10px">
+      <b>${m.side === 'client' ? 'You asked' : esc(d.company_name || 'The contractor')}</b>
+      · ${esc(m.at ? new Date(m.at).toLocaleString() : '')}
+      <div style="margin-top:3px;color:#26292e">${esc(m.body)}</div>
+    </div>`).join('');
+
+  // WHAT HAPPENS NEXT, in the reader's terms, not the system's.
+  //
+  // The rule underneath this sentence is mandate #2 and R5b's standing prohibition:
+  // "price changes resolve only through revision + fresh approval — never through
+  // thread agreement". A contractor typing "ok, $1,500" in this thread has changed
+  // nothing, and neither has a client typing "I'll pay $1,500". If the page does not
+  // say so, a homeowner who negotiates a number in the discussion reasonably believes
+  // they have agreed a price, and the next thing they see is a bill for the old one.
+  // So the page states the mechanism instead of leaving it to be discovered: a new
+  // number arrives as a new link to approve.
+  // ANSWERED IS A DIFFERENT CARD. REQ-LC23 closes the thread on the answer, and the
+  // server has enforced it since 308 — a reply written afterwards is rejected. So the
+  // answered card must not invite one. Telling a client "ask something else" on a
+  // page where the server would refuse it is the silent-delivery-failure shape this
+  // repo already found once on the contractor's side (DEF-4); it is not repeated here.
+  const closed = d.status === 'already_answered';
+  const nextStep = closed
+    ? (t.length
+        ? `This is the discussion as it stood when you answered. It is kept with the
+           record and does not change.`
+        : '')
+    : !t.length
+    ? `Nothing here yet. If something is unclear — the price, what is included, the
+       timing — ask below. Asking approves nothing.`
+    : waitingOnThem
+    ? `${esc(d.company_name || 'The contractor')} has your message. You can still
+       approve or decline at any time, or ask something else.`
+    : `You can reply with another question, or approve or decline above.`;
+
+  // Nothing at all on an answered document that was never discussed: an empty
+  // "Discussion" card under a signature is a heading with no content, which is the
+  // one case the original `return ''` was right about.
+  if (closed && !t.length) return '';
+
+  return `<div class="card" id="thread"${highlight ? ' style="border-color:var(--orange)"' : ''}>
+    <div class="kicker">${highlight ? 'New reply' : 'Discussion'}</div>
+    ${msgs}
+    ${nextStep ? `<p class="clause" style="margin-top:${t.length ? '12' : '6'}px">${nextStep}</p>` : ''}
+    ${closed ? '' : `<p class="recordnote" style="margin-top:10px;text-align:left">If the
+      price or the work needs to change, they send you a new version to approve.
+      Agreeing to a number in this discussion does not change what you are signing
+      above.</p>`}
+    <p class="recordnote" style="margin-top:6px;text-align:left">This discussion is
+      part of the project record.</p>
   </div>`;
 }
 
@@ -425,15 +628,48 @@ function threadHtml(d) {
  *
  * Returns null for anything sent before the sections existed, and every caller falls
  * back to the previous layout rather than showing an empty heading.
+ *
+ * ── THE ESCAPE BUG THIS FUNCTION SHIPPED WITH, recorded because the failure was
+ *    SILENT and the fallback hid it ──────────────────────────────────────────────
+ * The character class was written `'[\s\S]'` inside an ordinary JavaScript string.
+ * `\s` is not a recognised string escape, so the literal collapses to the two
+ * characters `s` and `S` and the regex compiled as `([sS]*?)` — a class matching only
+ * the letter s. It therefore matched NOTHING for every real document, `docSection`
+ * returned null on both calls, and `renderPriced`'s two fallbacks quietly took over:
+ * no SCOPE OF WORK block and no TERMS block on the page.
+ *
+ * The effect was the exact defect this function was written on 2026-08-05 to fix
+ * (hadar: "the recipient needs to be clear and upfront with the SOW … but first the
+ * SOW"). A client could approve a priced change order having seen a title, a number,
+ * and nothing about what is excluded, when payment is due, or what it does to the
+ * schedule — all of which were sitting inside the collapsed raw wording, which is
+ * where they were before the fix. Nothing threw, nothing logged, and the page looked
+ * deliberate. Verified by running the old expression against a real `shown_content`.
+ *
+ * `[\\s\\S]` is the correct escaping in a string literal. It is written that way
+ * rather than as a regex literal because `heading` is interpolated.
  */
 function docSection(txt, heading) {
   if (!txt) return null;
-  var re = new RegExp('(?:^|\n)' + heading + '\n([\s\S]*?)(?=\n\n[A-Z][A-Z &]{2,}\n|\n\nNothing proceeds|$)');
+  var re = new RegExp('(?:^|\n)' + heading + '\n([\\s\\S]*?)(?=\n\n[A-Z][A-Z &]{2,}\n|\n\nNothing proceeds|$)');
   var m = txt.match(re);
   return m && m[1].trim() ? m[1].trim() : null;
 }
 
-function renderPriced(d) {
+/**
+ * The one-line "we did the thing you just tapped" banner.
+ *
+ * Its own function because all three document renderers need it and the EWA renderer
+ * lives in another file. Green, at the top, above the fold: the client has just come
+ * back from a screen that took over the whole page, and without an acknowledgement
+ * the return reads as the tap having been ignored.
+ */
+function noticeHtml(text) {
+  if (!text) return '';
+  return `<div class="wrap"><div class="notice">${esc(text)}</div></div>`;
+}
+
+function renderPriced(d, notice) {
   const company = d.company_name || 'Your contractor';
   const priced = usd(d.amount_cents);
   const priorApproved = (d.approved_running_cents != null && d.approved_running_cents > 0)
@@ -467,6 +703,7 @@ function renderPriced(d) {
         <div class="cs">${esc(d.job_label || '')}</div>
       </div>
     </div>
+    ${noticeHtml(notice)}
     <div class="wrap">
       <!-- THE SCOPE FIRST, AND IN FULL. This card carried a title and a generic
            sentence about extras; the work itself was only inside the collapsed exact
@@ -528,6 +765,19 @@ function renderPriced(d) {
 // question" and "do not proceed" wrote the same row. A question is now a message on
 // its own thread: it commits nobody, needs no signature, and leaves Approve live —
 // PRD R5b, "the Approve button remains pinned at every point in the thread".
+//
+// ── ASKING IS NO LONGER A DEAD END ─────────────────────────────────────────────
+// A successful ask used to end on `done('💬', 'Question sent', …)`: a terminal
+// screen, with no way back to the document and no way to ask a second thing. The
+// product ask this page serves is "where they can approve, communicate, negotiate",
+// and negotiating is by definition more than one message. Every path off that screen
+// was outside the app — find the text again, tap the link again, read the whole
+// document again — and each of those is a place a non-technical homeowner stops.
+//
+// So a sent question returns to the DOCUMENT, with the thread refetched so their own
+// words are on the page (proof it landed, which is what the terminal screen was
+// really for) and with Approve, Decline and Ask all live again. The banner carries
+// the acknowledgement the old screen carried.
 function askQuestion(d) {
   screen(`
     <div class="wrap" style="padding-top:24px">
@@ -538,7 +788,8 @@ function askQuestion(d) {
         <button class="ghost" id="back">Back</button>
       </div>
       <p class="recordnote">Asking does not approve or decline anything. You can still
-        approve after they answer.</p>
+        approve after they answer. If you are asking for a different price, they will
+        send you a new version to approve — this one stays as it is until then.</p>
     </div>`);
   document.getElementById('send').onclick = async () => {
     const note = document.getElementById('note').value.trim();
@@ -548,6 +799,20 @@ function askQuestion(d) {
       p_token: token, p_note: note, p_user_agent: navigator.userAgent,
     });
     if (error) {
+      // A question can be refused for one reason that is NOT a network problem: the
+      // link was retired while this screen was open (250 + confirmation_question_
+      // not_superseded). Saying "that didn't send, tap again" there would send them
+      // round a loop that can never succeed, on a document that no longer exists.
+      // Named, for the same reason `answer()` names it.
+      if ((error.message || '').includes('replaced by a newer one') ||
+          error.hint === 'link_superseded') {
+        screen(`<div class="done"><div class="mark err">🔄</div>
+          <h2>This version was replaced</h2>
+          <p>The contractor sent an updated version while this page was open. Your
+             question was not sent. Please open the most recent link they texted
+             you.</p></div>`);
+        return;
+      }
       screen(`<div class="done"><div class="mark err">⚠️</div>
         <h2>That didn't send</h2><p>Nothing was recorded. Please tap again.</p>
         <div class="btns"><button class="yes" onclick="location.reload()">Try again</button></div></div>`);
@@ -556,10 +821,15 @@ function askQuestion(d) {
     if (data && data.status === 'already_answered') {
       done('✅', 'Already answered', 'Your first answer stands.'); return;
     }
-    done('💬', 'Question sent',
-      'The contractor has your question. This is still open — you can approve once they reply.');
+    // Refetch rather than appending the local string: the server stamps the time and
+    // trims the note, and the thread walks the revision lineage. Rendering our own
+    // copy would put a message on screen that differs from the record. If the refetch
+    // fails, `loadThread` keeps the previous thread and the banner still tells the
+    // truth — the question is recorded either way.
+    await loadThread(d);
+    renderDocument(d, 'Sent. They have your question — you can still approve or decline below.');
   };
-  document.getElementById('back').onclick = () => (d.amount_cents != null ? renderPriced(d) : renderPlain(d));
+  document.getElementById('back').onclick = () => renderDocument(d);
 }
 
 // DECLINE — a real, terminal, signed answer. It stops work and the contractor acts
@@ -584,13 +854,18 @@ function declineFlow(d) {
   dn.addEventListener('input', () => { sendEl.disabled = dn.value.trim().length < 2; });
   sendEl.onclick = () =>
     answer('declined', document.getElementById('note').value, dn.value.trim());
-  document.getElementById('back').onclick = () => (d.amount_cents != null ? renderPriced(d) : renderPlain(d));
+  // Back goes through the ONE dispatch. This line used to re-decide the document type
+  // from `amount_cents`, which is null for an EWA as well as for a legacy confirm — so
+  // backing out of a decline on an authorization redrew it as a plain confirmation
+  // with its proceed term and settlement window gone, still offering a signature.
+  document.getElementById('back').onclick = () => renderDocument(d);
 }
 
 // Legacy no-price confirmation (a decision, no cost change). Kept working.
-function renderPlain(d) {
+function renderPlain(d, notice) {
   const verb = d.kind === 'confirm' ? 'confirm' : 'acknowledge';
   screen(`
+    ${noticeHtml(notice)}
     <div class="wrap" style="padding-top:24px">
       <div class="who">For ${esc(d.counterparty)}</div>
       <h1 class="plain">Please read this and ${verb} it.</h1>
@@ -600,6 +875,12 @@ function renderPlain(d) {
             drop the photos from the one instrument whose entire content IS the
             condition being photographed. */ ''}
       ${photoStrip(d.photos)}
+      ${/* The discussion was MISSING from this renderer entirely, while the "Ask a
+            question instead" button below has always been offered here. So a client
+            on a plain confirmation could ask, and then never see their own question,
+            never see the answer, and have no evidence either had happened. The same
+            hole as DEF-5, on the third of the three documents. */''}
+      ${threadHtml(d)}
       <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
       <div class="btns">
         <button class="yes" id="yes" disabled>Yes — that's right</button>
@@ -628,6 +909,12 @@ function renderPlain(d) {
 
 async function answer(action, note, name) {
   document.querySelectorAll('button').forEach((b) => (b.disabled = true));
+  // Stop the reply poller BEFORE the round trip, not after it. Every branch below
+  // replaces the whole screen, so from here on there is no `#thread` element for the
+  // poller to update; and on the success path the document is terminal, where R5b
+  // closes the thread and nothing further can arrive. A poll that fired in between
+  // would be a request made on behalf of a page that no longer exists.
+  window.dispatchEvent(new Event('ezjb:answered'));
   const { data, error } = await supabase.rpc('confirmation_respond', {
     p_token: token, p_action: action, p_note: note || null,
     p_user_agent: navigator.userAgent,   // an identity SIGNAL, not proof.
@@ -672,7 +959,28 @@ async function answer(action, note, name) {
     'The contractor has your answer. You can close this page.');
 }
 
-load();
+// NOTHING MAY LEAVE THIS PAGE ON "Loading…" FOREVER.
+//
+// `load()` used to be called bare. It is an async function, so anything it threw
+// became an unhandled rejection: no screen, no console error, and a client left
+// staring at a spinner with no way to tell whether the link was broken, the signal
+// was bad, or they had done something wrong. That is exactly how the `.catch`
+// outage above stayed invisible — the failure had a message and nowhere to put it.
+//
+// The recovery screen says the only two things a homeowner can act on: try again,
+// or ask for the link again. It deliberately does NOT show the exception. A stack
+// trace tells this reader nothing and looks like the app broke on them.
+load().catch((e) => {
+  // Kept for whoever is looking at a device with a console attached. It is the only
+  // place the real reason survives.
+  console.error('[confirm] load failed', e);
+  screen(`<div class="done"><div class="mark err">⚠️</div>
+    <h2>This didn't load</h2>
+    <p>Something went wrong opening this. Nothing here was recorded.</p>
+    <div class="btns"><button class="yes" onclick="location.reload()">Try again</button></div>
+    <p class="recordnote">If it keeps happening, ask your contractor to text you the
+      link again.</p></div>`);
+});
 </script>
 </body>
 </html>
