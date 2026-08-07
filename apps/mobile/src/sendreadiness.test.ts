@@ -60,23 +60,33 @@ test('a complete extra is ready and complete', () => {
 // hadar 2026-07-28 reversed D3: ALL SIX items block Send, per the design's "these
 // are required for approval". These three tests asserted the old rule and are
 // rewritten to the new one — the assertions are inverted deliberately, not relaxed.
-test('all six are required — every one of the four former soft items blocks Send', () => {
+test('DESCRIPTION AND PHOTOS BLOCK; the terms only warn (hadar 2026-08-07)', () => {
   const r = sendReadiness({
-    ...full, photoCount: 0, billingTiming: null, scheduleEffect: null, exclusions: null,
+    ...full, photoCount: 0, amountCents: null,
+    billingTiming: null, scheduleEffect: null, exclusions: null,
   });
-  assert.equal(r.ok, false, 'the four widened items must now disable Send');
-  assert.deepEqual(r.blockers,
-    ['no_photos', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions']);
-  // `recommended` still names WHICH four they are — the checklist's fraction and its
-  // softer mark are built from it, and reversing this is one line in sendReadiness.
+  // Photos are evidence — without them the document does not show the work.
+  assert.deepEqual(r.blockers, ['no_photos']);
+  assert.equal(r.ok, false);
+  // The terms name themselves, mark the checklist incomplete, and send anyway.
   assert.deepEqual(r.recommended,
-    ['no_photos', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions']);
+    ['no_cost', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions']);
   assert.deepEqual(r.completeness, { have: 0, of: 4 });
 });
 
-test('each of the four is detected on its own and each one alone blocks Send', () => {
+test('everything soft missing but description and photos present -> SENDABLE', () => {
+  // The whole point of the 2026-08-07 reversal: a contractor who has said what the
+  // work is and shown it may send, and settle the terms after.
+  const r = sendReadiness({
+    ...full, amountCents: null, billingTiming: null, scheduleEffect: null, exclusions: null,
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.blockers, []);
+});
+
+test('each soft item is detected on its own and none of them blocks Send', () => {
   const spoil: Record<SendRecommendation, object> = {
-    no_photos: { photoCount: 0 },
+    no_cost: { amountCents: null },
     no_billing_timing: { billingTiming: null },
     no_schedule_effect: { scheduleEffect: null },
     no_exclusions: { exclusions: null },
@@ -84,8 +94,9 @@ test('each of the four is detected on its own and each one alone blocks Send', (
   for (const item of RECOMMENDED) {
     const r = sendReadiness({ ...full, ...spoil[item] });
     assert.deepEqual(r.recommended, [item], item);
-    assert.deepEqual(r.blockers, [item], item);
-    assert.equal(r.ok, false, item);
+    // Soft since 2026-08-07: named and counted, but Send stays live.
+    assert.deepEqual(r.blockers, [], item);
+    assert.equal(r.ok, true, item);
     assert.deepEqual(r.completeness, { have: 3, of: 4 }, item);
   }
 });
@@ -93,8 +104,9 @@ test('each of the four is detected on its own and each one alone blocks Send', (
 test('whitespace is not an answer', () => {
   const r = sendReadiness({ ...full, exclusions: '   ', billingTiming: '  ' });
   assert.deepEqual(r.recommended, ['no_billing_timing', 'no_exclusions']);
-  assert.deepEqual(r.blockers, ['no_billing_timing', 'no_exclusions']);
-  assert.equal(r.ok, false);
+  // Soft since 2026-08-07: named, marked incomplete, and sendable.
+  assert.deepEqual(r.blockers, []);
+  assert.equal(r.ok, true);
 });
 
 test("'not sure' about the schedule is a COMPLETE answer, not a missing one", () => {
@@ -182,10 +194,14 @@ test('DRIFT GUARD: the placeholder literal still matches startextra.ts', () => {
 
 // ── REQ-LC12: what "cost" means, per kind. NULL IS NOT ZERO ───────────────────
 
-test('an unpriced extra is blocked', () => {
+test('an unpriced extra SENDS, as an acknowledgement (hadar 2026-08-07)', () => {
+  // The trade, stated: no figure reaches the frozen instrument, so the client agrees
+  // to the WORK and the money is settled after. renderCard draws that variant — it
+  // never prints an empty price.
   const r = sendReadiness({ ...full, amountCents: null });
-  assert.deepEqual(r.blockers, ['no_cost']);
-  assert.equal(r.ok, false);
+  assert.deepEqual(r.blockers, []);
+  assert.deepEqual(r.recommended, ['no_cost']);
+  assert.equal(r.ok, true);
 });
 
 test('a genuinely $0 extra is NOT blocked', () => {
@@ -202,11 +218,19 @@ test('T&M always carries a cap — an NTE extra with no nte_cents is blocked', (
     sendReadiness({ ...full, priceMode: 'nte', nteCents: 250000 }).blockers, []);
 });
 
-test('an NTE extra with a cap but no amount is still blocked', () => {
-  // REQ-LC12's own Accept clause.
+test('an NTE mode with NO CAP still blocks — a ceiling-less cap is not a softer promise', () => {
+  // The one price case that survives 2026-08-07 as hard: he chose to state a
+  // not-to-exceed, and a not-to-exceed clause with no number in it says nothing while
+  // looking like a limit.
   assert.deepEqual(
-    sendReadiness({ ...full, priceMode: 'nte', amountCents: null, nteCents: 250000 })
+    sendReadiness({ ...full, priceMode: 'nte', amountCents: 120000, nteCents: null })
       .blockers, ['no_cost']);
+});
+
+test('an NTE extra with a cap but no amount now SENDS', () => {
+  const r = sendReadiness({ ...full, priceMode: 'nte', amountCents: null, nteCents: 250000 });
+  assert.deepEqual(r.blockers, []);
+  assert.equal(r.ok, true);
 });
 
 test('an EWA is never blocked on price — it deliberately states no amount', () => {
@@ -230,8 +254,8 @@ test('a description is required on every kind, priced or not', () => {
 });
 
 test('both blockers report together, description first', () => {
-  const r = sendReadiness({ ...full, scope: '', amountCents: null });
-  assert.deepEqual(r.blockers, ['no_description', 'no_cost']);
+  const r = sendReadiness({ ...full, scope: '', scopeOfWork: '', photoCount: 0 });
+  assert.deepEqual(r.blockers, ['no_description', 'no_photos']);
 });
 
 // ── keys, not sentences ───────────────────────────────────────────────────────
@@ -241,7 +265,8 @@ test('every code maps to its own i18n key', () => {
   assert.equal(blockerKey('no_cost'), 'send.blocked.noCost');
   const keys = RECOMMENDED.map(recommendationKey);
   assert.equal(new Set(keys).size, RECOMMENDED.length, 'two items must never share a line');
-  assert.equal(recommendationKey('no_photos'), 'send.recommended.noPhotos');
+  assert.equal(recommendationKey('no_cost'), 'send.recommended.noCost');
+  assert.equal(blockerKey('no_photos'), 'send.blocked.noPhotos');
 });
 
 test('the keys this module returns exist in BOTH languages', () => {
@@ -264,7 +289,9 @@ test('the keys this module returns exist in BOTH languages', () => {
 // ── REQ-LC13: the two gates are orthogonal and both must pass ─────────────────
 
 test('content is refused before pipeline — it is the one he can act on', () => {
-  const unpriced = sendReadiness({ ...full, amountCents: null });
+  // Uses a CONTENT blocker that still blocks: a missing description. Price stopped
+  // being one on 2026-08-07, so an unpriced extra no longer exercises this ordering.
+  const unpriced = sendReadiness({ ...full, scope: '', scopeOfWork: '' });
   const g = sendGate(unpriced, 'queued');
   assert.equal(g.ok, false);
   assert.equal(g.kind, 'content',

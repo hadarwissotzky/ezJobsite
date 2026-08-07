@@ -1194,8 +1194,11 @@ function checklist(p: ExtraDraftProps): ChecklistItem[] {
     // short forms in the checklist (and the banner pills, which read these same
     // labels), while the SCOPE rows keep the long forms.
     hard('no_description', t('draft.ckDescription'), p.onEditDescription),
-    ...(p.kind === 'extra' ? [hard('no_cost', t('draft.cost'), p.onEditCost)] : []),
-    soft('no_photos', t('draft.photos'), p.onAddPhotos),
+    // 2026-08-07: photos moved to HARD and cost to SOFT — the checklist's marks follow
+    // `sendReadiness`, which is the one authority, so the two cannot disagree about
+    // which ring a row wears.
+    hard('no_photos', t('draft.photos'), p.onAddPhotos),
+    ...(p.kind === 'extra' ? [soft('no_cost', t('draft.cost'), p.onEditCost)] : []),
     soft('no_billing_timing', t('draft.billing'), p.onEditBilling),
     soft('no_schedule_effect', t('draft.ckSchedule'), p.onEditSchedule),
     soft('no_exclusions', t('draft.ckExclusions'), p.onEditExclusions),

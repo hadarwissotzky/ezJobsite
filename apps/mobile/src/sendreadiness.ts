@@ -34,14 +34,14 @@ import type { ProcState } from './status.ts';
  *  `blockers` array can carry any of the six and the screens type-check against it. */
 export type SendBlocker =
   | 'no_description'
-  | 'no_cost'
+  | 'no_photos'
   | SendRecommendation;
 
 /** The four that used to be advisory. They still name themselves separately — the
  *  checklist's completeness fraction and its softer mark are built from this list —
  *  but as of 2026-07-28 they also block Send. */
 export type SendRecommendation =
-  | 'no_photos'
+  | 'no_cost'
   | 'no_billing_timing'
   | 'no_schedule_effect'
   | 'no_exclusions';
@@ -49,8 +49,11 @@ export type SendRecommendation =
 /** REQ-LC11: `completeness.of` is always 4 — the four recommended items, and
  *  blockers are deliberately not part of the fraction. A blocker is not 25% of
  *  anything; it is a wall. */
+/** The completeness fraction's denominator: the four genuinely optional items.
+ *  Photos left this list when they became a blocker (2026-08-07); cost took the slot,
+ *  so the fraction still counts four and the checklist keeps its shape. */
 export const RECOMMENDED: readonly SendRecommendation[] = [
-  'no_photos', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions',
+  'no_cost', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions',
 ];
 
 export type SendReadiness = {
@@ -156,17 +159,39 @@ export function sendReadiness(x: {
     blockers.push('no_description');
   }
 
+  // PHOTOS BLOCK (hadar, 2026-08-07: "description and photos are important — the rest
+  // are optional"). This product's whole claim is evidence: a change order describing
+  // rot under a tub, with no picture of the rot, is the text message it was built to
+  // replace. It is also the one gap the contractor can always close standing where he
+  // is, which is what makes it fair to block on.
+  if (!(x.photoCount > 0)) blockers.push('no_photos');
+
+  const recommended: SendRecommendation[] = [];
+  // COST IS RECOMMENDED, NOT REQUIRED (hadar, 2026-08-07). This reverses the rule that
+  // has stood since D3, and the trade is real and stated rather than hidden: an extra
+  // sent without a price is an ACKNOWLEDGEMENT, not a priced approval. `renderCard`
+  // already draws that variant — the frozen instrument simply carries no figure — so
+  // the client agrees to the WORK and the money is settled later. That is a legitimate
+  // jobsite act ("go ahead, we'll price it") and it is now permitted.
+  //
+  // WHAT IT MUST NEVER BECOME is a priced document with a blank number. It cannot:
+  // `renderCard` branches on the amount being present, so absence produces a document
+  // that never mentions cost, rather than one that mentions it emptily. Mandate #6 is
+  // untouched — the app still never authors a figure, and any figure that IS present
+  // still passed a human read-back.
   if (x.kind === 'extra') {
     // `== null` and not `=== null`: an undefined field from an untyped row is the
     // same fact as a null one — nobody said a price — and reading it as 0 is the
     // most expensive mistake this file could make.
     const noAmount = x.amountCents == null;
+    // A CAP IS DIFFERENT AND STILL BLOCKS. `nte` means the contractor has chosen to
+    // state a not-to-exceed, and a not-to-exceed clause with no ceiling in it is not a
+    // softer promise — it is a promise that says nothing while looking like a limit.
+    // Only the case "he named the mode and omitted its number" is caught here.
     const noCap = x.priceMode === 'nte' && x.nteCents == null;
-    if (noAmount || noCap) blockers.push('no_cost');
+    if (noCap) blockers.push('no_cost');
+    else if (noAmount) recommended.push('no_cost');
   }
-
-  const recommended: SendRecommendation[] = [];
-  if (!(x.photoCount > 0)) recommended.push('no_photos');
   if (!(x.billingTiming ?? '').trim()) recommended.push('no_billing_timing');
   // 'not_sure' IS A COMPLETE ANSWER (FLOW decision 3) and therefore never appears
   // here: it renders to the owner as "Schedule impact: to be confirmed", which is
@@ -174,6 +199,21 @@ export function sendReadiness(x: {
   if (!(x.scheduleEffect ?? '').trim()) recommended.push('no_schedule_effect');
   if (!(x.exclusions ?? '').trim()) recommended.push('no_exclusions');
 
+  // ── DESCRIPTION AND PHOTOS BLOCK; THE REST WARN (hadar, 2026-08-07) ──────────
+  // This reverses the 2026-07-28 "all six block" rule, whose own comment (kept below
+  // for the history) reversed D3 in the other direction. The line that decides it:
+  // "description and photos are important — the rest are optional."
+  //
+  // Why the reversal is safe where the previous one was contentious: the four now-soft
+  // items are TERMS, and a term nobody stated renders as a term nobody stated. Payment
+  // timing absent means the instrument says nothing about billing, not that it says
+  // something wrong. Description and photos are different in kind — without them the
+  // document does not describe the work, and there is nothing for an owner to agree to.
+  //
+  // The four still WARN, still show as incomplete, and still name themselves in the
+  // banner. What changed is only whether they gate `ok`, which is one line.
+  //
+  // ── previous rule, kept for the record ───────────────────────────────────────
   // ── ALL SIX BLOCK (hadar, 2026-07-28) ────────────────────────────────────────
   // This REVERSES D3, which made only description and cost blocking and left these
   // four as recommendations that warn and send anyway. hadar chose the mockup's
@@ -190,10 +230,9 @@ export function sendReadiness(x: {
   // SPEC-extra-lifecycle-v1 REQ-LC10/LC11 and the D3 text still describe the old
   // rule and are now WRONG. They are owed an edit; this comment is the record until
   // then, so the next reader does not "fix" this back to match the spec.
-  const gating = [...blockers, ...recommended];
   return {
-    ok: gating.length === 0,
-    blockers: gating as SendBlocker[],
+    ok: blockers.length === 0,
+    blockers,
     recommended,
     completeness: { have: RECOMMENDED.length - recommended.length, of: 4 },
   };
@@ -213,14 +252,17 @@ const BLOCKER_KEYS: Record<SendBlocker, string> = {
   // sentences state a fact and do not scold ("You have not said when you bill
   // this"), which is still the right register now that they gate Send — the
   // contractor is being told what is left, not told off.
-  no_photos: 'send.recommended.noPhotos',
+  no_photos: 'send.blocked.noPhotos',
   no_billing_timing: 'send.recommended.noBillingTiming',
   no_schedule_effect: 'send.recommended.noScheduleEffect',
   no_exclusions: 'send.recommended.noExclusions',
 };
 
 const RECOMMENDATION_KEYS: Record<SendRecommendation, string> = {
-  no_photos: 'send.recommended.noPhotos',
+  // 2026-08-07: cost is soft now. The wording says what an unpriced send MEANS —
+  // "they agree to the work; the money is settled after" — because a contractor
+  // skipping this needs to know he is sending an acknowledgement, not a quote.
+  no_cost: 'send.recommended.noCost',
   no_billing_timing: 'send.recommended.noBillingTiming',
   no_schedule_effect: 'send.recommended.noScheduleEffect',
   no_exclusions: 'send.recommended.noExclusions',

@@ -217,7 +217,7 @@ export const db = new PowerSyncDatabase({
 // Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
 // graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
 // wrong" until this could be read back off the device. One string, no data exposed.
-(globalThis as any).__EZ_BUILD__ = 'v24-silence';
+(globalThis as any).__EZ_BUILD__ = 'v26-filing';
 
 const connector = new SupabaseConnector();
 // The job the app is currently showing. Was a hardcoded constant -- every capture
@@ -4129,10 +4129,19 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     // that dev string reads as broken (hadar, 2026-07-27). Detect it and speak plainly.
     const netRetry = !t.uploaded && !!t.lastError &&
       /TRANSIENT|network request failed|network/i.test(t.lastError);
+    // HELD FOR A JOB — not slow, not offline, and NOT something waiting will fix
+    // (hadar 2026-08-07, screenshot: "AWAITING_FILING: held: this capture has no job
+    // yet" under "we'll have it ready shortly"). The uploader parks an unfiled capture
+    // on purpose: the server's FK needs a real project and the Inbox is a sentinel with
+    // no row. So the bytes sit there until a human picks the job — which means the
+    // screen was promising an arrival that could not happen, and printing a dev string
+    // to a contractor instead of the one thing he can do about it.
+    const awaitingFiling = !!t.lastError && /AWAITING_FILING/i.test(t.lastError);
     // Any surfaced error puts the screen into the reassure-and-let-them-proceed state;
     // the message below picks the right plain-language words for which kind it is.
     const trouble = t.offline || t.stalled || t.blocked || !!t.lastError;
-    const warnKey = t.blocked ? 'cap.transBlocked'
+    const warnKey = awaitingFiling ? 'cap.transNoJob'
+      : t.blocked ? 'cap.transBlocked'
       : t.offline ? 'cap.transOffline'
       : netRetry ? 'cap.transRetry'
       : 'cap.transStalled';
@@ -4218,7 +4227,23 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   is not debugging information to the person holding the phone — it is
                   evidence that something broke. A genuine stall keeps it: there the
                   detail is the only clue anyone has. */}
-              {t.lastError && !netRetry && <Text style={s.trWarnErr}>{t.lastError}</Text>}
+              {t.lastError && !netRetry && !awaitingFiling && (
+                <Text style={s.trWarnErr}>{t.lastError}</Text>
+              )}
+              {/* THE ACT THAT ENDS IT, offered where the problem is stated. Filing is
+                  the whole fix — `fileCapture` replaces the parked outbox row with a
+                  real destination and the next drain lands it — so this is a one-tap
+                  resolution, not a link to somewhere he has to find it. */}
+              {awaitingFiling && (
+                <Pressable style={s.trFile} onPress={() => {
+                  const ids = t.ids, coId = t.coId, anchor = t.anchorCaptureId;
+                  setTransition(null);
+                  setAssign({ ids, lat: null, lng: null, uris: [], secs: 0,
+                              anchorCoId: coId, anchorCaptureId: anchor });
+                }}>
+                  <Text style={s.trFileT}>{T('cap.transPickJob')}</Text>
+                </Pressable>
+              )}
               <Pressable
                 onPress={() => {
                   // Augment came FROM an extra, so Done returns to it — not Home (the
@@ -6872,6 +6897,9 @@ const s = StyleSheet.create({
   trWarn: { alignSelf: 'stretch', backgroundColor: C.brandSoft, borderWidth: 1,
     borderColor: C.caution, borderRadius: radii.lg, padding: 16, marginTop: 18 },
   trWarnT: { fontFamily: F.body, fontSize: 15.5, color: C.ink, lineHeight: 22 },
+  trFile: { backgroundColor: '#131110', borderRadius: 14, minHeight: 52,
+    alignItems: 'center', justifyContent: 'center', marginTop: 12, paddingHorizontal: 18 },
+  trFileT: { color: '#fff', fontFamily: 'Inter_700Bold', fontSize: 16 },
   trWarnErr: { fontFamily: 'Menlo', fontSize: 12, lineHeight: 17, color: C.danger, marginTop: 10 },
   trDone: { minHeight: 60, borderRadius: radii.md, backgroundColor: C.ink,
     alignItems: 'center', justifyContent: 'center', marginTop: 14 },
