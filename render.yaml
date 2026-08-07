@@ -1,0 +1,60 @@
+# Render blueprint — the processing pipeline, hosted.
+#
+# WHY THIS FILE EXISTS (hadar, 2026-08-06). The worker had never been deployed. It was
+# `npm start` on a laptop, started 23 July, and it went on claiming jobs for two weeks
+# with two-week-old code in memory — so every capture processed that day came back
+# looking like a raw transcription while the current code sat on disk, correct and
+# unreachable. Nothing about that failure was visible from the app: the queue drained,
+# the jobs said `done`, and the output was quietly wrong.
+#
+# WHY A BACKGROUND WORKER AND NOT A WEB SERVICE. `src/run.ts` is a claim-one-job loop
+# that sleeps when the queue is empty; it opens no port and answers no request. Render's
+# `worker` type is exactly that shape. A web service would need a health endpoint it has
+# no reason to have, and — on the free tier — would be put to sleep, which is the bug
+# above with better branding.
+#
+# ADR-3 (`docs/ARCHITECTURE.md`) named Trigger.dev/Inngest for this. This is not that
+# decision reversed: it is the same durable-jobs runtime, hosted the cheapest way that
+# ends the laptop problem tonight. The durability it relies on — leases, retries,
+# `for update skip locked` — is already in Postgres via `claim_job`, so the platform is
+# providing uptime and nothing else. Moving to Trigger.dev later changes this file and
+# no application code.
+services:
+  - type: worker
+    name: ezjobsite-pipeline
+    runtime: node
+    # NOT free. A free instance sleeps, and a sleeping worker means transcripts and
+    # write-ups silently never arrive — indistinguishable, from inside the app, from
+    # the pipeline being broken.
+    plan: starter
+    # Same coast as the database (the Supabase pooler resolves to aws-0-us-west-1).
+    # Every step here is chatty with Postgres; a cross-country round trip per read is
+    # paid on every job, forever.
+    region: oregon
+    rootDir: apps/worker
+    buildCommand: npm install
+    startCommand: npm start
+    # ONE. The lease is 120s and the structure step can approach it under a slow model
+    # response; two instances are SAFE (claim_job uses `for update skip locked`) but
+    # concurrency is a thing to turn on after measuring, not before.
+    numInstances: 1
+    # Deploy on push, deliberately. The failure this file exists to prevent was code
+    # that ran for two weeks after it stopped matching the repo.
+    autoDeploy: true
+    branch: main
+    envVars:
+      # `--experimental-strip-types` (the start script runs TypeScript directly) needs
+      # 22.6+. Without this pin Render picks its own default and the process dies at
+      # startup on an unsupported flag.
+      - key: NODE_VERSION
+        value: 22.11.0
+      # `sync: false` = set these in the dashboard, never in the repo. Two of them are
+      # the keys that can read every customer's evidence and spend money.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false

@@ -2,6 +2,9 @@
   "name": "@ezjobsite/worker",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "start": "node --experimental-strip-types src/run.ts",
     "test": "node --experimental-strip-types --test src/*.test.ts",
