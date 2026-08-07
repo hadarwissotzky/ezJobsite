@@ -125,6 +125,16 @@ export type ExtraRecord = {
    *  "No price given yet" instead of showing a dash posing as an amount
    *  (hadar, on device 2026-07-22). */
   priced: boolean;
+  /**
+   * 396 — WHAT HE SAID ABOUT COST, verbatim ("probably $1,800"), when no price has been
+   * set yet. Null once `priced` is true: a quote under a confirmed figure is noise, and
+   * worse, it invites a second reading of a number that is already decided.
+   *
+   * It is NOT a price and must never be rendered as one. Its only job is the read-back
+   * mandate #6 requires: show the man his own words, show him the figure they parse to,
+   * and let him tap. Nothing writes an amount without that tap.
+   */
+  priceHeard: string | null;
   nte: string | null;
   isMini: boolean;
   /** THIS EXTRA'S NUMBER ON ITS JOB — "Extra #4". Null on a row that predates the
@@ -200,6 +210,7 @@ export async function extraRecord(
     id: string; decision_id: string; scope: string; scope_of_work: string | null;
     summary: string | null;
     amount_cents: number | null;
+    price_heard?: string | null;
     job_name: string | null;
     nte_cents: number | null; is_mini: number; who_directed: string;
     numbers_confirmed_at_ms: number; status: string; signed_by: string | null;
@@ -209,7 +220,7 @@ export async function extraRecord(
     co_number: number | null;
   }>(
     `SELECT co.id, co.decision_id, co.scope, co.scope_of_work, co.summary,
-            co.amount_cents, co.nte_cents, co.is_mini,
+            co.amount_cents, co.nte_cents, co.is_mini, co.price_heard,
             co.who_directed, co.numbers_confirmed_at_ms, co.status, co.signed_by,
             co.created_at_ms,
             co.sent_at_ms, co.approved_at_ms, co.declined_at_ms, co.superseded_at_ms,
@@ -451,6 +462,8 @@ export async function extraRecord(
     status: co.status,
     amount: money(co.amount_cents),
     priced: co.amount_cents != null,
+    priceHeard: co.amount_cents == null
+      ? ((co as { price_heard?: string | null }).price_heard ?? null) : null,
     extraNo: co.co_number ?? null,
     jobName: co.job_name ?? null,
     nte: co.nte_cents == null ? null : money(co.nte_cents),

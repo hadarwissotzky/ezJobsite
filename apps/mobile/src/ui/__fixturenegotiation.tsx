@@ -43,6 +43,9 @@ ASSUMING · Both chimney breasts sound · The 1910 piece comes off intact — if
   status: 'sent',
   amount: '$2,400',
   priced: true,
+  // 396: a priced fixture has nothing to read back — the quote only exists
+  // while a price does not.
+  priceHeard: null,
   nte: null,
   isMini: false,
   extraNo: 4,

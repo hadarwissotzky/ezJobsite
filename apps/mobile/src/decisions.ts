@@ -290,6 +290,71 @@ export async function recordDecision(
 }
 
 /**
+ * Link an ADDED capture to the decision an extra already has — an append, not an edit.
+ *
+ * WHY IT EXISTS (hadar 2026-08-06: "I can see the second recording and the
+ * transcription but I cannot see that the scope of work was updated"). A voice note
+ * added to an existing extra was committed, transcribed and shown — and joined to the
+ * extra only through `capture_pair`, which is DEVICE-ONLY. The server therefore had two
+ * transcripts and no idea they described the same work, so the structure step could
+ * only ever see the new clip on its own and wrote a scope about an afterthought.
+ * `decision_version` is the grouping that syncs, so the link belongs here.
+ *
+ * A DECISION_VERSION IS A VERSION, and appending one is the existing vocabulary for
+ * "more was said about this" — the same row the first recording wrote. It carries the
+ * added words as its `value`, so the chain reads as the history it is.
+ *
+ * IDEMPOTENT BY CAPTURE. Re-running an augment (a retry, a resumed transition) must
+ * not append a second version for the same clip: the guard is the capture, not the
+ * caller's care.
+ */
+export async function linkCaptureToDecision(
+  db: AbstractPowerSyncDatabase,
+  o: { decisionId: string; captureId: string; value: string; projectId: string;
+       ownerId: string; subject: string; directedBy?: string | null }
+): Promise<{ linked: boolean }> {
+  const already = await db.getAll<{ id: string }>(
+    `SELECT id FROM decision_version WHERE decision_id = ? AND capture_id = ?`,
+    [o.decisionId, o.captureId]);
+  if (already.length) return { linked: false };
+
+  const now = Date.now();
+  const versionId = `dv-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const mutationId = `dm-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const value = (o.value || '').trim() || o.subject.trim();
+
+  await db.writeTransaction(async (tx) => {
+    await tx.execute(
+      `INSERT INTO decision_version (id, decision_id, value, capture_id, directed_by, created_at_ms)
+       VALUES (?,?,?,?,?,?)`,
+      [versionId, o.decisionId, value, o.captureId, o.directedBy ?? null, now]
+    );
+    await tx.execute(
+      `INSERT OR IGNORE INTO decision_capture (decision_id, capture_id, created_at_ms)
+       VALUES (?,?,?)`, [o.decisionId, o.captureId, now]
+    );
+    // Committed WITH the append, never after — the capture path's hardest-won rule
+    // (see recordDecision): an intent written in a second transaction is an intent a
+    // crash can lose while the row it belongs to survives.
+    const payload = {
+      mutation_id: mutationId, decision_id: o.decisionId, version_id: versionId,
+      project_id: o.projectId, subject: o.subject.trim(),
+      scope_level: 'project', assignee: null,
+      value, capture_id: o.captureId,
+      directed_by: o.directedBy ?? null, created_at_ms: now,
+    };
+    const payloadJson = JSON.stringify(payload);
+    await tx.execute(
+      `INSERT INTO decision_outbox (mutation_id, decision_id, version_id,
+         payload_json, payload_sha256, queued_at_ms)
+       VALUES (?,?,?,?,?,?)`,
+      [mutationId, o.decisionId, versionId, payloadJson, sha256(payloadJson), now]
+    );
+  });
+  return { linked: true };
+}
+
+/**
  * Drain the decision outbox. Deliberately the same shape as drainOutbox() for
  * captures, and the same rules apply: the row is deleted ONLY after the RPC
  * succeeds, retries are idempotent by mutation_id, and a permanent rejection

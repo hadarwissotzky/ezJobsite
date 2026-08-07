@@ -104,19 +104,55 @@ export async function runStep(
 
   if (step === 'structure') {
     if (!hasLlmKey()) return { ok: false, reason: 'needs_api_key' };
-    // Newest transcript wins — same read resolve_project does, same reason (150
-    // is append-only; the latest row is the current reading).
-    const { data: tr, error: trErr } = await sb
-      .from('capture_transcript').select('text')
-      .eq('capture_id', job.capture_id)
-      .order('created_at', { ascending: false }).limit(1);
-    if (trErr) return { ok: false, reason: 'needs_connection', error: trErr.message };
-    const text = (tr?.[0]?.text ?? '').trim();
+    // EVERY RECORDING BEHIND THIS EXTRA, NOT JUST THIS ONE (hadar 2026-08-06: "I can
+    // see the second recording and the transcription but I cannot see that the scope of
+    // work was updated").
+    //
+    // A contractor adds a voice note to an extra he already made — "I would like to
+    // add, that the price is…" — and that clip gets its own job. Structured alone it
+    // produces a scope of work describing an afterthought, because on its own that is
+    // all it is. The document has to be rewritten from EVERYTHING said about this
+    // extra, in the order it was said, or adding information makes the write-up worse.
+    //
+    // The link is `decision_version`, the one grouping that reaches the server
+    // (`capture_pair` is device-only). Captures with no decision row degrade to just
+    // this one, which is the pre-2026-08-06 behaviour and still correct for a first
+    // recording — the fallback is a narrower input, never a wrong one.
+    const text = await extraTranscript(sb, job.capture_id);
     if (!text) {
-      // The declared step order puts transcribe first, so this is a job whose
-      // transcript step was completed by a path that produced nothing. Parked,
-      // not skipped: structure without words is not a success.
-      return { ok: false, reason: 'needs_connection', error: 'no transcript to structure' };
+      // NOTHING WAS HEARD — and that is an ANSWER, not a failure to be retried forever
+      // (hadar 2026-08-07: "I keep getting the message this is taking longer than usual
+      // for every process").
+      //
+      // What this used to do: park with `needs_connection`. The job went to `blocked`,
+      // attempts climbed, and it never completed — so the capture screen waited out its
+      // full 90 seconds and told the contractor it was slow. It was not slow. Deepgram
+      // had returned an empty transcript (a real, explicit answer for silence — see
+      // deepgram.ts), and no amount of waiting was going to change it. A recording with
+      // nothing in it and a pipeline that is merely late looked identical, and only one
+      // of them is worth waiting for.
+      //
+      // So: record the step's honest outcome — a `confidence: 'none'` proposal, exactly
+      // what a model decline produces — and finish. The app then knows the pass RAN and
+      // produced nothing usable, which is a state it already draws properly ("No
+      // write-up came back… you can always write it yourself"), instead of a spinner
+      // that ends in a shrug.
+      //
+      // The distinction that matters, and why this is not "swallowing an error": a
+      // MISSING transcript row means the steps ran out of order and IS parked below
+      // (`typeof text !== 'string'` at the read). An EMPTY one means transcription
+      // succeeded and heard nothing.
+      const { error: noneErr } = await sb.from('capture_structured').insert({
+        id: `st-${job.capture_id}-${Date.now()}`,
+        capture_id: job.capture_id,
+        owner_id: job.owner_id,
+        confidence: 'none',
+        engine: 'worker-claude',
+        engine_model: STRUCTURE_MODEL,
+        from_transcript: '',
+      });
+      if (noneErr) return { ok: false, reason: 'needs_connection', error: noneErr.message };
+      return { ok: true };
     }
     let s: StructureResult | null;
     try {
@@ -142,6 +178,28 @@ export async function runStep(
       // like every other proposed field — the app decides whether to apply them,
       // because a proposal is not a record.
       proposed_tags: s?.tags?.length ? s.tags : null,
+      // 393 — the scope IN SECTIONS, and the terms the narration already stated.
+      // Stored as proposals like everything else here: the app renders and seeds
+      // them, and a human confirms before any of it can be sent (mandate #2).
+      // `proposed_value` above is the RENDERED text of exactly these sections, so
+      // the two can never describe different work.
+      proposed_sections: s?.sections ? {
+        background: s.sections.background,
+        steps: s.sections.steps,
+        included: s.sections.included,
+        excluded: s.sections.excluded,
+        assumptions: s.sections.assumptions,
+      } : null,
+      proposed_schedule_effect: s?.terms.scheduleEffect ?? null,
+      proposed_schedule_days: s?.terms.scheduleDays ?? null,
+      proposed_billing_timing: s?.terms.billingTiming ?? null,
+      // The two lists as TEXT, ready to copy into the change order's own columns.
+      // Bulleted the same way `renderScope` bullets them, so what the contractor
+      // reviews on the extra and what the owner reads in the instrument match.
+      proposed_exclusions: s?.sections.excluded.length
+        ? s.sections.excluded.map((x) => `• ${x}`).join('\n') : null,
+      proposed_inclusions: s?.sections.included.length
+        ? s.sections.included.map((x) => `• ${x}`).join('\n') : null,
       // Verbatim-quote task grouping (374). price_words in here is a QUOTE of
       // the transcript, never a figure — the app's parser + read-back remain
       // the only path a number takes into a field.
@@ -156,6 +214,24 @@ export async function runStep(
       from_transcript: text,
     });
     if (error) return { ok: false, reason: 'needs_connection', error: error.message };
+
+    // APPLY IT, HERE, ONCE (394). The proposal used to be written and then left for
+    // whichever client happened to open next — which meant the rule deciding what a
+    // binding document says lived in the React Native app, and would have had to be
+    // written a second time for the web app. `apply_proposal_v1` is that rule as a
+    // single SQL predicate: draft-only, never over a human-written scope, never over an
+    // answered term, never a price.
+    //
+    // NOT FATAL, and deliberately after the insert. The proposal is the durable
+    // outcome of this step; applying it is a convenience that the next capture on this
+    // extra — or a client that reads the proposal directly — can still deliver. A
+    // failure here must not park a job whose real work succeeded.
+    const { data: applied, error: applyErr } = await sb.rpc('apply_proposal_v1', {
+      p_capture_id: job.capture_id,
+    });
+    if (applyErr) console.warn('[worker] apply_proposal_v1:', applyErr.message);
+    else if (applied) console.log('[worker] applied proposal to its change order');
+
     return { ok: true };
   }
 
@@ -292,4 +368,51 @@ export function serviceClient(): SupabaseClient {
       'The anon key cannot advance a job: 140 revokes claim_job from anon.');
   }
   return createClient(url, key, { auth: { persistSession: false } });
+}
+
+
+/**
+ * The transcript of the WHOLE extra this capture belongs to, oldest first.
+ *
+ * Two reads rather than a join: PostgREST cannot join `capture_transcript` to
+ * `decision_version` without a declared relationship, and inventing one in the schema
+ * to save a round-trip on a background job is a bad trade.
+ *
+ * ORDER IS CHRONOLOGICAL AND LOAD-BEARING. The model is told to write steps "in the
+ * order the work happens", and the contractor's own sequence is the only evidence of
+ * that order. Sorting by anything else would silently rearrange the job.
+ *
+ * Each clip is separated by a blank line and nothing else — no "RECORDING 2" heading.
+ * The model is writing one document about one piece of work; telling it there were two
+ * sessions invites it to structure the output around the recordings instead of around
+ * the work.
+ */
+async function extraTranscript(sb: SupabaseClient, captureId: string): Promise<string> {
+  const one = async (id: string) => {
+    const { data } = await sb.from('capture_transcript').select('text')
+      .eq('capture_id', id).order('created_at', { ascending: false }).limit(1);
+    return (data?.[0]?.text ?? '').trim();
+  };
+  // Which decision is this capture part of?
+  const { data: mine } = await sb.from('decision_version').select('decision_id')
+    .eq('capture_id', captureId).limit(1);
+  const decisionId = mine?.[0]?.decision_id;
+  if (!decisionId) return one(captureId);
+
+  const { data: sibs } = await sb.from('decision_version')
+    .select('capture_id, created_at_ms')
+    .eq('decision_id', decisionId)
+    .order('created_at_ms', { ascending: true });
+  const ids = [...new Set((sibs ?? [])
+    .map((r: any) => r.capture_id).filter((x: unknown): x is string => !!x))];
+  if (ids.length <= 1) return one(captureId);
+
+  const parts: string[] = [];
+  for (const id of ids) {
+    const t = await one(id);
+    if (t) parts.push(t);
+  }
+  // A group whose transcripts have all vanished still has this capture's own words —
+  // never return empty when a single read would have answered.
+  return parts.length ? parts.join('\n\n') : one(captureId);
 }

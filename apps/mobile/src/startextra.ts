@@ -202,18 +202,50 @@ export async function retitleDraft(
  */
 export async function saveScopeOfWork(
   db: AbstractPowerSyncDatabase, changeOrderId: string, text: string,
-  opts?: { seedOnly?: boolean }
+  opts?: { seedOnly?: boolean; fromAi?: boolean }
 ): Promise<boolean> {
   const t = text.trim();
   if (!t) return false;
   const sql = opts?.seedOnly
-    // "Untouched" = still equal to the title it was born as, or empty. Anything else
-    // is the contractor's and is not seed material.
-    ? `UPDATE change_order SET scope_of_work = ?
+    // "Untouched" = empty, still the machine placeholder, or still equal to the title
+    // it was born as. Anything else is the contractor's and is not seed material.
+    //
+    // `scope_of_work = ?` (UNTITLED) IS LOAD-BEARING, and its absence was a real bug
+    // (found on device 2026-08-06). `applyProposalToExtra` retitles FIRST — the AI's
+    // subject becomes `scope` — and only then seeds the scope of work. By that point
+    // `scope_of_work = scope` is FALSE, because `scope` is no longer the placeholder
+    // the row was born with: it is "Fireplace facing replacement and staining" while
+    // the scope of work is still "Untitled extra — still being written up". So the
+    // guard rejected the seed, and the extra kept a real title, a real summary and a
+    // placeholder scope — with the write-up sitting on the server, high confidence,
+    // applied to two columns out of three.
+    //
+    // Testing the placeholder DIRECTLY is order-independent: it cannot be broken by
+    // any future writer that touches the title first. It is also the same rule
+    // `sendReadiness` uses to call a scope missing, so the seed and the send gate now
+    // agree about what "not written yet" means.
+    // `scope_of_work = scope_of_work_ai` IS WHAT MAKES RE-GENERATION POSSIBLE
+    // (hadar 2026-08-06: "in that case we change with the latest information").
+    // Adding a second recording must be able to REWRITE a scope the AI wrote — that
+    // is the whole point of saying more — while never touching a word the contractor
+    // typed. The column records exactly what the AI last left here, so the two cases
+    // are distinguishable instead of guessed at: current text still equals it → ours
+    // to replace; anything else → his, and untouchable without asking him.
+    ? `UPDATE change_order SET scope_of_work = ?, scope_of_work_ai = ?
         WHERE id = ? AND status = 'draft'
-          AND (scope_of_work IS NULL OR trim(scope_of_work) = '' OR scope_of_work = scope)`
-    : `UPDATE change_order SET scope_of_work = ? WHERE id = ? AND status = 'draft'`;
-  const r = await db.execute(sql, [t.slice(0, SCOPE_OF_WORK_MAX_CHARS), changeOrderId]);
+          AND (scope_of_work IS NULL OR trim(scope_of_work) = ''
+               OR scope_of_work = scope OR scope_of_work = ?
+               OR (scope_of_work_ai IS NOT NULL AND scope_of_work = scope_of_work_ai))`
+    // A HUMAN EDIT CLEARS THE AI MARK. Once he has rewritten it, the text is his and
+    // no later proposal may claim it back by matching a string it no longer owns.
+    : `UPDATE change_order SET scope_of_work = ?, scope_of_work_ai = ?
+         WHERE id = ? AND status = 'draft'`;
+  const body = t.slice(0, SCOPE_OF_WORK_MAX_CHARS);
+  const aiMark = opts?.fromAi ? body : null;
+  const args = opts?.seedOnly
+    ? [body, aiMark, changeOrderId, UNTITLED]
+    : [body, aiMark, changeOrderId];
+  const r = await db.execute(sql, args);
   if (!r.rowsAffected) return false;
   await refreshQueuedScope(db, changeOrderId, t.slice(0, SCOPE_OF_WORK_MAX_CHARS));
   return true;

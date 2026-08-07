@@ -51,6 +51,12 @@ import {
  * The outbox row is written INSIDE the insert's transaction; a crash between them
  * would leave a priced CO that nothing will ever try to upload.
  */
+/** The machine placeholder a capture-born extra is titled with. Same string as
+ *  `startextra.ts:UNTITLED` and `public.untitled_scope()` on the server — three
+ *  copies of one literal is two too many, and this one exists only because
+ *  importing startextra here would make a cycle. Change one, change all three. */
+const UNTITLED_SCOPE_TEXT = 'Untitled extra — still being written up';
+
 export const CHANGE_ORDER_DDL = [
   `CREATE TABLE IF NOT EXISTS change_order (
       id            TEXT NOT NULL PRIMARY KEY,
@@ -175,6 +181,17 @@ async function ensureFlowFields(db: AbstractPowerSyncDatabase) {
         OR schedule_effect IN ('no_change','adds_days','not_sure'))`],
     ['schedule_days', `INTEGER CHECK (schedule_days IS NULL OR schedule_days > 0)`],
     ['exclusions', 'TEXT'],
+    // WHAT THE AI LAST WROTE into scope_of_work (2026-08-06). DEVICE-ONLY, like the
+    // lifecycle stamps above and for the same reason: it is bookkeeping about
+    // authorship, not part of the instrument, so it stays out of the ingest RPC's
+    // fixed argument set. It is what lets a second recording rewrite a scope the model
+    // produced while leaving a scope the contractor typed alone — see saveScopeOfWork.
+    ['scope_of_work_ai', 'TEXT'],
+    // 396 — the contractor's own words about cost ("probably $1,800"), verbatim. NOT a
+    // price: it exists so the draft screen can read the number back and ask him to
+    // confirm it, which is the half of mandate #6 that was missing — the pipeline
+    // captured what he said and nothing ever showed it to him.
+    ['price_heard', 'TEXT'],
     // The AI's owner-facing SUMMARY of the change (structure.ts `value`): clear
     // prose the client reads, grouped by task, no prices (hadar, 2026-07-27). Set
     // at draft processing from the proposal and shown on the record beside the raw
@@ -874,6 +891,27 @@ export const CO_PHOTO_SUBQUERY = `(
  * Locale follows the reader (mandate #5). Forcing 'en-US' put an English date on a
  * Spanish-language legal record.
  */
+/**
+ * "Aug 5" — the DATE alone, for a list row (hadar 2026-08-06: "add date to the record
+ * item in the lists").
+ *
+ * Separate from `createdLabel` because a list is scanned, not read: the time of day
+ * doubles the width of the line and answers a question nobody asks while looking for
+ * last Tuesday's extra. Same locale rule, so the two never disagree about a month.
+ *
+ * THE YEAR APPEARS WHEN IT IS NOT THIS ONE. "Aug 5" on a change order from last August
+ * is not shorter, it is wrong — and this is a list a contractor uses to find what he
+ * has already billed.
+ */
+export function shortDate(ms: number, nowMs: number = Date.now()): string {
+  const d = new Date(ms);
+  const locale = getLang() === 'es' ? 'es-419' : 'en-US';
+  const sameYear = d.getFullYear() === new Date(nowMs).getFullYear();
+  return d.toLocaleDateString(locale, sameYear
+    ? { month: 'short', day: 'numeric' }
+    : { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 export function createdLabel(ms: number): string {
   const d = new Date(ms);
   const locale = getLang() === 'es' ? 'es-419' : 'en-US';
@@ -1243,7 +1281,7 @@ export async function hydrateChangeOrders(
 ) {
   const { data, error } = await supabase
     .from('change_order')
-    .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at')
+    .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at, scope_of_work, scope_of_work_ai, price_heard')
     .eq('project_id', projectId);
   if (error || !data) return { pulled: 0, statusUpdated: 0, skipped: 0, conflicts: 0 };
 
@@ -1378,6 +1416,44 @@ export async function hydrateChangeOrders(
     );
     if (upd.rowsAffected) statusUpdated++;
   }
+
+  // THE WRITE-UP, LEARNED RATHER THAN AUTHORED (394).
+  //
+  // The model's output is applied to the change order ON THE SERVER now
+  // (`apply_proposal_v1`), because the web app is coming and the rule that decides what
+  // a binding document says must exist once, not once per client. This device's job is
+  // no longer to apply it — only to notice it happened.
+  //
+  // THE GUARD IS THE SAME ONE, RESTATED LOCALLY, and it has to be: a draft is edited on
+  // the phone, often with no signal, and the row here can legitimately be ahead of the
+  // server. So a pulled scope is adopted ONLY while this device is holding nothing of
+  // its own — nothing queued in the outbox, and the local text still empty, still the
+  // placeholder, still a copy of the title, or still exactly what the AI last left.
+  // Anything else is the contractor's, and a hydrate that overwrote it would be the
+  // cloud silently editing a man's document while he was writing it.
+  //
+  // Draft-only, like everything else that touches these columns: a sent extra's scope
+  // is inside a frozen instrument (mandate #5).
+  let scopesLearned = 0;
+  for (const co of data as any[]) {
+    if (discarded.has(co.id)) continue;   // a deleted extra is not resurrected here either
+    const sow = (co as { scope_of_work?: string | null }).scope_of_work;
+    const ai = (co as { scope_of_work_ai?: string | null }).scope_of_work_ai;
+    if (!sow || !sow.trim() || sow !== ai) continue;   // not the server's AI text: leave it
+    const upd = await db.execute(
+      `UPDATE change_order SET scope_of_work = ?, scope_of_work_ai = ?, scope = ?,
+              price_heard = COALESCE(?, price_heard)
+        WHERE id = ? AND status = 'draft'
+          AND (scope_of_work IS NULL OR trim(scope_of_work) = ''
+               OR scope_of_work = scope OR scope_of_work = ?
+               OR (scope_of_work_ai IS NOT NULL AND scope_of_work = scope_of_work_ai))
+          AND NOT EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = change_order.id)`,
+      [sow, sow, co.scope, (co as { price_heard?: string | null }).price_heard ?? null, co.id, UNTITLED_SCOPE_TEXT]
+    );
+    if (upd.rowsAffected) scopesLearned++;
+  }
+  if (scopesLearned) console.log('hydrate learned %d server-written scope(s)', scopesLearned);
+
   return { pulled, statusUpdated, skipped, conflicts };
 }
 
