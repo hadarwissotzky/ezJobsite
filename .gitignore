@@ -33,3 +33,16 @@ supabase/.temp
 _import.tar
 .gstack/
 apps/worker/node_modules/
+
+# CodeGraph's local index. Derived from the source, rebuilt by the watcher, and large.
+.codegraph/
+
+# Ad-hoc Metro-inspector (CDP) helpers written during a debugging session — evaluate an
+# expression on the attached phone, grab a screenshot. Genuinely useful, genuinely
+# throwaway: each is a one-liner pile that assumes a device is attached on :8081. They
+# are dotfiles in apps/mobile so they never appear in a listing; ignoring them keeps a
+# private debugging kit private rather than pretending it is tooling anyone can rely on.
+apps/mobile/.c2.cjs
+apps/mobile/.fx.cjs
+apps/mobile/.go.cjs
+apps/mobile/.shot.cjs
