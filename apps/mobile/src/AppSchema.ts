@@ -52,6 +52,12 @@ const company = new Table({
   created_at: column.text,
   // Subscription tier (382). Client READS to lift caps; the store webhook WRITES it.
   plan: column.text,
+  // The letterhead mark (402 added the column, 404 the writer). A Storage object key,
+  // never a URL — URLs expire and get regenerated; the key is stable and the signed
+  // URL is minted at read time. Declared here ONLY so the drawer can read it: the sync
+  // rule is already `SELECT * FROM company`, so the value has been arriving on every
+  // device since 402 and simply had nowhere to land.
+  logo_key: column.text,
 });
 
 const company_member = new Table(

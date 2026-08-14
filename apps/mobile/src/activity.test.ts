@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildActivity, unreadCount, unreadIds,
-  type ActivitySource,
+  type ActivityRow, type ActivitySource,
 } from './activity.ts';
 
 const src = (o: Partial<ActivitySource> & { changeOrderId: string }): ActivitySource => ({
@@ -24,7 +24,9 @@ test('AC: an unanswered question is the FIRST row and the bell counts it', () =>
   ], new Set());
   assert.equal(rows[0].kind, 'question');
   assert.equal(rows[0].detail, 'Can it wait?');
-  assert.equal(unreadCount(rows), 1);
+  // BOTH count since 2026-08-12: the approval fires a push of its own, so a bell that
+  // ignored it would disagree with the notification the user is looking at.
+  assert.equal(unreadCount(rows), 2);
 });
 
 test('AC: marking read changes ONLY read-state — never an item field', () => {
@@ -47,7 +49,13 @@ test('AC: marking read changes ONLY read-state — never an item field', () => {
   assert.equal(unreadCount(after), 0);
 });
 
-test('the badge counts questions only — approvals must not inflate it', () => {
+/**
+ * REVERSED 2026-08-12 (hadar: "a red badge with the number of new notifications").
+ * This test used to assert that approvals must NOT inflate the badge. They must: the
+ * same approval raises a push and a row in the notification list, and a bell that stayed
+ * silent made three surfaces disagree about one event.
+ */
+test('the badge counts every unread arrival — approvals and declines included', () => {
   const rows = buildActivity([
     src({ changeOrderId: 'a', status: 'approved', signedBy: 'S' }),
     src({ changeOrderId: 'b', status: 'approved', signedBy: 'S' }),
@@ -55,7 +63,37 @@ test('the badge counts questions only — approvals must not inflate it', () => 
     src({ changeOrderId: 'd', questions: [{ id: 'q', body: '?', atMs: 1 }] }),
   ], new Set());
   assert.equal(rows.length, 4, 'all four are listed');
-  assert.equal(unreadCount(rows), 1, 'but only the question is counted');
+  assert.equal(unreadCount(rows), 4, 'and all four are counted');
+});
+
+test("a 'sent' row would be listed but never badged — he did it himself", () => {
+  // Built by hand, NOT through buildActivity: nothing emits a 'sent' row today (a bare
+  // sent extra with no question and no answer produces nothing at all). The kind is
+  // declared, the exclusion is written for it, and this is what it will do when
+  // something starts producing them — stated rather than left as a silent no-op.
+  const rows: ActivityRow[] = [
+    { id: 'sent:a', kind: 'sent', changeOrderId: 'a', scope: 'Subfloor rot',
+      jobName: '41 Alder', detail: null, atMs: 1000, read: false },
+    { id: 'q:1', kind: 'question', changeOrderId: 'b', scope: 'Panel',
+      jobName: '41 Alder', detail: '?', atMs: 2000, read: false },
+  ];
+  assert.equal(unreadCount(rows), 1, 'badging a man for his own action is furniture');
+  // …but "mark all read" must still be able to clear its dot, which is why the
+  // notification screen gates that button on unreadIds and not on the badge.
+  assert.equal(unreadIds(rows).length, 2);
+});
+
+test('reading a row drops it out of the badge', () => {
+  const rows = buildActivity([
+    src({ changeOrderId: 'a', status: 'approved', signedBy: 'S' }),
+    src({ changeOrderId: 'b', questions: [{ id: 'q', body: '?', atMs: 1 }] }),
+  ], new Set());
+  assert.equal(unreadCount(rows), 2);
+  const after = buildActivity([
+    src({ changeOrderId: 'a', status: 'approved', signedBy: 'S' }),
+    src({ changeOrderId: 'b', questions: [{ id: 'q', body: '?', atMs: 1 }] }),
+  ], new Set(unreadIds(rows)));
+  assert.equal(unreadCount(after), 0, 'the icon badge clears with the bell');
 });
 
 test('newest first, and a question outranks an answer at the SAME moment', () => {

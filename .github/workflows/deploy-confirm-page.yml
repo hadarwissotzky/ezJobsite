@@ -55,10 +55,10 @@ jobs:
           # transit, and the signature would be genuine on a document nobody wrote.
           # Repo-level custom domain — OVERRIDES the account-level capimpact.com that
           # otherwise hijacks every hadarwissotzky.github.io/* page. It needs ONE DNS
-          # record the owner adds at the ezchangeorder.com registrar:
-          #   approve.ezchangeorder.com  CNAME  hadarwissotzky.github.io
+          # record the owner adds at the ezchangeorders.com registrar:
+          #   approve.ezchangeorders.com  CNAME  hadarwissotzky.github.io
           # Until that resolves, the deploy is ready and waiting (hadar, 2026-07-24).
-          echo 'approve.ezchangeorder.com' > _site/CNAME
+          echo 'approve.ezchangeorders.com' > _site/CNAME
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

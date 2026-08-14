@@ -48,6 +48,17 @@ export type ThreadMessage = {
   side: ThreadSide;
   text: string;
   atMs: number;
+  /**
+   * Photos sent WITH this message (2026-08-09). Optional because every existing
+   * producer of a ThreadMessage — the server pull, the fixtures, the tests — omits
+   * it, and a message with no photos and a message from before photos existed are
+   * the same thing to every reader.
+   *
+   * The shape is deliberately structural rather than an import from
+   * `discussionstore`: this module stays free of PowerSync and expo so it can run
+   * under `node --test`, which is the whole reason the pure/IO split exists here.
+   */
+  photos?: readonly { captureId: string; relpath: string | null; published: boolean }[];
 };
 
 /**

@@ -44,7 +44,7 @@ const RESEND_AFTER_S = 60;
 const CODE_LEN = 6;
 
 type Method = 'phone' | 'email';
-type Step = 'form' | 'confirm' | 'code' | 'linkSent';
+type Step = 'form' | 'code' | 'linkSent';
 type Fail =
   | { kind: 'net' | 'notArrived' | 'badCode' | 'cantSend' | 'signupFailed' }
   | { kind: 'other'; text: string }
@@ -62,10 +62,22 @@ function classify(e: any, phase: 'send' | 'verify' | 'oauth'): Fail {
 
 const emailLooksReal = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
 
-export function AuthScreen({ connector }: { connector: SupabaseConnector }) {
+export function AuthScreen({ connector, initialSignUp = false, onReplayIntro }: {
+  connector: SupabaseConnector;
+  /**
+   * Which form to open on. The landing page has two buttons — "Get started" and
+   * "Log in" — and before this prop existed they were two labels for one destination:
+   * a returning user who tapped Log in landed on a sign-up form asking for his name
+   * and company, which reads as the app having forgotten him. Defaults false so every
+   * other caller is unchanged.
+   */
+  initialSignUp?: boolean;
+  /** DEV ONLY: clears the seen-intro flag and re-renders the landing pages. */
+  onReplayIntro?: () => void;
+}) {
   const [method, setMethod] = React.useState<Method>('phone');
   const [step, setStep] = React.useState<Step>('form');
-  const [signUp, setSignUp] = React.useState(false);
+  const [signUp, setSignUp] = React.useState(initialSignUp);
 
   const [typed, setTyped] = React.useState('');
   const [email, setEmail] = React.useState('');
@@ -157,15 +169,28 @@ export function AuthScreen({ connector }: { connector: SupabaseConnector }) {
     } catch (e) { setFail(classify(e, 'send')); } finally { setBusy(false); }
   };
 
+  /**
+   * A 429 maps to one kind and TWO wordings (hadar's screenshot, 2026-08-13).
+   *
+   * Supabase rate-limits the whole auth endpoint, so hammering the phone step and then
+   * switching to sign-up produced "Too many tries … then ask for a new code" ON THE
+   * CREATE-ACCOUNT FORM — a screen with no code field, which sends a magic LINK. The
+   * error was true and the sentence was about a different mechanism, which reads as the
+   * app being confused about what it just did.
+   *
+   * The wording follows the method actually in use rather than the phase that failed:
+   * that is what the reader is looking at.
+   */
   const failText = !fail ? null
     : fail.kind === 'other' ? fail.text
     : T(fail.kind === 'net' ? 'auth.errNoSignal'
-      : fail.kind === 'notArrived' ? 'auth.errNotArrived'
+      : fail.kind === 'notArrived'
+        ? (method === 'phone' && !signUp ? 'auth.errTooManyCode' : 'auth.errTooManyLink')
       : fail.kind === 'cantSend' ? 'auth.errCantSend'
       : fail.kind === 'signupFailed' ? 'auth.errCantSend'
       : 'auth.errBadCode');
 
-  const Brand = () => <Text style={st.brand}>EZchangeorder</Text>;
+  const Brand = () => <Text style={st.brand}>EZChangeOrders</Text>;
 
   // ── the emailed link is out; this state must survive leaving for Mail ──
   if (step === 'linkSent') {
@@ -236,26 +261,13 @@ export function AuthScreen({ connector }: { connector: SupabaseConnector }) {
     );
   }
 
-  // ── read the number back before any SMS goes out (REQ-ID4, mandate #6) ──
-  if (step === 'confirm') {
-    return (
-      <KeyboardAvoidingView style={st.c} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={st.inner}>
-          <Brand />
-          <Text style={st.h}>{T('auth.confirmTitle')}</Text>
-          <Text style={st.bigNumber}>{displayPhone(e164)}</Text>
-          <Text style={st.sub}>{T('auth.confirmWhy')}</Text>
-          {failText && <Text style={st.err}>{failText}</Text>}
-          <Pressable style={[st.btn, busy && st.btnOff]} disabled={busy} onPress={sendCode}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={st.btnT}>{T('auth.sendCode')}</Text>}
-          </Pressable>
-          <Pressable style={st.link} onPress={() => { reset(); setStep('form'); }}>
-            <Text style={st.linkT}>{T('auth.changeNumber')}</Text>
-          </Pressable>
-        </View>
-      </KeyboardAvoidingView>
-    );
-  }
+  /**
+   * The 'confirm' step lived here: a full screen showing the number back with a "Send
+   * code" button, added for REQ-ID4. Removed 2026-08-13 — the requirement is that the
+   * number be READ BACK before it is trusted, and the code screen does exactly that
+   * ("Code sent to …" plus Change number), at the moment the reader can act on it.
+   * Two read-backs is not twice the safety; it is one extra tap.
+   */
 
   const Social = () => (
     <>
@@ -373,9 +385,17 @@ export function AuthScreen({ connector }: { connector: SupabaseConnector }) {
             {typed.replace(/\D/g, '').length >= 7 && !e164 && (
               <Text style={st.err}>{T('auth.phoneBad')}</Text>
             )}
-            <Pressable style={[st.btn, !e164 && st.btnOff]} disabled={!e164}
-              onPress={() => { reset(); setStep('confirm'); }}>
-              <Text style={st.btnT}>{T('auth.continue')}</Text>
+            {/* SENDS THE CODE, rather than stepping to a read-back screen first
+                (hadar, 2026-08-13). That screen asked "is this your number?" about a
+                number typed two seconds earlier, on the way to a screen that ALREADY
+                reads it back — "Code sent to +1 415 555 0134" with Change number
+                underneath it. The check survives; it just happens where it is useful,
+                next to the thing that tells you whether the SMS arrived. One tap fewer
+                on the screen that stands between a contractor and his own app. */}
+            <Pressable style={[st.btn, (!e164 || busy) && st.btnOff]} disabled={!e164 || busy}
+              onPress={sendCode}>
+              {busy ? <ActivityIndicator color="#fff" />
+                : <Text style={st.btnT}>{T('auth.continue')}</Text>}
             </Pressable>
           </>
         ) : (
@@ -398,6 +418,18 @@ export function AuthScreen({ connector }: { connector: SupabaseConnector }) {
 
         {failText && <Text style={st.err}>{failText}</Text>}
         <Social />
+
+        {/* DEV ONLY — replay the intro. The onboarding flag is set the first time the
+            app is ever opened and never cleared, so on any device that has run this app
+            before, a design change to the intro is INVISIBLE: you sign out and land
+            straight here. The only other ways to see it were a reinstall (which takes
+            the local capture database with it) or a debugger attached over Metro.
+            `__DEV__` strips this from any release build. */}
+        {__DEV__ && onReplayIntro && (
+          <Pressable style={st.devRow} onPress={onReplayIntro} accessibilityRole="button">
+            <Text style={st.devT}>Show intro again (dev)</Text>
+          </Pressable>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -405,7 +437,13 @@ export function AuthScreen({ connector }: { connector: SupabaseConnector }) {
 
 const st = StyleSheet.create({
   c: { flex: 1, backgroundColor: '#F7F4EE' },
-  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 40 },
+  // TOP-ANCHORED, NOT CENTRED. `justifyContent: 'center'` with `flexGrow: 1` centres
+  // content that FITS and clips content that does not — and once the keyboard shrinks
+  // the box, this form does not fit. The brand and "Create your account" were pushed
+  // off the top with no way to scroll back to them (hadar's screenshot, 2026-08-13).
+  // A fixed top inset always shows the heading and lets the rest scroll under the
+  // keyboard, which is where the extra bottom padding takes it.
+  scroll: { flexGrow: 1, paddingHorizontal: 28, paddingTop: 72, paddingBottom: 120 },
   inner: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
   brand: { fontSize: 30, fontWeight: '900', color: '#4E6243', textAlign: 'center', marginBottom: 8 },
   h: { fontSize: 26, fontWeight: '800', color: '#151A1E', textAlign: 'center', marginBottom: 6 },
@@ -445,7 +483,6 @@ const st = StyleSheet.create({
   },
   groupInput: { paddingHorizontal: 16, paddingVertical: 17, fontSize: 17, color: '#151A1E' },
   groupRule: { height: 1, backgroundColor: '#E4DFD6' },
-  bigNumber: { fontSize: 30, fontWeight: '800', color: '#151A1E', textAlign: 'center', marginBottom: 14 },
   bigEmail: { fontSize: 18, fontWeight: '800', color: '#151A1E', textAlign: 'center', marginBottom: 6 },
   tick: { alignItems: 'center', marginBottom: 26 },
   didNot: { fontSize: 17, color: '#5E666E', textAlign: 'center', marginTop: 26, marginBottom: 12 },
@@ -479,4 +516,7 @@ const st = StyleSheet.create({
   consent: {
     textAlign: 'center', color: '#5E666E', fontSize: 13.5, lineHeight: 19, marginTop: 22,
   },
+  devRow: { alignItems: 'center', paddingVertical: 18, marginTop: 4 },
+  devT: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#8c959f',
+    textDecorationLine: 'underline' },
 });

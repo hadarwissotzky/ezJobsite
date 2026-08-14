@@ -58,3 +58,52 @@ services:
         sync: false
       - key: DEEPGRAM_API_KEY
         sync: false
+
+  # ── the client's approval page ──────────────────────────────────────────────
+  #
+  # WHY THIS IS HERE (hadar, 2026-08-10: "can we use render? we have a site").
+  # The page had no working address. It deploys to GitHub Pages via
+  # .github/workflows/deploy-confirm-page.yml, and that deploy is HIJACKED: the
+  # account-level custom domain sends hadarwissotzky.github.io/* to capimpact.com
+  # with a 301, and the repo-level CNAME meant to override it points at
+  # approve.ezchangeorders.com, which has never had a DNS record. Both paths are
+  # dead, so every approval link the app has ever minted goes nowhere.
+  #
+  # A Render static site fixes that today and needs no DNS: it publishes to a
+  # *.onrender.com hostname immediately. A custom domain can be pointed at it later
+  # without changing anything here.
+  #
+  # THE BUILD IS A SUBSTITUTION, not a bundler. confirm.html ships with
+  # __SUPABASE_URL__ / __ANON_KEY__ placeholders precisely so a repo cannot hardcode
+  # one project's keys — the same reason scripts/deploy-web.sh substitutes at upload.
+  # The anon key is public by design (RLS and the RPC grants are the protection), but
+  # it is still injected from the environment so a fork deploys against its own
+  # backend rather than silently against this one.
+  - type: web
+    name: ezjobsite-approve
+    runtime: static
+    rootDir: apps/web
+    buildCommand: |
+      mkdir -p _site
+      sed -e "s|__SUPABASE_URL__|${SUPABASE_URL}|g" \
+          -e "s|__ANON_KEY__|${ANON_KEY}|g" confirm.html > _site/confirm.html
+      # ewa.js holds no keys and reaches no network — copied, not substituted. It must
+      # ship WITH confirm.html: the page loads it with a plain <script src> and fails
+      # closed without it, which is correct and is exactly the DEF-6 defect that hit
+      # the bucket deploy.
+      cp ewa.js _site/ewa.js
+      # The bare host serves the approval page. A link that loses its path should not
+      # land on a 404 in front of a homeowner.
+      cp _site/confirm.html _site/index.html
+    staticPublishPath: _site
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: ANON_KEY
+        sync: false
+    headers:
+      # The page reads a token from the query string. Referrer leakage would hand that
+      # token to any host an outbound link points at — and the token IS the credential.
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer

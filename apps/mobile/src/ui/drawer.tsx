@@ -22,7 +22,7 @@
  * misrepresent signing out as dangerous when it is routine and reversible.
  */
 import React from 'react';
-import { Alert, Animated, Easing, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Alert, Animated, Easing, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LockCrown } from './usagecard';
 import { C, F } from './theme';
 import { radii, shadows } from './tokens';
@@ -31,22 +31,22 @@ import { t as T } from '../i18n';
 import type { Lang } from '../i18n';
 import type { UsageItem, UsageSummary } from '../usage';
 
-const SUPPORT_EMAIL = 'support@ezchangeorder.com';
+const SUPPORT_EMAIL = 'support@ezchangeorders.com';
 
 export function Drawer({
-  visible, onClose, onProfile, onCompanySettings, onInbox, onPlans,
-  inboxCount, planName, isFreePlan, isOwner,
-  lang, onToggleLang, appVersion, confirmBase, onSignOut,
+  visible, onClose, onProfile, onCompanySettings, onPlans,
+  planName, isFreePlan, isOwner,
+  lang, onToggleLang, appVersion, confirmBase, onSignOut, onShowIntro, onSimulateFirstRun,
+  companies, activeCompanyId, onSwitchCompany, onCloseAccount,
   buildLabel, updateReady, onApplyUpdate, onCheckUpdates, usage,
+  logoUri, companyName, canEditLogo, onLogoPress,
 }: {
   visible: boolean;
   onClose: () => void;
   onProfile: () => void;
   /** Opens the owner-only company Settings. Only rendered when isOwner. */
   onCompanySettings: () => void;
-  onInbox: () => void;
   onPlans: () => void;
-  inboxCount: number;
   planName: string;
   isFreePlan: boolean;
   /** This user created/owns the company: gates the Upgrade CTA and the Settings row. */
@@ -65,6 +65,24 @@ export function Drawer({
   onCheckUpdates?: () => Promise<'downloaded' | 'none' | 'error'>;
   confirmBase: string;
   onSignOut: () => Promise<void>;
+  /** DEV ONLY: re-render the first-open intro over the current screen. */
+  onShowIntro?: () => void;
+  /** DEV ONLY: clear the seen-flags and sign out, to replay the whole first-run path. */
+  onSimulateFirstRun?: () => void;
+  /** Every tenant this person belongs to. One entry (or none) hides the switcher. */
+  companies?: { id: string; name: string; isOwner: boolean }[];
+  activeCompanyId?: string | null;
+  onSwitchCompany?: (companyId: string) => void;
+  /** Opens the close-account confirmation. */
+  onCloseAccount?: () => void;
+  /** A local file:// URI for the company logo, or null to draw the EZ wordmark. */
+  logoUri?: string | null;
+  /** The company's name for the panel header. Null falls back to the product name. */
+  companyName?: string | null;
+  /** Owner-only: shows the add/change affordance. The writer refuses non-owners. */
+  canEditLogo?: boolean;
+  /** Opens the caller's logo sheet. Omitted = the header is not pressable. */
+  onLogoPress?: () => void;
 }) {
   const { width } = useWindowDimensions();
   const panelW = Math.min(340, Math.round(width * 0.86));
@@ -110,7 +128,7 @@ export function Drawer({
   const mailTo = (subject: string) =>
     Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}`).catch(() => {});
   const openLegal = (path: string) =>
-    Linking.openURL(`https://${confirmBase || 'ezchangeorder.com'}/${path}`).catch(() => {});
+    Linking.openURL(`https://${confirmBase || 'ezchangeorders.com'}/${path}`).catch(() => {});
   const confirmSignOut = () =>
     Alert.alert(T('set.signOut'), T('set.signOutConfirm'), [
       { text: T('set.cancel'), style: 'cancel' },
@@ -146,10 +164,40 @@ export function Drawer({
           transform: [{ translateX: slide.interpolate({ inputRange: [0, 1], outputRange: [-panelW, 0] }) }],
         }]}
       >
-        <View style={st.brand}>
-          <View style={st.brandBox}><Text style={st.brandBoxT}>EZ</Text></View>
-          <Text style={st.brandWord}>CHANGEORDER</Text>
-        </View>
+        {/* ── THE COMPANY'S OWN MARK ── (hadar 2026-08-12: "Add logo — add that to
+            the drawer"). This block used to be the EZChangeOrders wordmark, i.e. the
+            app telling the contractor what app he is in — which he knows. His own logo
+            is the more useful thing in the same space, and it is not decoration: the
+            SAME image goes on the letterhead of every change order his clients open
+            (402), so this is where he can see what they will see.
+
+            The wordmark is NOT gone — it is the fallback when no logo is set, so the
+            panel is never headless. */}
+        <Pressable style={st.brand} onPress={onLogoPress ? go(onLogoPress) : undefined}
+          accessibilityRole="button"
+          accessibilityLabel={T(logoUri ? 'logo.change' : 'logo.add')}>
+          {logoUri ? (
+            <Image source={{ uri: logoUri }} style={st.brandLogo} resizeMode="contain" />
+          ) : (
+            <View style={st.brandBox}><Text style={st.brandBoxT}>EZ</Text></View>
+          )}
+          <View style={{ flex: 1 }}>
+            {/* The company's name when we know it, the product's when we do not. A solo
+                operator who never named a company still gets a header, not a blank. */}
+            <Text style={st.brandWord} numberOfLines={1}>
+              {companyName || 'CHANGEORDERS'}
+            </Text>
+            {/* The affordance is SPELLED OUT rather than left to a tap-the-logo
+                convention. The ICP does not go hunting for hidden controls (CLAUDE.md
+                §1), and "Add logo" is also the only thing on this screen that tells him
+                the feature exists at all. Owner only: it is the company's mark, and
+                402's writer refuses a non-owner anyway — offering a control the server
+                will refuse is the dead-button failure this app keeps paying for. */}
+            {canEditLogo && (
+              <Text style={st.brandAct}>{T(logoUri ? 'logo.change' : 'logo.add')}</Text>
+            )}
+          </View>
+        </Pressable>
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}
           showsVerticalScrollIndicator={false}>
@@ -169,15 +217,48 @@ export function Drawer({
             ))}
           </Group>
 
-          {/* ── ACCOUNT ── */}
+          {/* ── WHICH COMPANY ── shown ONLY when this person belongs to more than one.
+              A switcher over a list of one is a decision nobody has, and for the
+              freelancer this app is built for that is the normal case — so it renders
+              nothing at all rather than a menu with a single entry.
+
+              A LIST, NOT A TOGGLE. "Toggle" reads as two; a person can be crew on one
+              company, a sub on another and a freelancer besides, and the row has to show
+              which one is live at a glance. */}
+          {companies && companies.length > 1 && (
+            <Group label={T('co.switchLabel')}>
+              {companies.map((c, i) => (
+                <Row
+                  key={c.id}
+                  icon={c.isOwner ? 'job' : 'people'}
+                  label={c.name}
+                  value={c.id === activeCompanyId ? T('co.switchOn') : undefined}
+                  accent={c.id === activeCompanyId}
+                  last={i === companies.length - 1}
+                  onPress={c.id === activeCompanyId ? undefined
+                    : go(() => onSwitchCompany?.(c.id))}
+                />
+              ))}
+            </Group>
+          )}
+
+          {/* ── ACCOUNT ──
+              TWO ROWS REMOVED HERE (hadar, 2026-08-12: "drawer has 2 sections index and
+              company feed — both can be removed from there").
+
+              COMPANY FEED was a stand-in door. It went in when the notifications screen
+              took the feed's bottom-nav slot, and the slot was given back to Company on
+              the same day — so it had been a second entrance to a place that already has
+              a tab. Two doors to one room is one door too many in a menu this short.
+
+              INBOX (`drawer.inbox`) is the one worth stating plainly: it was the ONLY
+              working way into the unfiled-captures screen. See the note at the App.tsx
+              call site — the screen still exists and now has no entrance. */}
           <Group label={T('drawer.account')}>
             <Row icon="gear" label={T('drawer.profile')} onPress={go(onProfile)} />
             {isOwner && (
               <Row icon="job" label={T('set.companyTitle')} onPress={go(onCompanySettings)}
-                crown={isFreePlan} />
-            )}
-            {inboxCount > 0 && (
-              <Row icon="savedLocal" label={T('drawer.inbox')} badge={inboxCount} onPress={go(onInbox)} last />
+                crown={isFreePlan} last />
             )}
           </Group>
 
@@ -199,16 +280,37 @@ export function Drawer({
                 </View>
               } />
             {updateReady && onApplyUpdate && (
-              <Row label={T('set.restartToUpdate')} accent onPress={onApplyUpdate} last />
+              <Row label={T('set.restartToUpdate')} accent onPress={onApplyUpdate} />
+            )}
+            {/* DEV ONLY — replay the first-open intro. It lives HERE, not only on the
+                sign-in screen, because the sign-in screen is unreachable once you are
+                signed in: the pages and the door to them both vanished at the same
+                moment. `__DEV__` strips it from any release build. */}
+            {__DEV__ && onShowIntro && (
+              <Row label="Show intro (dev)" onPress={go(onShowIntro)} />
+            )}
+            {/* DEV ONLY — replay the guided first change order in place. It no longer
+                signs you out: doing so cost a fresh magic link every cycle and Supabase
+                rate-limits those, so the tool produced the error it was used to reach.
+                The pre-login intro has its own row above; a genuinely logged-out run is
+                Sign out, three rows down. */}
+            {__DEV__ && onSimulateFirstRun && (
+              <Row label="Replay first change order (dev)" accent
+                onPress={go(onSimulateFirstRun)} last />
             )}
           </Group>
 
           {/* ── HELP ── */}
           <Group label={T('set.support')}>
-            <Row label={T('set.contact')} onPress={() => mailTo('EZchangeorder — support')} />
-            <Row label={T('set.feedback')} onPress={() => mailTo('EZchangeorder — feedback')} />
+            <Row label={T('set.contact')} onPress={() => mailTo('EZChangeOrders — support')} />
+            <Row label={T('set.feedback')} onPress={() => mailTo('EZChangeOrders — feedback')} />
             <Row label={T('set.terms')} onPress={() => openLegal('terms')} />
-            <Row label={T('set.privacy')} onPress={() => openLegal('privacy')} last />
+            <Row label={T('set.privacy')} onPress={() => openLegal('privacy')} />
+            {/* CLOSE ACCOUNT. Required by App Store 5.1.1(v) for any app that lets
+                somebody create an account — and it was missing entirely. Last in Help,
+                below the legal rows, because that is where somebody looks for it and
+                nowhere near anything they might hit by accident. */}
+            <Row label={T('set.closeAccount')} onPress={go(() => onCloseAccount?.())} last />
           </Group>
 
           <Pressable style={st.signOut} onPress={confirmSignOut} accessibilityRole="button">
@@ -301,6 +403,12 @@ const st = StyleSheet.create({
 
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 16,
     borderBottomWidth: 1, borderBottomColor: C.line },
+  // 44pt square, rounded, with a hairline: a logo on a cream panel needs an edge or a
+  // white-background mark dissolves into the page. `contain` so nothing is cropped —
+  // the crop decision was already made in the picker, by him.
+  brandLogo: { width: 44, height: 44, borderRadius: 8, borderWidth: 1, borderColor: '#ece5de',
+    backgroundColor: '#fff' },
+  brandAct: { fontFamily: F.bodySemi, fontSize: 12.5, color: C.brand, marginTop: 2 },
   brandBox: { borderWidth: 2, borderColor: C.brand, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
   brandBoxT: { fontFamily: F.bodyBold, fontSize: 20, color: C.brand, letterSpacing: 0.5 },
   brandWord: { fontFamily: F.disp, fontSize: 20, color: C.ink, letterSpacing: 0.4 },

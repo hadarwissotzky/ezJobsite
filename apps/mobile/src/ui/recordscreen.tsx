@@ -34,7 +34,9 @@
  * already-translated words, never slugs.
  */
 import React from 'react';
-import { Image, Modal, Pressable, Text, View } from 'react-native';
+import {
+  FlatList, Image, Modal, Pressable, Text, View, useWindowDimensions,
+} from 'react-native';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { ExtraRecord } from '../record';
 import type { ApprovalPanel } from '../eventlog';
@@ -135,7 +137,10 @@ export type RecordScreenProps = {
   /** A reply is a MESSAGE: it commits nothing and prices nothing. REQ-LC23's
    *  `canReply` is enforced inside the screen by `threadState`, so this is passed
    *  unconditionally — the old caller-side status test was a second copy of it. */
-  onReply: (text: string) => Promise<void>;
+  onReply: (text: string, captureIds: readonly string[]) => Promise<void>;
+  /** Take one photo for a MESSAGE and commit it; returns its capture id, or null
+   *  if the shutter was cancelled. */
+  onSnapPhoto?: () => Promise<string | null>;
   /** R8 manual remind — same link, never a new token. Resolves with the verdict so
    *  a refusal is SHOWN; this screen has no other status surface. */
   onRemind: () => Promise<{ ok: boolean; why?: string }>;
@@ -349,6 +354,10 @@ export function RecordScreen(props: RecordScreenProps) {
         // Same gate the removed FAB carried: capture is offered only where the
         // record may still grow, so a locked one is never handed the callback.
         onCapture={mayAppend ? props.onCapture : undefined}
+        // The MESSAGE camera, distinct from onCapture (which files evidence onto
+        // the change order). Gated on the same `mayAppend`: a sealed record takes
+        // no new bytes at all, by any door.
+        onSnapPhoto={mayAppend ? props.onSnapPhoto : undefined}
       />
     );
   })();
@@ -383,7 +392,8 @@ export function RecordScreen(props: RecordScreenProps) {
           note" under the conversation. Both are reachable without covering anything.
           `mayAppend` still governs WHETHER capture is offered — a locked record must
           never grow — it is now enforced by which screen receives the callback. */}
-      <PhotoLightbox uri={zoom} onClose={() => setZoom(null)} />
+      <PhotoLightbox uri={zoom} uris={rec.photos.filter((p) => p.present).map((p) => p.uri)}
+        onClose={() => setZoom(null)} />
     </View>
   );
 }
@@ -395,25 +405,87 @@ export function RecordScreen(props: RecordScreenProps) {
  * 2026-07-23: a corner ✕ is exactly the target the field-UX numbers forbid);
  * tapping the photo itself still closes too.
  */
-export function PhotoLightbox({ uri, onClose }: { uri: string | null; onClose: () => void }) {
+/**
+ * The full-screen photo viewer.
+ *
+ * IT TAKES THE WHOLE SET, NOT ONE PICTURE (hadar, 2026-08-12: "once in lightbox mode
+ * need to swipe left and right to load other images"). It used to take a single
+ * `uri`, so looking at the second of six photos meant closing, finding the next
+ * thumbnail and opening again — six times, on a phone, with gloves. Evidence is read
+ * in sequence: what the wall looked like before, during, after.
+ *
+ * A PAGING FlatList rather than a gesture library: horizontal, snapped to the screen,
+ * `initialScrollIndex` so it opens on the one that was tapped. No new dependency and
+ * the OS handles the physics.
+ *
+ * THE COUNTER IS NOT DECORATION. "3 of 6" is the only thing telling a reader there
+ * are more, because a photo that fills the screen gives no hint that anything sits
+ * beside it. Without it the swipe is a feature nobody discovers.
+ */
+export function PhotoLightbox({
+  uri, uris, onClose,
+}: {
+  /** The photo tapped. Kept as the entry point so every existing caller still works. */
+  uri: string | null;
+  /** The set it belongs to, in display order. Omitted -> a single-photo viewer. */
+  uris?: readonly string[];
+  onClose: () => void;
+}) {
+  const { width, height } = useWindowDimensions();
+  // The tapped photo must exist in the set, or the viewer would open on the wrong
+  // picture. If it does not (a stale list), fall back to showing just that one.
+  const all = React.useMemo(
+    () => (uris && uri && uris.includes(uri) ? [...uris] : uri ? [uri] : []),
+    [uris, uri]);
+  const start = Math.max(0, uri ? all.indexOf(uri) : 0);
+  const [at, setAt] = React.useState(start);
+  // Re-sync when a different thumbnail opens the viewer while it is mounted.
+  React.useEffect(() => { setAt(start); }, [start, uri]);
+
   return (
     <Modal visible={uri !== null} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable onPress={onClose}
-        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' }}>
-        {uri && <Image source={{ uri }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />}
-      </Pressable>
-      <Pressable onPress={onClose}
-        accessibilityLabel={t('common.close')}
-        style={{
-          position: 'absolute', left: 18, right: 18, bottom: 34,
-          minHeight: 64, borderRadius: 14, backgroundColor: '#fff',
-          alignItems: 'center', justifyContent: 'center',
-        }}>
-        <Text style={{ fontFamily: F.dispSemi, fontSize: 17, letterSpacing: 1.2,
-          textTransform: 'uppercase', color: C.ink }}>
-          {t('common.close')}
-        </Text>
-      </Pressable>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.94)' }}>
+        <FlatList
+          data={all}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={(u, i) => `${i}:${u}`}
+          initialScrollIndex={start}
+          getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+          onMomentumScrollEnd={(e) =>
+            setAt(Math.round(e.nativeEvent.contentOffset.x / Math.max(1, width)))}
+          renderItem={({ item }) => (
+            // Tapping the picture closes, as it did before. The Pressable is INSIDE
+            // the page rather than wrapping the list, because wrapping it swallowed
+            // the horizontal drag and the swipe never started.
+            <Pressable onPress={onClose} style={{ width, height }}>
+              <Image source={{ uri: item }} style={{ width, height }} resizeMode="contain" />
+            </Pressable>
+          )}
+        />
+        {all.length > 1 && (
+          <View style={{ position: 'absolute', top: 58, alignSelf: 'center',
+            backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 999,
+            paddingHorizontal: 14, paddingVertical: 6 }}>
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: '#fff' }}>
+              {t({ k: 'erec.photoOf', p: { n: at + 1, total: all.length } } as any)}
+            </Text>
+          </View>
+        )}
+        <Pressable onPress={onClose}
+          accessibilityLabel={t('common.close')}
+          style={{
+            position: 'absolute', left: 18, right: 18, bottom: 34,
+            minHeight: 64, borderRadius: 14, backgroundColor: '#fff',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+          <Text style={{ fontFamily: F.dispSemi, fontSize: 17, letterSpacing: 1.2,
+            textTransform: 'uppercase', color: C.ink }}>
+            {t('common.close')}
+          </Text>
+        </Pressable>
+      </View>
     </Modal>
   );
 }

@@ -8,7 +8,7 @@
  * plain field still works. Assist is an enhancement, never a gate.
  */
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { addressFromHere, type AddressHit, suggestAddresses } from '../geocode';
 import { t as T } from '../i18n';
@@ -65,6 +65,12 @@ export function AddressInput({
         placeholder={placeholder ?? T('job.address')}
         placeholderTextColor="#8c959f"
         autoCapitalize="words"
+        // A labelled way OUT of the keyboard (hadar 2026-08-12: "it doesn't retract").
+        // The default return key on a one-line field reads as a newline, so nobody
+        // presses it; "Done" says what it does. Blurring also closes the suggestion
+        // list, which is the other thing covering the form.
+        returnKeyType="done"
+        onSubmitEditing={() => { setOpen(false); Keyboard.dismiss(); }}
       />
       <Pressable style={st.hereBtn} onPress={useHere} disabled={locating}>
         {locating ? <ActivityIndicator color="#4E6243" />

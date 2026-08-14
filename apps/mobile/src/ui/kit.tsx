@@ -28,7 +28,8 @@
  */
 import React from 'react';
 import {
-  Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet,
+  Text, TextInput, View,
   type StyleProp, type ViewStyle,
 } from 'react-native';
 // The app's ONE audio player (annotate.ts). `VoiceClip` below is the only primitive
@@ -80,8 +81,24 @@ export function Section({ title, children, style }: {
  * he tapped is the thing in front of him, and Save writes the field he came to write.
  *
  * The dim behind it dismisses (a sheet must never trap someone), and the sheet itself
- * swallows taps so a press inside does not close it. Content is scrollable because a
- * keyboard over a short sheet must not bury the field it is typing into.
+ * swallows taps so a press inside does not close it.
+ *
+ * THE KEYBOARD MUST NOT SIT ON THE FIELD (hadar, 2026-08-08: "if a text field is
+ * edited by a keyboard the keyboard covers the whole text field — example: change
+ * order, things not included").
+ *
+ * This sheet is anchored to the BOTTOM of the screen, which is exactly where the
+ * keyboard opens. A ScrollView alone does not save it — the comment here used to
+ * claim it did, and that was wrong: scrolling moves content INSIDE the sheet, and
+ * the sheet itself was still underneath the keys. On a 13 mini the exclusions field
+ * and the Save button were both completely covered, so the one act the sheet exists
+ * for was unreachable while typing.
+ *
+ * `KeyboardAvoidingView` shrinks the container, and `sheetDim`'s `justifyContent:
+ * 'flex-end'` then lands the sheet directly above the keyboard. `maxHeight: '88%'`
+ * is a percentage of that shrunken box, so a tall sheet gives up height instead of
+ * pushing its footer off-screen. Same `behavior` split as authscreen.tsx — one
+ * keyboard strategy in the app, not two.
  */
 export function BottomSheet({ visible, title, onClose, children, footer, tall }: {
   visible: boolean;
@@ -98,6 +115,10 @@ export function BottomSheet({ visible, title, onClose, children, footer, tall }:
 }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
       <Pressable style={st.sheetDim} onPress={onClose} accessibilityRole="button">
         {/* The panel. `onStartShouldSetResponder` stops the dim's press from firing
             when the tap lands inside the sheet. */}
@@ -119,6 +140,7 @@ export function BottomSheet({ visible, title, onClose, children, footer, tall }:
           {footer && <View style={st.sheetFoot}>{footer}</View>}
         </Pressable>
       </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -638,7 +660,7 @@ export function Button({
 /** The product name as it appears on the device. Centred in the nav bar of every
  *  stage screen — the one piece of chrome that says which app you are in. Detail
  *  screens pass their own name instead, which is what the design does. */
-export const APP_NAME = 'EZChangeOrder';
+export const APP_NAME = 'EZChangeOrders';
 
 export function ScreenHeader({ title, onBack, backLabel, right, kicker, kickerRight, navTitle,
   onOverflow, overflowLabel, onTitleChange }: {
@@ -1184,7 +1206,7 @@ const st = StyleSheet.create({
   },
   moneySub: { fontFamily: F.body, fontSize: 14, color: C.steel, marginTop: 3 },
   // The nav bar carries a full-bleed hairline under it, the divider the design draws
-  // below "EZChangeOrder". The negative horizontal margin + matching padding pushes
+  // below "EZChangeOrders". The negative horizontal margin + matching padding pushes
   // the border to the screen edges while the content stays on the 18pt gutter; the
   // parent ScrollView pads by 18, so -18 here cancels it for the line only.
   navRow: {

@@ -21,6 +21,25 @@ export type FeedItem = {
   atMs: number;
   actor: string | null;
   lastAct: string | null;   // captured · priced · sent · approver
+  /**
+   * WHO RAISED IT, and WHEN they raised it (hadar, 2026-08-12: "the records should
+   * note who created it, when, its current state").
+   *
+   * NOT the same pair as `actor`/`atMs` above, and the difference is the whole point of
+   * adding them. Those two answer "what moved last" — they change every time anybody
+   * touches the extra, so on a row a client approved yesterday they name the CLIENT.
+   * These two are fixed at birth and never move: they answer "whose extra is this",
+   * which on a company-wide stream is the question an owner is actually asking when he
+   * does not recognise a line. On a solo operator's phone they are the same person, and
+   * that is fine — the cost of carrying them is one join.
+   *
+   * `createdBy` is null when nobody was named at capture (an extra raised before the
+   * actor log existed, or a device with no profile name). Null renders as ABSENT, never
+   * as "Unknown" — inventing an author on a record that will carry a signature is the
+   * one thing this field must not do.
+   */
+  createdBy: string | null;
+  createdAtMs: number;
 };
 
 export async function companyFeed(
@@ -34,19 +53,32 @@ export async function companyFeed(
     id: string; scope: string; amount_cents: number | null; status: string;
     open_questions: number; project_id: string; project_name: string | null;
     at_ms: number; actor: string | null; last_act: string | null;
+    created_by: string | null; created_at_ms: number;
   }>(
     `SELECT co.id, co.scope, co.amount_cents, COALESCE(co.status,'draft') AS status,
             (SELECT COUNT(*) FROM co_question q WHERE q.change_order_id = co.id) AS open_questions,
             co.project_id,
             (SELECT name FROM project WHERE id = co.project_id) AS project_name,
             COALESCE(la.at_ms, co.numbers_confirmed_at_ms, co.created_at_ms, 0) AS at_ms,
-            la.name AS actor, la.act AS last_act
+            la.name AS actor, la.act AS last_act,
+            fa.name AS created_by,
+            COALESCE(co.created_at_ms, fa.at_ms, 0) AS created_at_ms
        FROM change_order co
        LEFT JOIN (
          SELECT subject_id, name, act, at_ms,
                 ROW_NUMBER() OVER (PARTITION BY subject_id ORDER BY at_ms DESC, id DESC) AS rn
            FROM extra_actor WHERE subject_kind = 'change_order'
        ) la ON la.subject_id = co.id AND la.rn = 1
+       -- The AUTHOR: the FIRST act on the extra, ordered the mirror image of la above.
+       -- Deliberately not filtered to act='captured'. That act is written by the
+       -- capture flow, and an extra typed rather than spoken never gets one — filtering
+       -- would leave those rows permanently anonymous. The earliest act of ANY kind is
+       -- by definition the person who brought the extra into existence.
+       LEFT JOIN (
+         SELECT subject_id, name, at_ms,
+                ROW_NUMBER() OVER (PARTITION BY subject_id ORDER BY at_ms ASC, id ASC) AS rn
+           FROM extra_actor WHERE subject_kind = 'change_order'
+       ) fa ON fa.subject_id = co.id AND fa.rn = 1
       WHERE COALESCE(co.status,'draft') <> 'superseded'
       ORDER BY at_ms DESC, co.id DESC
       LIMIT ?`, [limit]);
@@ -55,5 +87,6 @@ export async function companyFeed(
     openQuestions: r.open_questions ?? 0,
     projectId: r.project_id, projectName: r.project_name, atMs: r.at_ms,
     actor: r.actor, lastAct: r.last_act,
+    createdBy: r.created_by, createdAtMs: r.created_at_ms ?? 0,
   }));
 }

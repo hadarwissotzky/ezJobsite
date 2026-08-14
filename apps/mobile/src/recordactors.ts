@@ -28,14 +28,19 @@
  * retiring an approver silently changes what an already-signed record says about who
  * was entitled to approve it.
  */
-import { AbstractPowerSyncDatabase } from '@powersync/react-native';
+// `import type` + explicit .ts, so `node --test` can load this file for its DDL. Both
+// of the first two are TYPES ONLY — imported as values they pulled the whole PowerSync
+// and Supabase React Native packages into any test that touched EXTRA_ACTOR_DDL, which
+// is why feedauthor.test.ts could not use the shipped schema. Types erase; runtime is
+// unchanged. Same fix, same reason, as discussionstore.ts.
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { sha256 } from 'js-sha256';
-import { SupabaseClient } from '@supabase/supabase-js';
-import { getProfile } from './profile';
-import { isApproverRole, isExtraType } from './approverrouting';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { getProfile } from './profile.ts';
+import { isApproverRole, isExtraType } from './approverrouting.ts';
 import {
   assemblePeople, type ActorAct, type ActorFact, type ItemKind, type PersonRow,
-} from './recordpeople';
+} from './recordpeople.ts';
 
 /** Both things an actor row can be attached to. A capture exists long before the
  *  change order does — often before anyone has decided the item carries a price at

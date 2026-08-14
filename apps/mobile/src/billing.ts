@@ -93,7 +93,7 @@ function planFromCustomerInfo(info: CustomerInfo): PlanId {
 
 export type PurchaseResult =
   | { ok: true; plan: PlanId }
-  | { ok: false; reason: 'not_configured' | 'cancelled' | 'failed'; detail?: string };
+  | { ok: false; reason: 'not_configured' | 'no_tenant' | 'cancelled' | 'failed'; detail?: string };
 
 /** True when the id is one this build knows how to sell. */
 function knownProduct(productId: string): boolean {
@@ -101,9 +101,25 @@ function knownProduct(productId: string): boolean {
     (p) => p.productIdMonthly === productId || p.productIdAnnual === productId);
 }
 
-/** Buy an auto-renewable subscription by its store product id. */
+/**
+ * Buy an auto-renewable subscription by its store product id.
+ *
+ * REFUSES WHILE THE CUSTOMER IS ANONYMOUS (2026-08-13). `configureBilling` is called
+ * with the tenant id; if the account has none, RevenueCat assigns `$RCAnonymousID:…`
+ * and the purchase attaches to a customer the webhook can never map back to a company
+ * row. The store completes, money is authorised, and the plan lands nowhere — the
+ * failure hadar hit. Selling in that state is the one thing this function must not do,
+ * so it fails BEFORE the store sheet rather than after the charge.
+ */
 export async function purchasePlan(productId: string): Promise<PurchaseResult> {
   if (billingStatus() !== 'ready') return { ok: false, reason: 'not_configured' };
+  try {
+    const uid = await Purchases.getAppUserID();
+    if (__DEV__) (globalThis as any).__rcUser = uid;
+    if (!uid || uid.startsWith('$RCAnonymousID')) {
+      return { ok: false, reason: 'no_tenant' };
+    }
+  } catch { /* cannot tell -> fall through; a real purchase still beats a false refusal */ }
   if (!knownProduct(productId)) {
     return { ok: false, reason: 'failed', detail: `unknown product ${productId}` };
   }
@@ -119,6 +135,78 @@ export async function purchasePlan(productId: string): Promise<PurchaseResult> {
     if (e?.userCancelled) return { ok: false, reason: 'cancelled' };
     return { ok: false, reason: 'failed', detail: String(e?.message ?? e) };
   }
+}
+
+/**
+ * WHICH PRODUCT is active — not just which tier.
+ *
+ * The paywall's monthly/annual toggle needs this. Knowing only `plan === 'core'` is not
+ * enough to render the Core card: with the toggle on Monthly it would print the monthly
+ * price above a button reading "Your plan", to somebody paying annually. That is a
+ * wrong statement about money, which is the one class of claim this app is least
+ * allowed to get wrong (mandate #6).
+ *
+ * Returns the first active subscription that this build actually sells, so a stale or
+ * unrelated product identifier cannot be mistaken for the current plan. Null when
+ * billing is not configured or nothing is active.
+ */
+export async function entitledProductNow(): Promise<string | null> {
+  if (billingStatus() !== 'ready') return null;
+  try {
+    const info = await Purchases.getCustomerInfo();
+    const plan = planFromCustomerInfo(info);
+    if (plan === 'free') return null;
+    // ASK THE ENTITLEMENT WHICH PRODUCT IS GRANTING IT. Anything derived from
+    // `activeSubscriptions` is a guess: that list has no defined order and can hold
+    // several live products at once. Two wrong answers came out of it on device —
+    // first a Crew product while the tier read Core, then Core-monthly while
+    // Core-annual was equally active. Both are real production states (a crossgrade
+    // leaves the old subscription live until its period ends), and neither is
+    // resolvable by picking from a list. `productIdentifier` is the entitlement's own
+    // answer to "what am I on", which is the question being asked.
+    const ent = info?.entitlements?.active?.[plan];
+    const pid = ent?.productIdentifier ?? null;
+    return pid && knownProduct(pid) ? pid : null;
+  } catch { return null; }
+}
+
+
+/**
+ * RevenueCat's CURRENT verdict for this customer, or null when billing is not
+ * configured / the read fails. Used at launch so a subscription bought on another
+ * device (or before a reinstall) is reflected without waiting on the webhook round
+ * trip. Never throws: a billing read must not delay the app.
+ */
+export async function entitledPlanNow(): Promise<PlanId | null> {
+  if (billingStatus() !== 'ready') return null;
+  try {
+    return planFromCustomerInfo(await Purchases.getCustomerInfo());
+  } catch { return null; }
+}
+
+/**
+ * WHERE TO CHANGE OR CANCEL A SUBSCRIPTION.
+ *
+ * hadar, 2026-08-13: "I cannot seem to be able to downgrade if I want to, or cancel."
+ *
+ * AND NO APP CAN DO IT IN-APP ON iOS. Apple owns the subscription: downgrading,
+ * upgrading and cancelling all happen in the App Store's own management screen, and an
+ * app that tried to cancel a StoreKit subscription itself would simply have no API to
+ * call. What an app MUST do — guideline 3.1.2 — is provide the link. Not providing one
+ * is a review rejection, and is also just a trap: money keeps leaving somebody's account
+ * with no visible way to stop it.
+ *
+ * `managementURL` is RevenueCat's per-customer link and is the right one when present
+ * (it points at the correct store for the receipt — App Store, Play, or web billing).
+ * The generic App Store URL is the fallback, which is correct for every iOS receipt.
+ */
+export async function manageSubscriptionUrl(): Promise<string> {
+  const APPLE = 'https://apps.apple.com/account/subscriptions';
+  if (billingStatus() !== 'ready') return APPLE;
+  try {
+    const info = await Purchases.getCustomerInfo();
+    return info?.managementURL ?? APPLE;
+  } catch { return APPLE; }
 }
 
 /**

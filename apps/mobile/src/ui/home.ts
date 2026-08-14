@@ -42,15 +42,58 @@ export async function projectCards(
       WHERE c.media_mime_type LIKE 'image/%'
       GROUP BY pid`);
 
+  // ── WHAT "LAST ACTIVITY" MEANS ────────────────────────────────────────────────
+  //
+  // hadar, 2026-08-12: "order jobs by last updated (or updated change orders inside
+  // the job)". It used to mean captures only, falling back to `last_used_ms` — which
+  // is a BROWSING stamp, written by touchProject when you merely OPEN a job. Two
+  // things were wrong with that. A job whose change order the client approved an hour
+  // ago showed "3d" and sat below jobs nothing had happened on, because approving is
+  // not a capture. And scrolling through jobs quietly reordered the list, so the top
+  // of the list drifted toward whatever you last looked at rather than what moved.
+  //
+  // Activity is now every event that changes what the job OWES someone:
+  //   * a capture filed to it            (already counted above)
+  //   * a change order created, sent, approved, declined or superseded
+  //   * a message on one of its change orders, from either side
+  //
+  // Two queries, not one UNION, so a device mid-migration that has `change_order` but
+  // not yet `thread_message` still gets the lifecycle half instead of losing both.
+  const [coActs, msgActs] = await Promise.all([
+    db.getAll<{ pid: string; ms: number }>(
+      `SELECT project_id AS pid,
+              MAX(MAX(created_at_ms,
+                      COALESCE(sent_at_ms, 0),       COALESCE(approved_at_ms, 0),
+                      COALESCE(declined_at_ms, 0),   COALESCE(superseded_at_ms, 0))) AS ms
+         FROM change_order
+        GROUP BY project_id`).catch(() => []),
+    db.getAll<{ pid: string; ms: number }>(
+      `SELECT c.project_id AS pid, MAX(m.at_ms) AS ms
+         FROM thread_message m
+         JOIN change_order c ON c.id = m.change_order_id
+        GROUP BY c.project_id`).catch(() => []),
+  ]);
+
   const byId = new Map(counts.map((x) => [x.pid, x]));
   const coverById = new Map(covers.map((x) => [x.pid, x.rel]));
+  const actById = new Map<string, number>();
+  for (const r of [...coActs, ...msgActs]) {
+    actById.set(r.pid, Math.max(actById.get(r.pid) ?? 0, r.ms ?? 0));
+  }
 
-  return projects.map((p) => ({
+  const cards = projects.map((p) => ({
     ...p,
     captureCount: byId.get(p.id)?.n ?? 0,
-    lastMs: byId.get(p.id)?.last_ms ?? p.last_used_ms ?? null,
+    lastMs: Math.max(byId.get(p.id)?.last_ms ?? 0, actById.get(p.id) ?? 0) || null,
     coverRelpath: coverById.get(p.id) ?? null,
   }));
+
+  // Newest activity first. A job nothing has happened to sorts as 0 and keeps the
+  // order listProjects gave it — created/last-opened descending — so an empty job
+  // created this morning still lands above an empty one from last year, and the
+  // relative order of the quiet tail never jitters between refreshes. Array#sort is
+  // stable (ES2019, and in Hermes), which is what makes that tie-break hold.
+  return cards.sort((a, b) => (b.lastMs ?? 0) - (a.lastMs ?? 0));
 }
 
 /**
@@ -61,10 +104,45 @@ export async function projectCards(
  * Returns null when unpinned or unconfigured, so the caller shows a placeholder and
  * the card never blocks (mandate #7 — online-fetch is opportunistic).
  */
-export function staticMapUrl(lat: number | null, lng: number | null): string | null {
-  const tmpl = process.env.EXPO_PUBLIC_STATIC_MAP_URL ?? '';
-  if (!tmpl || lat == null || lng == null) return null;
-  return tmpl.replace(/\{lat\}/g, String(lat)).replace(/\{lng\}/g, String(lng));
+// `staticMapUrl` lived here and is gone (2026-08-12). It built the URL and nothing
+// more, so every caller pulled a fresh Static Maps image on every render — billed per
+// request, and blank with no signal. src/mapcache.ts owns the URL and the disk cache
+// together, because the two cannot be allowed to disagree about the key.
+
+/**
+ * Change-order counts per job, for the Jobs list (design, 2026-08-11).
+ *
+ * ONE QUERY FOR EVERY JOB. The list draws three numbers on every card; asking per
+ * card would be N queries fired while a finger is already dragging the list, and the
+ * counts would land at different moments so the cards would flicker into agreement.
+ *
+ * THE BUCKETS ARE THE LEDGER'S, NOT NEW ONES. `draft` is work the contractor still
+ * owes, `sent` is out with the client, `approved` is settled — the same three the job
+ * screen's stat cards and its filter pills use. A fourth state invented here would be
+ * a fourth definition of "where does this job stand", and they would drift.
+ *
+ * DELIBERATELY NOT FOLDING "in discussion" INTO NEEDS-YOU, which the job screen does:
+ * that needs the open-question count per extra, a second read this list does not make.
+ * A discussing extra therefore counts as waiting here and as needs-you one screen in.
+ * Stated rather than hidden — it is the one place the two disagree.
+ */
+export type JobCoCounts = { needs: number; waiting: number; approved: number };
+
+export async function projectCoCounts(
+  db: AbstractPowerSyncDatabase,
+): Promise<Record<string, JobCoCounts>> {
+  const rows = await db.getAll<{ pid: string; status: string; n: number }>(
+    `SELECT project_id AS pid, status, COUNT(*) AS n
+       FROM change_order
+      GROUP BY project_id, status`).catch(() => []);
+  const out: Record<string, JobCoCounts> = {};
+  for (const r of rows) {
+    const c = out[r.pid] ?? (out[r.pid] = { needs: 0, waiting: 0, approved: 0 });
+    if (r.status === 'approved') c.approved += r.n;
+    else if (r.status === 'draft') c.needs += r.n;
+    else if (r.status === 'sent') c.waiting += r.n;
+  }
+  return out;
 }
 
 /** "just now" / "3h" / "2d" — terse, for a card corner. Pure; caller passes now. */

@@ -20,7 +20,7 @@ What that proved, which nothing static could:
 
 HOW FAR IT ACTUALLY GOT (2026-07-22, three screens rendered without a single tap):
   1. Value-first onboarding slide — renders.
-  2. Sign-in ("EZchangeorder / Welcome back") — renders, reached by writing
+  2. Sign-in ("EZChangeOrders / Welcome back") — renders, reached by writing
      `onboarding_seen_v1` into the app's AsyncStorage manifest.
   3. Stopped there — BY CHOICE, not because it was impossible.
      Past sign-in needs a Supabase session. Two routes existed and I took neither:
@@ -176,9 +176,9 @@ price and collects a signature — over HTTP anyone on the same wifi can rewrite
 number between the server and the client's eyes, which defeats
 `240_shown_content_integrity` entirely.
 
-1. **Namecheap → ezchangeorder.com → Advanced DNS**
+1. **Namecheap → ezchangeorders.com → Advanced DNS**
    `CNAME` · host `approve` · value `hadarwissotzky.github.io` · TTL automatic
-2. **GitHub → ezJobsite → Settings → Pages → Custom domain** → `approve.ezchangeorder.com`
+2. **GitHub → ezJobsite → Settings → Pages → Custom domain** → `approve.ezchangeorders.com`
 3. Wait for the certificate, then tick **Enforce HTTPS**. Do not skip this.
 
 ---
@@ -186,7 +186,7 @@ number between the server and the client's eyes, which defeats
 ## 3. Point the app at the domain — 2 minutes
 
 ```
-EXPO_PUBLIC_CONFIRM_BASE=https://approve.ezchangeorder.com
+EXPO_PUBLIC_CONFIRM_BASE=https://approve.ezchangeorders.com
 ```
 
 Until this is set, `sendForConfirmation` **refuses every send**. That is deliberate:

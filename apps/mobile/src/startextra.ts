@@ -44,6 +44,31 @@ import { sha256 } from 'js-sha256';
  */
 export const UNTITLED = 'Untitled extra — still being written up';
 
+/**
+ * The seed written into `who_directed` when an extra is born from a capture and
+ * nobody has been named yet. `change_order.who_directed` is NOT NULL, so the row
+ * needs SOMETHING — but this word is a ROLE, not a person, and every screen that
+ * asks "is there an owner on this extra?" must treat it as NO.
+ *
+ * It did not, and that was a real bug (hadar, 2026-08-08: "the screen didnt update
+ * — still looks the same"). The draft screen took any non-empty `who_directed` as
+ * an owner, so an unnamed extra drew a person row reading "Owner / Approver" —
+ * a signer who does not exist, with no roster row behind him and no phone number to
+ * send to. The no-owner state was unreachable on every extra the app has ever
+ * created.
+ *
+ * Exported so the writer and the readers share ONE literal. `isNamedClient` is the
+ * predicate; never compare to this string by hand.
+ */
+export const UNNAMED_CLIENT = 'Owner';
+
+/** Is `who_directed` an actual person, or the unnamed seed? Trimmed and
+ *  case-insensitive, the same shape as the roster lookup that matches it. */
+export function isNamedClient(whoDirected: string | null | undefined): boolean {
+  const v = (whoDirected ?? '').trim();
+  return v.length > 0 && v.toLowerCase() !== UNNAMED_CLIENT.toLowerCase();
+}
+
 export type StartResult =
   | { ok: true; changeOrderId: string; decisionId: string }
   | { ok: false; reason: string };
@@ -71,7 +96,7 @@ export async function startExtraFromCapture(
       subject: `extra ${o.captureId}`,
       value: UNTITLED,
       captureId: o.captureId,
-      directedBy: o.directedBy ?? 'Owner',
+      directedBy: o.directedBy ?? UNNAMED_CLIENT,
     });
 
     const id = `co-${o.captureId}`;
@@ -87,7 +112,7 @@ export async function startExtraFromCapture(
       amountCents: null,
       nteCents: null,
       isMini: false,
-      whoDirected: o.directedBy ?? 'Owner',
+      whoDirected: o.directedBy ?? UNNAMED_CLIENT,
       // Mandate #6 asks that no UNCONFIRMED number be stored. There is no number
       // here at all, which is a different thing and the honest one: the moment
       // is real, and it is when the extra came into existence.

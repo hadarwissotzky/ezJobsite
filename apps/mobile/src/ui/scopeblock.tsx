@@ -108,7 +108,23 @@ export function ScopeBlock({ text, stage, onEdit, missing, pending, pendingLabel
         // starts here moves the inner box while the page stands still, which reads as a
         // stuck screen. The page scrolls; the document is simply all there.
         <View style={[st.box, frozen && st.boxFrozen]}>
-          <Text style={st.body} selectable>{body}</Text>
+          {/* HEADINGS BOLD, IN THE RENDER ONLY (hadar 2026-08-07).
+              The stored string stays plain text and MUST: `scope_of_work` is frozen
+              into `shown_content`, which is the binding instrument, and the same string
+              is rendered into an approval web page, a PDF and an SMS-length preview.
+              Markdown in the stored text would either leak asterisks into a document
+              somebody signs or oblige four renderers to agree on a parser. The document
+              stays plain; only this view knows how to weight it.
+              A heading is a line `renderScope` wrote in caps — the test is deliberately
+              narrow (caps, spaces and & only) so a shouted sentence in a contractor's
+              own scope is not silently promoted to a section title. */}
+          {body.split('\n').map((line, i) => (
+            <Text key={i}
+              style={[st.body, /^[A-Z][A-Z '&]{2,}$/.test(line.trim()) && st.bodyHead]}
+              selectable>
+              {line || ' '}
+            </Text>
+          ))}
         </View>
       ) : (
         // THE GAP, DRAWN AS AN EMPTY STATE (hadar 2026-08-06, with a competitor's
@@ -177,6 +193,9 @@ const st = StyleSheet.create({
   // for "this is a record, not a field".
   boxFrozen: { backgroundColor: C.surfaceMuted },
   body: { fontFamily: F.body, fontSize: 15, lineHeight: 22, color: C.ink },
+  // Bold + a little air above, so the sections read as sections rather than as a wall
+  // of sentences that happens to contain capitals.
+  bodyHead: { fontFamily: F.bodyBold, marginTop: 10 },
   // Centred, with room to breathe — an empty state is a small poster, not a row.
   empty: {
     minHeight: 132, alignItems: 'center', justifyContent: 'center',

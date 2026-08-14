@@ -129,7 +129,11 @@ export type ExtraNegotiationProps = {
    *  this component holds no clock and one formatter serves the whole record. */
   formatAt: (ms: number) => string;
   onBack: () => void;
-  onReply: (text: string) => Promise<void>;
+  onReply: (text: string, captureIds: readonly string[]) => Promise<void>;
+  /** Take one photo FOR THIS MESSAGE, commit it, and return its capture id (null on
+   *  cancel/refusal). Distinct from `onCapture`, which files evidence onto the
+   *  change order — see ReplyComposer for why they must not be the same act. */
+  onSnapPhoto?: () => Promise<string | null>;
   /** Resolves with the verdict at press time — a reminder refused by the rate limit,
    *  or one the transport could not deliver (D5's loud failure), is SAID here. `why`
    *  arrives already translated. */
@@ -245,7 +249,7 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
           title={rec.title}
           kicker={props.kicker}
           kickerRight={rec.synced ? <SyncedPill /> : undefined}
-          navTitle={APP_NAME}
+          navTitle={t('erec.navTitle')}
           onBack={props.onBack}
           backLabel={t('erec.back')}
           onOverflow={showOverflow}
@@ -285,19 +289,6 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
             here (hadar): it lives under the Activity tab, not on the Info page. */}
         {tab === 'info' && (
           <>
-            {/* VERSION — the same card the sealed screen carries, in the same place.
-                This stage is where versions are made, so it belongs here at least as
-                much as it does there. */}
-            <Card style={st.cardTight}>
-              <Row
-                icon="layers"
-                label={t({ k: 'elock.currentVersion', p: { n: props.version ?? 1 } })}
-                value={(props.version ?? 1) > 1 ? t('elock.viewPrevious') : t('elock.noPrevious')}
-                chevron={(props.version ?? 1) > 1}
-                onPress={(props.version ?? 1) > 1
-                  ? (props.onViewVersions ?? props.onViewHistory) : undefined}
-              />
-            </Card>
             <PeopleSection approver={approver} contributors={props.contributors}
               onAddContact={props.onAddContact} />
             <DocumentSection
@@ -309,6 +300,23 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
             {/* THE ORIGINAL RECORDINGS. Reachable on a sent extra again — the scope
                 editor's Raw tab used to be the only door and it no longer exists. */}
             <RecordingsCard voices={rec.voices} />
+            {/* VERSION — the same card the sealed screen carries. LAST on this tab
+                (hadar, 2026-08-09), moved down from the top. It led the Info tab,
+                which put "Version 1 · No previous versions" — a line that says
+                nothing has happened — above the people, the document and the
+                recordings while the contractor is waiting on an answer. It is
+                provenance, not the state of the thing, so it reads after everything
+                the client is actually looking at. */}
+            <Card style={st.cardTight}>
+              <Row
+                icon="layers"
+                label={t({ k: 'elock.currentVersion', p: { n: props.version ?? 1 } })}
+                value={(props.version ?? 1) > 1 ? t('elock.viewPrevious') : t('elock.noPrevious')}
+                chevron={(props.version ?? 1) > 1}
+                onPress={(props.version ?? 1) > 1
+                  ? (props.onViewVersions ?? props.onViewHistory) : undefined}
+              />
+            </Card>
           </>
         )}
 
@@ -324,6 +332,7 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
                 undelivered={props.undelivered}
                 clientName={approver?.name ?? null}
                 clientAvatar={approver?.photoUri ?? null}
+                onPressPhoto={props.onPressPhoto}
               />
             ) : (
               <Card>
@@ -332,7 +341,7 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
               </Card>
             )}
             {thread.canReply
-              ? <ReplyComposer inputRef={composerInput} onReply={props.onReply} who={who ? firstName(who) : null} onCapture={props.onCapture} onAddVoice={props.onAddVoice} />
+              ? <ReplyComposer inputRef={composerInput} onReply={props.onReply} who={who ? firstName(who) : null} onSnapPhoto={props.onSnapPhoto} onAddVoice={props.onAddVoice} />
               : <ClosedThread onNewLinkedExtra={props.onNewLinkedExtra} />}
           </View>
         )}
@@ -671,34 +680,87 @@ function Avatar({ name, kind, photoUri }: {
  * through revision plus a fresh approval, and the rule is stated where it could be
  * broken.
  */
-function ReplyComposer({ inputRef, onReply, who, onCapture, onAddVoice }: {
+function ReplyComposer({ inputRef, onReply, who, onSnapPhoto, onAddVoice }: {
   inputRef: React.RefObject<TextInput | null>;
-  onReply: (text: string) => Promise<void>;
+  /** Send the message. `captureIds` are photos already COMMITTED by the caller —
+   *  the composer never holds undurable bytes. */
+  onReply: (text: string, captureIds: readonly string[]) => Promise<void>;
   who: string | null;
-  onCapture?: () => void;
+  /**
+   * Take ONE photo for this message and commit it, returning its capture id.
+   *
+   * NOT `onCapture` (hadar, 2026-08-09: "it should be a simple image(s) from the
+   * camera not the change order special addition"). That prop opened the fused
+   * change-order capture screen — photo + voice + review — and filed the result as
+   * EVIDENCE ON THE INSTRUMENT. In a conversation that is the wrong act twice over:
+   * it is four screens to send a picture, and the picture silently joined the
+   * document the client is being asked to sign.
+   *
+   * This is the one-touch camera (`snapPhoto`, mandate #3) and the photo belongs to
+   * the message. Returns null when the shutter was cancelled or permission refused.
+   */
+  onSnapPhoto?: () => Promise<string | null>;
   /** Record a voice note. Its own act, not the camera's. */
   onAddVoice?: () => void;
 }) {
   const [draft, setDraft] = React.useState('');
+  const [shots, setShots] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState(false);
+  const [snapping, setSnapping] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || busy) return;
+    // A PHOTO ALONE IS A MESSAGE. Requiring words would mean typing a caption on a
+    // ladder to send the picture that is the whole point.
+    if ((!text && !shots.length) || busy) return;
     setBusy(true);
     try {
-      await onReply(text);
-      setDraft(''); setError(null);
+      await onReply(text, shots);
+      setDraft(''); setShots([]); setError(null);
     } catch (e: any) {
       setError(String(e?.message ?? e));
     } finally { setBusy(false); }
+  };
+
+  const snap = async () => {
+    if (!onSnapPhoto || snapping) return;
+    setSnapping(true);
+    try {
+      const id = await onSnapPhoto();
+      // Cancelled or refused: nothing to say. The camera closing IS the feedback.
+      if (id) { setShots((s) => [...s, id]); setError(null); }
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    } finally { setSnapping(false); }
   };
 
   // INLINE composer, matching the design: the field, a camera shortcut, and a round
   // green send — one row — rather than a stacked field over a full-width button.
   return (
     <Card>
+      {/* ATTACHED PHOTOS SIT ABOVE THE FIELD, where he can see what he is about to
+          send and take one off before he sends it. Removal is local-only and legal:
+          nothing here has been sent, and the capture itself stays committed on the
+          phone — this drops it from the message, it does not destroy evidence. */}
+      {shots.length > 0 && (
+        <View style={st.attachRow}>
+          {shots.map((id, i) => (
+            <View key={id} style={st.attachChip}>
+              <Icon name="image" size={16} color={C.brand} />
+              <Text style={st.attachChipT}>{i + 1}</Text>
+              <Pressable
+                onPress={() => setShots((s) => s.filter((x) => x !== id))}
+                accessibilityRole="button"
+                accessibilityLabel={t('neg.removePhoto')}
+                hitSlop={10}
+              >
+                <Text style={st.attachX}>✕</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      )}
       <View style={st.composerRow}>
         <TextInput
           ref={inputRef}
@@ -710,9 +772,11 @@ function ReplyComposer({ inputRef, onReply, who, onCapture, onAddVoice }: {
           accessibilityLabel={t('r5b.replyPlaceholder')}
           style={st.composerInput}
         />
-        {onCapture && (
-          <Pressable onPress={onCapture} accessibilityRole="button"
-            accessibilityLabel={t('neg.addEvidence')} style={st.iconBox}>
+        {onSnapPhoto && (
+          <Pressable onPress={() => { void snap(); }} accessibilityRole="button"
+            disabled={snapping}
+            accessibilityLabel={t('neg.photoInMessage')}
+            style={[st.iconBox, snapping && { opacity: 0.5 }]}>
             <Icon name="photocam" size={20} color={C.ink} />
           </Pressable>
         )}
@@ -727,7 +791,7 @@ function ReplyComposer({ inputRef, onReply, who, onCapture, onAddVoice }: {
         )}
         <Pressable onPress={() => { void send(); }} accessibilityRole="button"
           accessibilityLabel={busy ? t('r5b.sending') : t('r5b.send')}
-          disabled={!draft.trim() || busy}
+          disabled={(!draft.trim() && !shots.length) || busy}
           style={st.sendRound}>
           <Icon name="send" size={20} color="#fff" />
         </Pressable>
@@ -1020,6 +1084,15 @@ const st = StyleSheet.create({
   avatarT: { fontFamily: F.dispSemi, fontSize: 15, color: '#fff' },
   personName: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.ink, marginTop: 7, textAlign: 'center' },
   personRole: { fontFamily: F.body, fontSize: 12, color: C.muted, marginTop: 1, textAlign: 'center', lineHeight: 15 },
+  // Photos staged on the message, before it is sent.
+  attachRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  attachChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.brandSoft, borderWidth: 1, borderColor: C.brandLine,
+    borderRadius: 999, paddingLeft: 10, paddingRight: 8, paddingVertical: 6,
+  },
+  attachChipT: { fontFamily: F.bodySemi, fontSize: 13, color: C.brandDark },
+  attachX: { fontFamily: F.body, fontSize: 15, color: C.steel, paddingHorizontal: 2 },
   composerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   composerInput: {
     flex: 1, fontFamily: F.body, fontSize: 15.5, color: C.ink,

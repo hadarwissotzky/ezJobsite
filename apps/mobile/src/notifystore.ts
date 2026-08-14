@@ -66,6 +66,37 @@ export async function requestNotifyPermission(): Promise<string> {
   } catch { return 'unavailable'; }
 }
 
+/**
+ * THE NUMBER ON THE APP ICON (hadar, 2026-08-12: "when the application is closed and
+ * the notification is displayed and has not yet viewed we add [a badge] to the
+ * application icon").
+ *
+ * MIRRORS THE BELL, ALWAYS. The caller drives it from the same `unreadCount` the header
+ * badge renders, so the icon and the bell cannot disagree — which is the entire value of
+ * an icon badge. Two numbers on one app teach a user to trust neither.
+ *
+ * WHAT IT CAN AND CANNOT DO, stated because the difference is invisible from outside.
+ * iOS PERSISTS the badge across launches, so a number set while the app was last awake
+ * is still on the home screen after it is killed — that IS the "app is closed" case, and
+ * it works. What it cannot do is CHANGE while the app is dead: these notifications are
+ * local (see notify.ts), so nothing polls, nothing fires, and nothing re-badges until
+ * the app is opened. Remote push is the only fix for that and it needs a provider; the
+ * gap is the same one notify.ts already names, not a new one.
+ *
+ * Never throws. A platform with no badge (Android launchers vary, web has none) is a
+ * missing decoration, not an error — and this is called from a render effect.
+ */
+export async function setAppBadge(n: number): Promise<void> {
+  try {
+    const N = await import('expo-notifications');
+    await N.setBadgeCountAsync(Math.max(0, Math.floor(n)));
+    (globalThis as any).__BADGE__ = `ok:${n}`;
+  } catch (e: any) {
+    (globalThis as any).__BADGE__ = `err:${String(e?.message ?? e)}`;
+    /* no badge on this platform — the in-app bell still carries the count */
+  }
+}
+
 async function pendingApprovals(
   db: AbstractPowerSyncDatabase, projectId: string
 ): Promise<PendingApproval[]> {

@@ -60,6 +60,13 @@ import type { CaptureDelivery } from '../uploader';
 
 const CAUTION = tint('caution');
 
+/** The owner-gap card's amber. Warmer and yellower than `CAUTION` (the peach used for
+ *  a draft's incompleteness) on purpose: the two appear on the same screen and mean
+ *  different things — peach is "unfinished", this is "nobody can sign this". */
+const OWNER_SOFT = '#FCF4E2';
+const OWNER_LINE = '#E9D5A6';
+const OWNER_MARK = '#C8901E';
+
 const st = StyleSheet.create({
   // The draft banner, as the design draws it: a filled ochre disc + the state, then
   // the count and why, then the gaps as tappable "+ Add …" buttons.
@@ -102,6 +109,26 @@ const st = StyleSheet.create({
   removeX: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   removeXT: { fontFamily: F.body, fontSize: 17, color: C.muted },
   deleteLabel: { fontFamily: F.bodySemi, fontSize: 15, color: C.danger },
+  // ── the no-owner card ──
+  ownerGap: {
+    backgroundColor: OWNER_SOFT, borderWidth: 1, borderColor: OWNER_LINE,
+    borderRadius: 14, padding: 14, marginVertical: 4,
+  },
+  ownerGapDisc: {
+    width: 42, height: 42, borderRadius: 21, backgroundColor: '#F7E6BD',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  ownerGapH: { fontFamily: F.bodyBold, fontSize: 19, color: C.ink, letterSpacing: -0.2 },
+  ownerGapB: { fontFamily: F.body, fontSize: 15, lineHeight: 21, color: C.steel, marginTop: 2 },
+  // White inside the amber, so the ACT is the brightest thing in the card.
+  ownerGapBtn: {
+    flexDirection: 'row', alignItems: 'center', minHeight: 54, marginTop: 12,
+    borderRadius: 10, backgroundColor: C.raised, borderWidth: 1, borderColor: '#EFE3C8',
+    paddingHorizontal: 14,
+  },
+  ownerGapBtnT: { fontFamily: F.bodyBold, fontSize: 18, color: C.brandDark },
+  ownerGapChev: { fontFamily: F.body, fontSize: 22, color: C.brand },
+  ownerGapFoot: { fontFamily: F.body, fontSize: 13.5, color: C.muted, marginTop: 10 },
 });
 
 export type ExtraDraftProps = {
@@ -341,7 +368,7 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
           kicker={kicker(props)}
           kickerRight={rec.synced ? <SyncedPill label={t('neg.synced')} /> : undefined}
           onTitleChange={isDraft ? props.onRetitle : undefined}
-          navTitle={APP_NAME}
+          navTitle={t('erec.navTitle')}
           onBack={props.onBack}
           backLabel={t('erec.back')}
           onOverflow={canDelete(rec.status) && props.onDelete ? openOverflow : undefined}
@@ -758,6 +785,10 @@ function RawSection(p: ExtraDraftProps) {
   // capture method. `capturedWith` (the "voice note · time" string) is the fallback
   // only when no crew person is on the record.
   const source = rec.people.find((pp) => pp.kind === 'crew') ?? null;
+  // THE ONE PREDICATE for "does this extra have somebody to send to". Every branch
+  // below reads it — the owner block, the roster list, and "Add someone else" — so
+  // they cannot disagree about whether an owner exists.
+  const owner = !!p.requestedBy;
   return (
     <Section title={t('draft.raw')}>
       {/* The standalone write-up block was removed 2026-07-28 to match the mockup,
@@ -883,18 +914,36 @@ function RawSection(p: ExtraDraftProps) {
             <Text style={{ fontFamily: F.body, fontSize: 22, color: C.muted }}>›</Text>
           </Pressable>
         ) : (
-          // THE NEGATIVE STATE, not a dead label. "Client — Not set" named the gap
-          // and offered nothing; this says what to do and opens the drawer that
-          // does it (contacts or type-it-in).
-          <Row
-            icon="person"
-            label={t('draft.requestedBy')}
-            sub={t('client.rowEmptySub')}
-            value={t('client.rowEmptyAction')}
-            tone="warn"
-            chevron
-            onPress={p.onEditClient ?? p.onEditDetails}
-          />
+          // THE NEGATIVE STATE IS A CARD, NOT A ROW (hadar's design, 2026-08-08).
+          // It was one warn-toned row among eight other rows — the same size and
+          // shape as "Payment timing", so the one gap that decides whether this
+          // extra can be signed read as the eighth-most-important thing on the
+          // screen. It is not: nobody can approve an extra addressed to nobody.
+          // So it gets a card, a heading that states the gap in words, and one
+          // button that does the one thing.
+          <View style={st.ownerGap}>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <View style={st.ownerGapDisc}>
+                <Icon name="person" size={22} color={OWNER_MARK} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={st.ownerGapH}>{t('client.noOwnerH')}</Text>
+                <Text style={st.ownerGapB}>{t('client.noOwnerB')}</Text>
+              </View>
+            </View>
+            <Pressable
+              onPress={p.onEditClient ?? p.onEditDetails}
+              accessibilityRole="button"
+              accessibilityLabel={t('client.chooseOwner')}
+              style={({ pressed }) => [st.ownerGapBtn, pressed && { opacity: 0.75 }]}
+            >
+              <Text style={[st.ownerGapBtnT, { flex: 1 }]}>{t('client.chooseOwner')}</Text>
+              <Text style={st.ownerGapChev}>›</Text>
+            </Pressable>
+            {/* The promise that makes the hiding below honest: the other people are
+                not gone, they are next. */}
+            <Text style={st.ownerGapFoot}>{t('client.othersLater')}</Text>
+          </View>
         )}
 
         {/* SOURCE = the on-site person, drawn like "Requested by": avatar + name +
@@ -917,16 +966,25 @@ function RawSection(p: ExtraDraftProps) {
           </View>
         ) : null}
 
-        {/* ADD ANOTHER PERSON, once a client exists. An extra rarely involves only the
-            person who signs it — an architect, an inspector, or the GC above you may
-            all need to be reachable on this job. Offered only after the client is
-            named: before that, the thing to do is name the client, not collect
-            bystanders. Adding here NEVER changes who approves (see `saveClient`). */}
-        {/* Everyone else on the job. Rendered exactly like the two rows above so
-            the section reads as one list of humans, not two features. Not tappable:
-            there is nothing to change about them from here, and a chevron that
-            opened an editor would suggest this extra owns them — it does not. */}
-        {(p.jobPeople ?? []).length > 0 && (
+        {/* EVERYTHING ABOUT OTHER PEOPLE IS HIDDEN UNTIL THERE IS AN OWNER
+            (hadar, 2026-08-08: "we need first to select an owner before we choose
+            additional people to send to"). The "Add someone else" row was already
+            gated this way; the roster list under it was not, so an extra with no
+            owner still showed a list of people it could not be sent to — three
+            names and no signer reads as "somebody will get this". One `owner`
+            predicate now governs both, so the section either asks for the owner or
+            shows the people, never both.
+
+            Once an owner exists: an extra rarely involves only the person who signs
+            it — an architect, an inspector, or the GC above you may all need to be
+            reachable on this job. Adding here NEVER changes who approves (see
+            `saveClient`).
+
+            Rendered exactly like the two rows above so the section reads as one list
+            of humans, not two features. Not tappable: there is nothing to change
+            about them from here, and a chevron that opened an editor would suggest
+            this extra owns them — it does not. */}
+        {owner && (p.jobPeople ?? []).length > 0 && (
           <View style={{ borderTopWidth: 1, borderTopColor: C.line, paddingTop: 6 }}>
             <Text style={labelStyle}>{t('draft.alsoOnJob')}</Text>
             {(p.jobPeople ?? []).map((m) => (
@@ -960,7 +1018,7 @@ function RawSection(p: ExtraDraftProps) {
           </View>
         )}
 
-        {p.requestedBy && p.onAddContact && (
+        {owner && p.onAddContact && (
           <Row
             icon="people"
             label={t('client.addContact')}
@@ -1236,7 +1294,21 @@ function BottomBar(p: ExtraDraftProps & {
       borderTopWidth: 1, borderTopColor: C.line, backgroundColor: C.card,
       padding: 12, paddingBottom: 22, gap: 10,
     }}>
-      <Button label={t('draft.editDetails')} icon="edit" variant="secondary" onPress={p.onEditDetails} />
+      {/* ONE BUTTON, AND IT OPENS THE CAMERA (hadar 2026-08-07, replacing the 70/30
+          split introduced minutes earlier). The split gave the bar two controls where
+          the product only has one answer at this point: say more. A contractor who
+          wants to change his extra does it the way he made it — by talking and
+          snapping — not by finding a form.
+
+          THE ICON IS THE MIC, NOT A PEN, and that is the honest label: this opens the
+          fused capture screen (photos + voice), the same one the FAB opens, so there is
+          one capture flow in the app. A pen would promise a text editor.
+
+          The details composer is still reachable — every checklist row opens its own
+          field and the scope has its own Edit link — it simply no longer owns the bar. */}
+      <Button label={t('draft.editDetails')} icon="microphone" variant="secondary"
+        onPress={p.onAddPhotos} />
+
       {/* WHILE THE PIPELINE IS STILL RUNNING, SEND IS NOT THE OFFER (hadar 2026-08-06:
           "if the draft was not processed, the send for approval button needs to be
           hidden and a different button asking to generate the change order").

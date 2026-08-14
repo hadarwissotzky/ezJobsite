@@ -18,11 +18,14 @@
  * (label + lat/lng) does not change.
  */
 import * as Location from 'expo-location';
+import { formatAddressLine, type NominatimAddress } from './addressline.ts';
+
+export { formatAddressLine, type NominatimAddress } from './addressline.ts';
 
 export type AddressHit = { label: string; lat: number; lng: number };
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
-const UA = 'EZchangeorder/1.0 (jobsite field-capture app)';   // Nominatim requires an identifying UA
+const UA = 'EZChangeOrders/1.0 (jobsite field-capture app)';   // Nominatim requires an identifying UA
 
 /** Typeahead suggestions for a partial address. [] on empty query, offline, or error. */
 export async function suggestAddresses(query: string): Promise<AddressHit[]> {
@@ -32,10 +35,22 @@ export async function suggestAddresses(query: string): Promise<AddressHit[]> {
     const url = `${NOMINATIM}?q=${encodeURIComponent(q)}&format=jsonv2&addressdetails=1&limit=5&countrycodes=us`;
     const r = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'en' } });
     if (!r.ok) return [];
-    const rows = (await r.json()) as Array<{ display_name: string; lat: string; lon: string }>;
+    const rows = (await r.json()) as Array<{
+      display_name: string; lat: string; lon: string; address?: NominatimAddress;
+    }>;
+    const seen = new Set<string>();
     return rows
-      .map((x) => ({ label: x.display_name, lat: parseFloat(x.lat), lng: parseFloat(x.lon) }))
-      .filter((h) => Number.isFinite(h.lat) && Number.isFinite(h.lng));
+      .map((x) => ({
+        // display_name is the FALLBACK, not the default: a result with no
+        // addressdetails (a park, a POI) still has to render something true.
+        label: (x.address && formatAddressLine(x.address, q)) || x.display_name,
+        lat: parseFloat(x.lat), lng: parseFloat(x.lon),
+      }))
+      .filter((h) => Number.isFinite(h.lat) && Number.isFinite(h.lng))
+      // Trimming the chain makes DUPLICATES visible — the range node and the single
+      // building above it now both read "933 Stanyan St, San Francisco, CA 94117".
+      // Two identical rows is a worse list than one long one, so the first wins.
+      .filter((h) => !seen.has(h.label) && (seen.add(h.label), true));
   } catch {
     return [];   // offline / rate-limited / bad response -> no suggestions, plain field still works
   }

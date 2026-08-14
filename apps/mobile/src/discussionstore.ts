@@ -25,8 +25,12 @@
  * price in front of a client is still an explicit tap through the existing send
  * preview.
  */
-import { AbstractPowerSyncDatabase } from '@powersync/react-native';
-import { SupabaseClient } from '@supabase/supabase-js';
+// TYPE-ONLY, and it must stay that way (the same note changeorder.ts carries). A
+// value import pulls in React Native, which `node --test` cannot parse — so the
+// moment this stops being `import type`, every test that touches this module
+// dies on a Flow annotation inside react-native/index.js.
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { sha256 } from 'js-sha256';
 import type { ThreadMessage, ThreadSide } from './discussion';
 
@@ -59,6 +63,50 @@ export const DISCUSSION_DDL = [
   `CREATE TRIGGER IF NOT EXISTS thread_message_no_delete
      BEFORE DELETE ON thread_message
      BEGIN SELECT RAISE(ABORT, 'thread messages are append-only evidence'); END`,
+
+  /**
+   * PHOTOS ON A MESSAGE (hadar, 2026-08-09: "if an image is to be added to the
+   * conversation then it should be a simple image(s) from the camera not the change
+   * order special addition — and it should add the image to the message").
+   *
+   * A LINK TABLE, NOT A COPY. The bytes live exactly where every other photo in this
+   * app lives: `capture_commit`, written by `performCapture` under the durability
+   * profile, uploaded by the same outbox. So a message photo inherits mandate #1 —
+   * it is durable and recoverable before the message claims to exist — and it
+   * inherits the upload path that already works, rather than growing a second one.
+   *
+   * WHAT MAKES IT A MESSAGE PHOTO AND NOT EXTRA EVIDENCE: nothing but this row. The
+   * extra's photo grid finds its photos through `decision_version` / `capture_pair`
+   * (CO_PHOTO_SUBQUERY); a capture linked only from here has neither, so it never
+   * appears as evidence on the change order. That separation IS the request — the
+   * conversation and the instrument are different records.
+   */
+  `CREATE TABLE IF NOT EXISTS thread_message_media (
+      message_id  TEXT NOT NULL,
+      capture_id  TEXT NOT NULL,
+      -- Order shown, authored by the device. Two photos taken in the same
+      -- millisecond must still render in the order he shot them.
+      ord         INTEGER NOT NULL,
+      -- NULL until the bytes are in Storage AND the server has been told this
+      -- message carries them. Until then the contractor sees his own photo and the
+      -- client does not — which is the truth, and the composer says so.
+      published_at_ms INTEGER,
+      PRIMARY KEY (message_id, capture_id)
+   ) STRICT`,
+
+  `CREATE INDEX IF NOT EXISTS thread_message_media_by_msg
+     ON thread_message_media (message_id, ord)`,
+
+  // Same rule as the message it hangs off: a photo sent into a priced conversation
+  // is evidence. `published_at_ms` is the one mutable field, so the trigger names
+  // the columns rather than blanket-blocking UPDATE.
+  `CREATE TRIGGER IF NOT EXISTS thread_message_media_append_only
+     BEFORE UPDATE OF message_id, capture_id, ord ON thread_message_media
+     BEGIN SELECT RAISE(ABORT, 'message media is append-only evidence'); END`,
+
+  `CREATE TRIGGER IF NOT EXISTS thread_message_media_no_delete
+     BEFORE DELETE ON thread_message_media
+     BEGIN SELECT RAISE(ABORT, 'message media is append-only evidence'); END`,
 
   `CREATE TABLE IF NOT EXISTS r5b_outbox (
       mutation_id   TEXT NOT NULL PRIMARY KEY,
@@ -126,10 +174,25 @@ export async function enqueueR5b(
  */
 export async function postReply(
   db: AbstractPowerSyncDatabase,
-  o: { changeOrderId: string; body: string; ownerId: string; atMs?: number }
+  o: {
+    changeOrderId: string; body: string; ownerId: string; atMs?: number;
+    /**
+     * Capture ids of photos taken in the composer, in the order shot. ALREADY
+     * COMMITTED by `performCapture` before this is called — this only links them.
+     * Committing here instead would put a file write inside the message
+     * transaction, and a photo that fails to land would take the message with it.
+     */
+    captureIds?: readonly string[];
+  }
 ): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
   const body = o.body.trim();
-  if (!body) return { ok: false, reason: 'empty' };
+  const media = o.captureIds ?? [];
+  // A photo alone is a message. Requiring words to send one would mean typing a
+  // caption on a ladder to send the picture that IS the point — but `body` is NOT
+  // NULL with a length check on both sides, so a wordless message carries a single
+  // bullet as its body rather than a lie about what was written.
+  const stored = body || (media.length ? PHOTO_ONLY_BODY : '');
+  if (!stored) return { ok: false, reason: 'empty' };
   const id = newReplyId();
   const at = o.atMs ?? Date.now();
   try {
@@ -139,10 +202,19 @@ export async function postReply(
          VALUES (?,?,'contractor',?,?,?)`,
         // Own messages are never notified -- notified_at_ms is stamped so the push
         // scan cannot pick one up and tell the contractor about his own reply.
-        [id, o.changeOrderId, body, at, at]
+        [id, o.changeOrderId, stored, at, at]
       );
+      // The links commit WITH the message. A crash between them would leave a
+      // message whose photos nothing knows about — the same write-ahead rule
+      // REQ-CAP8 applies to the capture itself.
+      for (let i = 0; i < media.length; i++) {
+        await tx.execute(
+          `INSERT INTO thread_message_media (message_id, capture_id, ord) VALUES (?,?,?)`,
+          [id, media[i], i]
+        );
+      }
       await enqueueR5b(tx, 'reply', id, {
-        id, change_order_id: o.changeOrderId, body, at_ms: at, owner_id: o.ownerId,
+        id, change_order_id: o.changeOrderId, body: stored, at_ms: at, owner_id: o.ownerId,
       }, at);
     });
   } catch (e: any) {
@@ -150,6 +222,11 @@ export async function postReply(
   }
   return { ok: true, id };
 }
+
+/** The body stored for a message that is only a photo. A visible mark, not an empty
+ *  string: `body` is NOT NULL with `length(trim(body)) > 0` on both sides, and the
+ *  record should not claim he wrote words he did not write. */
+export const PHOTO_ONLY_BODY = '📷';
 
 /**
  * Every message on one extra, including every version it replaced.
@@ -179,10 +256,50 @@ export async function threadFor(
       ORDER BY m.at_ms, m.id`,
     [changeOrderId]
   );
+
+  // The photos, in ONE query rather than one per message: a long thread on a job
+  // screen would otherwise issue a query per bubble while scrolling. Joined to
+  // capture_commit for the on-device path — a message photo renders from the local
+  // file, so it is visible with no signal (mandate #7).
+  const media = rows.length === 0 ? [] : await db.getAll<{
+    message_id: string; capture_id: string; media_relpath: string | null;
+    published_at_ms: number | null;
+  }>(
+    `SELECT mm.message_id, mm.capture_id, cc.media_relpath, mm.published_at_ms
+       FROM thread_message_media mm
+       LEFT JOIN capture_commit cc ON cc.capture_id = mm.capture_id
+      WHERE mm.message_id IN (${rows.map(() => '?').join(',')})
+      ORDER BY mm.message_id, mm.ord`,
+    rows.map((r) => r.id)
+  ).catch(() => []);
+
+  const byMsg = new Map<string, ThreadPhoto[]>();
+  for (const m of media) {
+    const list = byMsg.get(m.message_id) ?? [];
+    list.push({
+      captureId: m.capture_id,
+      relpath: m.media_relpath,
+      published: m.published_at_ms != null,
+    });
+    byMsg.set(m.message_id, list);
+  }
+
   return rows.map((r) => ({
     id: r.id, side: r.side as ThreadSide, text: r.body, atMs: r.at_ms,
+    photos: byMsg.get(r.id) ?? [],
   }));
 }
+
+/** One photo hanging off a message. `relpath` is null when the row survives but the
+ *  file does not (a restore, a purge) — the bubble then draws the missing-evidence
+ *  tile rather than a broken image, the same rule the extra's grid follows. */
+export type ThreadPhoto = {
+  captureId: string;
+  relpath: string | null;
+  /** Has the client been told about it? False = on this phone only, and the bubble
+   *  says so rather than implying the homeowner is looking at it. */
+  published: boolean;
+};
 
 /**
  * Every thread on a job, keyed by change order. One query, because the ledger needs

@@ -154,7 +154,7 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
           // false claim about whether the signed record exists anywhere but this
           // handset, on the one screen built for a dispute (mandate #1).
           kickerRight={rec.synced ? <SyncedPill label={t('neg.synced')} /> : undefined}
-          navTitle={APP_NAME}
+          navTitle={t('erec.navTitle')}
           onBack={props.onBack}
           backLabel={t('erec.back')}
         />
@@ -212,21 +212,6 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
             <Text style={st.lockLine}>{t('elock.lockedBody')}</Text>
           </View>
         </View>
-
-        {/* Version — its own card, above the agreed terms. */}
-        <Card style={st.navCard}>
-          {/* The REAL version, from the supersession lineage. A v1 record says
-              "Original" and offers no link — a chevron to a list of previous versions
-              that do not exist is a control that cannot work. */}
-          <Row
-            icon="layers"
-            label={t({ k: 'elock.currentVersion', p: { n: props.version ?? 1 } })}
-            value={(props.version ?? 1) > 1 ? t('elock.viewPrevious') : t('elock.noPrevious')}
-            chevron={(props.version ?? 1) > 1}
-            onPress={(props.version ?? 1) > 1
-              ? (props.onViewVersions ?? props.onViewFullHistory) : undefined}
-          />
-        </Card>
 
         {/* The two "views" that led to the seal — conversation + signature. */}
         <Card style={st.navCard}>
@@ -330,6 +315,35 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
             <ApprovalStep key={`${e.atMs ?? 'x'}-${i}`} what={e.what} at={e.at} />
           ))}
         </Section>
+
+        {/* VERSION — LAST (hadar, 2026-08-12: "move the version section to the bottom,
+            the same it is in negotiation"), moved down from directly under the lock
+            strip.
+
+            It used to be the third thing on a sealed record, so the first fact after
+            "Signed and approved" was "Version 1 · Original" — a line that says NOTHING
+            HAS HAPPENED, sitting above the terms that were agreed, the recordings, and
+            the signature chain. Same misjudgement the negotiation screen already
+            corrected on 2026-08-09, and it reads worse here: on the one screen built to
+            settle a dispute, provenance is what you check AFTER you have read what was
+            agreed and who signed it, not before.
+
+            One section further down than negotiation's, because on a sealed record the
+            approval chain IS the payload — the reason the screen was opened — and
+            nothing should push it below the fold. */}
+        <Card style={st.navCard}>
+          {/* The REAL version, from the supersession lineage. A v1 record says
+              "Original" and offers no link — a chevron to a list of previous versions
+              that do not exist is a control that cannot work. */}
+          <Row
+            icon="layers"
+            label={t({ k: 'elock.currentVersion', p: { n: props.version ?? 1 } })}
+            value={(props.version ?? 1) > 1 ? t('elock.viewPrevious') : t('elock.noPrevious')}
+            chevron={(props.version ?? 1) > 1}
+            onPress={(props.version ?? 1) > 1
+              ? (props.onViewVersions ?? props.onViewFullHistory) : undefined}
+          />
+        </Card>
 
         {/* The frozen instrument stays ONLY as the verification alarm when this
             device's copy does not hash to the signed value — that is load-bearing

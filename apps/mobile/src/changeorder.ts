@@ -857,6 +857,11 @@ export type LedgerRow = {
   /** Relpath of the extra's first PHOTO (for a thumbnail), or null when it has no
    *  photo (voice-only). Joined FS.documentDirectory-relative, same as the grid. */
   photo_relpath: string | null;
+  /** The extra's real per-job number, for the line that IDENTIFIES the document on
+   *  the send sheet. Null on rows created before the column existed (and on rows the
+   *  backfill has not reached) — the sheet then prints no number at all, because a
+   *  made-up one on an instrument's identity line is worse than a short line. */
+  co_number: number | null;
 };
 
 /**
@@ -929,10 +934,10 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     created_at_ms: number; pending: number; extra_type: string | null;
     billing_timing: string | null; schedule_effect: string | null;
     schedule_days: number | null; exclusions: string | null;
-    photo_relpath: string | null;
+    photo_relpath: string | null; co_number: number | null;
   }>(
     `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.scope_of_work,
-            co.amount_cents, co.nte_cents,
+            co.amount_cents, co.nte_cents, co.co_number,
             co.status, co.is_mini, co.signed_by, co.created_at_ms, co.extra_type,
             co.billing_timing, co.schedule_effect, co.schedule_days, co.exclusions,
             ${CO_PHOTO_SUBQUERY} AS photo_relpath,
@@ -963,7 +968,7 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
       extra_type: r.extra_type,
       billing_timing: r.billing_timing, schedule_effect: r.schedule_effect,
       schedule_days: r.schedule_days, exclusions: r.exclusions,
-      photo_relpath: r.photo_relpath,
+      photo_relpath: r.photo_relpath, co_number: r.co_number,
       // "on this phone" and "in the cloud" are different facts and the sender is
       // entitled to know which one they are looking at.
       synced: r.pending ? 0 : 1,

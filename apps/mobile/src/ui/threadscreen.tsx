@@ -19,9 +19,11 @@
  * about money.
  */
 import React from 'react';
+import * as FS from 'expo-file-system/legacy';
 import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { t } from '../i18n';
 import { clientMessageCount, threadState, type ThreadMessage } from '../discussion';
+import { PHOTO_ONLY_BODY } from '../discussionstore';
 // R7 owns what a status is CALLED. R5b owns whether the thread is open. Keeping the
 // label in one module is why the chip on the ledger and the chip here can never
 // disagree about the same extra.
@@ -47,6 +49,9 @@ function chipKind(s: LedgerStatus) {
  * every line because a log without them cannot show who was waiting on whom.
  */
 const msgAvatarStyle = { width: 30, height: 30, borderRadius: 15 } as const;
+// A photo inside a bubble. Small enough that three fit a 82%-wide bubble on a 13
+// mini, big enough to see what it is before tapping.
+const msgShotStyle = { width: 92, height: 92, borderRadius: 10 } as const;
 
 export function DiscussionLog(props: {
   messages: ThreadMessage[];
@@ -60,6 +65,10 @@ export function DiscussionLog(props: {
   clientName?: string | null;
   /** The client's photo, when the roster has one; initials otherwise. */
   clientAvatar?: string | null;
+  /** Open a photo sent in a message full-screen. Omitted where there is no lightbox
+   *  — the tile then renders and simply does not respond, rather than opening a
+   *  viewer this screen does not have. */
+  onPressPhoto?: (uri: string) => void;
 }) {
   if (!props.messages.length) return null;
   const clientName = props.clientName?.trim() || null;
@@ -94,8 +103,45 @@ export function DiscussionLog(props: {
                 borderBottomRightRadius: mine ? 4 : 16,
                 borderBottomLeftRadius: mine ? 16 : 4,
               }}>
-                <Text style={[T.body, { fontSize: 14.5, lineHeight: 20,
-                  color: mine ? '#fff' : '#151A1E' }]}>{m.text}</Text>
+                {/* PHOTOS ABOVE THE WORDS. A message whose body is the photo-only
+                    mark is a picture, and printing "📷" over the picture it stands
+                    for would be a caption saying "image". */}
+                {!!m.photos?.length && (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6,
+                    marginBottom: m.text === PHOTO_ONLY_BODY ? 0 : 7 }}>
+                    {m.photos.map((ph) => {
+                      // Resolved once. `FS.documentDirectory` is typed nullable (it is
+                      // null on web, where this screen never runs); a null base with a
+                      // real relpath would render a file:// URI missing its root, so
+                      // the tile falls back to the missing-evidence state rather than
+                      // to a broken image.
+                      const uri = ph.relpath && FS.documentDirectory
+                        ? FS.documentDirectory + ph.relpath : null;
+                      return uri ? (
+                      <Pressable key={ph.captureId}
+                        onPress={() => props.onPressPhoto?.(uri)}
+                        accessibilityRole="imagebutton"
+                        accessibilityLabel={t('r5b.photoInMessage')}>
+                        <Image source={{ uri }} style={msgShotStyle} />
+                      </Pressable>
+                    ) : (
+                      // The row survived, the file did not (a restore, a purge). The
+                      // extra's grid draws the same tile for the same reason: a
+                      // missing photo is a fact worth stating, not a broken image.
+                      <View key={ph.captureId} style={[msgShotStyle, {
+                        alignItems: 'center', justifyContent: 'center',
+                        backgroundColor: '#EFEBE3' }]}>
+                        <Text style={{ ...T.bodySteel, fontSize: 10, textAlign: 'center' }}>
+                          {t('erec.evidenceMissing')}
+                        </Text>
+                      </View>
+                    ); })}
+                  </View>
+                )}
+                {m.text !== PHOTO_ONLY_BODY && (
+                  <Text style={[T.body, { fontSize: 14.5, lineHeight: 20,
+                    color: mine ? '#fff' : '#151A1E' }]}>{m.text}</Text>
+                )}
               </View>
               {/* Time BELOW the bubble; your delivered messages get a ✓✓ read-receipt,
                   an undelivered one says so instead (mandate #1). */}

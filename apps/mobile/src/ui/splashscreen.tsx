@@ -1,7 +1,7 @@
 /**
  * The opening screen (hadar mockup, 2026-07-27).
  *
- * WHAT THIS REPLACES: `<View><Text>EZchangeorder</Text></View>` — a cream screen with
+ * WHAT THIS REPLACES: `<View><Text>EZChangeOrders</Text></View>` — a cream screen with
  * the product name in the top-left corner, shown for as long as the database takes to
  * open and the fonts take to load. It read as an unfinished screen, because it was one.
  *

@@ -46,6 +46,19 @@ export type Plan = {
   priceMonthly: number | null;
   /** USD/mo billed annually (the headline price). null = free or custom. */
   priceAnnualMonthly: number | null;
+  /**
+   * WHAT APPLE ACTUALLY CHARGES for a year, in USD. NOT `priceAnnualMonthly * 12`.
+   *
+   * Apple has no $228 or $588 price point — the nearest are $229 and $589, and those
+   * are what the products are configured at in App Store Connect. The paywall prints
+   * this total beside the per-month headline, so multiplying would put a figure on a
+   * purchase screen that the receipt then contradicts by a dollar. Mandate #6: a number
+   * a customer is asked to agree to is the highest-risk field there is.
+   *
+   * The headline stays the rounded-down per-month figure ($19, from $229/12 = $19.08),
+   * which is the ordinary way subscriptions are quoted — but the TOTAL is exact.
+   */
+  priceAnnualTotal: number | null;
   /** App Store / RevenueCat product identifiers. null where there is nothing to buy. */
   productIdMonthly: string | null;
   productIdAnnual: string | null;
@@ -56,7 +69,7 @@ const UNLIMITED = Infinity;
 
 export const PLANS: Record<PlanId, Plan> = {
   free: {
-    id: 'free', name: 'Free', priceMonthly: 0, priceAnnualMonthly: 0,
+    id: 'free', name: 'Free', priceMonthly: 0, priceAnnualMonthly: 0, priceAnnualTotal: 0,
     productIdMonthly: null, productIdAnnual: null,
     // hadar 2026-08-04: "2 change orders, 30 images (total) and 30 (min) total
     // recording — once you have gone past that limit prompt the user to subscribe".
@@ -70,7 +83,7 @@ export const PLANS: Record<PlanId, Plan> = {
     },
   },
   core: {
-    id: 'core', name: 'Core', priceMonthly: 24, priceAnnualMonthly: 19,
+    id: 'core', name: 'Core', priceMonthly: 24, priceAnnualMonthly: 19, priceAnnualTotal: 229,
     productIdMonthly: 'ezco_core_monthly', productIdAnnual: 'ezco_core_annual',
     limits: {
       jobs: UNLIMITED, decisionsPerJob: UNLIMITED,
@@ -83,7 +96,7 @@ export const PLANS: Record<PlanId, Plan> = {
     },
   },
   crew: {
-    id: 'crew', name: 'Crew', priceMonthly: 59, priceAnnualMonthly: 49,
+    id: 'crew', name: 'Crew', priceMonthly: 59, priceAnnualMonthly: 49, priceAnnualTotal: 589,
     productIdMonthly: 'ezco_crew_monthly', productIdAnnual: 'ezco_crew_annual',
     limits: {
       jobs: UNLIMITED, decisionsPerJob: UNLIMITED, members: UNLIMITED,

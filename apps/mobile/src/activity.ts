@@ -122,18 +122,31 @@ export function buildActivity(
 }
 
 /**
- * The bell's number.
+ * The bell's number — and, since 2026-08-12, the APP ICON'S number too.
  *
- * It counts UNREAD QUESTIONS ONLY, not every unread row. A badge that also counts
- * approvals would sit at 12 on a healthy job and stop meaning anything -- and the
- * one thing R8's AC asks the bell to surface is an unanswered client question. A
- * count nobody can clear is a count nobody reads.
+ * WIDENED FROM "questions + overdue prices" TO "everything except your own sends"
+ * (hadar: "if there are new notifications a red badge with the number of new
+ * notifications … same when the application is closed").
+ *
+ * THE OLD RULE WAS DEFENSIBLE AND STILL BROKE, for a reason that only appears once the
+ * icon badge exists. `runNotifications` presents a push for an APPROVAL as well as a
+ * question. Under the old count, that push landed on the phone, the row appeared in the
+ * notification list — and the bell said nothing. Three surfaces reporting the same event
+ * and one of them silently disagreeing is worse than any of the three being wrong,
+ * because the user cannot tell which to believe. A badge is a promise that the list
+ * behind it has something new in it; it does not get to be selective about which new
+ * things count.
+ *
+ * 'sent' IS STILL EXCLUDED, and that is the whole of the old rule worth keeping: he sent
+ * it himself, seconds ago, from this phone. Badging a man for his own action is how a
+ * counter becomes furniture — the "12 on a healthy job" failure the original comment
+ * warned about, which came from self-caused rows, not from news. Note that nothing in
+ * `buildActivity` emits a 'sent' row TODAY, so the clause is currently a no-op held for
+ * the day one appears; activity.test.ts asserts it against a hand-built row rather than
+ * pretending the builder can produce one.
  */
 export function unreadCount(rows: ActivityRow[]): number {
-  // Questions AND overdue prices. Both are work the CONTRACTOR owes someone who is
-  // waiting on him; approvals and declines are news, not tasks. A badge that counted
-  // news would sit at 12 on a healthy job and stop meaning anything.
-  return rows.filter((r) => (r.kind === 'question' || r.kind === 'unpriced') && !r.read).length;
+  return rows.filter((r) => !r.read && r.kind !== 'sent').length;
 }
 
 /** Rows whose read-state would change. Used so marking read writes once, not N times. */

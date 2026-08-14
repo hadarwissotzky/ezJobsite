@@ -1,6 +1,6 @@
 /**
- * EZChangeOrder design tokens — the canonical visual language, from the approved
- * design kit (EZChangeOrder_Design_System, 2026-07-26). This is the SINGLE SOURCE for
+ * EZChangeOrders design tokens — the canonical visual language, from the approved
+ * design kit (EZChangeOrders_Design_System, 2026-07-26). This is the SINGLE SOURCE for
  * colour, spacing, radius, type, motion, and touch-target values; `theme.ts` builds
  * the semantic layer (C/F/T, buttons, chips) on top of these.
  *

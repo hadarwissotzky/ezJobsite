@@ -20,6 +20,21 @@ export async function getSeenOnboarding(): Promise<boolean> {
   }
 }
 
+/**
+ * DEV ONLY — forget that the intro was seen, so the next logged-out render shows it.
+ *
+ * hadar, 2026-08-12: "how can I test it? for me it displays the login screen." He is
+ * signed out, so `session` is null — but this flag was set the first time he ever opened
+ * the app, months of builds ago, and it is doing exactly what it was written to do. The
+ * only ways to clear it were a reinstall (which takes the local capture database with
+ * it) or a debugger. Neither is a way to review a design.
+ *
+ * Not gated here: the caller is, so the shipped app has no path to it.
+ */
+export async function forgetSeenOnboarding(): Promise<void> {
+  try { await AsyncStorage.removeItem(SEEN_KEY); } catch { /* nothing to forget */ }
+}
+
 export async function setSeenOnboarding(): Promise<void> {
   try {
     await AsyncStorage.setItem(SEEN_KEY, 'yes');

@@ -77,6 +77,54 @@ export async function markFirstRunDone(db: AbstractPowerSyncDatabase) {
   );
 }
 
+/**
+ * THE GUIDED FIRST CHANGE ORDER (hadar, 2026-08-12).
+ *
+ * A separate flag from `first_run_done`, deliberately. That one gates the profile setup
+ * and is marked the moment the account exists; this one gates a walkthrough the user is
+ * allowed to decline with "Do this later" and never see again. Folding them together
+ * would mean either the walkthrough could not be dismissed independently, or dismissing
+ * it would re-open the profile questions on the next launch.
+ *
+ * It is device-local like the rest of this file: it records what THIS phone has already
+ * shown its holder, which is not a fact about the company or the account.
+ */
+const FIRST_EXTRA_KEY = 'first_extra_seen';
+
+export async function firstExtraSeen(db: AbstractPowerSyncDatabase): Promise<boolean> {
+  try {
+    const r = (await db.getAll<{ v: string }>(
+      `SELECT v FROM device_settings WHERE k = ?`, [FIRST_EXTRA_KEY]))[0];
+    return r?.v === 'yes';
+  } catch {
+    return false;   // no table yet -> nothing has been shown
+  }
+}
+
+export async function markFirstExtraSeen(db: AbstractPowerSyncDatabase) {
+  await db.execute(
+    `INSERT INTO device_settings (k, v) VALUES (?, 'yes')
+     ON CONFLICT(k) DO UPDATE SET v = 'yes'`, [FIRST_EXTRA_KEY]
+  );
+}
+
+/**
+ * DEV ONLY — forget every "you have already seen this" flag on this device.
+ *
+ * hadar, 2026-08-12: "I would like to test and simulate the first-time onboarding path."
+ * The three flags live in two different stores and are set at three different moments,
+ * so resetting them by hand means knowing all three exist. This is the one call.
+ *
+ * WHAT IT DOES NOT DO, and the caller must say so: it does not empty the device. The
+ * local database still holds this account's captures, change orders and jobs, so the
+ * SCREENS replay but the "no jobs and no change orders" condition behind the guided
+ * start does not. A genuinely clean system is a fresh install plus a fresh account.
+ */
+export async function resetFirstRunFlags(db: AbstractPowerSyncDatabase) {
+  await db.execute(`DELETE FROM device_settings WHERE k IN (?, ?)`,
+    [DONE_KEY, FIRST_EXTRA_KEY]);
+}
+
 const LANG_KEY = 'preferred_language';
 
 /**

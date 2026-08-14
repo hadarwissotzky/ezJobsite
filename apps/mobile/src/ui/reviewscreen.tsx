@@ -92,7 +92,7 @@ export function ReviewScreen({
         <Pressable onPress={onClose} hitSlop={14}>
           <Text style={[T.btnGhostText, { fontSize: 15 }]}>Back</Text>
         </Pressable>
-        <Text style={display(20)}>EZ<Text style={{ color: C.orange }}>jobsite</Text></Text>
+        <Text style={display(20)}>EZ<Text style={{ color: C.orange }}>ChangeOrders</Text></Text>
         <View style={{ width: 44 }} />
       </View>
 

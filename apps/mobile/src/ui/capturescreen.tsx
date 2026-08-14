@@ -3,7 +3,7 @@
  * CHANGE ORDER: walk the site, talk, snap photos along the way, tap Done. Everything
  * else is in service of that.
  *
- * REDESIGNED 2026-07-27 to hadar's mockup + the EZChangeOrder design system. What
+ * REDESIGNED 2026-07-27 to hadar's mockup + the EZChangeOrders design system. What
  * changed is the CHROME, not the machinery: the screen used to be a black full-bleed
  * viewfinder with dark scrims, and is now the system's warm light theme — a cream top
  * bar, the camera as an inset band, cream cards over it, and a cream action panel. The
@@ -114,8 +114,21 @@ function Wave({ level, active }: { level: number; active: boolean }) {
 type Shot = { uri: string; atMs: number; fromLibrary: boolean };
 
 export function FusedCapture({
-  projectName, onCapture, onClose, resolveLabel, db, ownerId,
+  projectName, onCapture, onClose, resolveLabel, db, ownerId, coachPrompts,
 }: {
+  /**
+   * THE FOUR PROMPTS, KEPT WITHIN REACH WHILE HE TALKS (hadar's storyboard step 3).
+   *
+   * Only passed by the guided first change order. WHY IT MATTERS: the coaching screen
+   * before this one is read and then gone, and the moment the recorder opens is exactly
+   * the moment a first-time user forgets what he was going to say. A strip of the same
+   * four questions, on the recording screen, is the difference between nine unusable
+   * words and something that can be priced.
+   *
+   * Undefined on every other path, and the strip does not render — an experienced user
+   * capturing his fortieth extra does not need to be asked what a change order is.
+   */
+  coachPrompts?: { label: string }[];
   /** R1: the session becomes durable WHILE it happens, not at Done. */
   db: AbstractPowerSyncDatabase;
   ownerId: string;
@@ -543,6 +556,25 @@ export function FusedCapture({
         </View>
       </View>
 
+      {/* ---------- THE COACH STRIP (guided flow, step 3) ----------
+           Sits directly above the controls, where his thumb already is, and only while
+           the mic is live: before he starts it would compete with the reassurance card,
+           and after he stops it is advice about a thing he has finished. Inert chips —
+           tapping one would either interrupt the recording or navigate away from it, and
+           both lose audio. They are a reminder, not a control. */}
+      {!!coachPrompts?.length && recordingNow && (
+        <View style={st.coachStrip}>
+          <Text style={st.coachStripLab}>{T('cap.needHelp')}</Text>
+          <View style={st.coachChips}>
+            {coachPrompts.map((p) => (
+              <View key={p.label} style={st.coachChip}>
+                <Text style={st.coachChipT}>{p.label}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
       {/* ---------- ACTION PANEL ---------- */}
       <View style={st.panel}>
         <View style={st.actionRow}>
@@ -787,4 +819,14 @@ const st = StyleSheet.create({
   savingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: C.paper,
     alignItems: 'center', justifyContent: 'center' },
   savingT: { fontFamily: F.bodySemi, fontSize: 17, color: C.ink, marginTop: 16 },
+  // ── the guided flow's prompt strip ──
+  coachStrip: { position: 'absolute', left: 0, right: 0, bottom: 208,
+    paddingHorizontal: 16 },
+  coachStripLab: { fontFamily: 'Inter_700Bold', fontSize: 12, color: '#fff',
+    marginBottom: 8, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 4 },
+  coachChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  coachChip: { backgroundColor: 'rgba(20,18,16,0.62)', borderRadius: 999,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)',
+    paddingVertical: 7, paddingHorizontal: 12 },
+  coachChipT: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#fff' },
 });

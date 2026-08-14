@@ -10,10 +10,10 @@
  * 'ready'. Field-first design: one clear action per card, plain words, big targets.
  */
 import React from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import {Linking,ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { t } from '../i18n';
 import { PLANS, PAID_TIERS, type PlanId } from '../plans';
-import { billingStatus, purchasePlan, restorePurchases } from '../billing';
+import { billingStatus, manageSubscriptionUrl, purchasePlan, restorePurchases } from '../billing';
 import { Icon } from './icon';
 import { C, F } from './theme';
 
@@ -38,6 +38,41 @@ const FEATURES: Record<PlanId, string[]> = {
 /** The tier whose features this one builds on, for the "everything in X, plus" line. */
 const INHERITS: Partial<Record<PlanId, PlanId>> = { crew: 'core' };
 
+export type BillingCycle = 'monthly' | 'annual';
+
+/** The store product for a tier on a cycle, falling back to whichever exists. */
+export function productFor(plan: PlanId, cycle: BillingCycle): string | null {
+  const p = PLANS[plan];
+  return cycle === 'annual'
+    ? (p.productIdAnnual ?? p.productIdMonthly)
+    : (p.productIdMonthly ?? p.productIdAnnual);
+}
+
+/** The per-month figure to print for a tier on a cycle. Null when there is no price. */
+export function priceFor(plan: PlanId, cycle: BillingCycle): number | null {
+  const p = PLANS[plan];
+  return cycle === 'annual' ? p.priceAnnualMonthly : p.priceMonthly;
+}
+
+/**
+ * How much annual saves, as a whole percent, or 0 when it saves nothing.
+ *
+ * COMPUTED, never typed into a string. A hardcoded "Save 20%" is a price claim that
+ * goes stale the first time a number in plans.ts moves, and a wrong discount on a
+ * paywall is the kind of error that ends up in a refund request.
+ */
+export function annualSavingPct(plan: PlanId): number {
+  const m = PLANS[plan].priceMonthly;
+  const a = PLANS[plan].priceAnnualMonthly;
+  if (m == null || a == null || m <= 0 || a >= m) return 0;
+  return Math.round(((m - a) / m) * 100);
+}
+
+/** The best saving across the paid tiers — what the toggle advertises. */
+export function bestAnnualSavingPct(): number {
+  return PAID_TIERS.reduce((best, p) => Math.max(best, annualSavingPct(p)), 0);
+}
+
 export function PaywallScreen(props: {
   visible: boolean;
   currentPlan: PlanId;
@@ -46,41 +81,122 @@ export function PaywallScreen(props: {
   /** Fired after a successful purchase/restore so the caller can re-read the plan.
    *  The AUTHORITY is still company.plan written by the RevenueCat webhook — this is
    *  only the cue to go look, not the entitlement itself. */
-  onPurchased?: () => void;
+  /** The plan RevenueCat granted, so the caller can cache the verdict rather than
+   *  re-deriving it from a server column that has not arrived yet. */
+  onPurchased?: (plan: PlanId) => void;
+  /** The store product actually being paid for, when known. Distinguishes Core-monthly
+   *  from Core-annual — `currentPlan` alone cannot. Null/undefined falls back to
+   *  tier-level matching, which is what this screen did before the toggle existed. */
+  currentProductId?: string | null;
 }) {
   const ready = billingStatus() === 'ready';
-  const [busy, setBusy] = React.useState(false);
+  const best = bestAnnualSavingPct();
+  /**
+   * MONTHLY OR ANNUAL, chosen once for the whole screen (hadar 2026-08-13: "I need the
+   * paywall to split between annual and monthly as any option across the 3 options").
+   *
+   * ONE toggle above all three cards, not a control per card. Every plan is on the same
+   * cycle at the same time, so the comparison down the column stays a comparison of
+   * TIERS — which is the only thing the screen is for. A per-card cycle would let
+   * somebody read $19 against $59 and conclude Crew costs three times Core, when they
+   * were looking at an annual rate beside a monthly one.
+   *
+   * Defaults to annual because that is the cheaper per-month number and what this
+   * screen already showed; the monthly price is never hidden, only one tap away.
+   */
+  const [cycle, setCycle] = React.useState<'monthly' | 'annual'>('annual');
+  // DEV ONLY — the two inputs that decide which card reads "Your plan", readable from
+  // the inspector. Guessing at them from a screenshot is how the last hour went.
+  if (__DEV__) (globalThis as any).__pw = JSON.stringify({
+    currentPlan: props.currentPlan, currentProductId: props.currentProductId, cycle });
+  // WHICH plan is buying, not merely "something is". A shared boolean disabled every
+  // button and marked none of them, so the one you pressed gave no sign of life.
+  const [busy, setBusy] = React.useState<PlanId | null>(null);
   const [note, setNote] = React.useState<string | null>(null);
+  /** Which card the note belongs to, so it appears where the finger was. */
+  const [noteFor, setNoteFor] = React.useState<PlanId | null>(null);
 
+  /**
+   * BUY — and say what happened, always (hadar, 2026-08-13: "I click on it and nothing
+   * happens", against the RevenueCat Test Store).
+   *
+   * Three things were wrong at once, and together they made a working call look like a
+   * dead button:
+   *
+   *   1. `cancelled` produced NO message and no state change. Indistinguishable from a
+   *      tap that did nothing at all.
+   *   2. A purchase that granted NO ENTITLEMENT was reported as success. The Test Store
+   *      returns customerInfo happily; if the product is not attached to a `core`/`crew`
+   *      entitlement in the dashboard, `planFromCustomerInfo` yields 'free' — so the app
+   *      said "thanks", re-read the plan, found it unchanged, and left the same paywall
+   *      on screen. That is the exact symptom, and saying thank you for nothing is the
+   *      worse half of it.
+   *   3. `detail` was discarded, so the one string that says WHICH of these happened
+   *      (`product_unavailable`, a store error) never reached anybody.
+   */
   const buy = async (plan: PlanId) => {
-    const pid = PLANS[plan].productIdAnnual ?? PLANS[plan].productIdMonthly;
+    // The chosen cycle decides the product. The fallback is not cosmetic: a tier with
+    // only one of the two configured must still be buyable rather than silently
+    // routing to the contact-us mailto.
+    const pid = productFor(plan, cycle);
     if (!ready || !pid) { props.onContact(); return; }
-    setBusy(true); setNote(null);
+    setBusy(plan); setNote(null); setNoteFor(plan);
     const r = await purchasePlan(pid);
-    setBusy(false);
-    if (r.ok) {
-      // Paid. The webhook writes company.plan server-side and it syncs down, which can
-      // lag a moment — so acknowledge here rather than leaving the buyer staring at
-      // the paywall wondering whether their money went anywhere.
+    setBusy(null);
+    // DEV ONLY — the raw result, readable from the inspector. The screen shows a
+    // sentence; this is the shape that produced it.
+    if (__DEV__) (globalThis as any).__lastBuy = JSON.stringify(r);
+    if (r.ok && r.plan !== 'free') {
+      // Paid AND entitled. The webhook writes company.plan server-side and it syncs
+      // down, which can lag a moment — so acknowledge here rather than leaving the
+      // buyer staring at the paywall wondering whether their money went anywhere.
       setNote(t('paywall.thanks'));
-      props.onPurchased?.();
+      props.onPurchased?.(r.plan);
       return;
     }
-    if (r.reason !== 'cancelled') setNote(t('paywall.failed'));
+    if (r.ok) { setNote(t('paywall.noEntitlement')); return; }
+    if (r.reason === 'cancelled') { setNote(t('paywall.cancelled')); return; }
+    // Refused before the store sheet: there is no tenant to attach the plan to. Says
+    // what to do rather than what went wrong.
+    if (r.reason === 'no_tenant') { setNote(t('paywall.needProfile')); return; }
+    // The detail is SHOWN in a debug build. It is the difference between "the store is
+    // down" and "this product is not set up", and without it the next hour is guesswork.
+    setNote(__DEV__ && r.detail ? `${t('paywall.failed')}\n${r.detail}` : t('paywall.failed'));
   };
 
   const restore = async () => {
-    setBusy(true); setNote(null);
+    setBusy('free'); setNote(null); setNoteFor('free');
     const r = await restorePurchases();
-    setBusy(false);
-    if (r.ok && r.plan !== 'free') { setNote(t('paywall.thanks')); props.onPurchased?.(); return; }
+    setBusy(null);
+    if (r.ok && r.plan !== 'free') { setNote(t('paywall.thanks')); props.onPurchased?.(r.plan); return; }
     if (!r.ok || r.plan === 'free') setNote(ready ? t('paywall.restoreNone') : t('paywall.notLive'));
   };
 
   const card = (plan: PlanId) => {
-    const p = PLANS[plan];
-    const isCurrent = props.currentPlan === plan;
-    const price = p.priceAnnualMonthly;
+    const price = priceFor(plan, cycle);
+    const productId = productFor(plan, cycle);
+    /**
+     * "Your plan" means THIS product, not this tier — when we know the product.
+     *
+     * Somebody on Core-annual who taps Monthly is looking at a different thing to buy,
+     * and the card has to offer it. Marking the tier as current would leave them staring
+     * at a monthly price they cannot select, which is exactly the dead-button complaint
+     * that produced the note-in-the-card fix above.
+     *
+     * When the product is unknown (billing not configured, nothing cached yet) this
+     * falls back to tier matching — the behaviour before the toggle existed. Free is
+     * always tier-level: it has no product and no cycle.
+     */
+    const sameTier = props.currentPlan === plan;
+    // The product NARROWS the tier match; it never stands in for it. Written the other
+    // way first, and caught on device: with the plan reading 'free' and a Core product
+    // still cached, the Free card AND the Core card both said "Your plan". A stale
+    // product id from a lapsed subscription does the same thing in production.
+    const knowsCycle = plan !== 'free' && !!props.currentProductId && !!productId;
+    const isCurrent = sameTier && (!knowsCycle || props.currentProductId === productId);
+    /** Same tier, other cycle: a switch, not a purchase — and it must say so. */
+    const isSwitch = sameTier && !isCurrent;
+    const saving = cycle === 'annual' ? annualSavingPct(plan) : 0;
     return (
       <View key={plan} style={{ backgroundColor: C.card, borderWidth: 1.5,
         borderColor: isCurrent ? C.brand : C.line, borderRadius: 18, padding: 18, marginBottom: 12 }}>
@@ -95,7 +211,24 @@ export function PaywallScreen(props: {
           )}
         </View>
         {price != null && price > 0 && (
-          <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.steel, marginTop: 2 }}>{t('paywall.annualNote')}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+            <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.steel }}>
+              {cycle === 'annual'
+                ? t({ k: 'paywall.billedAnnually',
+                      // The REAL annual charge, not the headline times twelve — Apple
+                      // has no $228 price point (see plans.ts `priceAnnualTotal`).
+                      p: { total: String(PLANS[plan].priceAnnualTotal ?? price * 12) } } as any)
+                : t('paywall.billedMonthly')}
+            </Text>
+            {saving > 0 && (
+              <View style={{ backgroundColor: C.brandSoft, borderRadius: 6,
+                paddingHorizontal: 6, paddingVertical: 2 }}>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.brandDark }}>
+                  {t({ k: 'paywall.savePct', p: { pct: String(saving) } } as any)}
+                </Text>
+              </View>
+            )}
+          </View>
         )}
         <View style={{ marginTop: 12, gap: 8 }}>
           {INHERITS[plan] && (
@@ -116,13 +249,34 @@ export function PaywallScreen(props: {
             <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.steel }}>{t('paywall.current')}</Text>
           </View>
         ) : plan !== 'free' ? (
-          <Pressable onPress={() => buy(plan)} disabled={busy}
+          <>
+          {/* THE OUTCOME, IN THE CARD HE PRESSED (hadar: "it thinks and returns
+              nothing"). There has been a message for every branch since v132 — it was
+              rendered once, at the BOTTOM of the sheet under all three cards, where a
+              scrolled paywall puts it off-screen. A message nobody can see is the same
+              as no message, and the button reads as dead. */}
+          {noteFor === plan && !!note && (
+            <View style={{ marginTop: 12, backgroundColor: C.surfaceMuted, borderRadius: 10,
+              paddingVertical: 10, paddingHorizontal: 12 }}>
+              <Text style={{ fontFamily: F.body, fontSize: 13.5, lineHeight: 19, color: C.ink }}>
+                {note}
+              </Text>
+            </View>
+          )}
+          <Pressable onPress={() => buy(plan)} disabled={!!busy}
             style={{ marginTop: 14, minHeight: 52, borderRadius: 12, backgroundColor: C.ink,
-              alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>
-              {ready ? t({ k: 'paywall.choose', p: { plan: t(('plan.' + plan) as any) } } as any) : t('paywall.comingSoon')}
-            </Text>
+              alignItems: 'center', justifyContent: 'center', opacity: busy && busy !== plan ? 0.5 : 1 }}>
+            {busy === plan
+              ? <ActivityIndicator color="#fff" />
+              : (
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>
+                  {!ready ? t('paywall.comingSoon')
+                    : isSwitch ? t(cycle === 'annual' ? 'paywall.switchAnnual' : 'paywall.switchMonthly')
+                    : t({ k: 'paywall.choose', p: { plan: t(('plan.' + plan) as any) } } as any)}
+                </Text>
+              )}
           </Pressable>
+          </>
         ) : null}
       </View>
     );
@@ -146,12 +300,56 @@ export function PaywallScreen(props: {
             </View>
           )}
 
+          {/* THE CYCLE SWITCH. One control, above all three cards — see the note on
+              `cycle`. Rendered as two halves of a single pill so it reads as one
+              either/or choice rather than two buttons, and sized past the touch-target
+              floor because this is a gloved thumb on a jobsite. */}
+          <View style={{ flexDirection: 'row', backgroundColor: C.surfaceMuted,
+            borderRadius: 12, padding: 4, marginBottom: 16 }}>
+            {(['monthly', 'annual'] as const).map((c) => {
+              const on = cycle === c;
+              return (
+                <Pressable key={c} onPress={() => setCycle(c)} disabled={!!busy}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  style={{ flex: 1, minHeight: 44, borderRadius: 9,
+                    backgroundColor: on ? C.card : 'transparent',
+                    alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 }}>
+                  <Text style={{ fontFamily: on ? F.bodyBold : F.body, fontSize: 15,
+                    color: on ? C.ink : C.steel }}>
+                    {t(c === 'annual' ? 'paywall.annual' : 'paywall.monthly')}
+                  </Text>
+                  {c === 'annual' && best > 0 && (
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 12,
+                      color: on ? C.brandDark : C.steel }}>
+                      {t({ k: 'paywall.saveUpTo', p: { pct: String(best) } } as any)}
+                    </Text>
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+
           {card('free')}
           {PAID_TIERS.map(card)}
 
           {note && <Text style={{ fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 4 }}>{note}</Text>}
 
-          <Pressable onPress={restore} disabled={busy}
+          {/* CHANGE OR CANCEL. Shown whenever there is a paid plan to change — the one
+              control that lets somebody stop paying. Apple owns the act; this is the
+              door to it, and App Store guideline 3.1.2 requires the door to exist. */}
+          {props.currentPlan !== 'free' && (
+            <Pressable
+              onPress={() => void manageSubscriptionUrl().then((u) => Linking.openURL(u).catch(() => {}))}
+              style={{ minHeight: 46, alignItems: 'center', justifyContent: 'center', marginTop: 10 }}>
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink,
+                textDecorationLine: 'underline' }}>
+                {t('paywall.manage')}
+              </Text>
+            </Pressable>
+          )}
+
+          <Pressable onPress={restore} disabled={!!busy}
             style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 }}>
             <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.steel }}>{t('paywall.restore')}</Text>
           </Pressable>

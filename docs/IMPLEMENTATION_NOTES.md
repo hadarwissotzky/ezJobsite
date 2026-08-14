@@ -733,3 +733,96 @@ durability disagree, and durability must win.
 **Status: unfixed.** Written up 2026-08-05 so it is not rediscovered by a user. The
 identity merge that unblocked this device is not a fix for this — it removed the second
 account, and the next second account will reproduce it exactly.
+
+---
+
+## §7 — 2026-08-13: closing the account, and what "delete my data" costs in an append-only schema
+
+hadar: *"I cannot seem to be able to downgrade if I want to, or cancel the account —
+need to be able to do both."* Two separate things, and only one of them is ours.
+
+**Downgrade/cancel is Apple's, and no app can do it.** A StoreKit subscription is changed
+or cancelled in the App Store's own management screen; there is no API an app can call.
+What guideline 3.1.2 requires is that the app *link there*, which it now does
+(`manageSubscriptionUrl()`, RevenueCat's per-customer `managementURL` with the generic
+Apple URL as fallback). Not providing the link was both a review risk and a trap: money
+leaving an account with no visible way to stop it.
+
+**Deletion did not exist at all**, which App Store 5.1.1(v) does not allow for any app
+that lets somebody create an account. Building it ran straight into the schema's whole
+design.
+
+### The conflict, and where it was already settled
+Seventeen triggers exist specifically to raise on DELETE, and `change_order_no_delete`
+refuses outright once an extra leaves draft. That is deliberate — mandate #1. But
+CLAUDE.md §2.5 had already written the carve-out: a valid erasure request **hard-deletes
+content + media and retains a hash + metadata stub**. `close_my_account()` implements
+exactly that and nothing wider. `erasure_stub` holds `id`, kind, `content_sha256`, and
+the date — no `user_id`, because a stub that names the person defeats the erasure it
+records — and it is written **before** the deletes, since destroying the record of the
+destruction is the one ordering nothing recovers from.
+
+### Three attempts at getting past the guards, and why the third is the one
+1. **An escape clause in each trigger** (`public.erasing()` reading a GUC). Rejected:
+   it means `create or replace`-ing seventeen functions that seventeen other files own,
+   and `check-sql-duplicates.mjs` calls that FATAL — correctly. One object, one file.
+   A deletion feature is not a reason to take co-ownership of every guard in the schema.
+2. **`session_replication_role = 'replica'`** — one line, but needs superuser, and
+   Supabase's `postgres` may not have it. The failure would land at runtime, on a
+   destructive path, after the confirmation was tapped.
+3. **`ALTER TABLE … DISABLE TRIGGER`** inside the function. Needs only table ownership,
+   which the migration role has by definition. DDL is transactional, so a failure rolls
+   the disable back with everything else; and `ALTER TABLE` takes ACCESS EXCLUSIVE, so
+   for the milliseconds a guard is off no other session can write to that table at all.
+   The lock is what closes the hole, not luck.
+
+### The part worth remembering: a `create function` that succeeds proves nothing
+plpgsql resolves table columns at **first execution**, not at creation. The migration
+was applied cleanly to a scratch database and was still wrong in two places:
+
+* the stub read `capture.created_at`. There is no such column — it is `inserted_at`.
+* the guard list was hand-typed with **sixteen** entries. There are **seventeen**
+  (`capture_no_delete`, which the grep that built the list did not match). The erasure
+  aborted halfway.
+
+Both were found by loading the real schema into a local Postgres 18, seeding a full
+account, and running it. Neither was findable by reading. The second is why the function
+now asks `pg_trigger` which guards to lift instead of carrying a list — a hand list is
+wrong again the first time somebody adds an evidence table, and the symptom is one
+unlucky person's deletion failing halfway through.
+
+**Verified by execution:** every seeded table went to 0 for the erased user (including an
+approved change order and a signed approval); both stubs survived with hash and date; a
+second user's project, capture, note and transcript were untouched; all 17 guards were
+back to `tgenabled = 'O'`, and DELETE on a note, DELETE on a capture and UPDATE on a
+transcript were all still refused afterwards.
+
+### Four places hold the data, not one
+Deleting only the Postgres rows would make "account deleted" false in three places, one
+of them the phone in their hand. `src/closeaccount.ts` does all four, in this order:
+
+1. **Supabase Storage** — from the client, because Supabase forbids SQL deletes on
+   storage tables (the lesson already paid for in `372`). `list()` is paginated and caps
+   at 100 silently, which is the shape that makes a purge *look* complete.
+2. **Postgres** — `close_my_account()`.
+3. **Device SQLite** — `DROP TABLE`, not `DELETE`: the local tables carry their own
+   append-only triggers and SQLite has no session flag to excuse a delete. Dropping takes
+   the triggers with it, and every one is `CREATE … IF NOT EXISTS` beside its table, so
+   the next launch rebuilds the table *and* the protection.
+4. **Device filesystem** — `capture-media/`, `draft-media/`.
+
+Storage goes **before** the rows: the rows are the index to the media, so failing after
+the rows are gone leaves media nobody can reach, enumerate, or ever clean up. Failing the
+other way leaves a live account with broken thumbnails — visible and retryable. The
+recoverable failure is the one worth choosing. Objects that could not be removed are
+**counted and reported** (`mediaLeft`), never rounded up to success: "your account is
+closed" while photos survive in a bucket is the same dishonest acknowledgement mandate #1
+forbids, pointed the other way.
+
+### Still owed
+* **`auth.users` is not deleted.** That needs `auth.admin.deleteUser` (service-role) in
+  an Edge Function. Until it exists this is a DATA erasure, not an identity erasure, and
+  the file says so rather than implying otherwise.
+* An active subscription **warns but does not block** deletion — Apple owns the
+  subscription and refusing to delete until it is cancelled would trap somebody inside a
+  paid account, which is the complaint that started this.

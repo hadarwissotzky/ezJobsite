@@ -6,14 +6,20 @@ import { PowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import * as Contacts from 'expo-contacts';
 import React from 'react';
-import { Alert, Dimensions, Image, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Dimensions, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
-import { ago, projectCards, staticMapUrl, type ProjectCard } from './src/ui/home';
+import { ago, projectCards, projectCoCounts, type ProjectCard } from './src/ui/home';
+import { cachedMaps, mapUrlFor } from './src/mapcache';
 import { REJECT_DDL, SupabaseConnector } from './src/connector';
-import { getSeenOnboarding, setSeenOnboarding } from './src/auth';
+import { forgetSeenOnboarding, getSeenOnboarding, setSeenOnboarding } from './src/auth';
 import { buildLine, useOta } from './src/otaclient';
 import { Onboarding } from './src/ui/onboarding';
+import { FirstExtra } from './src/ui/firstextra';
+import { GuidedCoach } from './src/ui/guidedcoach';
+import { StepDone, StepGaps, StepReview, StepTranscript,
+         type ScheduleChoice } from './src/ui/guidedsteps';
+import { COACH_PROMPTS } from './src/guidedflow';
 import { AuthScreen } from './src/ui/authscreen';
 import type { Session } from '@supabase/supabase-js';
 import { readCapture,
@@ -25,15 +31,17 @@ import { readCapture,
   recoverySweep,
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
-import { photoCapture, pickFromLibrary, textCapture, voiceCapture } from './src/modality';
-import { checkJobs, checkSendQuota, currentPlan, type QuotaKind } from './src/quota';
+import { photoCapture, pickFromLibrary, snapPhoto, textCapture, voiceCapture } from './src/modality';
+import { publishReplyMedia } from './src/replymediapublish';
+import { checkJobs, checkSendQuota, currentPlan, currentProductId, rememberEntitledPlan,
+         rememberEntitledProduct, type QuotaKind } from './src/quota';
 import { usageSummary, type UsageSummary } from './src/usage';
 import { UsageCard, UsageNudge } from './src/ui/usagecard';
 import { QuotaModal } from './src/ui/quotamodal';
 import { SwipeRow } from './src/ui/swiperow';
 import { PaywallScreen } from './src/ui/paywallscreen';
 import { PLANS, type PlanId } from './src/plans';
-import { Icon } from './src/ui/icon';
+import { Icon, type IconName } from './src/ui/icon';
 import { Svg, Circle } from 'react-native-svg';
 import { C, F } from './src/ui/theme';
 import { radii, shadows } from './src/ui/tokens';
@@ -47,7 +55,7 @@ import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { ReviewScreen } from './src/ui/reviewscreen';
-import { PhotoLightbox, RecordScreen, scheduleSentence,
+import { PhotoLightbox, RecordScreen, scheduleSentence, billingSentence,
          type RecordLifecycle } from './src/ui/recordscreen';
 import { FixtureDraft } from './src/ui/__fixturedraft';
 import { FixtureNegotiation } from './src/ui/__fixturenegotiation';
@@ -57,7 +65,7 @@ import { FixtureLocked } from './src/ui/__fixturelocked';
 // every other screen in this app navigates; a router introduced in one corner would
 // be a second navigation model nobody else obeys.
 import { BillingSheet, ClientSheet, CostSheet, DescriptionSheet, ExclusionsSheet, ScheduleSheet } from './src/ui/extrasheets';
-import { ConfirmSheet } from './src/ui/kit';
+import { BottomSheet, ConfirmSheet } from './src/ui/kit';
 import { FullHistory, PhotosAndProof,
          type RewriteState } from './src/ui/extradetails';
 import type { ExtraDetailField } from './src/ui/extranegotiation';
@@ -66,8 +74,12 @@ import type { ExtraDetailField } from './src/ui/extranegotiation';
 import { sendReadiness, UNTITLED_SCOPE } from './src/sendreadiness';
 import { mergeTimeline, openCount, type MergedEvent } from './src/eventtimeline';
 import { SettingsScreen } from './src/ui/settingsscreen';
-import { ensureOwnCompany, myCompany } from './src/company';
-import { configureBilling } from './src/billing';
+import { billingTenantId, ensureBillingTenant, ensureOwnCompany, listMyCompanies,
+         myCompany, setActiveCompany } from './src/company';
+import { closeMyAccount } from './src/closeaccount';
+import { ensureLogoCached, pickLogo, removeCompanyLogo,
+         saveCompanyLogo } from './src/companylogo';
+import { configureBilling, entitledPlanNow, entitledProductNow } from './src/billing';
 import { LABELS, labelHex } from './src/labels';
 import { companyFeed, type FeedItem } from './src/feed';
 import { registerPushToken } from './src/push';
@@ -92,7 +104,7 @@ import { fetchLatestProposalForCaptures, type Proposal } from './src/proposals';
 import { discardCapture, discardExtra, drainServerDiscards, drainDiscardedExtras, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
 import { startExtraFromCapture, titleExtraIfUntitled, retitleDraft, setDraftSummary,
          saveScopeOfWork, SCOPE_OF_WORK_MAX_CHARS,
-         SCOPE_MAX_CHARS } from './src/startextra';
+         SCOPE_MAX_CHARS, UNNAMED_CLIENT, isNamedClient } from './src/startextra';
 import { cleanupTestData } from './src/testdatacleanup';
 import { logDiag } from './src/diaglog';
 // The send gate. hadar: "only then it can be sent to the owner for approval —
@@ -155,7 +167,8 @@ import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
 import { addParty, assignBoundary, drainScopeOutbox, ensurePartySchema, listBoundaries,
          listParties, nameBoundary } from './src/parties';
 import { captureStatus, levelColor, screenStatus } from './src/status';
-import { FIRST_RUN_TAPS, isFirstRun, markFirstRunDone, nextStep, savedLang, saveLang } from './src/firstrun';
+import { FIRST_RUN_TAPS, firstExtraSeen, isFirstRun, markFirstExtraSeen, markFirstRunDone,
+         nextStep, resetFirstRunFlags, savedLang, saveLang } from './src/firstrun';
 import { getProfile, hasProfile as hasProfileFn, saveProfile, TRADES } from './src/profile';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          playCapture, stopPlayback, type Note } from './src/annotate';
@@ -163,7 +176,7 @@ import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
          tagMap, tagsFor } from './src/tags';
 import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
          INBOX_ID, listProjects, resolveProject, touchProject, distanceM, effectiveProject,
-         setProjectLabel, setProjectStatus, type Project } from './src/projects';
+         setProjectStatus, type Project } from './src/projects';
 import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
          getCellularConsent, getTermsAccepted, setCellularConsent,
          setTermsAccepted } from './src/consent';
@@ -217,7 +230,7 @@ export const db = new PowerSyncDatabase({
 // Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
 // graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
 // wrong" until this could be read back off the device. One string, no data exposed.
-(globalThis as any).__EZ_BUILD__ = 'v33-codexp1';
+(globalThis as any).__EZ_BUILD__ = 'v149-annualtotal';
 // DEV-ONLY read handle. Stripped from any release build by the __DEV__ guard, which
 // Metro constant-folds to false — so this cannot ship. It exists because three separate
 // bugs today were diagnosed in seconds by asking the DEVICE what it holds, and guessed
@@ -365,6 +378,21 @@ async function configureNotifications(): Promise<void> {
   } catch { /* notifications unavailable — the app works without them */ }
 }
 
+/**
+ * The first line of a saved block of text, clipped, for the acknowledgement popup.
+ *
+ * ECHOING A SCOPE OF WORK IN FULL WOULD DEFEAT THE POPUP: it can run to a paragraph,
+ * and a confirmation you have to scroll is not a confirmation. The first line is what a
+ * writer put first, so it is the line that identifies the edit. The ellipsis is the
+ * honest marker that there is more — the popup confirms WHICH text was saved, and the
+ * record behind it is where it is read in full.
+ */
+function firstLine(text: string, max = 64): string {
+  const line = (text ?? '').trim().split('\n')[0]?.trim() ?? '';
+  if (line.length <= max) return line;
+  return line.slice(0, max - 1).trimEnd() + '…';
+}
+
 export default function App() {
   // The design language (prototype): condensed display for things you RECOGNISE,
   // humanist body for things you READ. Gated below so text never flashes unstyled.
@@ -383,7 +411,11 @@ export default function App() {
   const [usage, setUsage] = React.useState<UsageSummary | null>(null);
   const [showPaywall, setShowPaywall] = React.useState(false);
   const [paywallPlan, setPaywallPlan] = React.useState<PlanId>('free');
+  /** The exact product being paid for, so the paywall's monthly/annual toggle can tell
+   *  Core-annual from Core-monthly instead of marking the whole tier as current. */
+  const [paywallProduct, setPaywallProduct] = React.useState<string | null>(null);
   const [showFeed, setShowFeed] = React.useState(false);         // REQ-PM9 Company feed
+  const [notifTab, setNotifTab] = React.useState<string>('all'); // Notifications filter
   const [feedItems, setFeedItems] = React.useState<FeedItem[]>([]);
   const feedOpenRef = React.useRef(false);      // feed is showing → refresh() reloads it
   const returnToFeedRef = React.useRef(false);  // an extra was opened FROM the feed
@@ -394,6 +426,34 @@ export default function App() {
   // to everyone, but the Upgrade CTA and the company-Settings entry are owner-only.
   const [planId, setPlanId] = React.useState<PlanId>('free');
   const [isOwner, setIsOwner] = React.useState(false);
+  /** Owner of a tenant that is an actual COMPANY (not a solo freelancer's own row).
+   *  Gates the roster/invite surfaces; billing and the letterhead do not use it. */
+  const [hasTeam, setHasTeam] = React.useState(false);
+  /** Every tenant this person belongs to, and which one this device is working in.
+   *  One or none hides the switcher entirely — the freelancer never sees it. */
+  const [companies, setCompanies] = React.useState<
+    { id: string; name: string; isOwner: boolean }[]>([]);
+  /** The close-account confirmation. Null = closed. */
+  const [closeAcct, setCloseAcct] = React.useState<null | { busy: boolean }>(null);
+  /**
+   * THE COMPANY'S LOGO for the drawer. `co` is name + id, resolved on the same tick as
+   * the plan; `logoUri` is a LOCAL file path (companylogo.ts) so the panel draws it with
+   * no network and no signed URL to expire.
+   */
+  const [co, setCo] = React.useState<{ id: string; name: string } | null>(null);
+  const [logoUri, setLogoUri] = React.useState<string | null>(null);
+  /** The company's CURRENT logo_key, so a removal can delete the file it cached. */
+  const [logoKey, setLogoKey] = React.useState<string | null>(null);
+  /**
+   * Has `refresh()` ever completed? A REF, not state — nothing should re-render because
+   * of it; it exists so the guided-start gate can refuse to fire on the empty lists that
+   * exist before the first read, rather than flashing a walkthrough over an established
+   * contractor's Home on every cold start (found by review, 2026-08-13).
+   */
+  const loadedRef = React.useRef(false);
+  const [loadedOnce, setLoadedOnce] = React.useState(false);
+  const [logoSheet, setLogoSheet] = React.useState(false);
+  const [logoBusy, setLogoBusy] = React.useState(false);
   // When set, the capture screen AUGMENTS this existing extra (adds photos/voice as
   // appended evidence) instead of minting a new extra (hadar, 2026-07-25).
   const [augmentCoId, setAugmentCoId] = React.useState<string | null>(null);
@@ -452,6 +512,16 @@ export default function App() {
   const [labelFilter, setLabelFilter] = React.useState<string | null>(null); // REQ-PM14 Jobs-list filter
   const [jobsArchived, setJobsArchived] = React.useState(false);             // REQ-PM4 Jobs-list archived view
   const [archivedCards, setArchivedCards] = React.useState<ProjectCard[]>([]);
+  // Change orders per job, for the Jobs list cards. One read for every job (see
+  // projectCoCounts) rather than one per card while the list is being dragged.
+  const [jobCounts, setJobCounts] = React.useState<Record<string, import('./src/ui/home').JobCoCounts>>({});
+  // Job id -> local file:// URI of its cached map snapshot. Fetched once per set of
+  // coordinates and kept on disk, so the list costs one Static Maps request per job
+  // ever and still draws with no signal (see src/mapcache.ts).
+  const [jobMaps, setJobMaps] = React.useState<Record<string, string>>({});
+  // The job just created, while its confirmation sheet is up. Null the rest of the
+  // time. Holds the id because both of the sheet's actions need to land ON that job.
+  const [jobCreated, setJobCreated] = React.useState<null | { id: string }>(null);
   const [waiting, setWaiting] = React.useState<Array<{
     id: string; scope: string; amount_cents: number; status: string;
     project_id: string; pname: string; signed_by: string | null; created_at_ms: number }>>([]);
@@ -488,6 +558,144 @@ export default function App() {
   const [session, setSession] = React.useState<Session | null | undefined>(undefined);
   // The 4-slide intro is shown once to a logged-out newcomer, then never again.
   const [seenOnboarding, setSeen] = React.useState(false);
+  /**
+   * DEV ONLY — put the intro on the screen from the Metro inspector.
+   *
+   * The in-app "Show intro again" row still exists and is the answer for a human. This
+   * is the answer for ME: reviewing a design I cannot see means asking the user to hunt
+   * for a control on every iteration, and every one of those round trips is a minute of
+   * theirs spent doing my verification. `globalThis.__showIntro()` renders it directly.
+   */
+  React.useEffect(() => {
+    if (!__DEV__) return;
+    (globalThis as any).__showIntro = () => setForceIntro(true);
+    // Same reasoning as __showIntro: the guided start only appears on an account with
+    // no jobs and no change orders, which is not a state a working phone can be put
+    // into for a design review. This OVERRIDES the data conditions, not just the flag —
+    // setting the flag alone would have done nothing on a phone that has jobs.
+    (globalThis as any).__showFirstExtra = () => setForceFirstExtra(true);
+    // Same door for step 2, so all four guided screens can be reviewed without a mic.
+    (globalThis as any).__showCoach = () => { setForceFirstExtra(true); setGuided('coach'); };
+    // DEV ONLY — open the paywall without hunting for the CTA that leads to it. The
+    // monthly/annual split has two states per card and reviewing them by hand means
+    // navigating there twice; this is the door.
+    // Routed through `openPaywall`, not `setShowPaywall`: the former reads the current
+    // plan first, and skipping it made the sheet open against a stale 'free'.
+    (globalThis as any).__showPaywall = () => { void openPaywall(); };
+    // DEV ONLY — land on a job screen without tapping through Home. Takes a project id,
+    // or defaults to the most recently touched job.
+    (globalThis as any).__openJob = (id?: string) => {
+      void (async () => {
+        const pick = id ?? (await db.getAll<{ id: string }>(
+          `SELECT id FROM project ORDER BY COALESCE(last_used_ms, created_at_ms) DESC LIMIT 1`))[0]?.id;
+        if (pick) { setProjectId(pick); setNav('project'); await refresh(); }
+      })();
+    };
+    // DEV ONLY — mint the billing tenant and REPORT what the server said. The startup
+    // path swallows the outcome by design (a failed mint must never block capture), so
+    // there was no way to see whether create_company succeeded, failed, or never ran.
+    (globalThis as any).__mintTenant = async () => {
+      (globalThis as any).__mint = 'pending';
+      try {
+        const prof = await getProfile(db);
+        const name = (prof?.isSolo ? '' : (prof?.company ?? '')).trim() || (prof?.name ?? '').trim();
+        if (!name) { (globalThis as any).__mint = 'no name in profile'; return; }
+        // The SAME call the startup path makes. A probe that used the old client-side
+        // route would pass while the real one was broken — the mistake `__startRec`
+        // already made once.
+        const r = await ensureBillingTenant(connector.client, db, {
+          companyName: prof?.isSolo ? null : (prof?.company ?? null),
+          personName: prof?.name ?? null,
+        });
+        (globalThis as any).__mint = r ?? ('null — ' + String((globalThis as any).__tenantErr ?? 'no reason'));
+      } catch (e: any) {
+        (globalThis as any).__mint = 'THREW ' + String(e?.message ?? e);
+      }
+    };
+    (globalThis as any).__hideIntro = () => setForceIntro(false);
+    /**
+     * DEV ONLY — SCREENSHOT THE PHONE, READABLE FROM THE METRO INSPECTOR.
+     *
+     * Built after the third round of "it's still off" on a screen I cannot see. Every
+     * one of those rounds cost hadar a screenshot and me a guess, and the guesses were
+     * the expensive part: I sized the onboarding by eye twice and was wrong twice,
+     * because eyeballing a design against a render I am only imagining is not a
+     * measurement. This makes it one.
+     *
+     * base64 into a global rather than a file or an upload: no bucket, no cleanup, no
+     * credentials, and nothing left on the device. The reader pulls it in slices,
+     * because a whole screen of base64 is megabytes and a single CDP response that size
+     * is not worth relying on. JPEG at 0.5 — this is for measuring geometry, not for
+     * judging the photograph's grain.
+     */
+    (globalThis as any).__shot = async () => {
+      (globalThis as any).__SHOT = 'pending';
+      try {
+        const VS = await import('react-native-view-shot');
+        (globalThis as any).__SHOT = await VS.captureScreen({
+          format: 'jpg', quality: 0.5, result: 'base64',
+        });
+      } catch (e: any) {
+        (globalThis as any).__SHOT = 'ERR ' + String(e?.message ?? e);
+      }
+    };
+  }, []);
+  /** Which button on the landing page got him here — 'signup' or 'login'. */
+  const [authIntent, setAuthIntent] = React.useState<'signup' | 'login'>('signup');
+  // DEV ONLY — read the resolved intent from the inspector. Its own effect, with a real
+  // dependency: hung off the big `[]` effect above it would have closed over the first
+  // value forever and reported 'signup' no matter which button was pressed.
+  React.useEffect(() => {
+    if (__DEV__) (globalThis as any).__authIntent = () => authIntent;
+  }, [authIntent]);
+  /**
+   * DEV ONLY — show the intro OVER whatever is on screen.
+   *
+   * hadar asked "how can I see these pages in the app?" twice, and the honest answer was
+   * "you can't, from where you are." The intro renders inside `session === null`, and
+   * the replay link I added lives on the sign-in screen — so the moment he signed in,
+   * BOTH the pages and the door to them disappeared. A control you can only reach from
+   * the state you are trying to leave is not a control.
+   *
+   * This is a separate flag, checked before every other branch, so it works from any
+   * screen and in any auth state. It changes nothing about when a real user sees the
+   * intro: `seenOnboarding` still governs that, and `__DEV__` strips this entirely.
+   */
+  const [forceIntro, setForceIntro] = React.useState(false);
+  /**
+   * THE GUIDED FIRST CHANGE ORDER (hadar, 2026-08-12): "the first time a user uses the
+   * application and after he registers, if there are no jobs or change orders."
+   *
+   * Null until the flag has been read — NOT false. A false default would render Home for
+   * one frame and then swap it for the walkthrough, which is the flash-of-the-wrong-app
+   * this file already fixed once for the language picker. Nothing renders until we know.
+   */
+  const [firstExtra, setFirstExtra] = React.useState<boolean | null>(null);
+  /** DEV ONLY — render the guided start over a populated account. */
+  const [forceFirstExtra, setForceFirstExtra] = React.useState(false);
+  /**
+   * Which guided screen is showing. Only the two screens AHEAD of the recorder need a
+   * cursor: from the capture onward `guidedStep()` derives the position from what
+   * exists, so there is nothing here to keep in step with the database.
+   */
+  const [guided, setGuided] = React.useState<'intro' | 'coach' | null>(null);
+  /**
+   * IS THE GUIDED FLOW RUNNING. Set when he enters from the intro and cleared when he
+   * finishes or leaves — it is what makes the recorder show its prompt strip and what
+   * routes the post-capture path through the guided screens instead of the ordinary
+   * ones. Separate from `guided` (which screen) because the flow outlives both of the
+   * screens that cursor names.
+   */
+  const [guidedOn, setGuidedOn] = React.useState(false);
+  /** Step 5/7/9/10's own screen, once the recording exists. Null = not in them. */
+  const [gStep, setGStep] = React.useState<null | 'transcript' | 'gaps' | 'review' | 'done'>(null);
+  const [gTranscript, setGTranscript] = React.useState<string | null>(null);
+  const [gAmount, setGAmount] = React.useState('');
+  const [gSched, setGSched] = React.useState<ScheduleChoice | null>(null);
+  const [gDays, setGDays] = React.useState('');
+  const [gNotes, setGNotes] = React.useState('');
+  const [gSending, setGSending] = React.useState(false);
+  const [gPlaying, setGPlaying] = React.useState(false);
 
   // OTA (SPEC-ota-updates-v1). The check runs in the background and never gates
   // launch; `canRestart` is already gated on every outbox being empty, so the drawer
@@ -762,7 +970,15 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
         scheduleEffect: co.schedule_effect,
         scheduleDays: co.schedule_days,
         exclusions: co.exclusions,
-        requestedBy: co.who_directed || null,
+        // THE UNNAMED SEED IS NOT AN OWNER. `who_directed` is NOT NULL and every
+        // extra born from a capture is seeded with the literal role word "Owner"
+        // (startextra.ts), so `co.who_directed || null` was never null in practice —
+        // which meant the draft screen drew a person row for a signer who does not
+        // exist, and its no-owner state was unreachable on every extra this app has
+        // ever created. `clientRow` — a REAL roster person matched by name — wins
+        // when there is one, exactly as the record header already does.
+        requestedBy: clientRow?.name
+          ?? (isNamedClient(co.who_directed) ? co.who_directed : null),
         openCount: openCount(events),
         lastOpenedAtMs: events.reduce(
           (m, e) => (e.kind === 'opened' && e.atMs > m ? e.atMs : m), 0) || null,
@@ -1403,6 +1619,15 @@ const saveClient = async (
     setClientOpen(null);
     await openRecord(changeOrderId);
     void refresh();
+    // 'client' MOVED who the document is addressed to; 'contact' only added somebody to
+    // the job's roster. Two different acts, so two different confirmations — telling a
+    // contractor "client updated" after he added an inspector would be a false report of
+    // whose signature this extra now waits on.
+    setAck({
+      kind: 'ok',
+      title: T(mode === 'client' ? 'ack.client' : 'ack.contact'),
+      detail: v.name.trim() || null,
+    });
   } catch (e: any) {
     setUi({ k: 'refused', why: e?.message ?? String(e) });
   }
@@ -1871,6 +2096,28 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // kept alongside it so refresh() can re-derive the record while it is open — a
   // record that cannot change is a record that can lie about what is owed.
   const [record, setRecord] = React.useState<ExtraRecord | null>(null);
+
+  /**
+   * THE HAND-OFF INTO STEP 5.
+   *
+   * Steps 3 and 4 are the app's OWN recorder and job sheet — the guided flow does not
+   * replace them, so it has to notice when they are finished rather than being told.
+   * The moment a record exists while the flow is running we are on the read-back; the
+   * transcript arrives later and is kept live here, which is what turns "we're still
+   * reading it" into the words without him doing anything.
+   *
+   * IT LIVES UP HERE WITH THE OTHER HOOKS, not beside the screens it feeds. Placed next
+   * to them it sat below `if (ready && !initError)` and every guard after it — so it ran
+   * on some renders and not others and React counted a different number of hooks each
+   * time: "Rendered more hooks than during the previous render", a red screen the moment
+   * the guided flow opened a record. Reading order lost to the rules of hooks.
+   */
+  React.useEffect(() => {
+    if (!guidedOn || !record) return;
+    setGTranscript(record.voices.find((v) => v.transcript)?.transcript ?? null);
+    // Only ENTERS the flow's screens; never overrides a step he has already moved past.
+    setGStep((cur) => cur ?? 'transcript');
+  }, [guidedOn, record]);
   const recordIdRef = React.useRef<string | null>(null);
   // R5b on the record (prototype c5): the discussion, its delivery state, and — on
   // a superseded record — what replaced it. Loaded ALONGSIDE the record: each layer
@@ -1944,6 +2191,29 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const [showTerms, setShowTerms] = React.useState<
     null | { jur: string | null; detecting: boolean }
   >(null);
+  /**
+   * DEV ONLY — a window on the flags that decide which screen wins.
+   *
+   * Its OWN effect with a real dependency list: hung off the `[]` effect above it would
+   * have reported the values from first render forever, which is worse than no probe —
+   * it would answer confidently and wrongly. Added because "it takes me to the starting
+   * page" is a symptom of any of six guards and guessing costs a round trip each time.
+   */
+  React.useEffect(() => {
+    if (!__DEV__) return;
+    (globalThis as any).__flags = () => JSON.stringify({
+      terms, showCapture, showTerms: !!showTerms, guidedOn, gStep, guided,
+      forceFirstExtra, record: !!record, projectId, assign: !!assign, gate: !!gate,
+      firstRun, hasProfile: hasProfileState, seenOnboarding, session: session === null ? 'null' : typeof session,
+      firstExtra, nav,
+    });
+    // REMOVED: __startRec used to REIMPLEMENT the entry so the tap could be reproduced
+    // from the inspector. That made it a fourth copy — one that would have passed while
+    // the three real ones were broken, which is the opposite of what a probe is for.
+    // `enterGuided` is a single function now; drive the flow with __showFirstExtra()
+    // and press the button.
+  });
+
   const openTerms = React.useCallback(() => {
     setShowTerms({ jur: null, detecting: true });
     (async () => {
@@ -1967,7 +2237,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // CompanyCam-style shell: the app opens on the Projects list; a capture happens
   // INSIDE a project. 'home' = the project list, 'project' = one project's
   // camera-first workspace + capture grid.
-  const [nav, setNav] = React.useState<'home' | 'project' | 'jobs' | 'activity'>('home');
+  const [nav, setNav] = React.useState<'home' | 'project' | 'jobs' | 'activity' | 'notifications'>('home');
   // The Activity page's status tab (hadar, 2026-07-23 mockup): all extras, filtered.
   const [activityTab, setActivityTab] = React.useState<'all' | 'waiting' | 'approved' | 'needs'>('all');
   // Home's summary-chip filter. Filters the Home list IN PLACE — tapping a chip must
@@ -1976,10 +2246,75 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // Opens on 'needs' (hadar 2026-08-05): what needs YOU is the reason to open the app,
   // so it is selected by default; tapping the live chip still clears to every section.
   const [homeFilter, setHomeFilter] = React.useState<null | 'needs' | 'waiting' | 'approved'>('needs');
+  /**
+   * "Learn how it works", from the first-run Home. It exists because the design put a
+   * link there and A LINK THAT OPENS NOTHING IS THE WORST CONTROL ON A FIRST SCREEN —
+   * the one user who most needs to be told what this app does is the one who taps it.
+   * Three steps, no account state, no network: it is the product in three sentences.
+   */
+  const [howOpen, setHowOpen] = React.useState(false);
+  /**
+   * THE APP ICON'S NUMBER — PARKED, NOT DELETED (2026-08-12).
+   *
+   * `React.useEffect(() => { void setAppBadge(unreadCount(activity)); }, [activity])`
+   * belongs here and is the right design: every path that moves the unread count ends
+   * by setting `activity`, so this is the one place downstream of all of them.
+   *
+   * IT IS OFF BECAUSE IT RED-SCREENED THE APP. Touching `setBadgeCountAsync` is the
+   * first thing in this app to pull expo-notifications' badge submodule, and something
+   * in that chain reads `ReactNative.PushNotificationIOS` — a getter whose module builds
+   * a NativeEventEmitter over a native module this build does not contain, so it throws
+   * `new NativeEventEmitter() requires a non-null argument` at module scope. My
+   * try/catch DOES swallow it (the app keeps working), but Metro's dev `guardedLoadModule`
+   * reports a module-factory throw to LogBox before the caller ever sees it — so the user
+   * gets a full-screen Uncaught Error for an error that was, in fact, caught.
+   *
+   * Turning it back on needs the module chain identified from a full stack (the capture
+   * in `index.js` records one) and then either the offending require avoided or the
+   * native module linked. The in-app bell carries the count in the meantime.
+   */
   const [cards, setCards] = React.useState<ProjectCard[]>([]);
   const [search, setSearch] = React.useState('');
   const [picker, setPicker] = React.useState(false);
   const [filed, setFiled] = React.useState<Msg | string | null>(null);
+  /**
+   * THE EDIT ACKNOWLEDGEMENT (hadar, 2026-08-12: "a popup that confirms the action …
+   * if an edit is made, cost was changed, payment timing is changed").
+   *
+   * WHY AN EDIT NEEDS ONE AT ALL. Every field sheet on the change-order screen closes
+   * itself on save and drops you back on the record. That is the SAME thing the screen
+   * does when you tap Cancel, so the two outcomes were pixel-identical: the only proof
+   * a price had been written was to find the row again and read it. On the one screen
+   * where the numbers are the product (mandate #6), "did that save?" is not a question
+   * the app gets to leave open.
+   *
+   * IT ECHOES THE VALUE, NOT JUST THE VERB. "Cost updated · $1,240.00" is a read-back —
+   * the same doctrine as the money field's own read-back, at the moment the figure
+   * becomes what the client will be shown. "Saved ✓" alone would confirm that SOMETHING
+   * was written without confirming WHAT, which is the failure mode mandate #6 exists for.
+   *
+   * `kind` decides how it leaves. A confirmation auto-dismisses (it is news you already
+   * expected, and mandate #3's touch budget does not spend a tap on "OK"); a REFUSAL
+   * waits to be dismissed, because it carries the reason the write did not happen and
+   * a message that vanishes on its own is a message nobody read.
+   */
+  const [ack, setAck] = React.useState<null | {
+    kind: 'ok' | 'no'; title: string; detail?: string | null;
+    /** Runs when this ack is dismissed, however it is dismissed — the timeout, the
+     *  scrim, or the button. Added for the account close, where the sign-out has to
+     *  wait until the confirmation has actually been SEEN: signing out immediately
+     *  unmounts this overlay, so the person is told nothing and simply finds
+     *  themselves back at the login screen. */
+    then?: () => void;
+  }>(null);
+  // The follow-up is read from `ack` and called OUTSIDE the updater. React may invoke a
+  // state updater twice, and a double-invoked `then` here is a double sign-out.
+  const dismissAck = React.useCallback(() => { ack?.then?.(); setAck(null); }, [ack]);
+  React.useEffect(() => {
+    if (!ack || ack.kind !== 'ok') return;
+    const t = setTimeout(dismissAck, 1900);
+    return () => clearTimeout(t);
+  }, [ack, dismissAck]);
   // REQ-P5. A proposal is NOT a project — it lives here until someone taps it.
   const [proposal, setProposal] = React.useState<null | { lat: number | null; lng: number | null; why: Msg }>(null);
   const [inbox, setInbox] = React.useState(0);
@@ -2211,6 +2546,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       } catch { /* CO schema not up yet */ }
       // The Projects-home cards: counts, last activity and a cover photo per job.
       setCards(await projectCards(db, ps));
+      // See the guided-start gate: it must distinguish "this account has nothing" from
+      // "nothing has loaded yet", and only this line proves a real read completed.
+      loadedRef.current = true;
+      if (!loadedOnce) setLoadedOnce(true);
       // Keep the company feed live while it is open (review 2026-07-25: no stale snapshot).
       if (feedOpenRef.current) { try { setFeedItems(await companyFeed(db)); } catch { /* keep last */ } }
       // Open where he left off. A contractor who closes the app on the Elm St job
@@ -2232,6 +2571,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       }
       setReadiness(ready);
       setCoRows(ledgerRows); coRowsRef.current = ledgerRows;
+      // The Jobs list's per-job counts. Its own try inside refresh's: a failure here
+      // must cost the cards their numbers, never the ledger this screen runs on.
+      try { setJobCounts(await projectCoCounts(db)); } catch { /* cards show zeros */ }
+      // Map snapshots, cached to disk. Not awaited into the refresh path: a slow or
+      // failed image download must never hold up the ledger this screen runs on.
+      void cachedMaps(process.env.EXPO_PUBLIC_STATIC_MAP_URL, ps)
+        .then(setJobMaps).catch(() => {});
       try { setQuestions(await openQuestions(db, pid)); } catch { /* schema not up yet */ }
       try { setThreads(await threadsForProject(db, pid)); } catch { /* schema not up yet */ }
       try {
@@ -2337,8 +2683,58 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     (async () => {
       try {
         setPlanId(await currentPlan(db));
+        /**
+         * Mint the billing tenant if this account has none — see company.ts. A
+         * freelancer is a tenant of one, and without a row RevenueCat gets an anonymous
+         * customer and every purchase buys nothing. Idempotent, and a no-op until the
+         * profile has a name to call it by.
+         */
+        const prof = await getProfile(db);
+        // The error is RECORDED, not swallowed. A tenant that fails to mint is the
+        // difference between billing working and a purchase buying nothing, and a bare
+        // `.catch(() => null)` made that invisible — which is how it stayed broken.
+        try {
+          await ensureBillingTenant(connector.client, db, {
+            companyName: prof?.isSolo ? null : (prof?.company ?? null),
+            personName: prof?.name ?? null,
+          });
+        } catch (e: any) {
+          if (__DEV__) (globalThis as any).__tenantErr = String(e?.message ?? e);
+        }
+        // RE-KEY THE SDK. configureBilling ran at sign-in, possibly before any tenant
+        // was known, and RevenueCat keeps whatever id it was configured with — an
+        // anonymous one — until told otherwise. Without this the tenant is settled and
+        // the purchase still attaches to nobody.
+        const billTo = await billingTenantId(db, OWNER);
+        if (billTo) await configureBilling(billTo);
+        // Cache RevenueCat's verdict AFTER the SDK is keyed to the tenant — asking
+        // before would return the anonymous customer's (empty) entitlements and cache
+        // 'free' over a real subscription.
+        const ent = await entitledPlanNow();
+        if (ent) { await rememberEntitledPlan(db, ent); setPlanId(await currentPlan(db)); }
+        // Which PRODUCT, not just which tier. Cached on every launch so a plan bought on
+        // another device shows the right cycle here too.
+        const prod = await entitledProductNow();
+        if (prod) await rememberEntitledProduct(db, prod);
+        setPaywallProduct(await currentProductId(db));
         const co = await myCompany(db, OWNER);
+        setCompanies(await listMyCompanies(db, OWNER));
         setIsOwner(!!co?.isOwner);
+        // SOLO IS NOT A COMPANY. `isOwner` is true for a freelancer's own tenant, so it
+        // can no longer be what reveals roster/invite UI — that would put "Company
+        // settings" in front of somebody who never said they had one.
+        setHasTeam(!!co && !prof?.isSolo);
+        setCo(co ? { id: co.id, name: co.name } : null);
+        // The logo rides this tick too. `logo_key` syncs down with the company row, so
+        // this is a local read on every pass after the first; the fetch inside
+        // ensureLogoCached only happens on a device that has never drawn it.
+        if (co) {
+          const row = await db.getAll<{ logo_key: string | null }>(
+            `SELECT logo_key FROM company WHERE id = ?`, [co.id]).catch(() => []);
+          const k = row[0]?.logo_key ?? null;
+          setLogoKey(k);
+          setLogoUri(await ensureLogoCached(connector.client, { companyId: co.id, logoKey: k }));
+        } else { setLogoUri(null); setLogoKey(null); }
         // Usage rides the SAME refresh as the plan, on purpose: the two are read
         // together everywhere they are shown, and refreshing them separately is how
         // a drawer ends up displaying free-tier lines beside a paid plan name for a
@@ -2576,6 +2972,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       // part of the profile form, not a gate, so there's no separate "picked" flag.
       if (sl) { setLang(sl); setLangState(sl); }
       setFirstRun(await isFirstRun(db));
+      setFirstExtra(!(await firstExtraSeen(db)));
       setHasProfile(await hasProfileFn(db));
       void initFeedback();            // haptics/sound warmup — not needed before paint
       void configureNotifications();  // display handler + Android channel (2026-07-26)
@@ -2627,8 +3024,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // its "coming soon" state. myCompany() reads synced tables, so it may be
           // null on a cold first run; configureBilling runs again on the next session
           // event once membership has synced down.
-          void myCompany(db, s.user.id)
-            .then((c) => configureBilling(c?.id ?? null))
+          // billingTenantId(), not myCompany(): the synced `company` table can be empty
+          // while a real tenant exists server-side, and keying RevenueCat off an empty
+          // cache is what made purchases attach to an anonymous customer and buy
+          // nothing. The remembered id is the server's own answer.
+          void billingTenantId(db, s.user.id)
+            .then((id) => configureBilling(id))
             .catch(() => {});
           // connect() is fire-and-forget: offline is the NORMAL case for this
           // product, not an error, and PowerSync retries internally. Once per app
@@ -2721,6 +3122,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           // forever. The drain carries his replies back out.
           const br = await drainR5bOutbox(db, connector.client, data.user.id);
           if (br.attempted) console.log('drain r5b:', JSON.stringify(br));
+          /**
+           * MESSAGE PHOTOS. On the drain, not only after a reply (fixed 2026-08-13,
+           * found by review).
+           *
+           * `publishReplyMedia` had exactly one caller — immediately after a successful
+           * `postReply` — so a photo attached in a basement uploaded once, failed, and
+           * then waited for the contractor to happen to post ANOTHER reply while online.
+           * Its own header promised "the next refresh tries again"; there was no such
+           * pass. The bubble said "on this phone only" and told the truth indefinitely.
+           */
+          const rm = await publishReplyMedia(db, connector.client, { ownerId: data.user.id });
+          if (rm.published || rm.failed.length) console.log('drain reply media:', JSON.stringify(rm));
           const er = await drainEwaOutbox(db, connector.client, data.user.id);
           if (er.attempted) console.log('drain ewa:', JSON.stringify(er));
           const pt = await pullThreads(db, connector.client, pid);
@@ -3514,7 +3927,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   if (inboxOpen) {
     return (
       <View style={s.c}>
-        <Text style={s.h}>EZchangeorder</Text>
+        <Text style={s.h}>EZChangeOrders</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T({ k: 'inbox.title', p: { n: inboxRows.length } })}</Text>
           <Text style={s.cardNote}>
@@ -3567,13 +3980,79 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   if (process.env.EXPO_PUBLIC_FIXTURE === '2') return <FixtureNegotiation />;
   if (process.env.EXPO_PUBLIC_FIXTURE === '3') return <FixtureLocked />;
 
+  // DEV override: above every other branch, so it wins from any screen and any state.
+  /**
+   * THE ONE WAY INTO THE GUIDED FLOW.
+   *
+   * It was written THREE times — the dev override, the coach's button and the intro's
+   * button — and the copies disagreed. Only one ever set `guidedOn`, so the whole
+   * journey (the recorder's prompt strip, the read-back, the gaps, the review, the sent
+   * screen) was dead for real users; and only one carried the signed-out guard, so the
+   * other two offered a button that silently bounced. Review found the first on
+   * 2026-08-13 and I fixed two of the three, which is how the third survived. It is one
+   * function now, and there is nowhere left for a fourth to hide.
+   */
+  const enterGuided = () => {
+    // A capture is filed to an account. There is no version of this that records while
+    // signed out, so say that rather than setting state nothing downstream can honour.
+    if (session === null) {
+      setAck({ kind: 'no', title: T('gf.needSignIn'), detail: T('gf.needSignInWhy') });
+      return;
+    }
+    setForceFirstExtra(false); setGuided(null);
+    setGuidedOn(true);
+    // The SAME consent gate every capture button passes through. Deliberately does NOT
+    // mark the walkthrough seen — backing out of the recorder lands here again, which is
+    // the honest place to land when nothing was created.
+    if (!terms) { openTerms(); return; }
+    setShowCapture(true);
+  };
+
+  if (__DEV__ && forceFirstExtra) {
+    return guided === 'coach'
+      ? <GuidedCoach onStart={enterGuided} onBack={() => setGuided('intro')} />
+      : (
+        <FirstExtra
+          onCoach={() => setGuided('coach')}
+          onStart={enterGuided}
+          onLater={() => { setForceFirstExtra(false); setGuided(null); }}
+        />
+      );
+  }
+
+  if (__DEV__ && forceIntro) {
+    // Carries the intent like the real path does. Without this the dev override was the
+    // ONE way in that ignored which button was pressed — so testing "Log in" through it
+    // would always have landed on sign-up and looked like the routing was broken.
+    return (
+      <Onboarding onDone={(intent) => {
+        setAuthIntent(intent ?? 'signup');
+        setForceIntro(false);
+      }} />
+    );
+  }
+
   if (ready && !initError) {
     if (session === undefined) return <SplashScreen />;
     if (session === null) {
       if (!seenOnboarding) {
-        return <Onboarding onDone={() => { void setSeenOnboarding(); setSeen(true); }} />;
+        return (
+          <Onboarding onDone={(intent) => {
+            // Remembered so the landing page shows ONCE, and the intent is carried into
+            // the form so "Log in" opens the log-in form rather than sign-up.
+            setAuthIntent(intent ?? 'signup');
+            void setSeenOnboarding();
+            setSeen(true);
+          }} />
+        );
       }
-      return <AuthScreen connector={connector} />;
+      return (
+        <AuthScreen
+          connector={connector}
+          initialSignUp={authIntent !== 'login'}
+          onReplayIntro={() => { void forgetSeenOnboarding(); setSeen(false); }}
+        />
+      );
     }
   }
 
@@ -3615,7 +4094,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         const canGo = pName.trim().length > 0 && pSolo !== null;
         return (
           <View style={s.c}>
-            <Text style={s.h}>EZchangeorder</Text>
+            <Text style={s.h}>EZChangeOrders</Text>
             <Dots />
             <View style={s.card}>
               {/* LANGUAGE, folded in. Each option in its OWN name so choosing needs
@@ -3667,7 +4146,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       };
       return (
         <View style={s.c}>
-          <Text style={s.h}>EZchangeorder</Text>
+          <Text style={s.h}>EZChangeOrders</Text>
           <Dots />
           <View style={s.card}>
             <Text style={s.cardH}>{T('fr.tradeTitle')}</Text>
@@ -3703,7 +4182,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   if (scopeOpen) {
     return (
       <ScrollView style={{ flex: 1, backgroundColor: '#f6f8fa' }} contentContainerStyle={s.c}>
-        <Text style={s.h}>EZchangeorder</Text>
+        <Text style={s.h}>EZChangeOrders</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('sc.title')}</Text>
 
@@ -3793,12 +4272,65 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // screen; `visible` toggles it. Opened from a hit cap ("See plans") or Settings.
   const paywallEl = (
     <PaywallScreen visible={showPaywall} currentPlan={paywallPlan}
+      currentProductId={paywallProduct}
       onClose={() => setShowPaywall(false)}
       // Re-read the plan after a purchase. company.plan is written by the RevenueCat
       // webhook and arrives via sync, so this may still read the old tier for a beat —
       // refresh() runs again on the next sync tick and settles it.
-      onPurchased={async () => { setPaywallPlan(await currentPlan(db)); void refresh(); }}
-      onContact={() => Linking.openURL('mailto:support@ezchangeorder.com?subject=' + encodeURIComponent('EZchangeorder — plans')).catch(() => {})} />
+      /**
+       * A PURCHASE HAS TO LAND EVERYWHERE, NOW.
+       *
+       * hadar, 2026-08-13: "I got the you're all set message, but the whole app needs to
+       * be loaded with all the limits updated, and in the drawer the selected plan needs
+       * to be updated." It only re-read the PAYWALL's own copy of the plan — so the
+       * sheet knew, and the drawer, the usage lines and every quota check did not, until
+       * the app was restarted. Paying for something and watching the app carry on
+       * refusing you is the worst moment this product has.
+       *
+       * The entitlement is cached FIRST so `currentPlan()` can see it: `company.plan`
+       * comes from the webhook via PowerSync and is not there yet — on this device it
+       * is not there at all.
+       */
+      onPurchased={async (plan) => {
+        if (plan) await rememberEntitledPlan(db, plan);
+        // Re-read the product too: after a switch from annual to monthly the TIER is
+        // unchanged, so the plan alone would leave the paywall marking the old cycle as
+        // current and offering the switch that just happened.
+        const prod = await entitledProductNow();
+        await rememberEntitledProduct(db, prod);
+        setPaywallProduct(prod);
+        const p = await currentPlan(db);
+        setPaywallPlan(p);
+        setPlanId(p);                                   // the drawer's plan row
+        const co2 = await myCompany(db, OWNER);
+        setUsage(await usageSummary(db, co2?.id ?? null));   // the drawer's usage lines
+        setQuota(null);                                 // clear any "you're capped" modal
+        await refresh();                                // limits everywhere else
+
+        /**
+         * LAND BACK WHERE THE PLAN LIVES (hadar 2026-08-13: "once a selection is made it
+         * should have some attinuation and get back to the drawer where the plan will be
+         * displayed").
+         *
+         * Before this, a successful purchase left you on the paywall — the screen whose
+         * entire job is to sell you something you have now bought. The one place that
+         * states your plan back to you is the drawer, so that is where this ends.
+         *
+         * SEQUENCED, NOT STACKED. The paywall and the drawer are both Modals, and
+         * opening one while the other dismisses is the iOS stacked-modal race this file
+         * has already been bitten by. The ack is a plain overlay, so the order becomes:
+         * paywall closes -> ack appears over the app -> the drawer opens when the ack is
+         * dismissed, by tap or by its own timeout. `then` exists for exactly this.
+         */
+        setShowPaywall(false);
+        setAck({
+          kind: 'ok',
+          title: T({ k: 'paywall.nowOn', p: { plan: T(('plan.' + p) as any) } } as any),
+          detail: T('paywall.limitsLive'),
+          then: () => setMenuOpen(true),
+        });
+      }}
+      onContact={() => Linking.openURL('mailto:support@ezchangeorders.com?subject=' + encodeURIComponent('EZChangeOrders — plans')).catch(() => {})} />
   );
 
   // The win overlay (gap #1) — mounted in each early-return screen so it floats over
@@ -3818,29 +4350,293 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     </Modal>
   ) : null;
 
+  /** Land on the job the sheet is about. Both of its buttons do this; the difference
+   *  is only whether the camera opens after. */
+  const openCreatedJob = async (id: string) => {
+    setProjectId(id);
+    setNav('project');
+    await refresh();
+  };
+
+  /**
+   * JOB CREATED (hadar, 2026-08-12). Creating a job used to drop straight into it
+   * with no acknowledgement — the form vanished and a different screen appeared, and
+   * whether anything had been saved was left to be inferred from the fact that the
+   * screen changed.
+   *
+   * IT OFFERS THE NEXT ACT RATHER THAN ASSUMING IT. A new job exists because work is
+   * about to happen on it, so raising the first change order is the likely next move
+   * — but it is not the only one, and a contractor setting up three jobs on a Sunday
+   * evening should not be pushed into the camera three times. So it is offered, and
+   * Close lands on the job either way.
+   *
+   * NOT SHOWN ON THE ASSIGN PATH. When a job is created to file a walk that is
+   * already recorded, `fileWalkTo` continues into the processing screen; a sheet
+   * asking whether to create a change order would be interrupting the one that is
+   * already being made.
+   */
+  const jobCreatedEl = jobCreated ? (
+    <Modal visible transparent animationType="fade"
+      onRequestClose={() => { const id = jobCreated.id; setJobCreated(null); void openCreatedJob(id); }}>
+      <View style={s.jcWrap}>
+        <View style={s.jcBox}>
+          <Pressable style={s.jcX} hitSlop={12} accessibilityLabel={T('common.close')}
+            onPress={() => { const id = jobCreated.id; setJobCreated(null); void openCreatedJob(id); }}>
+            <Text style={s.jcXT}>✕</Text>
+          </Pressable>
+          <Icon name="mapHero" size={132} />
+          <Text style={s.jcTitle}>{T('job.createdTitle')}</Text>
+          <Text style={s.jcSub}>{T('job.createdSub')}</Text>
+          <Pressable style={s.jcPrimary} accessibilityRole="button"
+            onPress={() => {
+              const id = jobCreated.id;
+              setJobCreated(null);
+              void (async () => {
+                await openCreatedJob(id);
+                // The same gate the capture button everywhere else passes through:
+                // recording consent is asked once per job, before anything records.
+                if (!terms) { openTerms(); return; }
+                setShowCapture(true);
+              })();
+            }}>
+            <Icon name="addSquare" size={19} color="#fff" />
+            <Text style={s.jcPrimaryT}>{T('job.createdCo')}</Text>
+          </Pressable>
+          <Pressable style={s.jcSecondary} accessibilityRole="button"
+            onPress={() => { const id = jobCreated.id; setJobCreated(null); void openCreatedJob(id); }}>
+            <Text style={s.jcSecondaryT}>{T('common.close')}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  ) : null;
+
+  /**
+   * The acknowledgement itself. Deliberately SMALL and centred rather than a banner at
+   * an edge: the thing it is confirming was a deliberate act a second ago, so it earns
+   * the middle of the screen for the moment it is there, and it costs nothing to leave.
+   *
+   * Tapping anywhere dismisses. On the refusal branch there is also a real button,
+   * because "tap anywhere" is a convention a first-time user does not know, and this is
+   * the branch where failing to dismiss means failing to read why nothing saved.
+   */
+  /**
+   * AN OVERLAY, NOT A <Modal>, and that is the one thing here worth being deliberate
+   * about. Every one of these fires microseconds after a bottom sheet — itself a Modal
+   * — has been dismissed, and presenting a modal while iOS is still tearing the last
+   * one down is the classic way to get a popup that appears on the simulator and never
+   * on the phone. An absolutely-positioned view has no presentation lifecycle to race.
+   * It costs nothing: the sheet is already closed by the time this renders, so there is
+   * nothing left for a modal's z-order to win against.
+   */
+  const ackEl = ack ? (
+    <Pressable
+      style={[StyleSheet.absoluteFill, s.ackWrap]}
+      onPress={dismissAck}
+      accessibilityLabel={T('common.close')}>
+      <View style={[s.ackBox, ack.kind === 'no' && s.ackBoxNo]}>
+        <Icon name={ack.kind === 'ok' ? 'ntCheck' : 'ntAttention'} size={46} />
+        <Text style={s.ackTitle}>{ack.title}</Text>
+        {!!ack.detail && <Text style={s.ackDetail}>{ack.detail}</Text>}
+        {ack.kind === 'no' && (
+          <Pressable style={s.ackBtn} accessibilityRole="button" onPress={dismissAck}>
+            <Text style={s.ackBtnT}>{T('common.close')}</Text>
+          </Pressable>
+        )}
+      </View>
+    </Pressable>
+  ) : null;
+
+  /**
+   * WHAT THIS APP DOES, in three steps, for someone who has not used it yet.
+   *
+   * Written as the three things HE does, not the three things the system does. The ICP
+   * is explicitly someone for whom software is not second nature (CLAUDE.md §1), so
+   * "capture is local-first and the pipeline structures it" is not an explanation — it
+   * is the thing he does not need to know. What he needs to know is that talking is
+   * enough, that he checks the price before anyone else sees it (mandate #2), and that
+   * the client signs on their phone.
+   */
+  /**
+   * ADD · CHANGE · REMOVE the company logo.
+   *
+   * A sheet rather than three rows in the drawer: it needs to SHOW the current mark
+   * (the whole question being answered is "is this the right image?"), and it opens
+   * from the drawer, which is itself a Modal — so it goes through the drawer's `go()`
+   * close-then-act path at the call site, or iOS refuses to present it.
+   *
+   * REMOVE IS DESTRUCTIVE-ISH AND SAYS SO. It does not delete the object (see
+   * companylogo.ts — old signed documents still render their letterhead), but it does
+   * change what every future client sees, so it is worded as an act on the documents
+   * rather than on a file.
+   */
+  const logoEl = (
+    <BottomSheet visible={logoSheet} title={T('logo.title')} onClose={() => setLogoSheet(false)}>
+      <View style={s.logoPreviewWrap}>
+        {logoUri
+          ? <Image source={{ uri: logoUri }} style={s.logoPreview} resizeMode="contain" />
+          : <View style={[s.logoPreview, s.logoPreviewEmpty]}>
+              <Icon name="ntCompany" size={44} />
+            </View>}
+      </View>
+      <Text style={s.logoNote}>{T('logo.note')}</Text>
+      <Pressable style={[s.logoBtn, logoBusy && s.btnOff]} disabled={logoBusy}
+        accessibilityRole="button"
+        onPress={() => void (async () => {
+          const picked = await pickLogo();
+          if (!picked || !co) return;
+          setLogoBusy(true);
+          const r = await saveCompanyLogo(connector.client,
+            { companyId: co.id, ownerId: OWNER, picked });
+          setLogoBusy(false);
+          if (!r.ok) {
+            setAck({
+              kind: 'no', title: T('logo.failed'),
+              detail: [T(('logo.err.' + r.reason) as any), r.detail].filter(Boolean).join('\n'),
+            });
+            return;
+          }
+          // Cache-bust: the path is stable by design, so <Image> would redraw the OLD
+          // bytes from its own memory cache after a REPLACE. The fragment changes the
+          // source identity without changing the file.
+          setLogoUri(`${r.localUri}?v=${Date.now()}`);
+          // The path now carries the key, so the next refresh must not treat the new
+          // file as the old one's cache.
+          void (async () => {
+            const row = await db.getAll<{ logo_key: string | null }>(
+              `SELECT logo_key FROM company WHERE id = ?`, [co.id]).catch(() => []);
+            setLogoKey(row[0]?.logo_key ?? null);
+          })();
+          setLogoSheet(false);
+          setAck({ kind: 'ok', title: T('logo.saved'), detail: co.name });
+        })()}>
+        <Icon name="photo" size={19} color="#fff" />
+        <Text style={s.logoBtnT}>{T(logoUri ? 'logo.change' : 'logo.add')}</Text>
+      </Pressable>
+      {!!logoUri && (
+        <Pressable style={s.logoRemove} accessibilityRole="button" disabled={logoBusy}
+          onPress={() => void (async () => {
+            if (!co) return;
+            setLogoBusy(true);
+            const r = await removeCompanyLogo(connector.client,
+              { companyId: co.id, logoKey });
+            setLogoBusy(false);
+            if (!r.ok) {
+              setAck({
+                kind: 'no', title: T('logo.failed'),
+                detail: [T('logo.err.save_failed'), r.detail].filter(Boolean).join('\n'),
+              });
+              return;
+            }
+            setLogoUri(null); setLogoKey(null);
+            setLogoSheet(false);
+            setAck({ kind: 'ok', title: T('logo.removed') });
+          })()}>
+          <Text style={s.logoRemoveT}>{T('logo.remove')}</Text>
+        </Pressable>
+      )}
+    </BottomSheet>
+  );
+
+  const howEl = (
+    <BottomSheet visible={howOpen} title={T('how.title')} onClose={() => setHowOpen(false)}>
+      {([1, 2, 3] as const).map((n) => (
+        <View key={n} style={s.howStep}>
+          <View style={s.howNum}><Text style={s.howNumT}>{n}</Text></View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.howStepT}>{T(`how.s${n}` as any)}</Text>
+            <Text style={s.howStepS}>{T(`how.s${n}sub` as any)}</Text>
+          </View>
+        </View>
+      ))}
+      <Text style={s.howFoot}>{T('how.foot')}</Text>
+    </BottomSheet>
+  );
+
   if (newJob) {
     return (
-      <View style={s.c}>
+      /**
+       * ── KEYBOARD (hadar, 2026-08-12: "cannot create new job — the keyboard is
+       *    hiding the buttons and it doesn't retract") ──────────────────────────
+       *
+       * This screen was a bare View with a `flex: 1` spacer pinning the footer to the
+       * bottom of the WINDOW. The name field autoFocuses, so the keyboard is up before
+       * the user has done anything — and it covers the bottom third, which is where
+       * Create and Cancel live. Nothing lifted them, nothing scrolled, and there was no
+       * way back out: no scroll to drag, no background to tap, and the field's return
+       * key was the system default rather than a labelled Done. The screen was a dead
+       * end, which is the worst thing a CREATE form can be.
+       *
+       * Three parts, and all three are needed — any two still leaves it stuck:
+       *   1. KeyboardAvoidingView shrinks the box, so the footer is inside the visible
+       *      area at all. Same `behavior` split as authscreen.tsx and kit.tsx — one
+       *      keyboard strategy in this app, not three.
+       *   2. ScrollView (flexGrow so the spacer still works when there IS room) makes
+       *      the footer reachable on a short phone, and `keyboardDismissMode="interactive"`
+       *      makes the ordinary iOS drag-down put the keyboard away.
+       *   3. keyboardShouldPersistTaps="handled" — THE ONE THAT ACTUALLY FIXES
+       *      "cannot create". Without it RN spends the first tap dismissing the
+       *      keyboard and never delivers it to the button underneath, so tapping Create
+       *      with the keyboard up does nothing at all. That is a dead button, and it
+       *      reads exactly like the bug reported.
+       */
+      <KeyboardAvoidingView style={s.njScreen}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {quotaEl}
+      {jobCreatedEl}
         {discardSheet}
         {celebrateEl}
         {paywallEl}
-        <Text style={s.h}>EZchangeorder</Text>
-        <View style={s.card}>
-          <Text style={s.cardH}>{T('job.newTitle')}</Text>
-          <TextInput style={s.moneyInput} value={newJob.name} autoFocus
-            placeholder={T('job.name')} placeholderTextColor="#8c959f"
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={s.njScroll}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          showsVerticalScrollIndicator={false}>
+        {/* ── NEW JOB, on the page ────────────────────────────────────────────
+            It was a boxed card floating under a 30pt app-name banner, which is the
+            old shell: the app told you its own name at the top of a form and then
+            drew a border around the form in case you had not noticed it. The screens
+            this sits between — Jobs and Job — put content on the paper with hairline
+            rules, so this does too.
+
+            THE FIELDS ARE LABELLED, not placeheld. A placeholder disappears the
+            moment someone types, so a person who looks away mid-address comes back to
+            two identical boxes with no way to tell which is which. */}
+        <Text style={s.njTitle}>{T('job.newTitle')}</Text>
+        <Text style={s.njSub}>{T('job.newSub')}</Text>
+
+        <View style={s.njField}>
+          <Text style={s.njLab}>{T('job.nameLabel')}</Text>
+          {/* returnKeyType="done" so the key he is already looking at says what it
+              does. The default "return" on a one-line field reads as a newline, which
+              is why nobody presses it to get out. */}
+          <TextInput style={s.njInput} value={newJob.name} autoFocus
+            placeholder={T('job.name')} placeholderTextColor="#9aa19b"
+            returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()}
             onChangeText={(v) => setNewJob({ ...newJob, name: v })} />
+        </View>
+
+        <View style={s.njField}>
+          <Text style={s.njLab}>{T('job.addressLabel')}</Text>
           <AddressInput
             value={newJob.address}
             onChangeText={(v) => setNewJob({ ...newJob, address: v })}
             onPick={(h) => setNewJob({ ...newJob, address: h.label, lat: h.lat, lng: h.lng })}
           />
-          <Text style={s.cardNote}>
-            Start typing an address or tap “use my location”. If you skip it, we pin
-            the job to where you are now, so captures here file themselves.
-          </Text>
-          <Pressable style={[s.confirmWide, !newJob.name.trim() && s.btnOff]}
+        </View>
+
+        {/* WHY THE ADDRESS MATTERS, in the terms it matters to him: it is what makes
+            a capture file itself later. Stated as the consequence, not as a rule. */}
+        <View style={s.njNote}>
+          <Icon name="info" size={17} color="#4E6243" />
+          <Text style={s.njNoteT}>{T('job.newAddressWhy')}</Text>
+        </View>
+
+        <View style={{ flex: 1 }} />
+
+        <View style={s.njFoot}>
+          <Pressable style={[s.njCreate, !newJob.name.trim() && s.btnOff]}
             disabled={!newJob.name.trim()}
             onPress={async () => {
               // FREE-TIER jobs cap (hadar 2026-07-25): stop before creating the
@@ -3867,17 +4663,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               // processing screen opens the details (hadar, 2026-07-24: this branch
               // used to file and stop, leaving an unprocessed draft).
               if (assign) { await fileWalkTo(assign, r.id); return; }
-              // CompanyCam: creating a job drops you into it, ready to capture.
-              setNav('project');
-              await refresh();
+              // The confirmation sheet takes it from here — it says the job exists and
+              // offers the first change order, and both of its buttons land on the job.
+              setJobCreated({ id: r.id });
             }}>
-            <Text style={s.confirmT}>{T('job.create')}</Text>
+            <Text style={s.njCreateT}>{T('job.create')}</Text>
           </Pressable>
-          <Pressable style={s.later} onPress={() => setNewJob(null)}>
-            <Text style={s.laterT}>{T('common.cancel')}</Text>
+          <Pressable style={s.njCancel} onPress={() => setNewJob(null)}>
+            <Text style={s.njCancelT}>{T('common.cancel')}</Text>
           </Pressable>
         </View>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -3885,7 +4682,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   if (picker) {
     return (
       <View style={s.c}>
-        <Text style={s.h}>EZchangeorder</Text>
+        <Text style={s.h}>EZChangeOrders</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('job.which')}</Text>
           {projects.map((p) => (
@@ -3926,7 +4723,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     };
     return (
       <View style={s.c}>
-        <Text style={s.h}>EZchangeorder</Text>
+        <Text style={s.h}>EZChangeOrders</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('terms.title')}</Text>
           <Text style={s.cardNote}>{T('terms.body')}</Text>
@@ -3949,7 +4746,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   if (sign) {
     return (
       <View style={s.c}>
-        <Text style={s.h}>EZchangeorder</Text>
+        <Text style={s.h}>EZChangeOrders</Text>
         <View style={s.card}>
           <Text style={s.cardH}>{T('sig.required')}</Text>
           <Text style={s.frozen}>{sign.shown}</Text>
@@ -4013,7 +4810,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     const r = await signApproval(connector.client, {
                       changeOrderId: sign.coId, projectId: projectId, shownContent: sign.shown,
                       signerLabel: 'Owner', legalName: sign.legalName, phoneE164: sign.phone,
-                      otpVerifiedAt: sign.verifiedAt!, action: 'approved', userAgent: 'EZchangeorder iOS',
+                      otpVerifiedAt: sign.verifiedAt!, action: 'approved', userAgent: 'EZChangeOrders iOS',
                     });
                     if (r.ok) {
                       // The signature is authored on the server (it needs the OTP
@@ -4047,7 +4844,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     changeOrderId: sign.coId, projectId: projectId, shownContent: sign.shown,
                     signerLabel: 'Owner', legalName: sign.legalName || 'declined',
                     phoneE164: sign.phone, otpVerifiedAt: sign.verifiedAt!,
-                    action: 'declined', userAgent: 'EZchangeorder iOS',
+                    action: 'declined', userAgent: 'EZChangeOrders iOS',
                   });
                   if (!dr.ok) { setSign({ ...sign, err: dr.reason }); return; }
                   const ld = await applyLocalApproval(db, sign.coId, 'declined', sign.legalName);
@@ -4343,80 +5140,114 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     // SAME dark world as the capture screen — this is step two of the SAME workflow,
     // not a different app. It opens with the receipt of the walk just taken (green
     // check, thumbnails, duration), then asks the one remaining question.
-    const mm = `${Math.floor(assign.secs / 60)}:${String(assign.secs % 60).padStart(2, '0')}`;
+    // THE DESIGN hadar supplied 2026-08-07: a light, calm picker, not the dark
+    // capture world. This is the first screen after a change order is saved, and its
+    // job is one question — which job is this for — so the receipt block, the
+    // thumbnails and the duration are gone. They described the walk he had just taken,
+    // which he had just taken and did not need told back to him.
+    //
+    // GPS SUGGESTS, IT NEVER DECIDES (mandate #8). "Jobs near you" is ORDERING, not
+    // selection: nothing is pre-picked, every row needs a tap. That is the same rule
+    // the old SendToCard enforced with a "Detected" marker, expressed as a section
+    // heading instead of a card — one fewer control between him and the answer.
+    const fmtDist = (m: number) => m < 950 ? `${Math.round(m)} m` : `${(m / 1609.34).toFixed(1)} mi`;
+    const near = candidates.filter((p) => p.distM != null).slice(0, 3);
+    const nearIds = new Set(near.map((p) => p.id));
+    const recent = [...projects]
+      .filter((p) => p.id !== INBOX_ID && !nearIds.has(p.id))
+      .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.address ?? '').toLowerCase().includes(q))
+      .sort((a, b) => (b.last_used_ms ?? 0) - (a.last_used_ms ?? 0))
+      .slice(0, 3)
+      // Recent rows carry no distance — they are remembered, not located — so the
+      // shape is completed with a null rather than the row type being widened.
+      .map((p) => ({ ...p, distM: null as number | null }));
+    const jobRow = (p: typeof candidates[number], showDist: boolean) => (
+      <Pressable key={p.id} style={s.jpRow} onPress={() => fileAll(p.id)}>
+        <View style={{ flex: 1 }}>
+          {/* THE ADDRESS LEADS. A contractor standing on a street recognises where he
+              is, not what somebody typed in the name field three weeks ago. The job
+              name is the second line precisely because it is the weaker signal. */}
+          <Text style={s.jpAddr} numberOfLines={1}>{p.address || p.name}</Text>
+          {!!p.address && !!p.name && p.name !== p.address && (
+            <Text style={s.jpName} numberOfLines={1}>{p.name}</Text>
+          )}
+        </View>
+        {showDist && p.distM != null && (
+          <View style={s.jpDist}>
+            <Icon name="mapPin" size={15} color="#4E6243" />
+            <Text style={s.jpDistT}>{fmtDist(p.distM)}</Text>
+          </View>
+        )}
+        <Text style={s.jpChev}>›</Text>
+      </Pressable>
+    );
     return (
-      <View style={s.assignC}>
+      <View style={s.jpC}>
         {quotaEl}
+      {jobCreatedEl}
         {discardSheet}
         {celebrateEl}
         {paywallEl}
-        <View style={s.assignReceipt}>
-          <Text style={s.assignSaved}>✓ {T('assign.saved')}</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 6 }} style={{ flexGrow: 0 }}>
-              {assign.uris.slice(0, 8).map((u, i) => (
-                <Image key={i} source={{ uri: u }} style={s.assignThumb} />
-              ))}
-            </ScrollView>
-            <Text style={s.assignMeta}>
-              {assign.uris.length > 0 ? `📸 ${assign.uris.length}   ` : ''}{assign.secs > 0 ? `🎙 ${mm}` : ''}
-            </Text>
+        <ScrollView contentContainerStyle={{ padding: 18, paddingTop: 8, paddingBottom: 40 }}
+          keyboardShouldPersistTaps="handled">
+          <Text style={s.jpTitle}>{T('assign.title')}</Text>
+          <Text style={s.jpSub}>{T('jobpick.sub')}</Text>
+
+          <View style={s.jpSearchWrap}>
+            <Icon name="search" size={18} color="#6b625b" />
+            <TextInput style={s.jpSearch} value={assignQ} onChangeText={setAssignQ}
+              placeholder={T('jobpick.search')} placeholderTextColor="#8c959f" />
           </View>
-        </View>
-        <View style={{ paddingHorizontal: 18, flex: 1 }}>
-          <Text style={s.assignH}>{T('assign.title')}</Text>
-          {/* R1: the prefill sits ABOVE the search box, because on the common path
-              (one job in range) the answer is already there and searching is the
-              exception. It states WHY it picked — "📍 Detected" — and changing it is
-              one tap. Two in range never auto-selects: GPS decides what to SUGGEST,
-              never what to file (mandate #8, suggest-never-decide). */}
-          {sendTo && (
-            <SendToCard
-              prefill={sendTo}
-              value={sendToId}
-              onChange={(pr: SendToProject) => { setSendToId(pr.id); void fileAll(pr.id); }}
-              onQuickAdd={async (o) => {
-                // FREE-TIER jobs cap: quick-add creates a NEW job too, so gate it
-                // before creating. Captures stay committed; the sheet stays open.
-                // quotaBlocked tells the card to show no form error — the modal does.
-                const jq = await checkJobs(db);
-                if (!jq.ok) { setQuota({ kind: 'jobs', limit: jq.limit }); return { ok: false, quotaBlocked: true }; }
-                // Name + phone, created implicitly at first send (R7). The walk files
-                // to it immediately — that is the whole point of quick-add.
-                const r = await quickAddDestination(db, {
-                  ownerId: OWNER, name: o.name, phone: o.phone,
-                  lat: assign.lat, lng: assign.lng,
-                });
-                if (r.ok) { setProjects(await listProjects(db)); void fileAll(r.projectId); }
-                return { ok: r.ok, problemKey: r.ok ? undefined : r.problemKey };
-              }}
-            />
-          )}
-          <TextInput style={s.assignSearch} value={assignQ} onChangeText={setAssignQ}
-            placeholder={T('assign.search')} placeholderTextColor="#7d848d" />
-          <Pressable style={s.assignNew} onPress={newJobHere}>
-            <Text style={s.assignNewT}>＋ {T('assign.newHere')}</Text>
+
+          {/* DASHED, and above the lists: creating a job here always succeeds, offline
+              included, so this screen can never dead-end on a job that does not exist
+              yet. Dashed because it makes a thing rather than choosing one. */}
+          <Pressable style={s.jpNew} onPress={newJobHere}>
+            <View style={s.jpNewPlus}><Text style={s.jpNewPlusT}>+</Text></View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.jpNewT}>{T('assign.newHere')}</Text>
+              <Text style={s.jpNewSub}>{T('jobpick.newSub')}</Text>
+            </View>
+            <Text style={s.jpChev}>›</Text>
           </Pressable>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-            {candidates.map((p) => (
-              <Pressable key={p.id} style={s.assignRow} onPress={() => fileAll(p.id)}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.assignRowName} numberOfLines={1}>{p.name}</Text>
-                  <Text style={s.assignRowMeta} numberOfLines={1}>
-                    {p.distM != null
-                      ? `📍 ${p.distM < 950 ? `${Math.round(p.distM)} m` : `${(p.distM / 1000).toFixed(1)} km`}`
-                      : (p.address ?? '')}
-                  </Text>
-                </View>
-                <Text style={s.assignChev}>›</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-          {/* Deliberately NO dismiss/"later" — a change order cannot move without a
-              job. The sheet never dead-ends: "new job right here" is a local create
-              and always succeeds, even offline. */}
-        </View>
+
+          {near.length > 0 && (
+            <>
+              <View style={s.jpSecHead}>
+                <Icon name="mapPin" size={17} color="#4E6243" />
+                <Text style={s.jpSecT}>{T('jobpick.near')}</Text>
+                <View style={s.jpGps}><Text style={s.jpGpsT}>{T('jobpick.usingGps')}</Text></View>
+              </View>
+              <Text style={s.jpSecSub}>{T('jobpick.nearSub')}</Text>
+              {near.map((p) => jobRow(p, true))}
+            </>
+          )}
+
+          {recent.length > 0 && (
+            <>
+              <View style={[s.jpSecHead, { marginTop: 22 }]}>
+                <Icon name="clock" size={17} color="#6b625b" />
+                <Text style={s.jpSecT}>{T('jobpick.recent')}</Text>
+              </View>
+              {recent.map((p) => jobRow(p, false))}
+            </>
+          )}
+
+          {!near.length && !recent.length && (
+            <Text style={s.jpEmpty}>{T('jobpick.none')}</Text>
+          )}
+
+          {/* Deliberately NO dismiss. A change order cannot move without a job — but
+              the choice is not final, and saying so is what stops him agonising over
+              it while standing in someone's kitchen. */}
+          <View style={s.jpTip}>
+            <Icon name="hardhat" size={20} color="#4E6243" />
+            <View style={{ flex: 1 }}>
+              <Text style={s.jpTipH}>{T('jobpick.tip')}</Text>
+              <Text style={s.jpTipT}>{T('jobpick.tipBody')}</Text>
+            </View>
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -4523,21 +5354,33 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const saveScope = async (changeOrderId: string, text: string) => {
     const ok = await saveScopeOfWork(db, changeOrderId, text);
     if (!ok) {
+      // Routed to the acknowledgement popup as well as `filed`. `filed` is currently
+      // WRITE-ONLY — nothing in this file renders it — so every refusal on this screen
+      // was silent, which is the exact failure the confirmation is being added to end.
+      // Left in place rather than removed: it is read by nothing today and its other
+      // callers are on screens the popup is not mounted on.
       setFiled(T('erec.errSaveScope'));
+      setAck({ kind: 'no', title: T('ack.notSaved'), detail: T('erec.errSaveScope') });
       return;
     }
     setDetail(null);
     await openRecord(changeOrderId);
     void refresh();
+    setAck({ kind: 'ok', title: T('ack.description'), detail: firstLine(text) });
   };
 
   /** Rename the extra from the header — `change_order.scope`, the title only. */
   const saveTitle = async (changeOrderId: string, text: string) => {
     const ok = await retitleDraft(db, changeOrderId, text);
-    if (!ok) { setFiled(T('erec.errSaveScope')); return; }
+    if (!ok) {
+      setFiled(T('erec.errSaveScope'));
+      setAck({ kind: 'no', title: T('ack.notSaved'), detail: T('erec.errSaveScope') });
+      return;
+    }
     setDetail(null);
     await openRecord(changeOrderId);
     void refresh();
+    setAck({ kind: 'ok', title: T('ack.title'), detail: firstLine(text) });
   };
 
   /** The price + terms editor's save. One writer (`priceDraftExtra`), which carries
@@ -4553,6 +5396,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     const amount = typed ?? co.amount_cents;
     if (amount === null) {
       setFiled(T('erec.errPriceFirst'));
+      setAck({ kind: 'no', title: T('ack.notSaved'), detail: T('erec.errPriceFirst') });
       return;
     }
     const days = parseInt(d.scheduleDaysText, 10);
@@ -4576,6 +5420,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     setDetail(null);
     await openRecord(changeOrderId);
     void refresh();
+    // THE FIGURE, NOT "saved". Through `money()` — the one formatter — so the popup
+    // cannot render a number in a shape the document never uses. The cap rides along
+    // when there is one, because on a T&M extra the cap is the number that binds.
+    const nte = d.priceMode === 'nte' ? centsFromInput(d.nteText) : null;
+    setAck({
+      kind: 'ok',
+      title: T('ack.cost'),
+      detail: nte == null ? money(amount)
+        : `${money(amount)} · ${T({ k: 'ack.nte', p: { cap: money(nte) } } as any)}`,
+    });
   };
 
   /**
@@ -4586,19 +5440,40 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
    * refused with "set a price first". `setDraftFlowFields` writes the three flow
    * columns and leaves the money alone. Still one guarded UPDATE per save.
    */
-  const saveFlow = async (changeOrderId: string, d: NonNullable<typeof detail>) => {
+  const saveFlow = async (
+    changeOrderId: string,
+    d: NonNullable<typeof detail>,
+    // WHICH SHEET SAVED. All three write the same row through the same call, so the
+    // write cannot tell them apart — but the confirmation must, or every one of them
+    // says the same thing and confirms nothing in particular. The call site is the only
+    // place that knows, so it says so.
+    field: 'schedule' | 'billing' | 'exclusions',
+  ) => {
     const days = parseInt(d.scheduleDaysText, 10);
+    const effDays = d.scheduleEffect === 'adds_days' && days > 0 ? days : null;
     const fin = await setDraftFlowFields(db, {
       changeOrderId,
       billingTiming: (d.billingTiming as BillingTiming) ?? null,
       scheduleEffect: (d.scheduleEffect as ScheduleEffect) ?? null,
-      scheduleDays: d.scheduleEffect === 'adds_days' && days > 0 ? days : null,
+      scheduleDays: effDays,
       exclusions: d.exclusions,
     });
     if (!fin.ok) { setUi({ k: 'refused', why: fin.reason }); return; }
     setDetail(null);
     await openRecord(changeOrderId);
     void refresh();
+    // The echoed value comes from the SAME renderers the record and the client's
+    // document use (billingSentence / scheduleSentence), not a second wording written
+    // for the popup — so what he is told he saved is what the owner will read.
+    const shown = field === 'billing' ? billingSentence(d.billingTiming)
+      : field === 'schedule' ? scheduleSentence(d.scheduleEffect, effDays)
+      : (d.exclusions.trim() ? firstLine(d.exclusions) : T('det.exclusionsNone'));
+    setAck({
+      kind: 'ok',
+      title: T(field === 'billing' ? 'ack.billing'
+             : field === 'schedule' ? 'ack.schedule' : 'ack.exclusions'),
+      detail: shown,
+    });
   };
 
   /**
@@ -4710,7 +5585,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           {/* The record's own lightbox, mounted here too: this guard returns before
               RecordScreen renders, so without it a tile on this screen would open
               nothing. One component, two mount points — never two viewers. */}
-          <PhotoLightbox uri={zoomUri} onClose={() => setZoomUri(null)} />
+          <PhotoLightbox uri={zoomUri}
+            uris={record.photos.filter((p) => p.present).map((p) => p.uri)}
+            onClose={() => setZoomUri(null)} />
         </>
       );
     }
@@ -4725,6 +5602,136 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     // into the SAME draft before writing: `priceDraftExtra` puts all four fields on
     // one row in a single guarded UPDATE, so every sheet commits the full set with its
     // own field replaced. Four sheets, still one write.
+  }
+
+
+  /**
+   * GUIDED STEPS 5, 7, 9 AND 10.
+   *
+   * Placed above `showCapture` deliberately: `gStep` is only ever set AFTER a capture
+   * exists, so these cannot shadow the recorder — but they must beat the ordinary record
+   * and home screens, which is what would otherwise render underneath.
+   *
+   * Every one of them writes through the SAME store calls the ordinary screens use
+   * (`savePrice`, `saveFlow`, `sendPricedApproval`). The guided flow is a different way
+   * of ASKING, never a second way of writing: a parallel writer is how two paths end up
+   * disagreeing about what a change order is.
+   */
+  if (guidedOn && gStep && record) {
+    const co = recordLc?.co;
+    const jobName = projects.find((p) => p.id === projectId)?.name ?? '';
+    const owner = recordLc?.clientRow ?? null;
+    if (gStep === 'transcript') {
+      return (
+        <>
+        {ackEl}
+        <StepTranscript
+          transcript={gTranscript}
+          // The clip's own stamp, not "now" — this screen is read back later as often
+          // as immediately, and a fresh timestamp on an hour-old recording is a lie.
+          at={record.voices[0]?.at ?? record.capturedAt ?? ''}
+          duration={record.voices.length ? T('gs.t.clip') : '—'}
+          playing={gPlaying}
+          onPlay={() => setGPlaying((v) => !v)}
+          onEdit={() => { setGStep(null); openDetail('scope'); }}
+          onNext={() => setGStep('gaps')}
+        />
+        </>
+      );
+    }
+    if (gStep === 'gaps') {
+      return (
+        <>
+        {ackEl}
+        <StepGaps
+          amountText={gAmount} onAmount={setGAmount}
+          schedule={gSched} onSchedule={setGSched}
+          days={gDays} onDays={setGDays}
+          notes={gNotes} onNotes={setGNotes}
+          priceAlreadyKnown={co?.amount_cents != null}
+          onNext={() => void (async () => {
+            if (!co) return;
+            // ONE WRITE, through the ordinary writer. `priceDraftExtra` carries its own
+            // draft-only guard and refreshes the queued payload; going around it would
+            // mean the guided flow could produce a row the ordinary screens refuse.
+            const cents = centsFromInput(gAmount);
+            if (cents === null) { setAck({ kind: 'no', title: T('erec.errPriceFirst') }); return; }
+            const days = parseInt(gDays, 10);
+            const fin = await priceDraftExtra(db, {
+              changeOrderId: co.id, amountCents: cents, nteCents: null,
+              lineItems: co.lineItems,
+              billingTiming: (co.billing_timing as BillingTiming) ?? null,
+              scheduleEffect: (gSched === 'none' ? 'no_change'
+                : gSched === 'adds' ? 'adds_days' : 'not_sure') as ScheduleEffect,
+              scheduleDays: gSched === 'adds' && days > 0 ? days : null,
+              exclusions: gNotes.trim() || co.exclusions || null,
+              whoDirected: co.who_directed || 'Owner',
+              numbersConfirmedAt: new Date(),
+            });
+            // The refusal is SHOWN. `setUi({k:'refused'})` renders nowhere in this
+            // app — it only drives haptics and the record button's label — so using it
+            // here made a rejected write indistinguishable from a dead button.
+            if (!fin.ok) {
+              setAck({ kind: 'no', title: T('gs.g.notSaved'), detail: fin.reason });
+              return;
+            }
+            await noteActorNow(db, { subjectKind: 'change_order', subjectId: co.id, act: 'priced' });
+            await openRecord(co.id);
+            // No owner yet -> the roster sheet, which is step 8 and already exists.
+            if (!owner) { setClientOpen('client'); setGStep(null); return; }
+            setGStep('review');
+          })()}
+        />
+        </>
+      );
+    }
+    if (gStep === 'review') {
+      return (
+        <>
+        {ackEl}
+        <StepReview
+          toName={owner?.name ?? recordLc?.view.requestedBy ?? UNNAMED_CLIENT}
+          toAddr={owner?.phone ?? null}
+          jobName={jobName}
+          scope={record.title}
+          price={record.priced ? record.amount : money(co?.amount_cents ?? null)}
+          schedule={scheduleSentence(co?.schedule_effect ?? null, co?.schedule_days ?? null)
+            ?? T('elock.schedNotStated')}
+          sending={gSending}
+          onBack={() => setGStep('gaps')}
+          onSend={() => void (async () => {
+            const row = coRowsRef.current.find((c) => c.id === record.id);
+            if (!row) return;
+            setGSending(true);
+            // The ORDINARY sender. Mandate #2's confirmation is this screen; the act
+            // behind it must be the same act every other path performs.
+            //
+            // AND THE SENT SCREEN ONLY SHOWS IF IT SENT. The `finally` used to fall
+            // through to step 10 whether or not the send threw, which would have told a
+            // first-time user his change order was on its way when it was not — the one
+            // claim this product cannot get wrong.
+            try {
+              await sendPricedApproval(row, owner as any);
+              setGStep('done');
+            } catch (e: any) {
+              setAck({ kind: 'no', title: T('gs.r.failed'), detail: String(e?.message ?? e) });
+            } finally { setGSending(false); }
+          })()}
+        />
+        </>
+      );
+    }
+    return (
+      <StepDone
+        toName={owner?.name ?? UNNAMED_CLIENT}
+        onView={() => { setGStep(null); setGuidedOn(false); void markFirstExtraSeen(db); setNav('home'); }}
+        onAnother={() => {
+          setGStep(null); setGuidedOn(false); void markFirstExtraSeen(db);
+          if (!terms) { openTerms(); return; }
+          setShowCapture(true);
+        }}
+      />
+    );
   }
 
   if (record) {
@@ -4809,21 +5816,21 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           scheduleEffect={sd.scheduleEffect}
           scheduleDaysText={sd.scheduleDaysText}
           onClose={closeSheet}
-          onSave={(v) => { void saveFlow(record.id, { ...sd, ...v }); }}
+          onSave={(v) => { void saveFlow(record.id, { ...sd, ...v }, 'schedule'); }}
         />}
         {sheetField === 'billing' && <BillingSheet
           visible
           editable={sheetsEditable}
           billingTiming={sd.billingTiming}
           onClose={closeSheet}
-          onSave={(v) => { void saveFlow(record.id, { ...sd, ...v }); }}
+          onSave={(v) => { void saveFlow(record.id, { ...sd, ...v }, 'billing'); }}
         />}
         {sheetField === 'exclusions' && <ExclusionsSheet
           visible
           editable={sheetsEditable}
           exclusions={sd.exclusions}
           onClose={closeSheet}
-          onSave={(v) => { void saveFlow(record.id, { ...sd, ...v }); }}
+          onSave={(v) => { void saveFlow(record.id, { ...sd, ...v }, 'exclusions'); }}
         />}
       </>
     ) : null;
@@ -4962,14 +5969,50 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         // screen; the status test that used to stand here was a second copy of it,
         // and it disagreed (it allowed approved and declined, which 308's server
         // trigger rejects, parking the reply forever while the UI showed it sent).
-        onReply={async (text: string) => {
-          const pr = await postReply(db, { changeOrderId: record.id, body: text, ownerId: OWNER });
+        onReply={async (text: string, captureIds: readonly string[]) => {
+          const pr = await postReply(db, {
+            changeOrderId: record.id, body: text, ownerId: OWNER, captureIds,
+          });
           // postReply reports failure as a value, not a throw. Throwing here is what
           // keeps the typed words in the composer and puts the reason on screen.
           if (!pr.ok) throw new Error(pr.reason);
           setRecordThread(await threadFor(db, record.id));
           setRecordUndelivered(await undeliveredReplyIds(db));
+          // The message is already durable and already queued. Its PHOTOS catch up on
+          // their own — deliberately not awaited, and deliberately allowed to fail:
+          // mandate #7 says the reply must not depend on signal, and a composer that
+          // waited on Storage would make "sent" mean something different in a
+          // basement. Until this lands, the bubble says the photo is on this phone
+          // only, which is the truth.
+          // .catch LAST: placed before .then it changed the resolved type to
+          // `void | ReplyMediaReport` and the success handler stopped type-checking.
+          void publishReplyMedia(db, connector.client, { ownerId: OWNER })
+            .then((rep) => { if (rep.published > 0) void refresh(); })
+            .catch(() => { /* the drain retries it; never a rejection into the UI */ });
           void refresh();
+        }}
+        // THE MESSAGE CAMERA (hadar, 2026-08-09). One touch, one photo, committed
+        // through the same durable path as every other capture — so it is
+        // recoverable before the composer shows it (mandate #1) and it rides the
+        // outbox that already works. It is NOT `onCapture`: nothing here touches
+        // `decision_version` or `capture_pair`, which is exactly what keeps it out
+        // of the extra's evidence grid and out of the document the client signs.
+        onSnapPhoto={async () => {
+          const picked = await snapPhoto();
+          // Cancelled or refused. The camera closing is the feedback; a toast here
+          // would be an error message for a decision the user just made.
+          if (!picked.ok) return null;
+          const stamp = await stampNow();   // mandate #9: stamped like any other photo
+          const r = await performCapture(db, {
+            // The extra's own job, from the lifecycle layer — NOT the app's
+            // currently-selected job. A record opened from Home can belong to a
+            // different job than the one on screen, and filing the photo to the
+            // wrong project would put it under the wrong client's RLS.
+            ownerId: OWNER, projectId: recordLc?.co?.project_id ?? projectId,
+            input: picked.input, stamp,
+          });
+          if (!r.ok) throw new Error(r.reason);
+          return r.captureId;
         }}
         // R8: remind. The verdict above decides whether the button is live; this is
         // the act, and `remindExtra` re-checks and returns its own refusal (no live
@@ -5070,6 +6113,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           onShare={() => { void shareApprovalDoc(db, record.id); }}
         />
       )}
+      {/* LAST. It is an overlay, not a modal, so paint order IS its z-order — declared
+          before RecordScreen it would render behind the screen it is confirming. */}
+      {ackEl}
       </>
     );
   }
@@ -5080,7 +6126,54 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // screen that renders it (the feed), because a `const` is not hoisted — a use before
   // this line is a temporal-dead-zone crash. `absolute` pins it over a plain-View
   // screen (the Job screen); the others use it as a flex child at the column's foot.
-  const bottomNav = (active: 'home' | 'jobs' | 'activity' | 'company' | null, absolute: boolean) => (
+  /**
+   * THE ONE DASHBOARD HEADER — Home, Jobs and Company (hadar, 2026-08-12: "the home
+   * header needs to be the same in jobs, company should have the hamburger and the
+   * notification").
+   *
+   * They had drifted into three different shapes: Home had menu + bell, Company had
+   * menu and an empty spacer where the bell belongs, and Jobs had neither — a blank
+   * on the left and a ＋ on the right. So the drawer and the activity centre appeared
+   * and disappeared depending on which tab you were standing on, which is the kind of
+   * thing that teaches someone the app is unreliable rather than that a button moved.
+   *
+   * `extra` is for a screen's own action (Jobs' ＋). It sits INSIDE the right group,
+   * before the bell, so the bell is always the last thing on the row and the thumb
+   * learns one place for it.
+   */
+  const dashHeader = (title: string, extra?: React.ReactNode) => (
+    <View style={s.dashHdr}>
+      {/* DRAWER LEFT, TITLE CENTRED, ACTIONS RIGHT — one header on Home, Jobs and
+          Company (hadar, 2026-08-12). The three had drifted apart: Home had drawer +
+          bell, Company had a drawer and an empty spacer, Jobs had neither. Right-hand
+          side is the screen's own action (Jobs' ＋) then the bell, and the bell is
+          LAST everywhere so the thumb learns one position for it. */}
+      <Pressable style={s.hdrBtn} onPress={() => setMenuOpen(true)}
+        accessibilityLabel={T('home.menu')} hitSlop={10}>
+        <Text style={s.hdrIcon}>☰</Text>
+      </Pressable>
+      <Text style={s.hdrTitle} numberOfLines={1}>{title}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {extra}
+        <Pressable style={s.hdrBtn} hitSlop={10}
+          accessibilityLabel={T('r8.activity')}
+          onPress={async () => {
+            // A SCREEN, not the old scrim card. Notifications is a place you go and
+            // can come back to, so it gets an address in the nav rather than being a
+            // sheet that eats the screen and loses your place when it closes.
+            closeFeed(); setNav('notifications');
+            setNotifyPerm(await notifyPermissionStatus());
+          }}>
+          <Icon name="remind" size={22} color="#151A1E" />
+          {unreadCount(activity) > 0 && (
+            <View style={s.hdrBadge}><Text style={s.hdrBadgeT}>{unreadCount(activity)}</Text></View>
+          )}
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  const bottomNav = (active: 'home' | 'jobs' | 'activity' | 'company' | 'notifications' | null, absolute: boolean) => (
     <View style={absolute
       ? [s.tabBar, { position: 'absolute' as const, left: -20, right: -20, bottom: 0 }]
       : s.tabBar}>
@@ -5092,33 +6185,54 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       <View style={s.tabHalf}>
         <Pressable style={s.tab} accessibilityLabel={T('home.navHome')}
           onPress={() => { closeFeed(); setNav('home'); setJobFilter(null); void refresh(); }}>
-          <Icon name="home" size={22} color={active === 'home' ? '#151A1E' : '#8A93A0'} />
+          {/* STROKE GLYPHS HERE, NOT THE TWO-TONE DROP. The drop's nav art is
+              pre-coloured and cannot show selected/unselected — and the design's own
+              render uses outlines that turn green with a bar under the label, which
+              is a state a contractor can see at a glance in sunlight. The artwork
+              stays in the kit for the letterhead, where it is a logo, not a state. */}
+          <Icon name="home" size={23} color={active === 'home' ? '#2F5233' : '#7A8085'} />
           <Text style={[s.tabLab, active === 'home' && s.tabLabOn]}>{T('home.navHome')}</Text>
+          {active === 'home' && <View style={s.tabUnder} />}
         </Pressable>
         <Pressable style={s.tab} accessibilityLabel={T('home.navJobs')}
           onPress={() => { closeFeed(); setNav('jobs'); void refresh(); }}>
-          <Icon name="job" size={22} color={active === 'jobs' ? '#151A1E' : '#8A93A0'} />
+          <Icon name="job" size={23} color={active === 'jobs' ? '#2F5233' : '#7A8085'} />
           <Text style={[s.tabLab, active === 'jobs' && s.tabLabOn]}>{T('home.navJobs')}</Text>
+          {active === 'jobs' && <View style={s.tabUnder} />}
         </Pressable>
       </View>
       <Pressable style={[s.fab, (!!gate || !!initError) && s.btnOff]}
         disabled={!!gate || !!initError} hitSlop={8}
         accessibilityLabel={T('home.recordExtra')}
         onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
-        <Icon name="extra" size={26} color="#fff" />
+        {/* An OUTLINED ring with a thin +, as drawn — not a filled green disc. The
+            capture entry belongs to the whole app; a solid green puck in the middle
+            of the bar outranked the screen's own primary action every time. */}
+        <Icon name="extra" size={24} color="#2F5233" />
       </Pressable>
       <View style={s.tabHalf}>
+        {/* THE COMPANY STREAM HOLDS THIS SLOT (hadar, 2026-08-12: "in the bottom menu
+            we should have company stream at the bottom not alerts"). I had given it to
+            notifications earlier the same day, reading the design's fourth glyph as a
+            bell. Wrong call, and the reason it is wrong is worth keeping: NOTIFICATIONS
+            ALREADY HAVE A DOOR ON EVERY SCREEN — the header bell, with the same unread
+            badge — so putting them here spent a permanent tab on a second entrance to
+            one place. The stream has no other standing entrance. A tab is for a place
+            you go; a bell is for something arriving.
+            The ☰ drawer's "Company feed" row stays: harmless, and it is the drawer's
+            job to list every destination whether or not it also has a tab. */}
         <Pressable style={s.tab} accessibilityLabel={T('feed.title')}
           onPress={() => void openFeed()}>
-          <Icon name="feed" size={22} color={active === 'company' ? '#151A1E' : '#8A93A0'} />
+          <Icon name="feed" size={23} color={active === 'company' ? '#2F5233' : '#7A8085'} />
           <Text style={[s.tabLab, active === 'company' && s.tabLabOn]}>{T('home.navCompany')}</Text>
+          {active === 'company' && <View style={s.tabUnder} />}
         </Pressable>
         {/* Profile opens the ☰ drawer (the account / settings / plan / support hub).
             It is an OVERLAY, not a destination, so it never carries an `active` state —
             the drawer element is mounted on every screen that renders this bar. */}
         <Pressable style={s.tab} accessibilityLabel={T('home.navProfile')}
           onPress={() => setMenuOpen(true)}>
-          <Icon name="person" size={22} color="#8A93A0" />
+          <Icon name="person" size={23} color="#7A8085" />
           <Text style={s.tabLab}>{T('home.navProfile')}</Text>
         </Pressable>
       </View>
@@ -5129,19 +6243,93 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // because the Profile tab (which opens it) lives in that shared bar. Previously the
   // drawer was only on Home and the Company feed, so a Profile tap from Jobs or a Job
   // screen would have opened nothing.
+  /**
+   * The drawer AND the sheets it opens, as one element.
+   *
+   * `logoEl` is bundled in here rather than mounted screen by screen for the reason
+   * this file has already paid for twice (the drawer's Upgrade row, then swipe-delete):
+   * the drawer is reachable from six screens, `setLogoSheet(true)` only flips state, and
+   * on any screen where the sheet is not in the tree the tap is a dead button. One
+   * element, one mount site, and the two cannot drift apart.
+   */
+  /**
+   * `onCompanyFeed`, `onInbox` and `inboxCount` were removed here on 2026-08-12 with
+   * their drawer rows. The feed keeps its bottom-nav tab and loses nothing.
+   *
+   * THE INBOX LOSES EVERYTHING, and that is worth writing down rather than discovering
+   * later. `if (inboxOpen)` below is still written and still correct, and nothing can
+   * now set `inboxOpen`: the only other caller sits inside the `not_safe` status banner
+   * and tests `screen.level === 'needs_you'` within a branch already guarded on
+   * 'not_safe', so it has never once been reachable. Unfiled captures are mandate #1
+   * material, so the screen is PARKED, not deleted — it needs a door somebody chose,
+   * not a third one invented here.
+   */
+  /**
+   * CLOSING THE ACCOUNT — the confirmation, and what it is honest about.
+   *
+   * IT STATES WHAT SURVIVES. Mandate #5's erasure carve-out keeps a hash + metadata
+   * stub, and a client may already hold a signed copy of an approved change order.
+   * "Everything is gone" is the easy sentence and a false one.
+   *
+   * IT WARNS ABOUT THE SUBSCRIPTION RATHER THAN BLOCKING ON IT. Apple owns the
+   * subscription (3.1.2) and deleting the data while it renews is a genuinely bad
+   * combination — but refusing to delete until they cancel would trap somebody inside
+   * a paid account, which is the exact complaint that started this. So a paying user
+   * is told, in the body, that cancelling is a separate act done in the App Store, and
+   * the confirm still works.
+   */
+  const closeAcctEl = closeAcct ? (
+    <ConfirmSheet
+      visible
+      title={T('set.closeTitle')}
+      body={planId === 'free'
+        ? T('set.closeBody')
+        : `${T('set.closeBody')}\n\n${T('set.closeHasPlan')}`}
+      confirmLabel={T('set.closeConfirm')}
+      cancelLabel={T('common.cancel')}
+      busy={closeAcct.busy}
+      onClose={() => { if (!closeAcct.busy) setCloseAcct(null); }}
+      onConfirm={() => void (async () => {
+        setCloseAcct({ busy: true });
+        const r = await closeMyAccount(connector.client, db, OWNER);
+        setCloseAcct(null);
+        if (!r.ok) { setAck({ kind: 'no', title: T('set.closeFailed'), detail: r.reason }); return; }
+        // The sign-out waits for the ack to be dismissed. Doing it here would unmount
+        // the overlay in the same tick and drop them at the login screen with no word
+        // about what just happened to their data.
+        const bye = () => { void connector.signOut(); };
+        if (r.mediaLeft > 0) {
+          // A partial sweep is reported, not rounded up to success. Photos surviving in
+          // the bucket after "your account is closed" is the same dishonest
+          // acknowledgement mandate #1 forbids, pointed the other way.
+          setAck({ kind: 'no', title: T('set.closedTitle'),
+                   detail: T('set.closedPartial').replace('{n}', String(r.mediaLeft)),
+                   then: bye });
+        } else {
+          setAck({ kind: 'ok', title: T('set.closedTitle'), then: bye });
+        }
+      })()}
+    />
+  ) : null;
+
   const drawerEl = (
+    <>
+    {logoEl}
+    {closeAcctEl}
     <Drawer
       visible={menuOpen}
       onClose={() => setMenuOpen(false)}
       onProfile={() => void openSettings('profile')}
       onCompanySettings={() => void openSettings('company')}
       onPlans={() => void openPaywall()}
-      onInbox={async () => { setInboxRows(await listCommittedCaptures(db, INBOX_ID)); setInboxOpen(true); }}
-      inboxCount={inbox}
       planName={T(('plan.' + planId) as any)}
       usage={usage}
       isFreePlan={planId === 'free'}
-      isOwner={isOwner}
+      isOwner={hasTeam}
+      logoUri={logoUri}
+      companyName={co?.name ?? null}
+      canEditLogo={isOwner}
+      onLogoPress={() => setLogoSheet(true)}
       lang={lang}
       onToggleLang={async () => {
         const n: Lang = lang === 'en' ? 'es' : 'en';
@@ -5158,7 +6346,92 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       onCheckUpdates={ota.checkNow}
       confirmBase={CONFIRM_BASE}
       onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
+      companies={companies}
+      activeCompanyId={co?.id ?? null}
+      /**
+       * SWITCHING RE-KEYS BILLING. The RevenueCat customer IS the tenant id, so a
+       * switch that changed only what the app displayed would leave purchases attached
+       * to the company he just left — and the plan he is entitled to is the ACTIVE
+       * tenant's, not the last one he happened to open.
+       */
+      onSwitchCompany={(id) => void (async () => {
+        await setActiveCompany(db, id);
+        await configureBilling(id);
+        const co2 = await myCompany(db, OWNER);
+        setCo(co2 ? { id: co2.id, name: co2.name } : null);
+        setIsOwner(!!co2?.isOwner);
+        setPlanId(await currentPlan(db));
+        setMenuOpen(false);
+        await refresh();
+      })()}
+      onCloseAccount={() => setCloseAcct({ busy: false })}
+      onShowIntro={() => setForceIntro(true)}
+      /**
+       * REPLAY THE WALKTHROUGH — WITHOUT SIGNING OUT (hadar, 2026-08-13).
+       *
+       * It used to sign out, on the reasoning that a "first run" starts logged out. In
+       * practice that made every single test cycle cost a fresh magic link, and Supabase
+       * rate-limits those: "login → drawer → simulate → create your account → too many
+       * tries" was the loop, and the tool caused the error it was being used to reach.
+       *
+       * Signing out buys ONE thing — the pre-login intro — and that already has its own
+       * door ("Show intro (dev)") which renders over any auth state. So this now resets
+       * the flags and opens the guided first change order in place. Testing the genuinely
+       * logged-out path is still possible: Sign out is three rows below.
+       */
+      onSimulateFirstRun={() => void (async () => {
+        await resetFirstRunFlags(db);
+        setFirstRun(true); setFirstExtra(true);
+        setGuided(null); setGuidedOn(false); setGStep(null);
+        setMenuOpen(false);
+        setForceFirstExtra(true);
+      })()}
     />
+    </>
+  );
+
+  /**
+   * WHERE AN EXTRA STANDS, in the five words the UI is allowed to use.
+   *
+   * Hoisted above the Company feed (2026-08-12) so both screens read ONE definition.
+   * It used to sit beside `extraRow`, several hundred lines below the feed's early
+   * return — out of reach by the temporal dead zone, which is exactly why the feed grew
+   * its own `coChip(displayStatus(...))` vocabulary instead. Two status vocabularies on
+   * two screens listing the SAME rows is how "Waiting" on one becomes "Sent" on the
+   * other, and neither is wrong enough to notice.
+   *
+   * Note `questions > 0` outranks 'sent': an extra the client has asked something about
+   * is in YOUR court, not theirs, whatever the status column says.
+   */
+  const stateKey = (status: string, questions: number):
+    'approved' | 'declined' | 'draft' | 'needs' | 'waiting' =>
+    status === 'approved' ? 'approved'
+    : status === 'declined' ? 'declined'
+    : status === 'draft' ? 'draft'
+    : questions > 0 ? 'needs' : 'waiting';
+  const stateColor: Record<string, { bg: string; fg: string; emoji: string; label: string }> = {
+    waiting:  { bg: 'rgba(164,122,63,0.13)', fg: '#A47A3F', emoji: '⏳', label: T('act.chipWaiting') },
+    needs:    { bg: 'rgba(109,127,137,0.14)', fg: '#5E7079', emoji: '💬', label: T('act.chipNeeds') },
+    approved: { bg: '#E7ECDD',                fg: '#536B49', emoji: '✅', label: T('act.chipApproved') },
+    draft:    { bg: '#EFEBE3',                fg: '#5E666E', emoji: '📝', label: T('act.chipCreated') },
+    declined: { bg: 'rgba(139,81,72,0.13)',  fg: '#8B5148', emoji: '✋', label: T('act.chipDeclined') },
+  };
+  // Outlined status pill for the Home rows — the mockup's look (thin colored
+  // border + colored text, no fill), in the design-system palette (global.css).
+  const chipStyle: Record<string, { border: string; text: string }> = {
+    waiting:  { border: '#efd667', text: '#8a6d1f' },  // butter-400 border, amber text
+    needs:    { border: '#c3bab2', text: '#3d3733' },  // ink-300 border, ink-700 text
+    approved: { border: '#3bbe77', text: '#157a47' },  // mint-500 border, mint-700 text
+    draft:    { border: '#c3bab2', text: '#6b625b' },
+    declined: { border: '#e0a59c', text: '#8B5148' },
+  };
+  /** The chip as both screens draw it: outlined, sentence case, one label per state. */
+  const stateChip = (st: string) => (
+    <View style={[s.exChip, { borderColor: chipStyle[st].border }]}>
+      <Text style={[s.exChipT, { color: chipStyle[st].text }]}>
+        {st === 'draft' ? T('home.notSent') : stateColor[st].label}
+      </Text>
+    </View>
   );
 
   // REQ-PM9 — Company feed: every extra across every project, newest first. Now a
@@ -5167,75 +6440,92 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   if (showFeed) {
     return (
       <View style={s.homeC}>
-        <View style={s.dashHdr}>
-          <Pressable style={s.hdrBtn} onPress={() => setMenuOpen(true)}
-            accessibilityLabel={T('home.menu')} hitSlop={10}>
-            <Text style={s.hdrIcon}>☰</Text>
-          </Pressable>
-          <Text style={s.hdrTitle}>{T('feed.title')}</Text>
-          <View style={s.hdrBtn} />
-        </View>
+        {dashHeader(T('feed.title'))}
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}
           refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPullRefresh} tintColor={C.steel} />}>
           {feedItems.length === 0 && <Text style={s.homeEmpty}>{T('feed.empty')}</Text>}
           {(() => {
-          // Group the (already newest-first) feed by calendar day: Today, Yesterday,
-          // then written dates. A day header is emitted whenever the day changes as we
-          // walk down the list. Undated rows (atMs 0) fall into one "Earlier" bucket at
-          // the end rather than a bogus 1970 date.
+          /**
+           * THE FEED ROW IS NOW THE HOME ROW (hadar, 2026-08-12: "the records should note
+           * who created it, when, its current state — follow the design from the home
+           * record page").
+           *
+           * It was a different row drawn from the same data: one-line title, a right-hand
+           * column stacking a timestamp over a filled pill, and its own status vocabulary
+           * via `coChip(displayStatus(...))`. Two designs for one object, and the feed's
+           * was the weaker of the two — a filled pill in a second palette, a title clipped
+           * at one line so two panel extras read identically, and no author anywhere.
+           *
+           * Same components as Home now: `exGroup` surface, `exRow`/`exName`/`exSub`/
+           * `exPrice`, the outlined `stateChip`, the chevron. What changed beyond the
+           * skin is the meta line — WHO raised it and WHEN, which is the fact a
+           * company-wide stream needs and a single-job list does not.
+           *
+           * THE DAY HEADERS STAY. They group by LAST activity, which is what the feed is
+           * ordered by and therefore the only honest way to break it up; Home's buckets
+           * are by status, which this screen already says on every row's chip.
+           */
           const nowMs = Date.now();
           let prevKey: string | null = null;
-          return feedItems.map((f) => {
+          // Rows are grouped into one card per day — the same "one quiet surface,
+          // hairlines inside" rule Home follows, instead of a bordered card per row.
+          const days: Array<{ key: string; label: string; items: typeof feedItems }> = [];
+          for (const f of feedItems) {
             const dayKey = f.atMs > 0 ? feedDayKey(f.atMs) : 'undated';
-            const showHead = dayKey !== prevKey;
-            prevKey = dayKey;
-            const chip = coChip(displayStatus(f.status, { openQuestions: f.openQuestions }) as any);
-            // WHO did WHAT — the verb is the feed's most useful signal, not just the name.
-            const actLabel = (f.lastAct && f.actor)
-              ? T({ k: 'feed.act.' + f.lastAct, p: { name: f.actor } } as any)
-              : (f.actor ?? '');
-            const meta = [f.projectName, actLabel].filter(Boolean).join(' · ');
-            return (
-              <React.Fragment key={f.id}>
-              {showHead && (
-                <Text style={s.feedDayHead}>
-                  {f.atMs > 0 ? feedDayLabel(f.atMs, nowMs) : T('feed.earlier')}
-                </Text>
-              )}
-              <Pressable style={s.jobItem}
-                onPress={() => { returnToFeedRef.current = true; setShowFeed(false); setProjectId(f.projectId); void openRecord(f.id); }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.jobItemName} numberOfLines={1}>{f.scope}</Text>
-                  {!!meta && <Text style={s.jobItemMeta} numberOfLines={1}>{meta}</Text>}
-                </View>
-                {/* Right column: time never truncates (it is the sort key), amount + status. */}
-                <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
-                  {f.atMs > 0 && (
-                    <Text style={{ fontFamily: 'Barlow_400Regular', fontSize: 11, color: '#8c959f' }}>
-                      {createdLabel(f.atMs)}
-                    </Text>
-                  )}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                    {f.amountCents != null && (
-                      <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#151A1E' }}>{money(f.amountCents)}</Text>
-                    )}
-                    <View style={[{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }, chip.bg]}>
-                      <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 10.5, color: chip.dark ? '#151A1E' : '#fff' }}>
-                        {chip.label}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </Pressable>
-              </React.Fragment>
-            );
-          });
+            if (dayKey !== prevKey) {
+              days.push({
+                key: dayKey,
+                label: f.atMs > 0 ? feedDayLabel(f.atMs, nowMs) : T('feed.earlier'),
+                items: [],
+              });
+              prevKey = dayKey;
+            }
+            days[days.length - 1].items.push(f);
+          }
+          return days.map((day) => (
+            <React.Fragment key={day.key}>
+              <Text style={s.feedDayHead}>{day.label}</Text>
+              <View style={s.exGroup}>
+                {day.items.map((f, i) => {
+                  const st = stateKey(f.status, f.openQuestions);
+                  // WHERE · WHO RAISED IT · WHEN, one line, joined rather than nested so a
+                  // missing piece shortens the line instead of dropping it. The author is
+                  // omitted when unknown (feed.ts) — never rendered as "Unknown".
+                  const meta = [
+                    f.projectName,
+                    f.createdBy ? T({ k: 'feed.raisedBy', p: { name: f.createdBy } } as any) : null,
+                    f.createdAtMs > 0 ? shortDate(f.createdAtMs, nowMs) : null,
+                  ].filter(Boolean).join(' · ');
+                  return (
+                    <Pressable key={f.id} style={[s.exRow, i > 0 && s.exRowRule]}
+                      onPress={() => {
+                        returnToFeedRef.current = true;
+                        setShowFeed(false);
+                        setProjectId(f.projectId);
+                        void openRecord(f.id);
+                      }}>
+                      <View style={{ flex: 1 }}>
+                        {/* Two lines, as on Home: a real scope runs past one phone line,
+                            and the clipped words are the ones telling two extras apart. */}
+                        <Text style={s.exName} numberOfLines={2}>{f.scope}</Text>
+                        {!!meta && <Text style={s.exSub} numberOfLines={1}>{meta}</Text>}
+                        {f.amountCents != null && <Text style={s.exPrice}>{money(f.amountCents)}</Text>}
+                      </View>
+                      {stateChip(st)}
+                      <Text style={s.exChev}>›</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </React.Fragment>
+          ));
           })()}
         </ScrollView>
         {bottomNav('company', false)}
         {drawerEl}
         {/* Feed can open the drawer too, so it needs the modals the drawer opens. */}
         {quotaEl}
+      {jobCreatedEl}
         {paywallEl}
       </View>
     );
@@ -5264,7 +6554,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       <FusedCapture
         db={db}
         ownerId={OWNER}
-        projectName={projects.find((p) => p.id === projectId)?.name ?? 'EZchangeorder'}
+        // Step 3 of the guided flow. Undefined everywhere else, so the strip is absent
+        // for an experienced user capturing his fortieth extra.
+        coachPrompts={guidedOn
+          ? COACH_PROMPTS.map((p) => ({ label: T(p.title) }))
+          : undefined}
+        projectName={projects.find((p) => p.id === projectId)?.name ?? 'EZChangeOrders'}
         onCapture={augId ? (a) => onAugmentCapture(augId, a) : onFusedCapture}
         onClose={() => { setShowCapture(false); setAugmentCoId(null); }}
         resolveLabel={resolveStampLabel}
@@ -5277,27 +6572,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // inside the Activity block; lifted here 2026-07-26 so Home's rows match the
   // mockup's Needs-you / Waiting / Approved chips).
   type Extra = (typeof homeExtras)[number];
-  const stateOf = (e: Extra): 'approved' | 'declined' | 'draft' | 'needs' | 'waiting' =>
-    e.status === 'approved' ? 'approved'
-    : e.status === 'declined' ? 'declined'
-    : e.status === 'draft' ? 'draft'
-    : e.questions > 0 ? 'needs' : 'waiting';
-  const stateColor: Record<string, { bg: string; fg: string; emoji: string; label: string }> = {
-    waiting:  { bg: 'rgba(164,122,63,0.13)', fg: '#A47A3F', emoji: '⏳', label: T('act.chipWaiting') },
-    needs:    { bg: 'rgba(109,127,137,0.14)', fg: '#5E7079', emoji: '💬', label: T('act.chipNeeds') },
-    approved: { bg: '#E7ECDD',                fg: '#536B49', emoji: '✅', label: T('act.chipApproved') },
-    draft:    { bg: '#EFEBE3',                fg: '#5E666E', emoji: '📝', label: T('act.chipCreated') },
-    declined: { bg: 'rgba(139,81,72,0.13)',  fg: '#8B5148', emoji: '✋', label: T('act.chipDeclined') },
-  };
-  // Outlined status pill for the Home rows — the mockup's look (thin colored
-  // border + colored text, no fill), in the design-system palette (global.css).
-  const chipStyle: Record<string, { border: string; text: string }> = {
-    waiting:  { border: '#efd667', text: '#8a6d1f' },  // butter-400 border, amber text
-    needs:    { border: '#c3bab2', text: '#3d3733' },  // ink-300 border, ink-700 text
-    approved: { border: '#3bbe77', text: '#157a47' },  // mint-500 border, mint-700 text
-    draft:    { border: '#c3bab2', text: '#6b625b' },
-    declined: { border: '#e0a59c', text: '#8B5148' },
-  };
+  const stateOf = (e: Extra) => stateKey(e.status, e.questions);
 
   // One Home extra row (mockup parity): a cover-photo thumbnail (falls back to the
   // status emoji when a capture has no photo yet), scope + project, the price, and
@@ -5355,11 +6630,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             one thing on the row you were meant to press — while the row itself, the
             chevron, and the button all did exactly the same thing. One tap target,
             stated once. What a draft needs to say here is where it stands: not sent. */}
-        <View style={[s.exChip, { borderColor: cp.border }]}>
-          <Text style={[s.exChipT, { color: cp.text }]}>
-            {st === 'draft' ? T('home.notSent') : stateColor[st].label}
-          </Text>
-        </View>
+        {stateChip(st)}
         <Text style={s.exChev}>›</Text>
       </Pressable>
     );
@@ -5452,6 +6723,42 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // CompanyCam's organising idea: you land on your JOBS, each shown by its most
   // recent photo, and you dive into one to capture. Filing is by GPS underneath,
   // so this list is navigation, not the thing that decides where a capture goes.
+  /**
+   * THE GUIDED START. Ahead of Home, and only when ALL of these hold:
+   *   * the walkthrough has never been dismissed on this phone (`firstExtra`)
+   *   * there are no change orders
+   *   * there are no jobs, INBOX excluded — the inbox is created by the app, not by the
+   *     user, so counting it would mean the screen never showed to anybody
+   *
+   * `firstExtra === true` and not merely truthy: null means the flag has not been read
+   * yet, and rendering Home during that tick then swapping is the flash-of-the-wrong-app
+   * this file already fixed once for the language picker.
+   *
+   * `loadedOnce` guards the OTHER half of that, and it is the one review caught: the
+   * flag resolves in the init effect while `projects`/`homeExtras` are filled by a
+   * refresh that runs afterwards. Without it, every existing user upgrading into this
+   * build — none of whom have ever marked `first_extra_seen` — would get the walkthrough
+   * over their Home on every cold start until the first refresh landed, and would be
+   * STRANDED on it with only "Do this later" if that refresh ever threw.
+   *
+   * NOT gated on `nav`, so it cannot be swiped past from the tab bar — but it is not a
+   * trap either: "Do this later" marks it seen and never asks again.
+   */
+  if (firstExtra === true && loadedOnce && !homeExtras.length
+      && !projects.filter((p) => p.id !== INBOX_ID).length) {
+    return (
+      guided === 'coach' ? (
+        <GuidedCoach onStart={enterGuided} onBack={() => setGuided(null)} />
+      ) : (
+      <FirstExtra
+        onCoach={() => setGuided('coach')}
+        onStart={enterGuided}
+        onLater={() => { void markFirstExtraSeen(db); setFirstExtra(false); }}
+      />
+      )
+    );
+  }
+
   if (nav === 'home') {
     const now = Date.now();
     // Buckets by "whose court is the ball in". NEEDS YOU is everything in YOUR court:
@@ -5474,53 +6781,71 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     const toggleFilter = (f: 'needs' | 'waiting' | 'approved') =>
       setHomeFilter((cur) => (cur === f ? null : f));
     const disabled = !!gate || !!initError;
+    /**
+     * THE FIRST-RUN HOME (hadar's design, 2026-08-12: "in case no changes were added
+     * yet to the system — here is the opening negative view").
+     *
+     * WHAT IT REPLACES AND WHY. The populated Home leads with a money figure and three
+     * count chips. On an empty account that renders as "$0", "0 across 0 extras" and
+     * three zeroes — a dashboard reporting nothing, four times over. Zero is a true
+     * number and a terrible first screen: it tells a new contractor the app is working
+     * and gives him nothing to do.
+     *
+     * So the whole top half changes shape rather than showing empty versions of itself:
+     * a headline that names the state in two words, one sentence saying what to do, the
+     * SAME black capture card (it is the only act available, so it is the only control),
+     * and one quiet card standing in for the approval list it will become.
+     *
+     * The house art stays exactly where it is. It is this screen's identity in both
+     * states, and moving it would make the first screen a different app from the second.
+     */
+    const homeEmpty = homeExtras.length === 0;
     return (
       <View style={s.homeC}>
         {discardSheet}
-        {/* Header: menu · Home · activity bell (mockup 2026-07-23). */}
-        <View style={s.dashHdr}>
-          <Pressable style={s.hdrBtn} onPress={() => setMenuOpen(true)}
-            accessibilityLabel={T('home.menu')} hitSlop={10}>
-            <Text style={s.hdrIcon}>☰</Text>
-          </Pressable>
-          <Text style={s.hdrTitle}>{T('home.title')}</Text>
-          <Pressable style={s.hdrBtn} hitSlop={10}
-            accessibilityLabel={T('r8.activity')}
-            onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
-            <Icon name="remind" size={22} color="#151A1E" />
-            {unreadCount(activity) > 0 && (
-              <View style={s.hdrBadge}><Text style={s.hdrBadgeT}>{unreadCount(activity)}</Text></View>
-            )}
-          </Pressable>
-        </View>
+        {dashHeader(T('home.title'))}
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}
           refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPullRefresh} tintColor={C.steel} />}>
           {/* Hero — the money outstanding on the client, across every job. Design
               system: Oswald caps label, huge Oswald figure, Inter sub. The house
               illustration (assets/house-hero.png) sits top-right. */}
-          <View style={s.heroWrap}>
-            <Image source={require('./assets/house-hero.png')} style={s.houseArt}
+          <View style={[s.heroWrap, homeEmpty && s.heroWrapEmpty]}>
+            <Image source={require('./assets/house-hero.png')}
+              style={[s.houseArt, homeEmpty && s.houseArtEmpty]}
               resizeMode="contain" />
-            <Text style={s.heroLabel}>{T('home.heroLabel')}</Text>
-            {/* One line, whole dollars, and it SHRINKS to fit its column instead of
-                running under the house art — "$300,000" is 8 chars and used to
-                collide (hadar 2026-07-27). */}
-            <Text style={s.heroBig} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.45}>
-              {moneyWhole(outstanding)}
-            </Text>
-            <Text style={s.heroSub}>
-              {outstandingN === 0 ? T('home.awaitNone')
-                : T({ k: 'home.acrossN', p: { n: outstandingN } })}
-            </Text>
-            {/* The money already won — the single most motivating number. */}
-            {recovered.n > 0 && (
-              <View style={s.recoverPill}>
-                <Icon name="approved" size={15} color="#157a47" />
-                <Text style={s.recoverPillT}>
-                  {T({ k: 'home.recoveredInline', p: { amount: money(recovered.cents) } })}
+            {homeEmpty ? (
+              <>
+                {/* Two deliberate lines, written as two: "NO EXTRAS YET" wrapped by the
+                    box would break wherever the house left room, and this headline is
+                    typography — the break belongs to the design, not to the layout. */}
+                <Text style={s.emptyHead}>{T('home.emptyHead1')}</Text>
+                <Text style={s.emptyHead}>{T('home.emptyHead2')}</Text>
+                <Text style={s.emptyLede}>{T('home.emptyLede')}</Text>
+              </>
+            ) : (
+              <>
+                <Text style={s.heroLabel}>{T('home.heroLabel')}</Text>
+                {/* One line, whole dollars, and it SHRINKS to fit its column instead of
+                    running under the house art — "$300,000" is 8 chars and used to
+                    collide (hadar 2026-07-27). */}
+                <Text style={s.heroBig} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.45}>
+                  {moneyWhole(outstanding)}
                 </Text>
-              </View>
+                <Text style={s.heroSub}>
+                  {outstandingN === 0 ? T('home.awaitNone')
+                    : T({ k: 'home.acrossN', p: { n: outstandingN } })}
+                </Text>
+                {/* The money already won — the single most motivating number. */}
+                {recovered.n > 0 && (
+                  <View style={s.recoverPill}>
+                    <Icon name="approved" size={15} color="#157a47" />
+                    <Text style={s.recoverPillT}>
+                      {T({ k: 'home.recoveredInline', p: { amount: money(recovered.cents) } })}
+                    </Text>
+                  </View>
+                )}
+              </>
             )}
           </View>
 
@@ -5544,9 +6869,33 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             </View>
           </Pressable>
 
+          {/* THE EMPTY BODY. One card where the approval list will be, then the way in
+              to what this app actually does. The three count chips and the status
+              sections are not rendered at all — three zeroes and three absent headings
+              is a UI describing its own emptiness in six places. */}
+          {homeEmpty && (
+            <>
+              <View style={s.emptyCard}>
+                <View style={s.emptyDisc}>
+                  <Icon name="ntClipboard" size={34} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.emptyCardT}>{T('home.emptyWaitTitle')}</Text>
+                  <Text style={s.emptyCardS}>{T('home.emptyWaitSub')}</Text>
+                </View>
+              </View>
+              <Pressable style={s.emptyLearn} accessibilityRole="button"
+                onPress={() => setHowOpen(true)}>
+                <Icon name="info" size={19} color="#1e6b3a" />
+                <Text style={s.emptyLearnT}>{T('home.emptyLearn')}</Text>
+              </Pressable>
+            </>
+          )}
+
           {/* Summary chips (mockup): a glance at what needs you / is out / is won.
               Tapping one filters the sections below IN PLACE; the live chip is ringed
               and tapping it again clears. Never navigates. */}
+          {!homeEmpty && (<>
           <View style={s.sumRow}>
             <Pressable style={[s.sumChip, s.sumNeeds, homeFilter === 'needs' && s.sumChipOn]}
               accessibilityState={{ selected: homeFilter === 'needs' }}
@@ -5617,10 +6966,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               )}
             </>);
           })()}
-
-          {homeExtras.length === 0 && (
-            <Text style={s.homeEmpty}>{T('home.emptyDash')}</Text>
-          )}
+          </>)}
         </ScrollView>
 
         {/* The one bottom nav (Home active here). */}
@@ -5644,6 +6990,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             destinations only. Each row navigates to a screen that already exists.
             Also reachable from the Profile tab in the bottom bar (2026-07-28). */}
         {drawerEl}
+        {howEl}
         {/* MOUNTED HERE OR THE DRAWER'S "Upgrade" DOES NOTHING (hadar 2026-08-04:
             "it takes me nowhere, just closes the drawer"). setShowPaywall(true) only
             flips state — if <PaywallScreen> is not in THIS screen's tree there is
@@ -5653,6 +7000,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             AFTER {drawerEl} deliberately: a Modal declared before its sibling content
             does not present on iOS. */}
         {quotaEl}
+      {jobCreatedEl}
         {/* AND THE SAME OMISSION BIT THE SWIPE-DELETE (hadar 2026-08-05: "the button
             is there but it doesn't delete once I confirm"). Home is the ONLY screen
             that renders <SwipeRow> (extraRow), so it is the only screen where
@@ -5686,22 +7034,34 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     return (
       <View style={s.homeC}>
         {quotaEl}
+      {jobCreatedEl}
         {discardSheet}
         {celebrateEl}
         {paywallEl}
         {/* Header: title · new job (the ＋ opens the create-job screen, an early
             return, so it works from here). */}
-        <View style={s.dashHdr}>
-          <View style={s.hdrBtn} />
-          <Text style={s.hdrTitle}>{T('home.navJobs')}</Text>
-          <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('home.newProject')}
-            onPress={() => setNewJob({ name: '', address: '' })}>
-            <Text style={s.hdrIcon}>＋</Text>
-          </Pressable>
-        </View>
+        {/* NO ＋ HERE (hadar, 2026-08-12). Creating a job is still reachable — the
+            job picker (tap the job on the Job screen) ends in "New job", and that is
+            the place it is actually wanted: you discover the job is missing while
+            trying to pick it. A header ＋ on a list is a second door to the same act,
+            and this header is now shared with Home and Company, where it has no
+            meaning at all. */}
+        {dashHeader(T('home.navJobs'))}
         <ScrollView style={{ flex: 1 }}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}
           refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPullRefresh} tintColor={C.steel} />}>
+          {/* CREATE, ABOVE THE FILTER (hadar, 2026-08-12). It replaces the header ＋
+              removed a build ago: same act, but a labelled button on the list says
+              what it does, and a glyph in a header shared with Home and Company could
+              not. Above the Active/Archived pills because it belongs to the LIST, not
+              to whichever slice of it is showing — under the filter it would read as
+              "create an archived job". */}
+          <Pressable style={s.jlNew} accessibilityRole="button"
+            onPress={() => setNewJob({ name: '', address: '' })}>
+            <Icon name="extra" size={18} color="#fff" />
+            <Text style={s.jlNewT}>{T('job.new')}</Text>
+          </Pressable>
+
           {/* REQ-PM4 — Active vs Archived. Archived jobs are retained, out of the way. */}
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 2 }}>
             <Pressable hitSlop={6} onPress={() => setJobsArchived(false)}
@@ -5745,8 +7105,37 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               })}
             </View>
           )}
-          {shown.map((p) => (
-            <Pressable key={p.id} style={s.jobItem}
+          {/* ── THE JOB CARD (design, 2026-08-11) ──────────────────────────────
+              A one-line row with a capture count told a contractor nothing he acts
+              on: how many photographs are on a job is not a state. The card answers
+              the question he opens this screen with — where does each job stand —
+              with the same three buckets the job screen uses, so the numbers here
+              and one tap in are the same numbers.
+
+              THE MAP IS A GOOGLE STATIC SNAPSHOT (hadar: "use google map snap shot"),
+              CACHED TO DISK by src/mapcache.ts and read from a file:// URI — one
+              billed request per job per set of coordinates, and the card still draws
+              with no signal. With no key, no coordinates, or a failed download, it
+              falls back to the kit's illustration rather than an empty grey box. */}
+          {shown.map((p) => {
+            const cc = jobCounts[p.id] ?? { needs: 0, waiting: 0, approved: 0 };
+            // The cached FILE first; the live URL only until the download lands, so
+            // the very first paint still shows a map instead of the illustration.
+            const mapUrl = jobMaps[p.id]
+              ?? mapUrlFor(process.env.EXPO_PUBLIC_STATIC_MAP_URL, p.lat, p.lng);
+            const stat = (n: number, label: string, icon: 'statPerson' | 'statClock' | 'statCheck',
+                          tint: string, ring: string) => (
+              <View style={s.jlStat}>
+                <View style={[s.jlStatIco, { backgroundColor: ring }]}>
+                  <Icon name={icon === 'statPerson' ? 'person' : icon === 'statClock' ? 'clock' : 'approved'}
+                    size={16} color={tint} />
+                </View>
+                <Text style={s.jlStatLab} numberOfLines={1}>{label}</Text>
+                <Text style={[s.jlStatN, { color: tint }]}>{n}</Text>
+              </View>
+            );
+            return (
+            <Pressable key={p.id} style={s.jlCard}
               onPress={() => {
                 // Archived rows OPEN read-only (retention view). They are not in the
                 // active `projects` state, so add the tapped one so the Job screen
@@ -5754,34 +7143,60 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 if (jobsArchived) setProjects((ps) => ps.some((x) => x.id === p.id) ? ps : [...ps, p]);
                 open(p.id);
               }}>
-              {labelHex(p.label) && (
-                <View style={{ width: 10, height: 10, borderRadius: 5, marginRight: 10,
-                  backgroundColor: labelHex(p.label) as string }} />
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={s.jobItemName} numberOfLines={1}>{p.name}</Text>
-                <Text style={s.jobItemMeta} numberOfLines={1}>
-                  {p.address ?? T('home.noAddress')}
-                  {p.lastMs ? ' · ' + ago(p.lastMs, now) : ''}
-                </Text>
+              {mapUrl
+                ? <Image source={{ uri: mapUrl }} style={s.jlMap} resizeMode="cover" />
+                : <View style={[s.jlMap, s.jlMapEmpty]}><Icon name="mapHero" size={74} /></View>}
+
+              {/* The text column stands off the map. Went 3 -> 12 -> 22: the map is a
+                  full-bleed panel with detail running to its edge, so it needs more
+                  clearance than the card's other sides, where the neighbour is just
+                  the card border. Asymmetric on purpose. */}
+              <View style={{ flex: 1, minWidth: 0, padding: 12, paddingLeft: 22 }}>
+                <View style={s.jlTitleRow}>
+                  {labelHex(p.label) && (
+                    <View style={{ width: 9, height: 9, borderRadius: 5, marginRight: 7,
+                      backgroundColor: labelHex(p.label) as string }} />
+                  )}
+                  <Text style={s.jlName} numberOfLines={2}>{p.name}</Text>
+                  <Icon name="chevRight" size={15} color="#8A93A0" />
+                </View>
+                {!!p.address && p.address !== p.name && (
+                  <Text style={s.jlAddr} numberOfLines={1}>{p.address}</Text>
+                )}
+                {!!p.lastMs && (
+                  <View style={s.jlAct}>
+                    <Icon name="cal" size={13} color="#4E6243" />
+                    <Text style={s.jlActT}>
+                      {T({ k: 'jobs.lastActivity', p: { ago: ago(p.lastMs, now) } })}
+                    </Text>
+                  </View>
+                )}
+
+                <View style={s.jlStats}>
+                  {stat(cc.needs, T('job.statNeeds'), 'statPerson', '#C2610C', '#FBEFE0')}
+                  <View style={s.jlStatDiv} />
+                  {stat(cc.waiting, T('job.chipWaiting'), 'statClock', '#2E5AA8', '#E8EFFA')}
+                  <View style={s.jlStatDiv} />
+                  {stat(cc.approved, T('job.statApproved'), 'statCheck', '#2F5233', '#E9EFE5')}
+                </View>
+
+                {jobsArchived && (
+                  <Pressable hitSlop={10} style={s.jlUnarchive}
+                    onPress={async () => {
+                      // Un-archiving re-consumes an active-job slot, so it faces the same
+                      // free-tier cap as creating one (review 2026-07-25: this was a bypass).
+                      const jq = await checkJobs(db);
+                      if (!jq.ok) { setQuota({ kind: 'jobs', limit: jq.limit }); return; }
+                      const r = await setProjectStatus(connector.client, db, p.id, 'in_progress');
+                      if (r.ok) { await refresh(); await loadArchived(); } else setFiled(statusErr(r.code));
+                    }}>
+                    <Text style={s.jlUnarchiveT}>{T('pm4.unarchive')}</Text>
+                  </Pressable>
+                )}
               </View>
-              <Text style={s.jobCount}>{p.captureCount}</Text>
-              {jobsArchived ? (
-                <Pressable hitSlop={10}
-                  style={{ minHeight: 44, paddingHorizontal: 10, justifyContent: 'center' }}
-                  onPress={async () => {
-                    // Un-archiving re-consumes an active-job slot, so it faces the same
-                    // free-tier cap as creating one (review 2026-07-25: this was a bypass).
-                    const jq = await checkJobs(db);
-                    if (!jq.ok) { setQuota({ kind: 'jobs', limit: jq.limit }); return; }
-                    const r = await setProjectStatus(connector.client, db, p.id, 'in_progress');
-                    if (r.ok) { await refresh(); await loadArchived(); } else setFiled(statusErr(r.code));
-                  }}>
-                  <Text style={{ color: '#4E6243', fontFamily: 'Barlow_600SemiBold', fontSize: 13 }}>{T('pm4.unarchive')}</Text>
-                </Pressable>
-              ) : <Text style={s.chev}>›</Text>}
             </Pressable>
-          ))}
+            );
+          })}
           {!shown.length && (
             <Text style={s.homeEmpty}>
               {jobsArchived ? T('pm4.noArchived') : q ? T('home.noMatch') : T('home.noProjects')}
@@ -5807,6 +7222,172 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // "displays major activity around communication - created, sent, approved, in
   //  communication" (hadar, 2026-07-23). One row per extra; the status IS the
   //  communication state. Reuses homeExtras (all live extras across every job).
+  /**
+   * NOTIFICATIONS (design, 2026-08-12).
+   *
+   * It replaces a scrim card that listed forty rows of "title / detail" with no
+   * grouping, no filter and no sense of when anything happened — everything from this
+   * morning and everything from last month looked identical, so the only way to find
+   * the thing that changed was to read all of it.
+   *
+   * GROUPED BY DAY, because recency is the first question. "Today" is what he acts
+   * on; "This week" is what he checks he did not miss. The buckets are computed from
+   * the row's own timestamp against local midnight, not from a stored bucket, so they
+   * stay correct as the day rolls over without anything having to rewrite rows.
+   *
+   * THE FILTER IS BUILT FROM THE DATA. The design draws All / Jobs / Change Orders /
+   * System. Every notification this product currently raises is about a change order
+   * — there are no job or system notifications yet — so rendering three fixed pills
+   * would give two that are permanently empty and teach a contractor that the filter
+   * is broken. Categories with no rows are not offered; when job or system events
+   * exist, their pill appears with them.
+   */
+  if (nav === 'notifications') {
+    const nowMs = Date.now();
+    const startOfDay = (ms: number) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
+    const today = startOfDay(nowMs);
+    const yesterday = today - 86400000;
+    const weekAgo = today - 6 * 86400000;
+
+    // kind -> the mark and the category it filters under. One table, so a new kind
+    // cannot be added to activity.ts and silently render as an unlabelled grey dot.
+    // THE DROP'S OWN MARKS. Each carries its disc and its colour, so nothing here
+    // paints a ring — a styled circle behind a drawn one never quite agreed on size,
+    // which is the mistake the job screen's stat cards already made. The colours are
+    // the drop's and they mean things: blue is a message from the client, orange is
+    // something changed, green is settled.
+    const MARK: Record<string, { icon: IconName; cat: string }> = {
+      question: { icon: 'ntChat',     cat: 'co' },   // blue bubble — the client spoke
+      approved: { icon: 'ntCheck',    cat: 'co' },   // green tick in its pale disc
+      declined: { icon: 'ntExcluded', cat: 'co' },   // ✕ with the attention dot
+      unpriced: { icon: 'ntDollar',   cat: 'co' },   // a price he owes
+      sent:     { icon: 'ntMail',     cat: 'co' },   // it left
+    };
+    const CATS: Array<{ k: string; label: string }> = [{ k: 'all', label: T('nt.all') }];
+    for (const c of [{ k: 'co', label: T('nt.changeOrders') }]) {
+      if (activity.some((a) => (MARK[a.kind]?.cat ?? 'co') === c.k)) CATS.push(c);
+    }
+    const rows = activity.filter((a) =>
+      notifTab === 'all' || (MARK[a.kind]?.cat ?? 'co') === notifTab);
+
+    const groups: Array<{ label: string; rows: typeof rows }> = [
+      { label: T('nt.today'),     rows: rows.filter((a) => a.atMs >= today) },
+      { label: T('nt.yesterday'), rows: rows.filter((a) => a.atMs >= yesterday && a.atMs < today) },
+      { label: T('nt.thisWeek'),  rows: rows.filter((a) => a.atMs >= weekAgo && a.atMs < yesterday) },
+      { label: T('nt.earlier'),   rows: rows.filter((a) => a.atMs < weekAgo) },
+    ].filter((g) => g.rows.length > 0);
+
+    const stamp = (ms: number) =>
+      ms >= today ? new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+      : ms >= yesterday ? T('nt.yesterday')
+      : ms >= weekAgo ? new Date(ms).toLocaleDateString(undefined, { weekday: 'short' })
+      : new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+    return (
+      <View style={s.homeC}>
+        {quotaEl}
+        {jobCreatedEl}
+        <View style={s.dashHdr}>
+          <Pressable style={s.hdrBtn} hitSlop={12} accessibilityLabel={T('common.back')}
+            onPress={() => { setNav('home'); void refresh(); }}>
+            <Icon name="ntBack" size={22} />
+          </Pressable>
+          <Text style={s.hdrTitle}>{T('nt.title')}</Text>
+          <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('drawer.profile')}
+            onPress={() => void openSettings('profile')}>
+            <Icon name="gear" size={21} color="#2F5233" />
+          </Pressable>
+        </View>
+
+        <ScrollView style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 110 }}
+          refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPullRefresh} tintColor={C.steel} />}>
+
+          {CATS.length > 1 && (
+            <View style={s.ntPills}>
+              {CATS.map((c) => (
+                <Pressable key={c.k} style={[s.ntPill, notifTab === c.k && s.ntPillOn]}
+                  accessibilityRole="button" accessibilityState={{ selected: notifTab === c.k }}
+                  onPress={() => setNotifTab(c.k)}>
+                  <Text style={[s.ntPillT, notifTab === c.k && s.ntPillTOn]}>{c.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
+          {/* PUSH PERMISSION, only while it is still askable. A standing row telling
+              someone notifications are off, on the notifications screen, after they
+              have said no, is nagging. */}
+          {notifyPerm === 'undetermined' && (
+            <Pressable style={s.ntPerm}
+              onPress={async () => setNotifyPerm(await requestNotifyPermission())}>
+              <Icon name="ntAttention" size={20} />
+              <Text style={s.ntPermT}>{T('r8.pushWhy')}</Text>
+              <Text style={s.ntPermA}>{T('r8.pushAsk')}</Text>
+            </Pressable>
+          )}
+
+          {groups.map((g) => (
+            <View key={g.label}>
+              <Text style={s.ntGroup}>{g.label}</Text>
+              <View style={s.ntCard}>
+                {g.rows.map((a, i) => {
+                  const m = MARK[a.kind] ?? { icon: 'ntQuestion' as IconName, cat: 'co' };
+                  return (
+                    <Pressable key={a.id} style={[s.ntRow, i > 0 && s.ntRowDiv]}
+                      accessibilityRole="button"
+                      onPress={async () => {
+                        await markRead(db, [a.id]);
+                        await refresh();          // rebuilds `activity` with the new read-state
+                        void openRecord(a.changeOrderId);
+                      }}>
+                      <Icon name={m.icon} size={42} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={s.ntTitle} numberOfLines={1}>{T(('r8.kind.' + a.kind) as any)}</Text>
+                        <Text style={s.ntBody} numberOfLines={2}>
+                          {a.detail ?? `${a.scope}${a.jobName ? ` · ${a.jobName}` : ''}`}
+                        </Text>
+                      </View>
+                      <View style={s.ntRight}>
+                        <Text style={s.ntWhen}>{stamp(a.atMs)}</Text>
+                        {/* Unread is a filled dot, read is a hollow grey one — the row
+                            never loses its trailing mark, so the column stays aligned
+                            and "read" is a state rather than an absence. */}
+                        <View style={[s.ntDot, a.read ? s.ntDotRead : s.ntDotUnread]} />
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          ))}
+
+          {!rows.length && <Text style={s.homeEmpty}>{T('r8.nothingYet')}</Text>}
+          {!!rows.length && (
+            <View style={s.ntEnd}>
+              <View style={s.ntEndRule} />
+              <Text style={s.ntEndT}>{T('nt.caughtUp')}</Text>
+              <View style={s.ntEndRule} />
+            </View>
+          )}
+          {/* Gated on unreadIds, NOT unreadCount: 'sent' rows are unread but deliberately
+              unbadged, and gating on the badge left them with no control that could ever
+              clear their dot. The button clears every unread row it can see. */}
+          {unreadIds(activity).length > 0 && (
+            <Pressable style={s.ntMarkAll} onPress={async () => {
+              await markRead(db, unreadIds(activity));
+              await refresh();
+            }}>
+              <Text style={s.ntMarkAllT}>{T('r8.markAllRead')}</Text>
+            </Pressable>
+          )}
+        </ScrollView>
+        {bottomNav('notifications', false)}
+        {drawerEl}
+      </View>
+    );
+  }
+
   if (nav === 'activity') {
     // stateOf + stateColor are now shared with Home (defined once, above).
     const tabLabel: Record<typeof activityTab, string> = {
@@ -5885,6 +7466,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         {drawerEl}
         {/* Same reason as home — the drawer opens from here too. */}
         {quotaEl}
+      {jobCreatedEl}
         {paywallEl}
         {(bell || drafts.length > 0) && (
           <View style={s.homeScrim}>
@@ -5918,24 +7500,47 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const jobShown = jobFilter === 'needs' ? jobNeeds
     : jobFilter === 'waiting' ? jobWaiting
     : jobFilter === 'approved' ? jobApproved : coRows;
-  const jobMapUrl = jobProj ? staticMapUrl(jobProj.lat, jobProj.lng) : null;
+  const jobMapUrl = jobProj
+    ? (jobMaps[jobProj.id]
+        ?? mapUrlFor(process.env.EXPO_PUBLIC_STATIC_MAP_URL, jobProj.lat, jobProj.lng))
+    : null;
   const startCaptureJob = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
   return (
     <View style={s.c}>
       {quotaEl}
+      {jobCreatedEl}
         {discardSheet}
       {celebrateEl}
       {paywallEl}
       {/* Header: back · Job · bell (mockup 2026-07-23). Fixed above the scroll. */}
-      <View style={s.dashHdr}>
-        <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('common.back')}
-          onPress={() => { setNav('home'); setJobFilter(null); void refresh(); }}>
-          <Text style={s.hdrIcon}>‹</Text>
+      {/* ── THE LETTERHEAD HEADER (design, 2026-08-11) ─────────────────────────
+          It said "‹  Job  🔔". "Job" is the app telling the contractor which screen
+          he is on, which he knows; the design uses that space for the two facts a
+          jobsite screen should carry — which company this is, and which human is
+          running it — because the same header appears on the document the client
+          signs and the two must agree.
+
+          THE BELL IS NOT LOST: unread activity moves onto the envelope, which is the
+          same act (open what came in) with a mark that survives on a white bar. */}
+      <View style={s.jsHdr}>
+        {/* BACK GOES TO JOBS, NOT HOME (hadar, 2026-08-11). This screen is reached
+            by picking a job off the Jobs list, so Home was not where the contractor
+            came from — going there discarded his place in the list and made "back"
+            mean "start again" every time he wanted the next job. */}
+        <Pressable style={s.jsHdrBack} hitSlop={12} accessibilityLabel={T('common.back')}
+          onPress={() => { setNav('jobs'); setJobFilter(null); void refresh(); }}>
+          <Icon name="chevLeft" size={20} color="#22252A" />
         </Pressable>
-        <Text style={s.hdrTitle}>{T('job.title')}</Text>
-        <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('r8.activity')}
+        {/* "JOB", CENTRED (hadar, 2026-08-12). The header carried the company name
+            and the contractor's own name — his letterhead, which is the right content
+            for the CLIENT's page and pointless on his own phone: he knows which
+            company he works for, and it pushed the one useful word off the row. The
+            company and contact identity still exist and still render where they are
+            read by someone who does not already know them — the approval page. */}
+        <Text style={s.jsHdrTitle} numberOfLines={1}>{T('job.title')}</Text>
+        <Pressable style={s.jsHdrMail} hitSlop={10} accessibilityLabel={T('r8.activity')}
           onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
-          <Icon name="remind" size={22} color="#151A1E" />
+          <Icon name="envelope" size={22} color="#2F5233" />
           {unreadCount(activity) > 0 && (
             <View style={s.hdrBadge}><Text style={s.hdrBadgeT}>{unreadCount(activity)}</Text></View>
           )}
@@ -5945,120 +7550,52 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       {/* ONE outer ScrollView for the whole body (fixes the old overflow). The
           bottom nav floats absolutely below, so nothing here can displace it. */}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 96 }}>
-        {/* Job card: map · name · address · total. Tap to switch jobs. */}
-        <Pressable style={s.jobCard} onPress={() => setPicker(true)}>
+        {/* ── THE HERO ────────────────────────────────────────────────────────
+            NO CARD. The design sits the job on the page itself — bordered, it read
+            as one more object in a list of objects, and this is the thing the whole
+            screen is about. Tapping it still switches jobs. */}
+        <Pressable style={s.jsHero} onPress={() => setPicker(true)}>
           {jobMapUrl
-            ? <Image source={{ uri: jobMapUrl }} style={s.jobCardMap} resizeMode="cover" />
-            : <View style={[s.jobCardMap, s.jobCardMapEmpty]}><Icon name="mapPin" size={26} color="#8A93A0" /></View>}
-          <View style={{ flex: 1 }}>
-            <Text style={s.jobCardName} numberOfLines={1}>{jobProj?.name ?? T('job.pick')}</Text>
-            <Text style={s.jobCardAddr} numberOfLines={2}>{jobProj?.address ?? T('home.noAddress')}</Text>
-            <Text style={s.jobCardTotal}>{money(jobTotal)}</Text>
-            <Text style={s.jobCardSub}>{T({ k: 'job.acrossReq', p: { n: coRows.length } })}</Text>
-          </View>
-        </Pressable>
-
-        {/* REQ-PM14 — a color label for this job. Full-size taps (gloves, mandate #3);
-            the chosen color shows a ✓ (not ring-color alone — color-blind ICP) and its
-            NAME reads back; a dedicated ✕ swatch clears (never a hidden re-tap). */}
-        {jobProj && (
-          <View style={{ marginTop: 4, marginBottom: 2 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
-              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#5E666E', marginRight: 6 }}>
-                {T('label.title')}
-              </Text>
-              {/* Clear */}
-              <Pressable hitSlop={6}
-                onPress={async () => { await setProjectLabel(db, jobProj.id, null); await refresh(); }}
-                style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
-                <View style={{ width: 26, height: 26, borderRadius: 13, borderWidth: 1.5,
-                  borderColor: jobProj.label ? '#D5D0C7' : '#151A1E', alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: 13, color: jobProj.label ? '#8c959f' : '#151A1E' }}>✕</Text>
-                </View>
-              </Pressable>
-              {LABELS.map((l) => {
-                const on = jobProj.label === l.key;
-                return (
-                  <Pressable key={l.key} hitSlop={6}
-                    onPress={async () => { await setProjectLabel(db, jobProj.id, on ? null : l.key); await refresh(); }}
-                    style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
-                    <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: l.hex,
-                      borderWidth: on ? 2 : 0, borderColor: '#151A1E', alignItems: 'center', justifyContent: 'center' }}>
-                      {on && <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>✓</Text>}
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-            {labelHex(jobProj.label) && (
-              <Text style={{ fontFamily: 'Barlow_400Regular', fontSize: 12, color: '#5E666E', marginLeft: 2, marginTop: 2 }}>
-                {T(('label.' + jobProj.label) as any)}
-              </Text>
+            ? <Image source={{ uri: jobMapUrl }} style={s.jsHeroMap} resizeMode="cover" />
+            : <View style={s.jsHeroMap}><Icon name="mapHero" size={92} /></View>}
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={s.jsHeroName} numberOfLines={2}>{jobProj?.name ?? T('job.pick')}</Text>
+            {!!jobProj?.address && jobProj.address !== jobProj.name && (
+              <Text style={s.jsHeroAddr} numberOfLines={2}>{jobProj.address}</Text>
             )}
-          </View>
-        )}
-
-        {/* REQ-PM4 — lifecycle. Set where the job is; Archive takes it out of the
-            working list (kept for warranty/dispute). Archiving returns to Home. */}
-        {jobProj && (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8, marginBottom: 4 }}>
-            {(['lead', 'in_progress', 'complete'] as const).map((st) => {
-              const on = jobProj.status === st;
-              return (
-                <Pressable key={st} hitSlop={6}
-                  onPress={async () => {
-                    const r = await setProjectStatus(connector.client, db, jobProj.id, st);
-                    if (r.ok) await refresh(); else setFiled(statusErr(r.code));
-                  }}
-                  style={{ minHeight: 36, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 18, borderWidth: on ? 2 : 1,
-                    borderColor: on ? '#151A1E' : '#D5D0C7', backgroundColor: on ? '#151A1E' : '#fff' }}>
-                  <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: on ? '#fff' : '#5E666E' }}>
-                    {T(('pm4.' + st) as any)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-            {/* Archive is the SAFE, reversible path — neutral styling, not alarm-red. */}
-            <Pressable hitSlop={6}
-              onPress={async () => {
-                const r = await setProjectStatus(connector.client, db, jobProj.id, 'archived');
-                if (r.ok) { setNav('home'); await refresh(); } else setFiled(statusErr(r.code));
-              }}
-              style={{ minHeight: 36, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: '#D5D0C7' }}>
-              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#5E666E' }}>{T('pm4.archive')}</Text>
-            </Pressable>
-          </View>
-        )}
-
-        {/* RECORD EXTRA WORK — the one capture entry. */}
-        <Pressable style={[s.ctaCard, { marginHorizontal: 0 },
-            (!ready || !!gate || !!initError) && s.btnOff]}
-          disabled={!ready || !!gate || !!initError} onPress={startCaptureJob}>
-          <View style={s.ctaIcon}><Icon name="camera" size={22} color="#fff" /></View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.ctaTitle}>{T('home.recordExtra')}</Text>
-            <Text style={s.ctaSub}>{T('job.recordSub')}</Text>
+            {/* EST. COMPLETION IS OMITTED, NOT GUESSED. The design carries a date
+                here and nothing in this product stores a job's end; printing one
+                derived from schedule days would be a completion date nobody set,
+                on the screen a contractor reads it off to a client. */}
+            <Text style={s.jsHeroSub}>{T({ k: 'job.acrossReq', p: { n: coRows.length } })}</Text>
           </View>
         </Pressable>
 
-        {/* Filter pills: Needs you · Waiting · Approved. Tap to filter, tap again clears. */}
-        <View style={s.pillRow}>
-          <Pressable style={[s.pill, jobFilter === 'needs' && s.pillNeedsOn]}
-            onPress={() => setJobFilter(jobFilter === 'needs' ? null : 'needs')}>
-            <Text style={[s.pillT, jobFilter === 'needs' && s.pillTOn]}>{T('job.pillNeeds')}</Text>
-            <View style={[s.pillBadge, s.secBadgeMuted]}><Text style={s.secBadgeT}>{jobNeeds.length}</Text></View>
-          </Pressable>
-          <Pressable style={[s.pill, jobFilter === 'waiting' && s.pillWaitOn]}
-            onPress={() => setJobFilter(jobFilter === 'waiting' ? null : 'waiting')}>
-            <Text style={[s.pillT, jobFilter === 'waiting' && s.pillTWaitOn]}>{T('job.pillWaiting')}</Text>
-            <View style={[s.pillBadge, s.secBadgeWarn]}><Text style={s.secBadgeT}>{jobWaiting.length}</Text></View>
-          </Pressable>
-          <Pressable style={[s.pill, jobFilter === 'approved' && s.pillOkOn]}
-            onPress={() => setJobFilter(jobFilter === 'approved' ? null : 'approved')}>
-            <Text style={[s.pillT, jobFilter === 'approved' && s.pillTOkOn]}>{T('job.pillApproved')}</Text>
-            <View style={[s.pillBadge, s.secBadgeOk]}><Text style={s.secBadgeT}>{jobApproved.length}</Text></View>
-          </Pressable>
-        </View>
+        {/* JOB SETTINGS REMOVED (hadar, 2026-08-11). Colour label, project status
+            (Lead / In progress / Complete) and Archive are gone from this screen —
+            the design has none of them and they are controls a contractor touches
+            about once per job, sitting above the list he opened the screen to read.
+
+            STATED PLAINLY: this screen was their ONLY entry point, so setting a
+            colour, changing a job's status and archiving a job are now unreachable
+            in the app. The columns, the writers and the Jobs-list FILTERS that read
+            them are all untouched — only the way in is gone. They want a home on the
+            Jobs list or in the drawer; this is a removal, not a migration, and it is
+            recorded here so it cannot pass for one. */}
+
+        {/* THE BLACK "RECORD EXTRA WORK" CARD IS GONE FROM HERE. It is the same act
+            as "Create new change order" at the foot of the list, which is where the
+            design puts it — and I added that button while leaving this one, so the
+            screen carried two primaries for one act, a screenful apart, in different
+            colours and different words. The bottom one wins: it is where a contractor
+            lands after reading the list and finding the extra he meant to raise is not
+            in it. Home still leads with the capture card; that is the screen whose
+            whole job is starting one. */}
+
+        {/* THE OLD PILL ROW IS GONE. It duplicated the three stat cards below —
+            same three buckets, same counts, two controls for one choice — and it had
+            no "All", so showing everything meant deselecting rather than selecting.
+            The counts now ARE the filter, and a real All pill sits with the rest. */}
 
       {/* REQ-VAL7's way in. Only when there IS a gap: a boundary nobody owns is
           the expensive one, and a link that only appears when it matters is not
@@ -6071,12 +7608,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         </Pressable>
       )}
 
-      {/* REQ-X3: THE one status. Eight parallel banners collapsed to this.
-          Each of those eight was added honestly for a good reason, and stacked
-          together they were a wall of colour a man on a ladder cannot parse —
-          which meant he read none of them. Every "never silent" fix I made was
-          making the next one quieter. */}
-      {screen && (
+      {/* REQ-X3's ONE status, now NARROWED TO THE ONE THAT MATTERS (hadar,
+          2026-08-11: "remove the 3 need a job").
+          The banner had four levels and three of them were noise on this screen:
+            · needs_you — "3 need a job →". Removed. Unfiled captures are NOT
+              stranded: the drawer carries the Inbox with its own count, which is the
+              route that exists on every screen rather than only this one.
+            · safe / waiting — "backed up", "waiting to back up". Reassurance, not
+              action, in a coloured box above the work.
+          WHAT STAYS IS `not_safe`, and it is not negotiable: "this won't back up"
+          is the one sentence mandate #1 forbids being silent about. Deleting the
+          banner outright would have taken it with the other three. */}
+      {screen && screen.level === 'not_safe' && (
         <Pressable style={[s.oneStatus, {
           backgroundColor: levelColor(screen.level).bg,
           borderColor: levelColor(screen.level).border,
@@ -6126,7 +7669,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
       {(gate || initError) && (
         <View style={s.gate}>
-          <Text style={s.gateT}>{initError ? 'EZchangeorder couldn’t start safely' : 'Can’t record safely on this device'}</Text>
+          <Text style={s.gateT}>{initError ? 'EZChangeOrders couldn’t start safely' : 'Can’t record safely on this device'}</Text>
           <Text style={s.gateS}>
             The database can’t guarantee a save would survive. Rather than tell you
             something is saved and lose it, recording is off.
@@ -6523,75 +8066,230 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           {/* Approved vs awaiting, AGAINST PRICE — the breakdown to keep (hadar,
               2026-07-24). The flag, progress-update and evidence-bundle tools were
               removed from here: good features, but they blended into the extras. */}
-          <View style={s.jxTotals}>
-            <View style={s.jxTotCol}>
-              <Text style={s.jxTotLab}>{T('job.totApproved')} · {approved.length}</Text>
-              <Text style={s.jxTotVal}>{money(approvedCents)}</Text>
+          {/* ── THE JOB'S STATE, IN THREE COUNTS AND TWO FIGURES (hadar's job-screen
+              design, 2026-08-10) ────────────────────────────────────────────────
+              The screen used to open with two money columns and nothing else, so
+              "what is waiting on ME?" — the only question a contractor opens this
+              screen to ask — was answerable only by reading every row.
+
+              COUNTS AND MONEY ARE SEPARATED ON PURPOSE. A count is work to do; a
+              figure is money at stake. Three extras needing approval and $5,400
+              pending are different facts and the old card fused them into one line
+              per column. */}
+          <View style={s.jsStats}>
+            {([
+              { k: 'needs',    icon: 'statPerson' as const, label: T('job.statNeeds'),    n: jobNeeds.length },
+              { k: 'waiting',  icon: 'statClock'  as const, label: T('job.statWaiting'),  n: jobWaiting.length },
+              { k: 'approved', icon: 'statCheck'  as const, label: T('job.statApproved'), n: jobApproved.length },
+            ] as const).map((st) => (
+              <Pressable key={st.k} style={[s.jsStat, jobFilter === st.k && s.jsStatOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: jobFilter === st.k }}
+                accessibilityLabel={`${st.label}: ${st.n}`}
+                onPress={() => setJobFilter(jobFilter === st.k ? null : st.k)}>
+                {/* ICON ON ITS OWN LINE. Beside the words it left ~70pt for a
+                    two-word label in three columns on a 13 mini, and every card
+                    truncated: "Needs appro…", "Awaitin g resp…", "Approv ed". A
+                    label that has to be guessed is not a label. */}
+                {/* ICON AND LABEL SHARE THE ROW, as the design draws them, with the
+                    label free to take two lines. I had stacked them after the labels
+                    truncated — the truncation was the FONT, not the layout: 12.5px
+                    beside a 30px disc leaves "Awaiting response" nowhere to go on a
+                    375pt screen, 11.5px wrapping to two lines fits. */}
+                <View style={s.jsStatTop}>
+                  <Icon name={st.icon} size={24} />
+                  {/* SAME TYPE SIZE ON ALL THREE. `adjustsFontSizeToFit` shrank only
+                      the label that did not fit, so "Awaiting response" rendered
+                      visibly smaller than its neighbours — three cards, three type
+                      sizes. Two lines are reserved for every card instead, so they
+                      match whether the words wrap or not. */}
+                  <Text style={s.jsStatLab} numberOfLines={2}>{st.label}</Text>
+                </View>
+                <Text style={s.jsStatN}>{st.n}</Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {/* PENDING is money OUT ON THE CLIENT — sent and not yet answered. It is
+              deliberately not "everything unapproved": a draft on this phone is not
+              money at stake, it is work not yet done, and counting it here would
+              tell a contractor he is owed something he has not asked for. */}
+          <View style={s.jsMoney}>
+            <View style={s.jsMoneyCol}>
+              <Icon name="statMoney" size={32} />
+              <View>
+                <Text style={s.jsMoneyLab}>{T('job.totAwaiting')}</Text>
+                {/* NO CENTS. The design writes $5,400 and moneyWhole already exists
+                    for exactly this ("the .00 is noise at that size", 2026-07-27). */}
+                <Text style={[s.jsMoneyVal, s.jsMoneyWait]}>{moneyWhole(awaitingCents)}</Text>
+              </View>
             </View>
-            <View style={s.jxTotDiv} />
-            <View style={s.jxTotCol}>
-              <Text style={s.jxTotLab}>{T('job.totAwaiting')} · {awaiting.length}</Text>
-              <Text style={[s.jxTotVal, s.jxTotWait]}>{money(awaitingCents)}</Text>
+            <View style={s.jsMoneyDiv} />
+            <View style={s.jsMoneyCol}>
+              <Icon name="statCheck" size={32} />
+              <View>
+                <Text style={s.jsMoneyLab}>{T('job.totApproved')}</Text>
+                <Text style={s.jsMoneyVal}>{moneyWhole(approvedCents)}</Text>
+              </View>
             </View>
           </View>
 
-          {/* Grouped sections with photo thumbnails (the mockup). A card shows the
-              photo, title, category and price; tapping it opens the extra's DETAIL
-              page, where send / finish / remind / delete / revise now live. A pill
-              focuses one section; "See all" toggles that focus. */}
-          {(() => {
-            // Muted status pill (kit palette) with a line icon + word — colour never
-            // alone. Waiting = ochre clock, Needs you = slate reply, Approved = forest check.
-            const pill = {
-              waiting:  { color: '#A47A3F', bg: 'rgba(164,122,63,0.13)', icon: 'clock' as const,    label: T('job.pillWaiting') },
-              needs:    { color: '#5E7079', bg: 'rgba(109,127,137,0.14)', icon: 'reply' as const,    label: T('job.pillNeeds') },
-              approved: { color: '#536B49', bg: '#E7ECDD',                icon: 'approved' as const,  label: T('job.pillApproved') },
-            };
-            const card = (c: LedgerRow, bucket: 'waiting' | 'needs' | 'approved') => {
-              const p = pill[bucket];
-              return (
-              <Pressable key={c.id} style={s.jxCard} onPress={() => { void openRecord(c.id); }}>
-                {c.photo_relpath
-                  ? <Image source={{ uri: FS.documentDirectory + c.photo_relpath }}
-                      style={s.jxThumb} resizeMode="cover" />
-                  : <View style={[s.jxThumb, s.coThumbEmpty]}><Icon name="microphone" size={24} color="#8A93A0" /></View>}
-                <View style={{ flex: 1 }}>
-                  <Text style={s.jxName} numberOfLines={1}>{c.scope}</Text>
-                  {c.extra_type && isExtraType(c.extra_type) && (
-                    <Text style={s.jxSub} numberOfLines={1}>{typeLabel(c.extra_type)}</Text>
-                  )}
-                  {c.amount_cents != null && <Text style={s.jxAmt}>{c.amount}</Text>}
-                </View>
-                <View style={[s.jxChip, { borderColor: p.color, backgroundColor: p.bg,
-                  flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
-                  <Icon name={p.icon} size={12} color={p.color} />
-                  <Text style={[s.jxChipT, { color: p.color }]}>{p.label}</Text>
-                </View>
+          <Text style={s.jsH2}>{T('job.changeOrders')}</Text>
+          {/* ALL is a real option, and it is the default. The old pills could only be
+              toggled on and off, so "show me everything" was expressed by having
+              nothing selected — a state with no control of its own. */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.jsPills}>
+            {([
+              { k: null,       label: T('job.pillAll') },
+              { k: 'needs',    label: T('job.pillNeeds') },
+              { k: 'waiting',  label: T('job.pillWaiting') },
+              { k: 'approved', label: T('job.pillApproved') },
+            ] as const).map((f) => (
+              <Pressable key={String(f.k)}
+                style={[s.jsPill, jobFilter === f.k && s.jsPillOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: jobFilter === f.k }}
+                onPress={() => setJobFilter(f.k as any)}>
+                <Text style={[s.jsPillT, jobFilter === f.k && s.jsPillTOn]}>{f.label}</Text>
               </Pressable>
-              );
+            ))}
+          </ScrollView>
+
+          {/* ── ONE FLAT LIST OF RICH CARDS ────────────────────────────────────
+              The grouped Waiting / Needs you / Approved sections are gone. They
+              answered the same question the three counts above now answer, and they
+              answered it worse: the same extra could only be found under whichever
+              heading its status put it, so scanning "what is on this job" meant
+              reading three lists and holding the order in your head. The pills
+              filter; the list stays one list, newest first.
+
+              EACH CARD CARRIES WHAT DISTINGUISHES ONE EXTRA FROM ANOTHER: its number,
+              its photograph, its title, when it started and who asked for it, what it
+              does to the schedule, its state, and its price. The old card had a
+              thumbnail, a title, a type and an amount — two extras raised the same
+              week on the same job were indistinguishable. */}
+          {(() => {
+            // OUTLINED, not filled. The design's chips are a hairline in the status
+            // colour on white (approved is the one with a tint). Filled blocks the
+            // size of a word competed with the price for the same glance.
+            const chip = {
+              waiting:  { color: '#2E5AA8', bg: '#FFFFFF', line: '#B9CBE8', label: T('job.chipWaiting') },
+              needs:    { color: '#C2610C', bg: '#FFFFFF', line: '#F0C89B', label: T('job.chipNeeds') },
+              approved: { color: '#3A5230', bg: '#EDF2E9', line: '#C3D3BA', label: T('job.chipApproved') },
             };
-            const section = (labelKey: string, rows: LedgerRow[], bucket: 'waiting' | 'needs' | 'approved') => {
-              if (rows.length === 0 || (jobFilter !== null && jobFilter !== bucket)) return null;
+            const rows = jobFilter === null ? coRows
+              : jobFilter === 'needs' ? jobNeeds
+              : jobFilter === 'waiting' ? jobWaiting : jobApproved;
+
+            if (rows.length === 0) {
+              return <Text style={s.jsEmpty}>{T('job.noneInFilter')}</Text>;
+            }
+
+            return rows.map((c) => {
+              const bucket = jobBucket(c);
+              const ch = chip[bucket];
+              // The schedule line, as the design writes it. Null stays null — an
+              // unanswered question is omitted, never rendered as "no change", which
+              // would be an answer nobody gave.
+              const sched = c.schedule_effect === 'adds_days' && c.schedule_days
+                ? T({ k: 'job.addsDays', p: { n: c.schedule_days } })
+                : c.schedule_effect === 'no_change' ? T('job.noScheduleChange')
+                : null;
+              const asked = isNamedClient(c.who_directed) ? c.who_directed : null;
               return (
-                <View style={{ marginTop: 8 }}>
-                  <View style={s.jxSecHead}>
-                    <Text style={s.jxSecLab}>{T(labelKey)}</Text>
-                    <Pressable hitSlop={8} onPress={() => setJobFilter(jobFilter === bucket ? null : bucket)}>
-                      <Text style={s.jxSeeAll}>{jobFilter === bucket ? T('job.seeLess') : T('job.seeAll')}</Text>
-                    </Pressable>
+                <Pressable key={c.id} style={s.jsCard} onPress={() => { void openRecord(c.id); }}
+                  accessibilityRole="button" accessibilityLabel={c.scope}>
+                  {c.photo_relpath
+                    ? <Image source={{ uri: FS.documentDirectory + c.photo_relpath }}
+                        style={s.jsThumb} resizeMode="cover" />
+                    : <View style={[s.jsThumb, s.coThumbEmpty]}>
+                        <Icon name="microphone" size={22} color="#8A93A0" /></View>}
+
+                  {/* ONE FLEXIBLE COLUMN, TWO ROWS — not three side-by-side columns.
+                      The card was thumb | text | price, and the price block does not
+                      shrink (RN defaults flexShrink to 0), so on a 393pt screen the
+                      text column was left ~10pt and "Change Order #16" rendered one
+                      character per line straight down the card.
+                      The design stacks instead: the chip sits top-right on the number's
+                      row, the price sits mid-right on the meta's row, and both rows
+                      span the full width beside the thumbnail. */}
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={s.jsCardTop}>
+                      <Text style={s.jsCardNo} numberOfLines={1}>
+                        {c.co_number != null
+                          ? T({ k: 'job.coNo', p: { n: c.co_number } })
+                          : T('job.coNoNumber')}
+                      </Text>
+                      <View style={[s.jsChip, { backgroundColor: ch.bg, borderColor: ch.line }]}>
+                        <Text style={[s.jsChipT, { color: ch.color }]} numberOfLines={1}>
+                          {ch.label}</Text>
+                      </View>
+                    </View>
+
+                    <Text style={s.jsCardName} numberOfLines={2}>{c.scope}</Text>
+
+                    <View style={s.jsCardBottom}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        {/* THE DATE, WITHOUT THE TIME (design, 2026-08-13).
+                            This read `c.created`, which is `createdLabel` — "Aug 13 ·
+                            12:04 pm". On a 375pt screen that ran past the price and
+                            ellipsised to "Initiated Aug 13 · 12:...", so the line lost
+                            its end and the clock told nobody anything. `shortDate`
+                            exists for exactly this and says so in its own comment: a
+                            list is SCANNED, and the time of day doubles the width to
+                            answer a question nobody asks while looking for last
+                            Tuesday's extra. It also adds the year once the row is not
+                            from this one.
+
+                            Two lines, not one: with a named requester this legitimately
+                            does not fit, and half a name is worse than a wrap. */}
+                        <Text style={s.jsCardMeta} numberOfLines={2}>
+                          {T({ k: 'job.initiated', p: { d: shortDate(c.created_at_ms) } })}
+                          {asked ? ` • ${T({ k: 'job.requestedBy', p: { name: asked } })}` : ''}
+                        </Text>
+                        {sched && (
+                          <View style={s.jsCardSched}>
+                            <Icon name="cal" size={14} color="#4E6243" />
+                            <Text style={s.jsCardSchedT} numberOfLines={1}>{sched}</Text>
+                          </View>
+                        )}
+                        {(questions[c.id] ?? 0) > 0 && (
+                          <View style={s.jsCardSched}>
+                            <Icon name="updated" size={15} />
+                            <Text style={[s.jsCardSchedT, { color: '#B26A00' }]} numberOfLines={1}>
+                              {T('job.inConversation')}</Text>
+                          </View>
+                        )}
+                      </View>
+                      {c.amount_cents != null && (
+                        <View style={s.jsCardPrice}>
+                          <Text style={s.jsCardAmt} numberOfLines={1}>+{moneyWhole(c.amount_cents)}</Text>
+                          <Text style={s.jsCardAmtL} numberOfLines={1}>
+                            {c.nte_cents != null ? T('job.nte') : T('job.fixedPrice')}</Text>
+                        </View>
+                      )}
+                      <Icon name="chevRight" size={16} color="#8A93A0" />
+                    </View>
                   </View>
-                  {rows.map((c) => card(c, bucket))}
-                </View>
+                </Pressable>
               );
-            };
-            return (
-              <>
-                {section('job.secWaiting', jobWaiting, 'waiting')}
-                {section('job.secNeeds', jobNeeds, 'needs')}
-                {section('job.secApproved', jobApproved, 'approved')}
-              </>
-            );
+            });
           })()}
+
+          {/* THE BOTTOM ACTIONS ARE GONE (hadar, 2026-08-11). "Create new change
+              order" and "View change order log" both left the screen.
+
+              CAPTURE IS NOT LOST — the + in the bottom bar is the same act and is on
+              every screen, which is why the black card at the top of this one was
+              removed a build ago for competing with it. Three doors to one action
+              was the problem; this leaves the one that is always in reach.
+
+              THE LOG IS LOST FROM HERE, and it was this screen's only link to it.
+              The activity centre it opened is still reachable from the envelope in
+              the header (which also carries the unread count), so nothing is
+              stranded — but the named entry point is gone and that is a removal, not
+              a move. */}
         </>
         );
       })()}
@@ -6624,9 +8322,21 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           <View style={{ flex: 1, backgroundColor: 'rgba(13,15,18,0.45)' }}>
           <ScrollView contentContainerStyle={{ padding: 14, paddingTop: 64, paddingBottom: 40 }}
             keyboardShouldPersistTaps="handled">
-          <View style={s.money}>
-            <Text style={s.cardH}>{T('r5c.sendTo')}</Text>
-            <Text style={s.moneyScope}>{sp.co.scope} · {sp.co.amount}</Text>
+          <View style={s.spCard}>
+            {/* THE DOCUMENT NAMES ITSELF FIRST (hadar's design, 2026-08-08). The
+                sheet used to open with "SEND TO / <scope> · <amount>" in one grey
+                line, which made the thing being sent smaller than the act of
+                sending it. Mandate #2 says the human confirms a COMMITMENT: the
+                first thing they must be able to read is which commitment. So the
+                scope is the headline and the kind + number sit under it, the same
+                identity line the record screen prints. */}
+            <Text style={s.spKicker}>{T('r5c.sendTo')}</Text>
+            <Text style={s.spTitle} numberOfLines={3}>{sp.co.scope}</Text>
+            <Text style={s.spDoc}>
+              {sp.co.co_number == null
+                ? T('r5c.docNo')
+                : T({ k: 'r5c.doc', p: { n: sp.co.co_number } })}
+            </Text>
 
             {/* The extra's KIND is set by the AI on processing (hadar, 2026-07-24:
                 "i don't want the user to tag it"); the manual type picker was
@@ -6635,8 +8345,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
             {/* ── who approves ── */}
             {sp.adding ? (
-              <View>
-                <Text style={s.cardH}>{T('r5c.whoApproves')}</Text>
+              <View style={{ marginTop: 18 }}>
+                <Text style={s.spSecH}>{T('r5c.whoApproves')}</Text>
                 {/* Pull the person + number straight from the phone's contacts —
                     the native picker needs no permission prompt (hadar, 2026-07-24:
                     "add someone ... a phone number and associate it with a person").
@@ -6669,7 +8379,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     </Pressable>
                   ))}
                 </View>
-                <Pressable style={s.confirmWide} disabled={!sp.adding.name.trim()}
+                <Pressable style={[s.spSend, !sp.adding.name.trim() && s.spSendOff]}
+                  disabled={!sp.adding.name.trim()}
                   onPress={async () => {
                     const a = sp.adding!;
                     const id = await addApprover(db, {
@@ -6681,67 +8392,95 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                     // re-deriving a suggestion here would throw that away.
                     setSendPrep((p) => p && { ...p, roster, chosenId: id, adding: null });
                   }}>
-                  <Text style={s.confirmT}>{T('r5c.addApprover')}</Text>
+                  <Text style={s.spSendT}>{T('r5c.addApprover')}</Text>
                 </Pressable>
               </View>
             ) : sp.picking ? (
-              <View>
-                <Text style={s.cardH}>{T('r5c.whoApproves')}</Text>
+              <View style={{ marginTop: 18 }}>
+                <Text style={s.spSecH}>{T('r5c.whoApproves')}</Text>
                 {sp.roster.map((m) => (
-                  <Pressable key={m.id} style={s.coSendRow}
+                  <Pressable key={m.id} style={s.spRow}
                     onPress={() => setSendPrep((p) => p && { ...p, chosenId: m.id, picking: false })}>
-                    <Text style={s.dval}>{m.name}</Text>
-                    <Text style={s.dmeta}>{roleLabel(m.role)}</Text>
+                    <View style={s.spAvatar}><Icon name="person" size={21} color="#4a4a46" /></View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.spRowT} numberOfLines={1}>{m.name}</Text>
+                      <Text style={s.spRowSub} numberOfLines={1}>{roleLabel(m.role)}</Text>
+                    </View>
+                    <Text style={s.spChev}>›</Text>
                   </Pressable>
                 ))}
-                <Pressable style={s.coSendRow}
+                <Pressable style={s.spRow}
                   onPress={() => setSendPrep((p) => p && { ...p, picking: false,
                     adding: { name: '', role: 'owner', phone: '' } })}>
-                  <Text style={s.coNudge}>{T('r5c.addApprover')} →</Text>
+                  <View style={s.spAvatar}><Icon name="personAdd" size={21} color="#4a4a46" /></View>
+                  <Text style={[s.spRowT, { flex: 1 }]}>{T('r5c.addApprover')}</Text>
+                  <Text style={s.spChev}>›</Text>
                 </Pressable>
               </View>
             ) : chosen ? (
-              <View>
-                <Text style={s.dval}>{chosen.name}</Text>
-                {/* The REASON, shown verbatim. R5c: "with the reason visible". A
-                    pre-filled recipient the sender cannot check is the failure. */}
-                <Text style={s.dmeta}>
-                  {sp.chosenId ? roleLabel(chosen.role) : reasonText(sug!)}
-                </Text>
-                {unconfirmed && (
-                  <Text style={s.warn}>{T('r5c.unconfirmedAuthority')}</Text>
-                )}
-                <Pressable style={s.coSendRow}
+              <>
+                <Pressable style={s.spRow}
                   onPress={() => setSendPrep((p) => p && { ...p, picking: true })}>
-                  <Text style={s.coNudge}>{T('r5c.change')} →</Text>
+                  <View style={s.spAvatar}><Icon name="person" size={21} color="#4a4a46" /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.spRowT} numberOfLines={1}>{chosen.name}</Text>
+                    {/* The REASON, shown verbatim. R5c: "with the reason visible". A
+                        pre-filled recipient the sender cannot check is the failure. */}
+                    <Text style={s.spRowSub} numberOfLines={2}>
+                      {sp.chosenId ? roleLabel(chosen.role) : reasonText(sug!)}
+                    </Text>
+                  </View>
+                  <Text style={s.spChangeT}>{T('r5c.change')}</Text>
                 </Pressable>
-              </View>
+                {unconfirmed && (
+                  <View style={s.spWarn}>
+                    <Icon name="alert" size={24} color="#C98A14" />
+                    <Text style={[s.spWarnT, { flex: 1 }]}>{T('r5c.unconfirmedAuthority')}</Text>
+                  </View>
+                )}
+              </>
             ) : (
-              <View>
-                <Text style={s.warn}>{T('r5c.noRoster')}</Text>
-                <Pressable style={s.coSendRow}
+              <>
+                {/* NOBODY CAN SIGN THIS. Said as a warning above the act that clears
+                    it, not as a red line under a dead button — the contractor has to
+                    understand the block before he meets it. */}
+                <View style={s.spWarn}>
+                  <Icon name="alert" size={26} color="#C98A14" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.spWarnT}>{T('r5c.noSignerH')}</Text>
+                    <Text style={s.spWarnT}>{T('r5c.noSignerB')}</Text>
+                  </View>
+                </View>
+                <Pressable style={s.spRow}
                   onPress={() => setSendPrep((p) => p && { ...p,
                     adding: { name: '', phone: '', role: (sug && sug.kind === 'needs_approver'
                       && sug.wantedRole) ? sug.wantedRole : 'owner' } })}>
-                  <Text style={s.coNudge}>{T('r5c.addApprover')} →</Text>
+                  <View style={s.spAvatar}><Icon name="personAdd" size={21} color="#4a4a46" /></View>
+                  <Text style={[s.spRowT, { flex: 1 }]}>{T('r5c.addApprover')}</Text>
+                  <Text style={s.spChev}>›</Text>
                 </Pressable>
-              </View>
+              </>
             )}
 
             {/* Send is DISABLED until somebody is named. Sending a priced commitment
-                to nobody is not a degraded send, it is a lost one. */}
+                to nobody is not a degraded send, it is a lost one — and a refused
+                button now LOOKS refused and says what would un-refuse it, instead of
+                being a black button whose tap does nothing. */}
             {!sp.adding && !sp.picking && (
               <>
-                <Pressable style={s.confirmWide} disabled={!chosen || sp.busy}
+                <Pressable style={[s.spSend, (!chosen || sp.busy) && s.spSendOff]}
+                  disabled={!chosen || sp.busy}
                   onPress={async () => {
                     setSendPrep((p) => p && { ...p, busy: true });
                     await sendPricedApproval(sp.co, chosen);
                     setSendPrep((p) => p && { ...p, busy: false });
                   }}>
-                  <Text style={s.confirmT}>{T('conf.send')}</Text>
+                  <Icon name="send" size={23} color="#fff" />
+                  <Text style={s.spSendT}>{T('r5c.sendIt')}</Text>
                 </Pressable>
-                <Pressable style={s.coSendRow} onPress={() => setSendPrep(null)}>
-                  <Text style={s.dmeta}>{T('common.cancel')}</Text>
+                {!chosen && <Text style={s.spHint}>{T('r5c.needSigner')}</Text>}
+                <Pressable style={s.spCancel} onPress={() => setSendPrep(null)}>
+                  <Text style={s.spCancelT}>{T('common.cancel')}</Text>
                 </Pressable>
               </>
             )}
@@ -6761,37 +8500,89 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         <View style={{ flex: 1, backgroundColor: 'rgba(13,15,18,0.45)' }}>
         <ScrollView contentContainerStyle={{ padding: 14, paddingTop: 64, paddingBottom: 40 }}>
         <View style={s.sentCard}>
-          <Pressable style={s.sentClose} hitSlop={12} onPress={() => {
-            setSentLink(null); setPhotoNote(null);
-            if (returnRecordId) { const rid = returnRecordId; setReturnRecordId(null); void openRecord(rid); }
-          }}>
-            <Text style={s.sentCloseT}>✕</Text>
-          </Pressable>
-          <View style={s.sentBadge}><Text style={s.sentBadgeIcon}>{sentLink.shared ? '✓' : '↗'}</Text></View>
+          {/* A TITLED BAR, NOT A FLOATING ✕ (hadar's design, 2026-08-08). The close
+              glyph sat alone in the corner with nothing naming the sheet, so the
+              screen's first readable word was its own headline. */}
+          <View style={s.sentBar}>
+            <Text style={s.sentBarT}>{T(sentLink.shared ? 'sent.barSent' : 'sent.barReady')}</Text>
+            <Pressable style={s.sentClose} hitSlop={14} onPress={() => {
+              setSentLink(null); setPhotoNote(null);
+              if (returnRecordId) { const rid = returnRecordId; setReturnRecordId(null); void openRecord(rid); }
+            }}>
+              <Text style={s.sentCloseT}>✕</Text>
+            </Pressable>
+          </View>
+
+          {/* THE MARK. Sent gets the design's signed-document illustration; not-yet
+              keeps the small tinted badge, because the drawing says "done" and this
+              state is not.
+              KNOWN GAP, stated rather than papered over: the design's hand-drawn
+              clipboard-with-signature-and-check does not exist as an asset in this
+              repo. `checklist` is the nearest APPROVED artwork (the transition set's
+              clipboard, pre-coloured sage) and is drawn large here as a stand-in.
+              Drop the real drawing into assets/icons and change the name — nothing
+              else about this block needs to move.
+
+              Neither is a text character any more: `↗` and `✓` were rendered in
+              Barlow, which has neither, so iOS fell back to the emoji font and drew a
+              blue-and-white system tile in the middle of a cream sheet. */}
+          {sentLink.shared ? (
+            <View style={s.sentArt}><Icon name="checklist" size={104} /></View>
+          ) : (
+            <View style={s.sentBadge}><Icon name="send" size={29} color="#1A7F37" /></View>
+          )}
+
           <Text style={s.sentH}>{T(sentLink.shared ? 'sent.title' : 'sent.readyTitle')}</Text>
           <Text style={s.sentSub}>{T(sentLink.shared ? 'sent.waiting' : 'sent.readySub')}</Text>
 
+          {/* THE ROWS ARE STACKED, NOT OPPOSED. Label over value with a glyph in the
+              left gutter — the design's shape, and the one that survives real data:
+              the old label-left / value-right row right-aligned every value, so a
+              two-line scope came out ragged-left and collided with its own price. */}
           <View style={s.sentRows}>
-            {!!sentLink.jobName && (<View style={s.sentRow}>
-              <Text style={s.sentLab}>{T('sent.job')}</Text>
-              <Text style={s.sentVal} numberOfLines={1}>{sentLink.jobName}</Text>
-            </View>)}
-            {!!sentLink.scope && (<View style={s.sentRow}>
-              <Text style={s.sentLab}>{T('sent.request')}</Text>
-              <Text style={s.sentVal} numberOfLines={1}>
-                {sentLink.scope}{sentLink.amount ? ` · ${sentLink.amount}` : ''}
-              </Text>
-            </View>)}
-            {!!sentLink.sentTo && (<View style={s.sentRow}>
-              <Text style={s.sentLab}>{T('sent.to')}</Text>
-              <Text style={s.sentVal} numberOfLines={1}>
-                {sentLink.sentTo}{sentLink.atMs
-                  ? ` · ${new Date(sentLink.atMs).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
-                  : ''}
-              </Text>
-            </View>)}
-            <View style={s.sentRow}>
-              <Text style={s.sentLab}>{T('sent.status')}</Text>
+            {!!sentLink.jobName && (
+              <View style={s.sentRow}>
+                <Icon name="job" size={18} color="#9AA1A8" />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.sentLab}>{T('sent.job')}</Text>
+                  <Text style={s.sentVal} numberOfLines={2}>{sentLink.jobName}</Text>
+                </View>
+              </View>
+            )}
+            {/* THE MONEY SITS ALONE ON THE RIGHT (hadar's design, 2026-08-07). It was
+                appended to the scope with a middle dot, which made the one number the
+                client is agreeing to the tail of a sentence. */}
+            {!!sentLink.scope && (
+              <View style={s.sentRow}>
+                <Icon name="doc" size={18} color="#9AA1A8" />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.sentLab}>{T('sent.request')}</Text>
+                  <Text style={s.sentVal} numberOfLines={2}>{sentLink.scope}</Text>
+                </View>
+                {!!sentLink.amount && <Text style={s.sentAmt}>{sentLink.amount}</Text>}
+              </View>
+            )}
+            {!!sentLink.sentTo && (
+              <View style={s.sentRow}>
+                <Icon name="person" size={18} color="#9AA1A8" />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.sentLab}>{T('sent.to')}</Text>
+                  <Text style={s.sentVal} numberOfLines={1}>{sentLink.sentTo}</Text>
+                  {/* THE TIME ON ITS OWN LINE, as the design draws it. It was glued to
+                      the name with a middle dot, so a long name pushed the one fact
+                      that says WHEN this went out off the end of the row. */}
+                  {!!sentLink.atMs && (
+                    <Text style={s.sentWhen}>
+                      {new Date(sentLink.atMs).toLocaleString(undefined,
+                        { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            )}
+            {/* No glyph on Status — the chip is the mark. */}
+            <View style={[s.sentRow, s.sentRowLast]}>
+              <Text style={[s.sentLab, { flex: 1 }]}>{T('sent.status')}</Text>
               <View style={s.sentChip}><Text style={s.sentChipT}>
                 {T(sentLink.shared ? 'sent.waitingChip' : 'sent.notSentChip')}</Text></View>
             </View>
@@ -6799,14 +8590,26 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
           {photoNote && <Text style={s.cardNote}>{photoNote}</Text>}
 
+          {/* THE ORDER IS: DO THE ACT, THEN LEAVE (hadar, 2026-08-08). "View request"
+              used to sit ABOVE the send button — a bordered pill between the sentence
+              telling him to tap Send and the button that sends. The one thing this
+              sheet exists for was the third control down the screen. */}
+
+          {/* ONCE IT HAS GONE, THE SEND CONTROLS GO (hadar's design, 2026-08-08: the
+              sent state carries "View request" and nothing else). Both stayed on
+              screen after a successful send, the loud one still saying "Text it to
+              Dave now" over a status chip reading "Waiting for a yes" — an invitation
+              to send the same document twice. Re-sending is not lost: the record's
+              Remind (R8) owns it, with the backoff rules a raw re-send has not got. */}
+
           {/* AUTOMATIC SMS (REQ-VAL8) — one tap texts the link via Twilio when we
               have the recipient's number. Falls back to the manual share below if it
               is not configured/deployed, so the link can ALWAYS reach the client. */}
-          {!!sentLink.phone && sentLink.url && (
+          {!sentLink.shared && !!sentLink.phone && sentLink.url && (
             <Pressable style={s.confirmWide} onPress={async () => {
               const r = await sendSms(connector.client, sentLink.phone as string,
                 `${sentLink.shown}\n\n${sentLink.url}`);
-              if (!r.ok) { setUi({ k: 'refused', why: `Couldn’t text it automatically (${r.reason}). Use “Send by text” below.` }); return; }
+              if (!r.ok) { setUi({ k: 'refused', why: T('sent.autoFailed') }); return; }
               setSentLink((sl) => sl && { ...sl, shared: true });
             }}>
               <Text style={s.confirmT}>{T({ k: 'sent.textAuto', p: { name: sentLink.sentTo ?? '' } } as any)}</Text>
@@ -6815,15 +8618,41 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
           {/* The link goes to the client by TEXT — a link the contractor sends
               themselves arrives from a number the client recognises, not spam
-              (REQ-VAL8). The always-works manual path. */}
-          <Pressable style={sentLink.phone ? s.coSendRow : s.confirmWide} onPress={async () => {
-            const r = await shareLink(sentLink.url, sentLink.shown);
-            if (!r.ok) setUi({ k: 'refused', why: r.reason ?? 'could not share' });
-            // Only NOW has the link reached the client — flip to the sent state.
-            else setSentLink((sl) => sl && { ...sl, shared: true });
-          }}>
-            <Text style={sentLink.phone ? s.dmeta : s.confirmT}>{T(sentLink.shared ? 'sent.shareAgain' : 'sent.share')}</Text>
-          </Pressable>
+              (REQ-VAL8). The always-works manual path.
+
+              ITS LABEL DEPENDS ON WHETHER THE BUTTON ABOVE EXISTS. With a number on
+              file the screen showed "Text it to hadar now →" and, under it, "Send by
+              text →" — two controls claiming the same job, and the quiet one looked
+              like the plain-language version of the loud one. It is not: it is the
+              route out through the phone's own share sheet, which is why it survives
+              (mandate #7 — the link must be able to reach the client with nothing
+              configured). So when both are on screen this one says it is the OTHER
+              way, not the same way. */}
+          {!sentLink.shared && (
+            <Pressable style={sentLink.phone ? s.coSendRow : s.confirmWide} onPress={async () => {
+              const r = await shareLink(sentLink.url, sentLink.shown);
+              if (!r.ok) setUi({ k: 'refused', why: r.reason ?? 'could not share' });
+              // Only NOW has the link reached the client — flip to the sent state.
+              else setSentLink((sl) => sl && { ...sl, shared: true });
+            }}>
+              <Text style={sentLink.phone ? s.dmeta : s.confirmT}>
+                {T(sentLink.phone ? 'sent.shareOther' : 'sent.share')}
+              </Text>
+            </Pressable>
+          )}
+
+          {/* VIEW REQUEST — the way OUT. It opens the extra's record, which is where
+              the answer will arrive, so the contractor leaves this screen looking at
+              the thing he is now waiting on rather than at Home. */}
+          {!!returnRecordId && (
+            <Pressable style={s.sentView} onPress={() => {
+              const rid = returnRecordId;
+              setSentLink(null); setPhotoNote(null); setReturnRecordId(null);
+              void openRecord(rid);
+            }}>
+              <Text style={s.sentViewT}>{T('sent.viewRequest')}</Text>
+            </Pressable>
+          )}
 
           <Text style={s.sentFoot}>{T('sent.foot')}</Text>
         </View>
@@ -6861,28 +8690,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   );
 }
 
-/** Change-order status → its notation chip (prototype c4). Muted ochre (pending) needs
-    dark text to stay legible; everything else is white-on-colour. */
-/** Change-order status → its notation chip (prototype c4). Muted ochre (pending) needs
- *  dark text to stay legible; everything else is white-on-colour.
- *  Takes a DERIVED status (extrastatus.ts), never the stored one — `discussing` does
- *  not appear in change_order.status and never should: a status two writers can move
- *  is a status nobody can rely on (220_question_path). */
-function coChip(status: LedgerStatus): { label: string; bg: any; dark: boolean } {
-  // COLOUR + ICON + LABEL — never colour alone (kit status rule; the ICP is often
-  // colour-blind and reading in a second language, so the glyph and the word carry
-  // the state, colour only reinforces). Emoji is the app's icon layer (no SVG lib).
-  switch (status) {
-    case 'approved':   return { label: '✓ ' + T('co.chip.approved'),   bg: s.chipApproved, dark: false };
-    case 'sent':       return { label: '⏳ ' + T('co.chip.sent'),       bg: s.chipPending,  dark: true  };
-    // Its own colour, not ink: 'superseded' already owns ink, and two statuses that
-    // look identical is the failure a status chip exists to prevent.
-    case 'discussing': return { label: '💬 ' + T('co.chip.discussing'), bg: s.chipDiscussing, dark: false };
-    case 'declined':   return { label: '✕ ' + T('co.chip.declined'),   bg: s.chipDeclined, dark: false };
-    case 'superseded': return { label: '↻ ' + T('co.chip.superseded'), bg: s.chipRevised,  dark: false };
-    default:           return { label: '✎ ' + T('co.chip.draft'),      bg: s.chipDraft,    dark: false };
-  }
-}
+// `coChip` lived here: the FILLED status pill, the feed's own status vocabulary.
+// Removed 2026-08-12 when the feed adopted Home's outlined `stateChip` and left it
+// with no callers. One vocabulary for one object was the point of the change.
 
 // Light theme. Palette (GitHub-light / CompanyCam-ish): page #f6f8fa, surfaces
 // #ffffff, borders #d0d7de, text #1f2328 / #57606a / #8c959f, brand green #1f883d,
@@ -6939,7 +8749,13 @@ const s = StyleSheet.create({
     paddingHorizontal: 8 },
   trSafeT: { fontFamily: F.body, fontSize: 14, color: C.steel, lineHeight: 20, flexShrink: 1 },
 
-  c: { flex: 1, paddingTop: 72, paddingHorizontal: 20, backgroundColor: '#F7F4EE' },
+  // 16, TO MATCH HOME (hadar, 2026-08-11: "inconsistent with the rest of the pages").
+  // Home puts no padding on its container and gives every block `marginHorizontal:
+  // 16` — the CTA card, the summary row, the extras group all sit on that gutter. The
+  // job screen padded its container 20 instead, so its content was 8pt narrower
+  // overall and every card edge missed Home's by 4pt. One number, and now the two
+  // screens line up when you flick between them.
+  c: { flex: 1, paddingTop: 72, paddingHorizontal: 16, backgroundColor: '#F7F5F0' },
   h: { color: '#151A1E', fontFamily: 'Barlow_700Bold', fontSize: 30, letterSpacing: -0.2, marginBottom: 18 },
   btn: { backgroundColor: '#151A1E', paddingVertical: 28, borderRadius: 18, alignItems: 'center' },
   btnRec: { backgroundColor: '#8B5148' },
@@ -6965,22 +8781,39 @@ const s = StyleSheet.create({
   rowS: { color: '#8c959f', fontSize: 11, fontFamily: 'Menlo', marginTop: 2 },
   card: { backgroundColor: '#dafbe1', borderColor: '#2da44e', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16 },
   // ── "Sent for approval" screen (mockup 2026-07-24) ─────────────────────────
-  sentCard: { backgroundColor: '#fff', borderRadius: 18, padding: 20, paddingTop: 44, alignItems: 'center' },
-  sentClose: { position: 'absolute', top: 12, right: 14, width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  sentCard: { backgroundColor: '#fff', borderRadius: 18, padding: 20, paddingTop: 8, alignItems: 'center' },
+  // The bar: title centred, ✕ absolutely placed so the title stays centred on the
+  // CARD rather than on the space left over beside the button.
+  sentBar: { alignSelf: 'stretch', height: 44, alignItems: 'center', justifyContent: 'center' },
+  sentBarT: { fontFamily: 'Barlow_700Bold', fontSize: 16.5, color: '#151A1E' },
+  sentClose: { position: 'absolute', right: 0, top: 4, width: 36, height: 36,
+    alignItems: 'center', justifyContent: 'center' },
   sentCloseT: { fontSize: 18, color: '#8A93A0' },
+  sentArt: { marginTop: 6, marginBottom: 14, alignItems: 'center', justifyContent: 'center' },
   sentBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#E9F6ED',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  sentBadgeIcon: { fontSize: 30, color: '#1A7F37', fontFamily: 'Barlow_700Bold' },
-  sentH: { fontFamily: 'Barlow_700Bold', fontSize: 22, color: '#151A1E',
-    letterSpacing: -0.2 },
-  sentSub: { fontFamily: 'Barlow_400Regular', fontSize: 15, color: '#6B7280', marginTop: 2, marginBottom: 16 },
+    alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 12 },
+  sentAmt: { fontFamily: 'Oswald_700Bold', fontSize: 19, color: '#131110', marginLeft: 12 },
+  sentWhen: { fontFamily: 'Barlow_400Regular', fontSize: 13.5, color: '#8A93A0', marginTop: 1 },
+  // `alignSelf: 'stretch'` because sentCard centres its children: without it this
+  // button shrank to the width of the words "View request" and floated mid-card,
+  // reading as a chip rather than as one of the two ways off this screen.
+  sentView: { alignSelf: 'stretch', marginTop: 14, minHeight: 52, borderRadius: 14,
+    borderWidth: 1.5, borderColor: '#d8d2cb', alignItems: 'center', justifyContent: 'center' },
+  sentViewT: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#131110' },
+  // CONDENSED CAPS, the design's headline. It was sentence-case Barlow at 22, the
+  // same weight as a row value, so the sheet had no clear top.
+  sentH: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 28, color: '#151A1E',
+    textTransform: 'uppercase', letterSpacing: 0.6, textAlign: 'center' },
+  sentSub: { fontFamily: 'Barlow_400Regular', fontSize: 15, color: '#6B7280',
+    marginTop: 2, marginBottom: 18, textAlign: 'center' },
   sentRows: { alignSelf: 'stretch', borderWidth: 1, borderColor: '#EEEFEC', borderRadius: 12, marginBottom: 16 },
-  sentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  // Glyph gutter · stacked label/value · optional trailing amount or chip.
+  sentRow: { flexDirection: 'row', alignItems: 'center', gap: 11,
     paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#F2F3F0' },
+  sentRowLast: { borderBottomWidth: 0 },
   sentLab: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, color: '#8A93A0',
     textTransform: 'uppercase', letterSpacing: 0.8 },
-  sentVal: { flex: 1, textAlign: 'right', marginLeft: 12, fontFamily: 'Barlow_600SemiBold',
-    fontSize: 14.5, color: '#151A1E' },
+  sentVal: { fontFamily: 'Barlow_600SemiBold', fontSize: 15, lineHeight: 20, color: '#151A1E' },
   sentChip: { borderRadius: 8, borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FEF6E7',
     paddingVertical: 4, paddingHorizontal: 10 },
   sentChipT: { fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#B26A00' },
@@ -7077,19 +8910,13 @@ const s = StyleSheet.create({
   chipText: { color: '#fff', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5,
     textTransform: 'uppercase', letterSpacing: 0.9 },
   chipTextDark: { color: '#151A1E' },
-  chipApproved: { backgroundColor: '#536B49' },
-  chipPending: { backgroundColor: '#A47A3F' },
-  chipDeclined: { backgroundColor: '#8B5148' },
-  chipRevised: { backgroundColor: '#151A1E' },
-  // R7 'discussing'. Orange = "this is the one to act on", which is exactly what an
-  // unanswered client question is. NOT ink — chipRevised already owns ink, and two
-  // statuses that look identical defeat the point of a chip.
-  chipDiscussing: { backgroundColor: '#4E6243' },
+  // The six FILLED status swatches (chipApproved/Pending/Declined/Revised/Discussing/
+  // Draft) were `coChip`'s palette and went with it, 2026-08-12. `chipBase`/`chipText`
+  // stay: they still dress other chips.
   bell: { fontSize: 17, opacity: 0.55, paddingHorizontal: 6 },
   bellOn: { fontSize: 15, color: '#fff', backgroundColor: '#4E6243', overflow: 'hidden',
             borderRadius: 11, paddingHorizontal: 8, paddingVertical: 2,
             fontFamily: 'BarlowCondensed_700Bold' },
-  chipDraft: { backgroundColor: '#5E666E' },
 
   hNow: { color: '#536B49', fontSize: 14, marginBottom: 4 },
   hOld: { color: '#8c959f', fontSize: 13, marginBottom: 4, textDecorationLine: 'line-through' },
@@ -7261,8 +9088,13 @@ const s = StyleSheet.create({
   hdrBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   hdrIcon: { fontSize: 22, color: '#131110' },
   hdrTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 18, color: '#131110' },
+  // RED (hadar 2026-08-12), not the mint it was. Green is this app's colour for SETTLED
+  // — the approved chip, the recovered pill, the signed stamp — so a green count on the
+  // bell read as "things went well" at a glance, which is the opposite of what a badge
+  // is for. Red is the app's one alarm colour (#cf222e, the palette's), used nowhere
+  // else on this header, and it matches the OS badge sitting on the icon.
   hdrBadge: { position: 'absolute', top: 3, right: 3, minWidth: 18, height: 18, borderRadius: 9,
-    backgroundColor: '#157a47', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+    backgroundColor: '#cf222e', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   hdrBadgeT: { color: '#fff', fontSize: 11, fontFamily: 'Inter_700Bold' },
   heroWrap: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 14 },
   // Ratios measured off the mockup (hadar 2026-07-27: "the ratios in the header are
@@ -7277,6 +9109,46 @@ const s = StyleSheet.create({
   // Hero illustration — the hand-drawn house (assets/house-hero.png), top-right.
   // Its cream ground (#faf7f3) matches the hero bg so it blends without a seam.
   houseArt: { position: 'absolute', right: -8, top: 0, width: 210, height: 168 },
+  // ── first-run Home (no extras yet) ──
+  // The hero keeps its geometry and swaps its content. Slightly taller, because two
+  // lines of headline plus three of lede is more than the label/figure/sub it replaces.
+  heroWrapEmpty: { paddingTop: 10, paddingBottom: 22 },
+  // The art moves DOWN and shrinks a touch: with a headline this tall the two would
+  // otherwise fight for the same corner. It stays right-anchored — same identity, same
+  // side of the screen, in both states.
+  houseArtEmpty: { top: 26, width: 196, height: 156 },
+  // 44pt Oswald, tight leading, one word per line by hand. The same family and weight
+  // as the money figure it stands in for, so the two states read as one screen.
+  emptyHead: { fontFamily: 'Oswald_700Bold', fontSize: 44, lineHeight: 46, color: '#131110',
+    textTransform: 'uppercase', letterSpacing: -0.5 },
+  // Deliberately narrow (maxWidth) rather than full-bleed: it wraps to three short
+  // lines clear of the house instead of running under it.
+  emptyLede: { fontFamily: 'Inter_400Regular', fontSize: 17, lineHeight: 24, color: '#6b625b',
+    maxWidth: 240, marginTop: 14 },
+  // The standing-in card. Hairline and cream, NOT the black CTA treatment — it is a
+  // statement about the future, and the only thing on this screen to press is above it.
+  emptyCard: { flexDirection: 'row', alignItems: 'center', gap: 16, marginHorizontal: 16,
+    backgroundColor: '#fdfbf8', borderWidth: 1, borderColor: '#ece5de', borderRadius: 16,
+    paddingVertical: 20, paddingHorizontal: 18 },
+  emptyDisc: { width: 66, height: 66, borderRadius: 33, backgroundColor: '#e4f4eb',
+    alignItems: 'center', justifyContent: 'center' },
+  emptyCardT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#131110', letterSpacing: -0.2 },
+  emptyCardS: { fontFamily: 'Inter_400Regular', fontSize: 14.5, lineHeight: 20, color: '#6b625b',
+    marginTop: 4 },
+  emptyLearn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
+    alignSelf: 'center', marginTop: 22, paddingVertical: 10, paddingHorizontal: 14 },
+  emptyLearnT: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#1e6b3a' },
+  // ── how it works ──
+  howStep: { flexDirection: 'row', gap: 14, marginBottom: 20 },
+  howNum: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#131110',
+    alignItems: 'center', justifyContent: 'center' },
+  howNumT: { fontFamily: 'Oswald_700Bold', fontSize: 16, color: '#fff' },
+  howStepT: { fontFamily: 'Inter_700Bold', fontSize: 16.5, color: '#131110' },
+  howStepS: { fontFamily: 'Inter_400Regular', fontSize: 14.5, lineHeight: 21, color: '#6b625b',
+    marginTop: 3 },
+  howFoot: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 20, color: '#8a827a',
+    marginTop: 2, marginBottom: 10 },
+
   recoverPill: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, alignSelf: 'flex-start',
     backgroundColor: '#e4f4eb', borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 },  // mint-100
   recoverPillT: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: '#157a47' },
@@ -7341,9 +9213,15 @@ const s = StyleSheet.create({
   tab: { alignItems: 'center', justifyContent: 'center', minWidth: 64, gap: 2 },
   tabIcon: { fontSize: 20, opacity: 0.45 },
   tabIconOn: { opacity: 1 },
-  tabLab: { fontFamily: 'Barlow_500Medium', fontSize: 11, color: '#8A93A0' },
-  tabLabOn: { color: '#151A1E' },
-  fab: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#151A1E',
+  tabLab: { fontFamily: 'Inter_500Medium', fontSize: 11.5, color: '#7A8085' },
+  tabLabOn: { color: '#2F5233', fontFamily: 'Inter_600SemiBold' },
+  // The selected bar under the label. Colour never alone (kit rule) — but here the
+  // bar IS the second signal, so a green label over a green rule reads as chosen
+  // even to someone who cannot separate the two greens from the greys.
+  tabUnder: { height: 3, borderRadius: 2, backgroundColor: '#2F5233',
+    alignSelf: 'stretch', marginTop: 5, marginHorizontal: 10 },
+  fab: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#FFFFFF',
+    borderWidth: 1.5, borderColor: '#C7CFC3',
     alignItems: 'center', justifyContent: 'center', marginTop: -18,
     shadowColor: '#151A1E', shadowOpacity: 0.4, shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 }, elevation: 6 },
@@ -7467,6 +9345,334 @@ const s = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 1.4 },
   recVal: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 28, color: '#fff', marginTop: 2 },
   jobsWrap: { flex: 1, paddingHorizontal: 18, paddingTop: 4 },
+  // ── job picker (hadar's design, 2026-08-07) — light, calm, one question ──────
+  jpC: { flex: 1, backgroundColor: '#faf7f3', paddingTop: 54 },
+  jpTitle: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 36, color: '#131110' },
+  jpSub: { fontFamily: 'Inter_400Regular', fontSize: 15.5, color: '#6b625b', marginTop: 4 },
+  jpSearchWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16,
+    backgroundColor: '#fff', borderColor: '#e2dbd4', borderWidth: 1, borderRadius: 12,
+    paddingHorizontal: 14, minHeight: 52 },
+  jpSearch: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 16, color: '#131110', paddingVertical: 12 },
+  jpNew: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12,
+    backgroundColor: '#eef2ea', borderColor: '#4E6243', borderWidth: 1.5, borderStyle: 'dashed',
+    borderRadius: 14, padding: 14 },
+  jpNewPlus: { width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: '#4E6243',
+    alignItems: 'center', justifyContent: 'center' },
+  jpNewPlusT: { fontFamily: 'Inter_400Regular', fontSize: 20, color: '#4E6243', lineHeight: 24 },
+  jpNewT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#3d5236' },
+  jpNewSub: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#5d6b56', marginTop: 1 },
+  jpSecHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 24 },
+  jpSecT: { fontFamily: 'Inter_700Bold', fontSize: 19, color: '#131110' },
+  jpGps: { backgroundColor: '#e7ece2', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
+  jpGpsT: { fontFamily: 'Inter_600SemiBold', fontSize: 12.5, color: '#4E6243' },
+  jpSecSub: { fontFamily: 'Inter_400Regular', fontSize: 14.5, color: '#6b625b', marginTop: 2, marginLeft: 25 },
+  jpRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10,
+    backgroundColor: '#fdfbf9', borderColor: '#e9e2db', borderWidth: 1, borderRadius: 12,
+    paddingVertical: 14, paddingHorizontal: 14 },
+  jpAddr: { fontFamily: 'Inter_700Bold', fontSize: 16.5, color: '#131110' },
+  jpName: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#6b625b', marginTop: 2 },
+  jpDist: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  jpDistT: { fontFamily: 'Inter_600SemiBold', fontSize: 14.5, color: '#4a4a46' },
+  jpChev: { fontFamily: 'Inter_400Regular', fontSize: 22, color: '#b3aaa2' },
+  jpEmpty: { fontFamily: 'Inter_400Regular', fontSize: 15, color: '#8c959f', marginTop: 24, textAlign: 'center' },
+  jpTip: { flexDirection: 'row', gap: 12, marginTop: 26, backgroundColor: '#eef2ea',
+    borderRadius: 14, padding: 14 },
+  jpTipH: { fontFamily: 'Inter_700Bold', fontSize: 15.5, color: '#4E6243' },
+  jpTipT: { fontFamily: 'Inter_400Regular', fontSize: 14.5, lineHeight: 20, color: '#3d4a38', marginTop: 2 },
+  // ── JOB SCREEN — measured off the design render, not eyeballed (2026-08-11) ──
+  //
+  // Every number below came from the same 393pt-wide render, so the proportions hold
+  // together instead of each control being nudged on its own. The earlier pass was
+  // built from a description of the design and drifted on all of it at once: radii
+  // half again too round, cards a third too tall, filled pills where the design has
+  // outlines, and cents on figures the design writes whole.
+  //
+  // THE PAGE IS THE BACKGROUND. Nothing on this screen paints its own white except
+  // the change-order cards and the stat cards; the header and the hero sit on the
+  // paper, divided by hairlines. A white header on a cream page drew a band across
+  // the top that nothing in the design has.
+
+  // Header: transparent, one hairline under it.
+  jsHdr: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 0,
+    paddingTop: 6, paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#DCD9D1' },
+  jsHdrBack: { width: 26, height: 38, alignItems: 'center', justifyContent: 'center' },
+  // Centred by taking the row's spare width, so the back chevron and the envelope
+  // flank it evenly without either being pushed off on a narrow screen.
+  jsHdrTitle: { flex: 1, minWidth: 0, textAlign: 'center',
+    fontFamily: 'Inter_600SemiBold', fontSize: 18, color: '#131110' },
+  jsHdrMail: { width: 28, height: 38, alignItems: 'center', justifyContent: 'center' },
+
+  jsHero: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 12 },
+  jsHeroMap: { width: 96, height: 74, alignItems: 'center', justifyContent: 'center',
+    borderRadius: 8, overflow: 'hidden' },
+  jsHeroName: { fontFamily: 'Inter_700Bold', fontSize: 24, lineHeight: 29, color: '#131110',
+    letterSpacing: -0.5 },
+  jsHeroAddr: { fontFamily: 'Inter_400Regular', fontSize: 13.5, lineHeight: 18,
+    color: '#5f5a53', marginTop: 3 },
+  jsHeroSub: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#8c959f', marginTop: 4 },
+
+  // Stat cards: SHORTER (71pt, was 96), radius 8 (was 14), content packed left.
+  // Measured off the render: the screen inside the bezel is 730px for 393pt, so the
+  // scale is 1.858 and every figure below is a divided measurement, not a guess.
+  //   card       220 x 132 px  ->  118 x 71 pt
+  //   disc        44 px        ->   24 pt
+  //   left inset  20 px        ->   11 pt
+  //   numeral cap 35 px        ->   26 pt type
+  // WHAT WAS ACTUALLY WRONG: the label. At 11.5pt "Awaiting response" needs ~98pt
+  // and the card gives it ~83, so the middle card wrapped to two lines while the
+  // outer two did not — three cards the same size holding different shapes, which is
+  // what reads as "designed differently" before you can say why. It is one line in
+  // the design and it is one line now, which sets the type size rather than taste.
+  jlNew: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
+    minHeight: 50, borderRadius: 8, backgroundColor: '#2F4F2A', marginTop: 12 },
+  jlNewT: { fontFamily: 'Inter_700Bold', fontSize: 16, color: '#fff' },
+  // ── notifications ──
+  tabBadge: { position: 'absolute', top: -4, right: -8, minWidth: 17, height: 17,
+    borderRadius: 9, backgroundColor: '#C2610C', alignItems: 'center',
+    justifyContent: 'center', paddingHorizontal: 4 },
+  tabBadgeT: { fontFamily: 'Inter_700Bold', fontSize: 10.5, color: '#fff' },
+  ntPills: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 4 },
+  ntPill: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 15, borderRadius: 999,
+    borderWidth: 1, borderColor: '#D6D2C7', backgroundColor: 'transparent' },
+  ntPillOn: { backgroundColor: '#131110', borderColor: '#131110' },
+  ntPillT: { fontFamily: 'Inter_500Medium', fontSize: 13.5, color: '#3f423e' },
+  ntPillTOn: { color: '#FFFFFF', fontFamily: 'Inter_600SemiBold' },
+  ntPerm: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: '#F1F4EF',
+    borderRadius: 8, padding: 12, marginTop: 10 },
+  ntPermT: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 13, color: '#3d4a38' },
+  ntPermA: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#2F5233' },
+  ntGroup: { fontFamily: 'Inter_500Medium', fontSize: 13.5, color: '#6b625b',
+    marginTop: 18, marginBottom: 8 },
+  ntCard: { backgroundColor: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#DEDBD3', borderRadius: 12, overflow: 'hidden' },
+  ntRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 13 },
+  ntRowDiv: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#EBE8E1' },
+  ntTitle: { fontFamily: 'Inter_700Bold', fontSize: 15.5, color: '#131110' },
+  ntBody: { fontFamily: 'Inter_400Regular', fontSize: 13.5, lineHeight: 18.5,
+    color: '#5f5a53', marginTop: 2 },
+  ntRight: { alignItems: 'flex-end', gap: 8 },
+  ntWhen: { fontFamily: 'Inter_400Regular', fontSize: 12.5, color: '#8c959f' },
+  ntDot: { width: 9, height: 9, borderRadius: 5 },
+  ntDotUnread: { backgroundColor: '#2F5233' },
+  ntDotRead: { backgroundColor: '#D2CEC6' },
+  ntEnd: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 22 },
+  ntEndRule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: '#DEDBD3' },
+  ntEndT: { fontFamily: 'Inter_400Regular', fontSize: 13.5, color: '#8c959f' },
+  ntMarkAll: { minHeight: 46, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  ntMarkAllT: { fontFamily: 'Inter_600SemiBold', fontSize: 14.5, color: '#2F5233' },
+
+  // ── job created sheet ──
+  jcWrap: { flex: 1, backgroundColor: 'rgba(20,22,20,0.45)', alignItems: 'center',
+    justifyContent: 'center', padding: 24 },
+  jcBox: { width: '100%', maxWidth: 380, backgroundColor: '#FFFFFF', borderRadius: 16,
+    paddingHorizontal: 22, paddingTop: 26, paddingBottom: 20, alignItems: 'center' },
+  jcX: { position: 'absolute', top: 10, right: 12, width: 36, height: 36,
+    alignItems: 'center', justifyContent: 'center' },
+  jcXT: { fontSize: 19, color: '#8A93A0' },
+  jcTitle: { fontFamily: 'Inter_700Bold', fontSize: 25, color: '#131110', marginTop: 10,
+    letterSpacing: -0.5 },
+  jcSub: { fontFamily: 'Inter_400Regular', fontSize: 14.5, lineHeight: 20, color: '#5f5a53',
+    textAlign: 'center', marginTop: 8, marginBottom: 20 },
+  jcPrimary: { alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'center', gap: 9, minHeight: 54, borderRadius: 8,
+    backgroundColor: '#2F4F2A' },
+  jcPrimaryT: { fontFamily: 'Inter_700Bold', fontSize: 16.5, color: '#fff' },
+  jcSecondary: { alignSelf: 'stretch', minHeight: 50, borderRadius: 8, borderWidth: 1.5,
+    borderColor: '#2F4F2A', alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  jcSecondaryT: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#2F4F2A' },
+
+  // ── new job screen shell ──
+  // Was `s.c` (flex + paddingTop 72 + padding 16). Split in two because the padding now
+  // belongs to the SCROLL CONTENT and the flex to the keyboard-avoiding box — a
+  // ScrollView with padding on the outer view clips its own content instead of scrolling
+  // it. flexGrow keeps the `flex: 1` spacer working, so on a tall phone with no keyboard
+  // the footer still sits at the bottom rather than riding up under the note.
+  njScreen: { flex: 1, backgroundColor: '#F7F5F0' },
+  njScroll: { flexGrow: 1, paddingTop: 72, paddingHorizontal: 16, paddingBottom: 24 },
+
+  // ── company logo ──
+  logoPreviewWrap: { alignItems: 'center', marginTop: 4, marginBottom: 14 },
+  // Big enough to judge by. The whole question this sheet answers is "is this the mark
+  // my clients should see?", and that cannot be answered off a 44pt thumbnail.
+  logoPreview: { width: 132, height: 132, borderRadius: 14, borderWidth: 1,
+    borderColor: '#ece5de', backgroundColor: '#fff' },
+  logoPreviewEmpty: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#fdfbf8' },
+  logoNote: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 20, color: '#6b625b',
+    textAlign: 'center', marginBottom: 18 },
+  logoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
+    minHeight: 52, borderRadius: 10, backgroundColor: '#2F4F2A' },
+  logoBtnT: { fontFamily: 'Inter_700Bold', fontSize: 16.5, color: '#fff' },
+  logoRemove: { alignItems: 'center', justifyContent: 'center', minHeight: 48, marginTop: 4 },
+  logoRemoveT: { fontFamily: 'Inter_600SemiBold', fontSize: 15.5, color: '#cf222e' },
+
+  // ── edit acknowledgement ──
+  ackWrap: { flex: 1, backgroundColor: 'rgba(20,22,20,0.35)', alignItems: 'center',
+    justifyContent: 'center', padding: 30 },
+  ackBox: { width: '100%', maxWidth: 320, backgroundColor: '#FFFFFF', borderRadius: 16,
+    paddingHorizontal: 22, paddingTop: 22, paddingBottom: 20, alignItems: 'center' },
+  // A refusal is not a confirmation wearing a different icon: it carries the warning
+  // hairline so the two are told apart before either is read.
+  ackBoxNo: { borderWidth: 1.5, borderColor: '#E4A33B' },
+  ackTitle: { fontFamily: 'Inter_700Bold', fontSize: 18.5, color: '#131110', marginTop: 10,
+    textAlign: 'center', letterSpacing: -0.3 },
+  // The echoed value. Bigger and darker than a caption because on the cost sheet THIS
+  // is the line worth reading — the title only names which field moved.
+  ackDetail: { fontFamily: 'Inter_600SemiBold', fontSize: 16, lineHeight: 22, color: '#2F4F2A',
+    textAlign: 'center', marginTop: 6 },
+  ackBtn: { alignSelf: 'stretch', minHeight: 46, borderRadius: 8, borderWidth: 1.5,
+    borderColor: '#2F4F2A', alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+  ackBtnT: { fontFamily: 'Inter_600SemiBold', fontSize: 15.5, color: '#2F4F2A' },
+
+  // ── new job (design pass, 2026-08-12) ──
+  njTitle: { fontFamily: 'Inter_700Bold', fontSize: 27, color: '#131110',
+    letterSpacing: -0.6, marginTop: 4 },
+  njSub: { fontFamily: 'Inter_400Regular', fontSize: 14.5, lineHeight: 20,
+    color: '#5f5a53', marginTop: 6, marginBottom: 22 },
+  njField: { marginBottom: 16 },
+  njLab: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#3f423e', marginBottom: 7 },
+  njInput: { minHeight: 52, borderRadius: 8, borderWidth: 1, borderColor: '#DEDBD3',
+    backgroundColor: '#FFFFFF', paddingHorizontal: 14,
+    fontFamily: 'Inter_400Regular', fontSize: 16, color: '#131110' },
+  njNote: { flexDirection: 'row', gap: 10, alignItems: 'flex-start',
+    backgroundColor: '#F1F4EF', borderRadius: 8, padding: 12, marginTop: 2 },
+  njNoteT: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 13.5, lineHeight: 19,
+    color: '#3d4a38' },
+  // The commit sits at the BOTTOM of the screen, where the thumb already is, rather
+  // than immediately under the last field where it competes with the keyboard.
+  njFoot: { paddingBottom: 10 },
+  njCreate: { minHeight: 54, borderRadius: 8, backgroundColor: '#2F4F2A',
+    alignItems: 'center', justifyContent: 'center' },
+  njCreateT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#fff' },
+  njCancel: { minHeight: 46, alignItems: 'center', justifyContent: 'center', marginTop: 6 },
+  njCancelT: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#5f5a53' },
+
+  // ── Jobs list card (design, 2026-08-11) ──
+  jlCard: { flexDirection: 'row', backgroundColor: '#FFFFFF',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: '#DEDBD3', borderRadius: 12,
+    overflow: 'hidden', marginBottom: 12 },
+  jlMap: { width: 104, alignSelf: 'stretch', minHeight: 150, backgroundColor: '#ECEDEA' },
+  jlMapEmpty: { alignItems: 'center', justifyContent: 'center' },
+  jlTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  jlName: { flex: 1, minWidth: 0, fontFamily: 'Inter_700Bold', fontSize: 16.5,
+    lineHeight: 21, color: '#131110', letterSpacing: -0.3 },
+  jlAddr: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#6b625b', marginTop: 3 },
+  jlAct: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  jlActT: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#4a4a46' },
+  jlStats: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 11, paddingTop: 11,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E4E1D9' },
+  jlStat: { flex: 1, alignItems: 'center' },
+  jlStatDiv: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', backgroundColor: '#E4E1D9' },
+  jlStatIco: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  jlStatLab: { fontFamily: 'Inter_400Regular', fontSize: 10.5, color: '#5f5a53', marginTop: 5 },
+  jlStatN: { fontFamily: 'Inter_700Bold', fontSize: 20, marginTop: 2, letterSpacing: -0.4 },
+  jlUnarchive: { minHeight: 40, justifyContent: 'center', marginTop: 6 },
+  jlUnarchiveT: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#4E6243' },
+  jsStats: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  jsStat: { flex: 1, backgroundColor: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#DEDBD3', borderRadius: 8, paddingHorizontal: 11, paddingVertical: 10,
+    minHeight: 71, justifyContent: 'space-between' },
+  jsStatOn: { borderWidth: 1.5, borderColor: '#2F5233' },
+  jsStatTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  jsStatLab: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 10.5, lineHeight: 13,
+    color: '#3f423e', height: 26 },
+  // CENTRED under the label (hadar, 2026-08-11). Left-aligned, a single digit sat
+  // hard against the card's left edge with the whole label above it — the number is
+  // the thing being read and it looked like an afterthought pinned to a corner.
+  jsStatN: { fontFamily: 'Inter_700Bold', fontSize: 26, color: '#2F5233',
+    letterSpacing: -0.8, lineHeight: 30, textAlign: 'center', alignSelf: 'stretch' },
+
+  // Money band: radius 8, peach, one hairline divider.
+  jsMoney: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FBF6EC',
+    borderWidth: 1, borderColor: '#EDE3D2', borderRadius: 8,
+    paddingHorizontal: 14, paddingVertical: 12, marginTop: 9 },
+  jsMoneyCol: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  jsMoneyDiv: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch',
+    backgroundColor: '#E2D6C2', marginHorizontal: 6 },
+  jsMoneyLab: { fontFamily: 'Inter_400Regular', fontSize: 12.5, color: '#5f5a53' },
+  jsMoneyVal: { fontFamily: 'Inter_700Bold', fontSize: 22, color: '#2F5233', marginTop: 1,
+    letterSpacing: -0.6 },
+  jsMoneyWait: { color: '#2F5233' },
+
+  jsH2: { fontFamily: 'Inter_700Bold', fontSize: 21, color: '#131110', marginTop: 16,
+    letterSpacing: -0.4 },
+
+  // Pills: unselected are TRANSPARENT with a hairline — the design has no white
+  // chips on the cream. Selected is the dark green.
+  jsPills: { flexDirection: 'row', gap: 7, paddingVertical: 10, paddingRight: 12 },
+  jsPill: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 15, borderRadius: 999,
+    borderWidth: 1, borderColor: '#D6D2C7', backgroundColor: 'transparent' },
+  jsPillOn: { backgroundColor: '#2F4F2A', borderColor: '#2F4F2A' },
+  jsPillT: { fontFamily: 'Inter_500Medium', fontSize: 13.5, color: '#3f423e' },
+  jsPillTOn: { color: '#FFFFFF', fontFamily: 'Inter_600SemiBold' },
+
+  jsCard: { flexDirection: 'row', gap: 10, backgroundColor: '#FFFFFF', borderWidth: 1,
+    borderColor: '#E4E1D9', borderRadius: 8, padding: 10, marginBottom: 8 },
+  jsThumb: { width: 76, height: 76, borderRadius: 6, backgroundColor: '#EFEBE3' },
+  jsCardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // flexShrink, not flex — the number gives way to the chip rather than the other way
+  // round, and never collapses below a readable width.
+  // THE NUMBER HOLDS ITS WIDTH; THE CHIP IS WHAT GIVES.
+  //
+  // Reversed on 2026-08-13, from a screenshot where the first row read "Change Order
+  // #..." while the row under it read "Change Order #17". The comment above used to
+  // argue the other way, and it had it backwards: the number is the record's
+  // IDENTIFIER — the only thing separating two extras raised the same week on the same
+  // job, which is the exact confusion this card was redesigned to end. The chip can
+  // afford to lose a character because its meaning is carried three other ways: its
+  // colour, its outline, and the filter pill the reader just tapped.
+  jsCardNo: { flexShrink: 0, fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#2F5233' },
+  jsChip: { flexShrink: 1, marginLeft: 'auto', borderRadius: 999, borderWidth: 1,
+    paddingHorizontal: 8, paddingVertical: 3 },
+  jsChipT: { fontFamily: 'Inter_600SemiBold', fontSize: 10.5, letterSpacing: 0.1 },
+  jsCardName: { fontFamily: 'Inter_700Bold', fontSize: 18, lineHeight: 22, color: '#131110',
+    marginTop: 2, letterSpacing: -0.3 },
+  jsCardMeta: { fontFamily: 'Inter_400Regular', fontSize: 12, color: '#6b625b', marginTop: 3 },
+  jsCardSched: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
+  jsCardSchedT: { fontFamily: 'Inter_400Regular', fontSize: 12, color: '#6b625b' },
+  // The second row: meta on the left, price and chevron pinned right. Both hold their
+  // width (flexShrink 0) so the text column is what gives, not the money.
+  jsCardBottom: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: 4 },
+  jsCardPrice: { flexShrink: 0, alignItems: 'flex-end' },
+  jsCardAmt: { fontFamily: 'Inter_700Bold', fontSize: 20, color: '#2F5233', letterSpacing: -0.5 },
+  jsCardAmtL: { fontFamily: 'Inter_400Regular', fontSize: 12, color: '#6b625b', marginTop: 1 },
+  jsChev: { fontFamily: 'Inter_400Regular', fontSize: 20, color: '#b3aaa2', marginTop: 2 },
+  jsEmpty: { fontFamily: 'Inter_400Regular', fontSize: 14.5, color: '#8c959f',
+    textAlign: 'center', paddingVertical: 24 },
+  // ── R5c send sheet (hadar's design, 2026-08-08) ──────────────────────────────
+  // Cream paper, not the old amber `money` box. The amber is spent on the ONE
+  // warning that stops the send, so it means something when it appears.
+  spCard: { backgroundColor: '#FBF9F1', borderRadius: 20, borderWidth: 1,
+    borderColor: '#DDE0CE', padding: 22 },
+  spKicker: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#6F7A5E',
+    textTransform: 'uppercase', letterSpacing: 1.5 },
+  spTitle: { fontFamily: 'Inter_700Bold', fontSize: 29, lineHeight: 35, color: '#131110',
+    marginTop: 8 },
+  spDoc: { fontFamily: 'Inter_400Regular', fontSize: 16, color: '#8A8A80', marginTop: 6 },
+  spSecH: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#6F7A5E',
+    textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 10 },
+  spWarn: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 18,
+    backgroundColor: '#FBEFD8', borderRadius: 12, padding: 14 },
+  spWarnT: { fontFamily: 'Inter_400Regular', fontSize: 15.5, lineHeight: 21, color: '#8A5A11' },
+  spRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14,
+    minHeight: 66, borderWidth: 1.5, borderColor: '#3E4A33', borderRadius: 14,
+    paddingHorizontal: 14, paddingVertical: 10 },
+  spAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#EDEAE2',
+    alignItems: 'center', justifyContent: 'center' },
+  spRowT: { fontFamily: 'Inter_700Bold', fontSize: 18, color: '#131110' },
+  spRowSub: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#6b625b', marginTop: 2 },
+  spChev: { fontFamily: 'Inter_400Regular', fontSize: 24, color: '#3E4A33' },
+  spChangeT: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#4E6243' },
+  spSend: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
+    minHeight: 66, borderRadius: 12, backgroundColor: '#4E6243', marginTop: 18 },
+  // Refused reads as refused. Paired with the `spHint` line below it, which names
+  // the missing thing — a greyed button with no reason is the same dead end.
+  spSendOff: { backgroundColor: '#B9C1AE' },
+  spSendT: { fontFamily: 'Inter_700Bold', fontSize: 20, color: '#fff' },
+  spHint: { fontFamily: 'Inter_400Regular', fontSize: 15, color: '#8A8A80',
+    textAlign: 'center', marginTop: 10 },
+  spCancel: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', marginTop: 8 },
+  spCancelT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#131110' },
   assignC: { flex: 1, backgroundColor: '#151A1E', paddingTop: 54 },
   assignReceipt: { marginHorizontal: 18, backgroundColor: '#15271C', borderColor: '#1E5236',
     borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 16 },
@@ -7490,10 +9696,7 @@ const s = StyleSheet.create({
     justifyContent: 'center', marginBottom: 12 },
   assignNewT: { color: '#fff', fontFamily: 'Barlow_700Bold', fontSize: 18,
     letterSpacing: -0.2 },
-  jobItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 14, paddingHorizontal: 14,
-    paddingVertical: 14, marginBottom: 8 },
-  jobItemName: { fontFamily: 'Barlow_600SemiBold', fontSize: 16.5, color: '#151A1E' },
-  jobItemMeta: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#5E666E', marginTop: 2 },
+  // jobItem/jobItemName/jobItemMeta went with the feed's old row (2026-08-12) —
+  // its bordered card and Barlow scale, replaced by Home's exGroup/exRow family.
   jobCount: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, color: '#151A1E', marginRight: 8 },
 });

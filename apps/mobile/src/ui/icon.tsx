@@ -1,5 +1,5 @@
 /**
- * The EZChangeOrder icon set — the kit's 24 line icons (2026-07-26), rendered with
+ * The EZChangeOrders icon set — the kit's 24 line icons (2026-07-26), rendered with
  * react-native-svg. Each is a `currentColor` stroke icon, so <Icon color> tints it.
  *
  * WHY SvgXml. The kit ships SVGs; SvgXml renders the raw markup and maps its `color`
@@ -69,6 +69,11 @@ const ICONS = {
   // icon buttons read as a set. The hand-drawn icon-mic1.png is a thin stroke that
   // renders lighter than the bold camera and can't be fattened without its glow.
   micLine: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>',
+  // The send sheet's two marks. `alert` warns that nobody can sign this yet — it is
+  // the one thing on that screen that stops a send, so it gets a glyph rather than
+  // colour alone (kit rule). `personAdd` is the act that clears it.
+  alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+  personAdd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg>',
   // Stacked layers — the "current version / previous versions" row.
   layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg>',
 } as const;
@@ -108,6 +113,83 @@ const KIT = {
   // and they override the same-named Lucide keys below by the rule at the top of
   // this block. Regenerated from the raw drops by `scripts/crop-icons.py`.
   //
+  // ── THE PORTAL / JOB-SCREEN SET (hadar drop, 2026-08-11) ────────────────────
+  // Sliced from four sheets in assets/raw-assets by a grid cut (the sheets are drawn
+  // on a regular grid; the first attempt found columns by scanning for gaps in the
+  // alpha profile and merged six stat glyphs into one, because they sit on pale
+  // filled discs with no zero-alpha column between them). Cropped square to the
+  // glyph with 9% breathing room and downscaled to 128 — the same treatment the rest
+  // of this map has, so they land at the same optical weight in a 20px slot.
+  //
+  // NEARLY ALL OF THESE ARE PRE-COLOURED and are listed in NEVER_TINT below: the
+  // stat glyphs carry their own pale-green disc, `updated` is orange on purpose, and
+  // the nav set is two-tone dark + green. Passing them a colour would flatten each
+  // one to a single silhouette.
+  navHome: require('../../assets/icons/navHome.png'),
+  navJobs: require('../../assets/icons/navJobs.png'),
+  navAdd: require('../../assets/icons/navAdd.png'),
+  navCompany: require('../../assets/icons/navCompany.png'),
+  navProfile: require('../../assets/icons/navProfile.png'),
+  // The three job-screen counts + the money band's mark. Disc included.
+  statPerson: require('../../assets/icons/statPerson.png'),
+  statClock: require('../../assets/icons/statClock.png'),
+  statCheck: require('../../assets/icons/statCheck.png'),
+  statMoney: require('../../assets/icons/statMoney.png'),
+  // ORANGE, and that is the point: it marks a change order that was REVISED after a
+  // conversation, which is the one thing on a card a client must not scroll past.
+  updated: require('../../assets/icons/updated.png'),
+  addSquare: require('../../assets/icons/addSquare.png'),
+  chevLeft: require('../../assets/icons/chevLeft.png'),
+  chevRight: require('../../assets/icons/chevRight.png'),
+  envelope: require('../../assets/icons/envelope.png'),
+  pin: require('../../assets/icons/pin.png'),
+  cal: require('../../assets/icons/cal.png'),
+  docLine: require('../../assets/icons/docLine.png'),
+  // The job hero's illustration — a pin standing on a map plate. Kept at 256 because
+  // it renders at ~72pt, not at icon size.
+  mapHero: require('../../assets/icons/mapHero.png'),
+
+  // ── THE FULL SET (hadar drop `icons-notifications.png`, 2026-08-12) ──────────
+  // 29 glyphs sliced on a 6x5 grid from assets/raw-assets. This is the app's own
+  // vocabulary — the same marks the notification rows, the record screen and the
+  // client's page all draw from, so one idea has one picture everywhere.
+  //
+  // ALL PRE-COLOURED, ALL IN NEVER_TINT below. Several carry their own pale disc
+  // (person, dollar, check, question, plus), two are deliberately NOT green — the
+  // orange refresh means "this changed after a conversation" and the orange dot means
+  // "attention" — and the chat bubble is blue because a message from the client is
+  // not the same event as an approval. Tinting any of them would flatten the one
+  // distinction the colour is carrying.
+  ntBack: require('../../assets/icons/ntBack.png'),
+  ntMail: require('../../assets/icons/ntMail.png'),
+  ntPin: require('../../assets/icons/ntPin.png'),
+  ntMap: require('../../assets/icons/ntMap.png'),
+  ntPinMap: require('../../assets/icons/ntPinMap.png'),
+  ntPerson: require('../../assets/icons/ntPerson.png'),
+  ntCalendar: require('../../assets/icons/ntCalendar.png'),
+  ntClock: require('../../assets/icons/ntClock.png'),
+  ntDollar: require('../../assets/icons/ntDollar.png'),
+  ntCheck: require('../../assets/icons/ntCheck.png'),
+  ntRefresh: require('../../assets/icons/ntRefresh.png'),
+  ntAttention: require('../../assets/icons/ntAttention.png'),
+  ntPhoto: require('../../assets/icons/ntPhoto.png'),
+  ntDoc: require('../../assets/icons/ntDoc.png'),
+  ntChat: require('../../assets/icons/ntChat.png'),
+  ntQuestion: require('../../assets/icons/ntQuestion.png'),
+  ntTools: require('../../assets/icons/ntTools.png'),
+  ntExcluded: require('../../assets/icons/ntExcluded.png'),
+  ntLock: require('../../assets/icons/ntLock.png'),
+  ntDownload: require('../../assets/icons/ntDownload.png'),
+  ntPrint: require('../../assets/icons/ntPrint.png'),
+  ntHistory: require('../../assets/icons/ntHistory.png'),
+  ntHome: require('../../assets/icons/ntHome.png'),
+  ntClipboard: require('../../assets/icons/ntClipboard.png'),
+  ntPlus: require('../../assets/icons/ntPlus.png'),
+  ntCompany: require('../../assets/icons/ntCompany.png'),
+  ntProfile: require('../../assets/icons/ntProfile.png'),
+  ntChecklistPlus: require('../../assets/icons/ntChecklistPlus.png'),
+  ntComment: require('../../assets/icons/ntComment.png'),
+
   // Only these four of the second batch are here. `bell`, `send`, `bubble`, `pen`
   // and `lock-check` are drawn on a radial glow that background subtraction cannot
   // separate from the stroke — they process into blobs, verified twice — so those
@@ -124,6 +206,15 @@ const KIT = {
  */
 const NEVER_TINT = new Set([
   'photo',
+  // The 2026-08-11 set arrives coloured: the stat glyphs carry a pale-green disc, the
+  // nav icons are two-tone dark + green, `updated` is orange because orange is what it
+  // means, and mapHero is a small illustration. Tinting any of them replaces the
+  // artwork with a silhouette.
+  'navHome', 'navJobs', 'navAdd', 'navCompany', 'navProfile',
+  // The 2026-08-12 set, all of it.
+  'ntBack', 'ntMail', 'ntPin', 'ntMap', 'ntPinMap', 'ntPerson', 'ntCalendar', 'ntClock', 'ntDollar', 'ntCheck', 'ntRefresh', 'ntAttention', 'ntPhoto', 'ntDoc', 'ntChat', 'ntQuestion', 'ntTools', 'ntExcluded', 'ntLock', 'ntDownload', 'ntPrint', 'ntHistory', 'ntHome', 'ntClipboard', 'ntPlus', 'ntCompany', 'ntProfile', 'ntChecklistPlus', 'ntComment',
+  'statPerson', 'statClock', 'statCheck', 'statMoney', 'updated', 'addSquare',
+  'mapHero',
   // The transition set arrives already coloured in the kit's sage (#80917d–#a4af94),
   // lighter than C.brand on purpose. Tinting would both darken them and, in the hard
   // hat's case, flood its cream shell with the stroke colour — verified 2026-07-27,

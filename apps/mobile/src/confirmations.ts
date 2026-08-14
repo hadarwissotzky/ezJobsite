@@ -188,7 +188,17 @@ export async function sendForConfirmation(
     // Frozen priced fields — null on the plain decision-confirm path.
     p_amount_cents: o.amountCents ?? null,
     p_nte_cents: o.nteCents ?? null,
-    p_scope_title: o.value,
+    // THE TITLE IS `subject`, NOT `value` (fixed 2026-08-10, found by opening a real
+    // link). 391 split these: `subject` became the short title and `value` became the
+    // full scope-of-work document. This line was not updated, so every confirmation
+    // sent since has frozen a ~1000-character document into the field the page renders
+    // as its HEADLINE — 26px, uppercase, no clamp. The client's first screen was the
+    // entire scope shouted at them, with the actual document below it.
+    //
+    // Not cosmetic: `scope_title` is a FROZEN field on the request, so this is wrong
+    // on every already-sent link and cannot be corrected by a redeploy of the page.
+    // See 402 for the backfill.
+    p_scope_title: o.subject,
     p_company_name: o.companyName ?? null,
     p_job_label: o.projectName,
     p_approved_running_cents: o.approvedRunningCents ?? null,

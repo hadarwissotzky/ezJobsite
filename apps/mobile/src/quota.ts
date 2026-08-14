@@ -48,18 +48,77 @@ const PLAN_RANK: Record<PlanId, number> = { free: 0, core: 1, crew: 2 };
  * and user-favourable: a member of any paid company gets the paid experience, which is
  * exactly "crew inherit the plan". Solo/no-company reads 'free'.
  */
+export const ENTITLED_KEY = 'entitled_plan';
+/** The exact product behind the entitlement, so the paywall can tell monthly from
+ *  annual. Cached beside the plan and for the same reason: `company` may be empty. */
+export const ENTITLED_PRODUCT_KEY = 'entitled_product';
+
 export async function currentPlan(db: AbstractPowerSyncDatabase): Promise<PlanId> {
+  let best: PlanId = 'free';
   try {
     const rows = await db.getAll<{ plan: string | null }>(`SELECT plan FROM company`);
-    let best: PlanId = 'free';
     for (const r of rows) {
       const p = asPlanId(r.plan);
       if (PLAN_RANK[p] > PLAN_RANK[best]) best = p;
     }
-    return best;
-  } catch {
-    return 'free';  // pre-migration schema / not synced yet → treat as free
-  }
+  } catch { /* pre-migration schema / not synced yet → the entitlement below decides */ }
+
+  /**
+   * THE VALIDATED ENTITLEMENT, when the server's copy has not arrived.
+   *
+   * hadar, 2026-08-13: bought Core, got "You're all set", and the drawer still said
+   * Free. `company.plan` is written by the RevenueCat webhook and reaches the device
+   * through PowerSync — and on that device the `company` table is empty, so the column
+   * this function reads does not exist locally at all. A man who has just paid was
+   * being told he had not.
+   *
+   * WHAT THIS IS NOT: the client asserting it is paid. The value is written only from
+   * `Purchases.getCustomerInfo()` — RevenueCat's own answer after IT validated the
+   * receipt with Apple — so it is a cached server verdict, not a local claim.
+   * `company.plan` remains the durable record and the thing the backend trusts.
+   *
+   * RAISES ONLY. A stale entitlement can never DOWNGRADE somebody below what the server
+   * says they have; the worst it can do is keep a lapsed subscriber at their old tier
+   * until the next successful read, which is the correct way to be wrong about somebody
+   * who has been paying.
+   */
+  try {
+    const r = (await db.getAll<{ v: string }>(
+      `SELECT v FROM device_settings WHERE k = ?`, [ENTITLED_KEY]))[0];
+    const p = asPlanId(r?.v ?? null);
+    if (PLAN_RANK[p] > PLAN_RANK[best]) best = p;
+  } catch { /* no settings table → server value stands */ }
+  return best;
+}
+
+/** The cached product id behind the entitlement, or null. Never throws. */
+export async function currentProductId(
+  db: AbstractPowerSyncDatabase
+): Promise<string | null> {
+  try {
+    const r = (await db.getAll<{ v: string }>(
+      `SELECT v FROM device_settings WHERE k = ?`, [ENTITLED_PRODUCT_KEY]))[0];
+    return r?.v ?? null;
+  } catch { return null; }
+}
+
+/** Cache which product is active. Cleared with an empty string when nothing is. */
+export async function rememberEntitledProduct(
+  db: AbstractPowerSyncDatabase, productId: string | null
+): Promise<void> {
+  await db.execute(
+    `INSERT INTO device_settings (k, v) VALUES (?, ?)
+     ON CONFLICT(k) DO UPDATE SET v = excluded.v`,
+    [ENTITLED_PRODUCT_KEY, productId ?? '']);
+}
+
+/** Cache RevenueCat's verdict. Called after a purchase, a restore, and on launch. */
+export async function rememberEntitledPlan(
+  db: AbstractPowerSyncDatabase, plan: PlanId
+): Promise<void> {
+  await db.execute(
+    `INSERT INTO device_settings (k, v) VALUES (?, ?)
+     ON CONFLICT(k) DO UPDATE SET v = excluded.v`, [ENTITLED_KEY, plan]);
 }
 
 /** Active jobs (excludes the Inbox sentinel and archived projects — archiving frees a slot). */

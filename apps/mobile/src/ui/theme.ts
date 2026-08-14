@@ -1,7 +1,7 @@
 /**
- * Design tokens — the EZChangeOrder visual language.
+ * Design tokens — the EZChangeOrders visual language.
  *
- * ADOPTED 2026-07-26 from the approved EZChangeOrder Design System kit (see
+ * ADOPTED 2026-07-26 from the approved EZChangeOrders Design System kit (see
  * `tokens.ts` for the raw values). A warm, high-contrast FIELD light theme: ink is
  * the primary dark action, OLIVE is the brand accent (the kit retires the old bright
  * orange), and status colours are MUTED and always paired with an icon + plain words
