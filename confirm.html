@@ -1,0 +1,2332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Approval</title>
+<!--
+  The no-login approval page — REQ-VAL1/2/3/8, and the client-facing REPORT.
+
+  WHO IS READING THIS: a homeowner or a GC standing in a doorway, on their own
+  phone, who has never heard of this app and will never make an account for it.
+  They tapped a link a contractor texted them. If this page asks them to sign up,
+  install anything, or work out what a "disposition" is, the contractor does not
+  get their answer and the job stops. REQ-VAL3's no-login rule is not a
+  convenience -- it is the only reason this loop closes at all.
+
+  WHAT IT SHOWS (2026-07-20): for an EXTRA, the money is the report. The page now
+  renders the priced approval -- who is asking, the scope, the FIXED PRICE, the
+  running total already approved on the job, and a type-your-name-to-sign action.
+  Every value is FROZEN at send (confirmation_fetch returns exactly what was
+  stored): the price shown here is the price signed here. It cannot drift from the
+  binding record, because the record is what it reads.
+
+  WHY THIS IS A STATIC FILE IN A STORAGE BUCKET, and not an Edge Function:
+  the page is inert. Every value it displays comes from confirmation_fetch(token),
+  already granted to anon. There is no server logic to host.
+
+  THE ANON KEY IS PUBLIC BY DESIGN. It identifies the project; RLS plus the RPC
+  grants are what protect the data. anon can reach exactly two functions, no table.
+
+  THE TOKEN IS THE CREDENTIAL. Whoever holds the link can answer. That is the trade
+  REQ-VAL3 makes deliberately, stated plainly rather than dressed up.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  /* TOKENS RE-POINTED AT THE PORTAL DESIGN (hadar, 2026-08-10: "the element maybe
+     there but they don't look as the design").
+     Three things were wrong and all three were token-level, not layout:
+       * GREEN. --approve was #0E8A4C, a bright signal green. The design uses a dark
+         forest green as a TEXT and BUTTON colour — it reads as ink, not as a status
+         light, which is what a document needs.
+       * ORANGE. --orange carried the old kit's accent and painted a bright "APPROVAL
+         REQUESTED" kicker the design does not have anywhere. It survives only for the
+         one thing the design does colour: the count of what is owed.
+       * RADIUS + LINE. 18px cards with #E4E5E1 borders read as app chrome. The design
+         is a sheet of paper: ~11px corners and a hairline you have to look for. */
+  :root {
+    --ink:#191A17; --paper:#F7F6F3; --card:#FFFFFF;
+    --orange:#C2410C;
+    --steel:#6B6F6A; --line:#E7E6E1; --approve:#2F5233; --approveDeep:#26431F;
+    --caution:#B26A00; --danger:#B3261E;
+    --disp:'Barlow Condensed', 'Arial Narrow', sans-serif;
+    --body:'Barlow', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --r:11px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: var(--body); font-size: 17px; line-height: 1.5;
+    margin: 0; padding: 0 0 40px; background: var(--paper); color: var(--ink);
+    max-width: 480px; margin-inline: auto; min-height: 100vh;
+  }
+  .wrap { padding: 0 16px; }
+
+  /* Branded header — who is asking + which job. */
+  .brand { display: flex; align-items: center; gap: 12px; padding: 22px 16px 14px; }
+  .logo {
+    width: 46px; height: 46px; border-radius: 12px; background: var(--ink); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--disp); font-weight: 700; font-size: 18px; letter-spacing: .5px; flex: none;
+  }
+  .cn { font-family: var(--disp); font-weight: 700; font-size: 20px; text-transform: uppercase; letter-spacing: .3px; line-height: 1.1; }
+  .cs { font-size: 13.5px; color: var(--steel); margin-top: 2px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
+    padding: 18px; margin-bottom: 10px;
+  }
+  /* Quiet. The design has no coloured kicker on the document; this is a label, and a
+     bright one competes with the price for the first thing the eye lands on. */
+  .kicker { font-family: var(--body); font-weight: 600; font-size: 12px; letter-spacing: .12em;
+            text-transform: uppercase; color: var(--steel); }
+  .title { overflow-wrap: anywhere; font-family: var(--disp); font-weight: 700; font-size: 26px; line-height: 1.12; text-transform: uppercase; letter-spacing: .3px; margin: 6px 0 0; }
+  .scope { font-size: 16px; color: #26292e; margin-top: 10px; line-height: 1.55; }
+
+  .price { display: flex; justify-content: space-between; align-items: baseline; }
+  .pl { font-family: var(--disp); font-weight: 600; font-size: 13px; letter-spacing: .13em; text-transform: uppercase; color: var(--steel); }
+  .pv { font-family: var(--disp); font-weight: 700; font-size: 40px; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
+  /* The qualifier on an EWA cap ("max"). Sized down and kept on the same line as the
+     figure: at .pv's 40px it wrapped, and a cap whose qualifier is orphaned reads for
+     a moment as a fixed price. */
+  .pvq { font-family: var(--disp); font-weight: 600; font-size: 17px; letter-spacing: .06em;
+         text-transform: uppercase; color: var(--steel); margin-left: 6px; white-space: nowrap; }
+  .clause { font-size: 13.5px; color: var(--steel); margin-top: 8px; line-height: 1.5; }
+  .totals { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+  .trow { display: flex; justify-content: space-between; font-size: 14.5px; padding: 3px 0; color: var(--steel); }
+  .trow b { color: var(--ink); font-family: var(--disp); font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; }
+
+  /* PHOTOS — PRD R4. The evidence the client is being asked to believe.
+     Two columns with the first tile spanning both: the opening shot of the walk is
+     the one that says what this is about, and a uniform grid of thumbnails on a
+     phone reads as decoration rather than as the thing you are approving.
+     `aspect-ratio` + a filled background means every tile reserves its space BEFORE
+     the bytes land, so the page does not reflow under the client's thumb while the
+     images stream in on LTE — which on a slow link is how you get an accidental tap
+     on a button that just moved. */
+  .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; }
+  .shot { position: relative; display: block; border-radius: 12px; overflow: hidden;
+          background: #ECEDEA; aspect-ratio: 4 / 3; }
+  .shot:first-child { grid-column: 1 / -1; aspect-ratio: 3 / 2; }
+  .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .shotd { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 8px;
+           font-size: 11.5px; color: #fff; letter-spacing: .02em;
+           background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0)); }
+
+  /* Frozen legal wording, available but not shouting. */
+  .exact { margin-top: 10px; }
+  .exact summary { font-size: 13px; color: var(--steel); cursor: pointer; }
+  .sow { white-space: pre-wrap; font-size: 15.5px; line-height: 1.55; color: #26292e; margin-top: 8px; }
+  .fromline { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .terms { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .tline { font-size: 14px; line-height: 1.5; color: #26292e; margin-top: 4px; }
+  .exact .doc { white-space: pre-wrap; background: #F3F4F2; border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 13.5px; line-height: 1.55; margin-top: 8px; color: #26292e; }
+
+  /* Actions. Big, thumb-sized — answered one-handed, outdoors. */
+  .sign { width: 100%; font-family: var(--body); font-size: 17px; padding: 15px 16px; border: 1.5px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); margin-bottom: 10px; }
+  .sign:focus { outline: none; border-color: var(--ink); }
+  /* SENTENCE CASE. The design's actions read as sentences a person says — "Approve
+     $3,200", "Have a question?" — not as shouted labels. Condensed caps at 20px is a
+     poster treatment and it made every control look equally loud. */
+  button {
+    font-family: var(--body); font-weight: 700; font-size: 17px; letter-spacing: 0;
+    border: 0; border-radius: var(--r); padding: 16px; cursor: pointer; width: 100%; min-height: 56px;
+  }
+  .approve { background: var(--approveDeep); color: #fff; display: flex; align-items: center; justify-content: center; gap: 9px; }
+  .ghost { display: flex; align-items: center; justify-content: center; gap: 9px; }
+  .approve:disabled { opacity: .4; }
+  /* A BORDER, BECAUSE A CHOICE HAS TO LOOK LIKE ONE.
+     `background: none` with no border rendered these as bare text under a large green
+     button -- seen for the first time when the page was actually opened in a browser,
+     2026-07-21. PRD R5 says approve / ask / decline are three distinct outcomes; on a
+     phone this read as one button and two lines of footer copy. The client most likely
+     to need "Ask a question instead" is the one least likely to recognise unbordered
+     text as tappable, which is the core design test in CLAUDE.md: would someone who
+     does not think in software succeed here without being taught?
+     The card and the decline-confirmation button in this same file already carry
+     `1px solid var(--line)`; these were simply missed. */
+  .ghost {
+    background: var(--card); color: var(--steel); font-size: 16px; margin-top: 10px;
+    border: 1px solid var(--line);
+  }
+  .decline { background: none; color: var(--danger); border: 1.5px solid #E4C4C4; }
+  .recordnote { font-size: 12px; color: var(--steel); text-align: center; margin-top: 12px; line-height: 1.5; }
+
+  /* The "your question was sent" acknowledgement, at the top of the redrawn document.
+     It replaces a full-screen terminal confirmation, so it has to carry the same
+     weight without taking the page: a green rule and a filled background, above the
+     fold, where the eye lands after a screen transition. Not a toast — a toast that
+     fades is exactly the wrong shape for a client who looks up from the page and back
+     down again ten seconds later. */
+  .notice {
+    background: #E8F5EE; border: 1px solid #BFE3CE; border-left: 4px solid var(--approve);
+    border-radius: 12px; padding: 12px 14px; margin: 12px 0 0;
+    font-size: 15px; line-height: 1.45; color: #14432B;
+  }
+
+  textarea { width: 100%; font-family: var(--body); font-size: 16px; padding: 12px; border-radius: 12px; border: 1.5px solid var(--line); background: #fff; color: var(--ink); margin: 10px 0; min-height: 88px; resize: none; }
+
+  /* Legacy plain-confirm fallback (no price). */
+  .plaincard { white-space: pre-wrap; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; font-size: 16.5px; line-height: 1.6; }
+  h1.plain { font-size: 21px; margin: 4px 0 16px; line-height: 1.3; }
+  .who { font-size: 14px; color: var(--steel); margin-bottom: 4px; }
+  .btns { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; }
+  .yes { background: var(--approve); color: #fff; }
+  .no { background: none; color: var(--danger); border: 1.5px solid #E4C4C4; }
+
+  /* Terminal screens. */
+  .done { text-align: center; padding: 46px 22px; }
+  .done .mark { font-size: 52px; line-height: 1; }
+  .done h2 { font-family: var(--disp); font-weight: 700; text-transform: uppercase; letter-spacing: .3px; font-size: 26px; margin: 16px 0 8px; }
+  .done p { color: var(--steel); font-size: 15.5px; line-height: 1.55; margin: 0; }
+  .err { color: var(--danger); }
+
+  /* ── DESKTOP (hadar's portal design, 2026-08-09) ────────────────────────────────
+     The phone layout above is untouched and stays the default: this page is opened
+     from an SMS, so a phone is the common case and the wide layout is the addition,
+     not the baseline. Everything below only applies once there is room for it.
+
+     One shell, two columns. The sidebar is a NAVIGATION surface — the project, the
+     other change orders, how to reach a human — and the document keeps the whole
+     right column so the thing being signed is never squeezed by chrome. */
+  .shell { display: block; }
+  .side { display: none; }
+
+  @media (min-width: 940px) {
+    body { max-width: none; padding-bottom: 0; }
+    .shell {
+      display: grid; grid-template-columns: 300px minmax(0, 1fr);
+      align-items: start; gap: 24px;
+      max-width: 1320px; margin-inline: auto; padding: 24px;
+    }
+    /* Sticky, and scrollable on its own: on a job with fifteen change orders the
+       list must not push the "Questions?" card past the bottom of a laptop screen. */
+    .side {
+      display: block; position: sticky; top: 24px;
+      max-height: calc(100vh - 48px); overflow-y: auto;
+    }
+    .main { min-width: 0; }
+    .wrap { padding: 0; }
+    /* The document reads as one sheet on a desk, not as a stack of phone cards. */
+    .main .card { border-radius: 14px; }
+    .main .title { font-size: 34px; }
+    .main .pv { font-size: 46px; }
+    .shots { grid-template-columns: 1fr 1fr 1fr; }
+    .shot:first-child { grid-column: 1 / -1; aspect-ratio: 16 / 9; }
+    /* Actions sit side by side once there is width: approve is the act, asking is
+       the alternative, and stacking them full-width on a 1200px screen makes the
+       second one look like a second primary. */
+    .acts { display: flex; gap: 12px; }
+    .acts .approve { flex: 1.6; }
+    .acts .ghost { flex: 1; margin-top: 0; }
+  }
+
+  /* ── the sidebar ───────────────────────────────────────────────────────────── */
+  .sbrand { display: flex; align-items: center; gap: 11px; padding: 2px 4px 16px; }
+  .sbc { font-family: var(--body); font-weight: 700; font-size: 17px; line-height: 1.12;
+         text-transform: uppercase; letter-spacing: .2px; }
+  .sbt { font-size: 12.5px; color: var(--steel); margin-top: 3px; }
+  .phero { display: block; width: 100%; height: 132px; object-fit: cover;
+           border-radius: 10px; margin: 4px 0 10px; background: #ECEDEA; }
+  .slink { display: inline-block; margin: 10px 4px 2px; font-weight: 600; font-size: 14.5px;
+           color: var(--approve); text-decoration: none; }
+  .saskrow { display: flex; gap: 11px; align-items: flex-start; margin-top: 8px; }
+  .sasbtn { min-height: 46px; font-size: 14.5px; margin-top: 12px; }
+  /* The exclusions carry a mark of their own — the one section a reader skims and the
+     one whose absence costs money later. */
+  .secico { position: relative; }
+  .secdot { position: absolute; top: -1px; right: -1px; width: 9px; height: 9px;
+            border-radius: 5px; background: #E08A00; border: 2px solid var(--card); }
+  .sfoot { display: flex; align-items: flex-start; gap: 7px; }
+
+  .sh { font-family: var(--body); font-weight: 700; font-size: 19px; margin: 16px 4px 8px;
+        padding-top: 16px; border-top: 1px solid var(--line); letter-spacing: -.2px; }
+  .sh:first-of-type { border-top: 0; padding-top: 0; }
+  .sproj { font-family: var(--body); font-weight: 700; font-size: 17px; margin: 2px 4px 2px; }
+  .saddr { font-size: 13.5px; color: var(--steel); margin: 0 4px; line-height: 1.45; }
+  /* Two counts, side by side. The one that needs an answer carries the caution
+     colour; the settled one stays neutral — colour marks what is OWED, nothing else. */
+  .scounts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 4px; }
+  .scount { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--card); }
+  .scount.need { border-color: #F0D6A6; background: #FFFBF2; }
+  .scl { font-size: 12.5px; line-height: 1.25; color: var(--steel); }
+  .scount.need .scl { color: var(--orange); }
+  .scv { font-family: var(--body); font-weight: 700; font-size: 27px; line-height: 1.1; margin-top: 4px;
+         color: var(--approve); }
+  .scount.need .scv { color: var(--orange); }
+  .slab { font-family: var(--body); font-weight: 600; font-size: 11.5px; letter-spacing: .12em;
+          text-transform: uppercase; color: var(--steel); margin: 16px 4px 6px; }
+  .srow { display: flex; gap: 8px; align-items: flex-start; text-decoration: none; color: inherit;
+          border: 1px solid var(--line); border-radius: 12px; background: var(--card);
+          padding: 10px 12px; margin-bottom: 6px; }
+  .srow.here { border-color: var(--ink); background: #F3F4F2; }
+  .srt { font-size: 14.5px; line-height: 1.3; }
+  .srt b { font-weight: 700; }
+  .srm { font-size: 12.5px; color: var(--steel); margin-top: 3px; }
+  .sra { font-family: var(--body); font-weight: 700; font-size: 14.5px; margin-left: auto;
+         white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .srtick { color: var(--approve); flex: none; }
+  .sask { border: 1px solid var(--line); border-radius: 14px; background: var(--card);
+          padding: 14px; margin-top: 18px; }
+  .saskh { font-family: var(--body); font-weight: 700; font-size: 16px; }
+  .saskt { font-size: 13.5px; color: var(--steel); margin-top: 4px; line-height: 1.45; }
+  .sfoot { font-size: 12px; color: var(--steel); margin: 18px 4px 4px; }
+
+  /* ── the document's identity line ──────────────────────────────────────────── */
+  .idn { font-family: var(--body); font-weight: 700; font-size: 17px; text-transform: uppercase;
+         letter-spacing: .3px; color: var(--approve); }
+  .idm { font-size: 13.5px; color: var(--steel); margin-top: 3px; }
+
+  /* ── contract summary ─────────────────────────────────────────────────────── */
+  .csum { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14.5px; }
+  .csum td { border: 1px solid var(--line); padding: 9px 12px; }
+  .csum td:last-child { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .csum tr.this td { background: #F3F4F2; font-weight: 600; }
+  .csum tr.tot td { font-weight: 700; }
+  .csumnote { font-size: 12.5px; color: var(--steel); margin-top: 8px; line-height: 1.45; }
+
+  .allshots { display: flex; align-items: center; justify-content: center; gap: 8px;
+              margin-top: 8px; min-height: 46px; border: 1px solid var(--line);
+              border-radius: var(--r); color: var(--ink); text-decoration: none;
+              font-weight: 600; font-size: 14.5px; background: var(--card); }
+  .demobar { background: #FDF3DC; border: 1px solid #EFDCA9; border-radius: var(--r);
+             padding: 10px 14px; font-size: 13.5px; color: #7A5A11; margin-bottom: 10px; }
+
+  /* ── the approved stamp ────────────────────────────────────────────────────── */
+  .stamp { display: flex; gap: 13px; align-items: flex-start; border: 1px solid;
+           border-radius: var(--r); padding: 15px; }
+  .stamp.ok { background: #EEF3EB; border-color: #CBDCC4; }
+  .stamp.no { background: #F6E5E1; border-color: #DDBAB2; }
+  .stampmark { flex: none; width: 34px; height: 34px; border-radius: 17px;
+               background: var(--card); display: flex; align-items: center;
+               justify-content: center; font-weight: 700; font-size: 17px; }
+  .stamp.ok .stampmark { color: var(--approve); }
+  .stamp.no .stampmark { color: var(--danger); }
+  .stampt { display: block; font-family: var(--body); font-weight: 700; font-size: 17px; }
+  .stampm { display: block; font-size: 13.5px; color: var(--steel); margin-top: 3px; line-height: 1.45; }
+
+  /* ── the answered status band ──────────────────────────────────────────────── */
+  .abar { display: flex; gap: 12px; align-items: center; border-radius: var(--r);
+          padding: 14px; margin-bottom: 10px; border: 1px solid; }
+  .abar.ok { background: #EEF3EB; border-color: #CBDCC4; }
+  .abar.no { background: #F6E5E1; border-color: #DDBAB2; }
+  .amark { flex: none; width: 30px; height: 30px; border-radius: 15px; background: var(--card);
+           display: flex; align-items: center; justify-content: center; font-weight: 700; }
+  .abar.ok .amark { color: var(--approve); }
+  .abar.no .amark { color: var(--danger); }
+  .awhen { display: block; font-family: var(--body); font-weight: 700; font-size: 15.5px; }
+  .alead { display: block; font-size: 13.5px; color: var(--steel); margin-top: 2px; line-height: 1.45; }
+
+  /* ── the outcome sheet ─────────────────────────────────────────────────────── */
+  .omwrap { position: fixed; inset: 0; z-index: 50; background: rgba(20,22,20,.45);
+            display: flex; align-items: center; justify-content: center; padding: 20px;
+            -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+  .ombox { background: var(--card); border-radius: 16px; padding: 28px 22px 22px;
+           max-width: 380px; width: 100%; text-align: center;
+           box-shadow: 0 18px 50px rgba(0,0,0,.22); }
+  .ommark { width: 62px; height: 62px; border-radius: 31px; margin: 0 auto 14px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 30px; font-weight: 700; }
+  .ommark.approved, .ommark.already { background: #E7EFE4; color: var(--approve); }
+  .ommark.declined { background: #F6E5E1; color: var(--danger); }
+  .omh { font-family: var(--body); font-weight: 700; font-size: 21px; margin: 0;
+         letter-spacing: -.2px; }
+  .omp { font-size: 14.5px; line-height: 1.5; color: var(--steel); margin: 8px 0 18px; }
+  @media print { .omwrap { display: none !important; } }
+
+  /* ── the sheet, as BANDS ───────────────────────────────────────────────────── */
+  /* The document is one piece of paper. Each band answers one question and is divided
+     from the next by a hairline — not by a gutter, which is what made the old stack
+     read as a feed of equal cards rather than as a document with an order. */
+  .band { padding: 20px; border-bottom: 1px solid var(--line); }
+  .band:last-child { border-bottom: 0; }
+  .bandh { font-family: var(--body); font-weight: 700; font-size: 17px; margin-bottom: 10px; }
+
+  /* THE RULE RUNS ALL THE WAY DOWN. In the design one vertical hairline separates the
+     work from the money in the title band and CONTINUES between the sections and the
+     photographs below it — the document is two columns, not two unrelated splits.
+     This band was a flex row with no rule and the band under it was a 1.2/.8 grid, so
+     the line appeared from nowhere halfway down at an x nothing above it shared. Both
+     now use the same track sizes and the left column carries the border. */
+  .bandtitle { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+  .btmain { min-width: 0; }
+  .doctitle { font-family: var(--body); font-weight: 700; font-size: 27px; line-height: 1.18;
+              letter-spacing: -.3px; margin: 0; overflow-wrap: anywhere; }
+  .doclede { font-size: 15.5px; line-height: 1.5; color: var(--steel); margin: 8px 0 0; }
+  .btprice { text-align: left; }
+  .pvbig { font-family: var(--body); font-weight: 700; font-size: 33px; color: var(--approve);
+           font-variant-numeric: tabular-nums; line-height: 1.05; letter-spacing: -.5px; }
+  .pvlab { font-size: 13.5px; color: var(--steel); margin-top: 3px; }
+
+  /* Sections beside the photographs of them, divided. On a phone the photos fall
+     under the words — a picture above the description it illustrates is a picture
+     with no caption. */
+  .bandbody { display: grid; grid-template-columns: 1fr; gap: 0; padding: 0; }
+  .bsecs { padding: 6px 20px 14px; }
+  .bshots { padding: 0 20px 18px; }
+  .bandsched { display: block; }
+
+  .tline { font-size: 14.5px; line-height: 1.5; color: #26292e; margin-top: 5px; }
+  .apara { font-size: 14.5px; line-height: 1.55; color: #26292e; margin: 0 0 14px; }
+  .signlab { display: block; font-size: 13px; color: var(--steel); margin-bottom: 6px; }
+
+  /* Approve carries the weight; the question is the alternative, not a second
+     primary. Decline is a link — findable, never competing. */
+  .acts { display: flex; flex-direction: column; gap: 10px; }
+  .askbtn { text-align: left; line-height: 1.25; font-weight: 400; font-size: 14.5px; }
+  .askbtn b { font-weight: 700; font-size: 15.5px; }
+  .linkbtn { background: none; border: 0; color: var(--steel); font-size: 14.5px;
+             font-weight: 600; min-height: 44px; padding: 8px; width: 100%; }
+
+  .bandfoot { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+              font-size: 13.5px; color: var(--steel); }
+  .bandfoot a { color: var(--steel); }
+  .bandfoot span { color: var(--line); }
+
+  @media (min-width: 940px) {
+    /* IDENTICAL TRACKS to .bandtitle, so the two rules are one line. */
+    .bandbody { grid-template-columns: 1.2fr .8fr; }
+    .bandtitle { grid-template-columns: 1.2fr .8fr; gap: 0; padding: 0; }
+    .btmain { padding: 20px; border-right: 1px solid var(--line); }
+    .btprice { padding: 20px; text-align: center; }
+    .bsecs { padding: 6px 20px 18px; border-right: 1px solid var(--line); }
+    .bshots { padding: 18px 20px; }
+    .doctitle { font-size: 31px; }
+    .pvbig { font-size: 40px; }
+    /* 60/40, the design's split. */
+    .acts { flex-direction: row; }
+    .acts .approve { flex: 1.5; }
+    .acts .askbtn { flex: 1; }
+  }
+
+  /* ── the sheet ─────────────────────────────────────────────────────────────── */
+  /* The document's parts share one border and one radius, divided by hairlines. The
+     cards inside it give up their own chrome — this is what makes it read as a
+     document rather than as a feed of three cards. */
+  .sheet { background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
+           overflow: hidden; margin-bottom: 10px; }
+  .sheet > .card, .sheet > .idgrid {
+    border: 0; border-radius: 0; margin: 0; padding: 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  .sheet > .idgrid { padding: 0; }
+  .sheet > .exact { padding: 0 20px 18px; }
+
+  /* ── letterhead + job identity (402) ───────────────────────────────────────── */
+  .lh { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  .lhco { display: flex; gap: 13px; align-items: flex-start; }
+  .lhcn { font-family: var(--body); font-weight: 700; font-size: 19px; line-height: 1.15;
+          text-transform: uppercase; letter-spacing: .2px; }
+  .lhtag { font-size: 13.5px; color: var(--steel); margin-top: 2px; }
+  .lhline { font-size: 14px; color: var(--steel); margin-top: 4px; }
+  .lhperson { display: flex; gap: 11px; align-items: flex-start;
+              border-top: 1px solid var(--line); padding-top: 14px; }
+  .lhav { width: 44px; height: 44px; border-radius: 22px; flex: none; background: #EEF1EA;
+          color: var(--approve); display: flex; align-items: center; justify-content: center;
+          font-family: var(--disp); font-weight: 700; font-size: 16px; }
+  .lhpn { font-family: var(--body); font-weight: 700; font-size: 16.5px; }
+  .lhpt { font-size: 13.5px; color: var(--steel); margin-top: 1px; }
+  .lhpc { font-size: 14px; margin-top: 3px; }
+  .lhpc a { color: var(--approve); text-decoration: none; }
+  @media (min-width: 940px) {
+    /* THE SHEET HAS ONE COLUMN LINE. Every band that splits — letterhead, job, title,
+       sections — divides at the SAME x, which is what makes four separate rules read
+       as one edge running down the page. They were 1fr/auto, 1fr/1fr and 1.2fr/.8fr,
+       so the eye met three different lines on the way down. */
+    .lh { grid-template-columns: 1.2fr .8fr; gap: 0; padding: 0; align-items: stretch; }
+    .lhco { padding: 20px; }
+    .lhperson { border-top: 0; border-left: 1px solid var(--line);
+                padding: 20px; align-items: center; }
+  }
+
+  .idjob { font-family: var(--body); font-weight: 700; font-size: 17.5px; line-height: 1.25; }
+  .idaddr { font-size: 14px; color: var(--steel); margin-top: 3px; line-height: 1.4; }
+
+  /* ── the document head + section rows (design, 2026-08-10) ─────────────────── */
+  /* SENTENCE CASE, NOT CONDENSED CAPS. The design moved the document's title off the
+     display face: a change order's subject is read, not scanned, and 26px of
+     letterspaced uppercase is a poster treatment on a legal instrument. `.title` is
+     untouched — other renderers still use it. */
+  .dochead { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between;
+             flex-wrap: wrap; margin-top: 4px; }
+  .docmain { flex: 1 1 260px; min-width: 0; }
+  .doctitle { font-family: var(--body); font-weight: 700; font-size: 27px; line-height: 1.2;
+              letter-spacing: -.2px; margin: 4px 0 0; overflow-wrap: anywhere; }
+  .docprice { text-align: right; flex: 0 0 auto; }
+  .pvbig { font-family: var(--body); font-weight: 700; font-size: 32px; color: var(--approve);
+           font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .pvlab { font-size: 13.5px; color: var(--steel); margin-top: 2px; }
+
+  .secwrap { display: grid; grid-template-columns: 1fr; gap: 4px; margin-top: 16px;
+             border-top: 1px solid var(--line); padding-top: 6px; }
+  .sec { display: flex; gap: 12px; padding: 13px 0; border-bottom: 1px solid #F2F3F0; }
+  .sec:last-child { border-bottom: 0; }
+  .secico { flex: none; width: 34px; height: 34px; border-radius: 17px; background: #EEF1EA;
+            color: var(--approve); display: flex; align-items: center; justify-content: center; }
+  .secico svg { width: 18px; height: 18px; }
+  .secico.warn { background: #FBEFD8; color: #B26A00; }
+  .sech { font-family: var(--body); font-weight: 700; font-size: 15.5px; }
+  .secb { white-space: pre-wrap; font-size: 14.5px; line-height: 1.5; color: #26292e; margin-top: 3px; }
+  /* The photo strip lives INSIDE the document now, beside the sections on a wide
+     screen. It kept its own card styling for the standalone use elsewhere. */
+  .secwrap .shots { padding: 0; margin-top: 8px; background: none; border: 0; }
+  @media (min-width: 940px) {
+    .secwrap { grid-template-columns: 1.25fr .85fr; gap: 24px; }
+    .secwrap .shots { grid-template-columns: 1fr 1fr; align-content: start; margin-top: 0; }
+    .secwrap .shot:first-child { grid-column: 1 / -1; aspect-ratio: 4 / 3; }
+    .doctitle { font-size: 32px; }
+    .pvbig { font-size: 38px; }
+  }
+
+  /* ── "what changed" (400) ──────────────────────────────────────────────────── */
+  .wcbar { background: #FDF3DC; border: 1px solid #EFDCA9; border-radius: 14px;
+           margin: 12px 16px; padding: 14px; }
+  .wctop { display: flex; gap: 12px; align-items: center; cursor: pointer; list-style: none; }
+  .wctop::-webkit-details-marker { display: none; }
+  .wcmsg { flex: 1; min-width: 0; }
+  .wcwhen, .wclead { display: block; }
+  .wcbtn { flex: none; background: var(--card); border: 1px solid #EFDCA9; border-radius: 10px;
+           padding: 9px 14px; font-weight: 600; font-size: 14px; color: #7A5A11; }
+  .wcmark { color: #C8901E; font-size: 22px; line-height: 1.1; flex: none; }
+  .wcwhen { font-family: var(--disp); font-weight: 700; font-size: 14px; letter-spacing: .1em;
+            text-transform: uppercase; color: #7A5A11; }
+  .wclead { font-size: 15px; line-height: 1.45; color: #26292e; margin-top: 3px; }
+  .wcd summary { cursor: pointer; }
+  .wcgrid { display: grid; grid-template-columns: 1fr; gap: 0; margin-top: 12px;
+            background: #fff; border: 1px solid #EFDCA9; border-radius: 12px; overflow: hidden; }
+  .wcc { padding: 12px 14px; }
+  .wcc + .wcc { border-top: 1px solid #F0E6CC; }
+  .wch { font-family: var(--disp); font-weight: 600; font-size: 12.5px; letter-spacing: .12em;
+         text-transform: uppercase; color: var(--steel); }
+  .wcv { font-size: 15px; line-height: 1.45; margin-top: 3px; color: #26292e; }
+  .wcv s { color: var(--steel); }
+  .wcm { font-size: 13px; color: var(--steel); margin-top: 3px; }
+  .wcnote { font-size: 13px; color: #6b625b; line-height: 1.5; margin: 10px 0 0; }
+  .wclink { display: inline-block; margin-top: 10px; font-weight: 600; font-size: 14.5px;
+            color: var(--approve); text-decoration: none; }
+  @media (min-width: 940px) {
+    .wcbar { margin: 0 0 12px; }
+    /* Three across, as the desktop design draws them. */
+    .wcgrid { grid-template-columns: repeat(3, 1fr); }
+    .wcc + .wcc { border-top: 0; border-left: 1px solid #F0E6CC; }
+  }
+
+  /* ── the phone's project page (mobile design, 2026-08-09) ──────────────────── */
+  .pbar { display: flex; align-items: center; gap: 11px; padding: 18px 16px 12px; }
+  .pbn { font-family: var(--disp); font-weight: 700; font-size: 17px; line-height: 1.05;
+         text-transform: uppercase; letter-spacing: .3px; }
+  .phero { padding: 4px 0 14px; border-bottom: 1px solid var(--line); }
+  .pheroname { font-family: var(--body); font-weight: 700; font-size: 22px; line-height: 1.2; }
+  .ph2 { font-family: var(--body); font-weight: 700; font-size: 21px; margin: 18px 0 2px; }
+  .srchev { color: #B3AAA2; font-size: 20px; line-height: 1; flex: none; align-self: center; }
+  .srt { display: block; }
+  .srm { display: block; }
+
+  /* ← back to the list. Only rendered when there IS a list to go back to. */
+  .backbar { padding: 14px 16px 0; }
+  .backbar a { display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+               color: var(--approve); font-weight: 600; font-size: 16px; }
+
+  /* The bottom bar. Fixed, and the page reserves room for it so the last card is
+     never sitting underneath the thing covering it. */
+  .tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    display: flex; background: var(--card); border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+         padding: 9px 4px 10px; text-decoration: none; color: var(--steel); font-size: 12px; }
+  .tab.on { color: var(--approve); font-weight: 600; }
+  .tabg { font-size: 19px; line-height: 1; }
+  body.hastabs { padding-bottom: 86px; }
+  @media (min-width: 940px) {
+    .tabs { display: none; }
+    body.hastabs { padding-bottom: 0; }
+    .backbar { display: none; }
+  }
+
+  /* The detail's two-column blocks, as the mobile design draws them: the job beside
+     the change-order number, and the sections beside the photos. Kept at 2 columns
+     even on a phone because that is the drawing — but the SECTIONS column is given
+     the larger share, since it is the words somebody is agreeing to. */
+  .idgrid { display: grid; grid-template-columns: 1fr; gap: 0; background: var(--card); }
+  .idgrid > div { padding: 20px; }
+  .idgrid > div + div { border-top: 1px solid var(--line); }
+  @media (min-width: 940px) {
+    .idgrid { grid-template-columns: 1.2fr .8fr; }
+    .idgrid > div + div { border-top: 0; border-left: 1px solid var(--line); }
+  }
+
+  /* ── print ─────────────────────────────────────────────────────────────────── */
+  @media print {
+    .side, .acts, .sign, .askbox, .recordnote, .tabs, .backbar, .wcd summary { display: none !important; }
+    .wcd[open] .wcgrid, .wcd .wcgrid { display: grid; }
+    body { max-width: none; background: #fff; }
+    .shell { display: block; padding: 0; max-width: none; }
+    .card { border-radius: 0; break-inside: avoid; }
+    .exact { display: block; }
+    .exact[open] .doc, .exact .doc { background: #fff; }
+  }
+</style>
+</head>
+<body>
+<div id="root"><div class="done"><div class="mark">·</div><p>Loading…</p></div></div>
+
+<!-- PRD R3 AC2. A SEPARATE FILE on purpose: this page renders a PRICED approval —
+     a big number, a running total, and "Nothing proceeds until you approve." All
+     three are wrong for an Extra Work Authorization, which has no price, and on a
+     T&M-capped term work proceeds precisely BECAUSE it was approved. A classic
+     script runs before any module, so window.renderEwa is set by the time the
+     dispatch below needs it. -->
+<script src="ewa.js"></script>
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+// Injected at deploy time. The anon key is public by design (see the top comment).
+const SUPABASE_URL = '__SUPABASE_URL__';
+const ANON_KEY = '__ANON_KEY__';
+
+const supabase = createClient(SUPABASE_URL, ANON_KEY);
+const root = document.getElementById('root');
+// The link may arrive either way: ?t=TOKEN (works on any static host with no
+// rewrite) or a pretty /c/TOKEN path (needs a host rewrite). Accept both so the
+// choice of host never silently breaks every link.
+const token = new URLSearchParams(location.search).get('t')
+  || (location.pathname.match(/\/c\/([^/?#]+)/) || [])[1] || null;
+// Which VIEW of the same link. `v=project` is the phone's list screen; anything else
+// (including nothing) is the document. One URL, one credential — see projectHtml.
+const view = new URLSearchParams(location.search).get('v');
+/**
+ * Design-preview flag — AND IT MUST NEVER APPLY TO A REAL DOCUMENT.
+ *
+ * `?demo=1` invents a company name, address, phone, email, a named contact and a CO
+ * number so the letterhead can be reviewed while those fields are still empty in the
+ * product. It was gated on the query string ALONE, which meant anyone holding a genuine
+ * approval link could append it and be shown a document whose letterhead, requesting
+ * party and change-order number differ from the frozen `shown_content` they are being
+ * asked to sign — with Approve and Decline still live. That is precisely the invariant
+ * this page exists to hold (mandate #5: what the signer saw is the binding instrument).
+ *
+ * So it now additionally requires that there be NO TOKEN: the preview is for the
+ * design, and a design has no counterparty. With a token present the flag is ignored
+ * and the page draws only what the server sent. Found by review, 2026-08-13.
+ */
+// `token`, not `?t=` — the link may also arrive as a /c/TOKEN path, and a gate that
+// only knew one of the two would still fabricate letterhead on half the real links.
+const demo = new URLSearchParams(location.search).get('demo') === '1' && !token;
+
+// The EWA's structured terms, held at module scope so a redraw (Back, or the return
+// from the question screen) does not need to re-fetch them and cannot redraw the
+// authorization without them. `renderEwa` fails closed on null, which is the correct
+// outcome if they were never fetched — an authorization missing its proceed term must
+// not be signable.
+let ewaTerms = null;
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Integer cents -> "$1,850". Money never becomes a float here either.
+const usd = (cents) => {
+  if (cents == null) return '';
+  const s = Math.abs(cents).toString().padStart(3, '0');
+  const whole = s.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return '$' + whole + '.' + s.slice(-2);
+};
+// Initials for the logo tile, from the company name.
+const initials = (name) => String(name || '')
+  .split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '•';
+
+function screen(html) { root.innerHTML = html; }
+function done(mark, title, sub) {
+  screen(`<div class="done"><div class="mark">${mark}</div>
+    <h2>${esc(title)}</h2><p>${esc(sub)}</p></div>`);
+}
+
+async function load() {
+  if (!token) { done('⚠️', 'This link is incomplete', 'Ask for the link again.'); return; }
+
+  // Both reads go out together. They share only the token and neither needs the
+  // other's answer, so awaiting them in series just made the client wait two round
+  // trips before seeing anything — on the bad-signal phone this page is built for,
+  // that is the whole perceived load time, doubled, for no reason.
+  //
+  // A link is retired the moment a newer one is issued for the same change order
+  // (250_one_live_link), so an old text message can no longer be signed at a stale
+  // price. Say that here rather than letting the client read, type their name and
+  // only THEN hit a refusal. Checked separately because confirmation_fetch is one of
+  // the four already-duplicated functions and extending it would add a fifth.
+  //
+  // PRD R4's photos ride along as a THIRD parallel call, not a fourth field on
+  // confirmation_fetch. Two reasons, and the second is the one that matters:
+  //   * confirmation_fetch is owned by 200_priced_approval.sql and has already been
+  //     redefined across files once, at real cost. 304_approval_photos.sql owns this
+  //     one and nothing else touches it.
+  //   * it is inside the SAME Promise.all, so it costs ZERO extra round trips against
+  //     the AC's 3 seconds. The photos themselves are what has to fit in that budget,
+  //     not the question of whether there are any.
+  //
+  // 399 rides along in the same Promise.all for the same reason: zero extra round
+  // trips against the 3-second budget. Both are OPTIONAL — on a server where 399 has
+  // not been applied the RPC does not exist and the call errors, which must degrade
+  // to "no sidebar, no identity line" and never to a blank page. That is the exact
+  // failure this file already shipped once (an unpinned import took the whole page
+  // down silently), so every new call is written to fail into a lesser page.
+  const [{ data, error }, { data: st }, ph, proj, hdr, chg, cmp] = await Promise.all([
+    supabase.rpc('confirmation_fetch', { p_token: token }),
+    supabase.rpc('confirmation_state', { p_token: token }),
+    supabase.rpc('confirmation_photos', { p_token: token }),
+    supabase.rpc('confirmation_project_v1', { p_token: token }),
+    supabase.rpc('confirmation_header_v1', { p_token: token }),
+    supabase.rpc('confirmation_changes_v1', { p_token: token }),
+    supabase.rpc('confirmation_company_v1', { p_token: token }),
+  ]);
+  if (error) { done('⚠️', 'Could not load this', 'Check your connection and open the link again.'); return; }
+
+  if (st && st.found && st.superseded && !st.answered) {
+    // R6 AC2: LINK to the current version, do not describe it. This used to say
+    // "please open the most recent link they texted you", which asks a homeowner
+    // standing in a doorway to go hunting through their SMS history and diff two
+    // near-identical URLs by eye. The live token was in the database the whole time.
+    //
+    // The URL is built from THIS page's own origin, never from a base stored
+    // server-side: a second source of truth for where this page lives has already
+    // been wrong once (EXPO_PUBLIC_CONFIRM_BASE pointed at a domain that did not
+    // exist). Whatever host served this link serves the next one.
+    //
+    // live_token is null when a link was retired with no replacement — the
+    // contractor changed his mind. That is a real state and it keeps the old copy,
+    // because sending someone to a page that does not exist is worse than telling
+    // them to ask.
+    const live = st.live_token
+      ? `${location.pathname}?t=${encodeURIComponent(st.live_token)}`
+      : null;
+    screen(`<div class="done"><div class="mark">🔄</div>
+      <h2>This version was replaced</h2>
+      <p>${live
+        ? 'The contractor sent an updated version. Nothing here was recorded.'
+        : 'The contractor withdrew this request. Nothing here was recorded — ask them for a new link.'}</p>
+      ${live ? `<div class="btns"><a class="yes" style="display:block;text-decoration:none;text-align:center"
+           href="${esc(live)}">Open the current version</a></div>` : ''}
+      </div>`);
+    return;
+  }
+
+  // R6 AC: "opened twice and questioned once -> the timeline shows each event."
+  // Logged HERE, after the fetch succeeded and BEFORE any branch, so an open counts
+  // whether they approve, ask, decline, or just read it and put the phone down —
+  // "she opened it three times and has not answered" is the signal that tells a
+  // contractor whether to chase, and it is only true if every open is counted.
+  //
+  // Fire-and-forget on purpose. This is bookkeeping about the page, and it must
+  // never delay or block what the client came here to do. The RPC no-ops on an
+  // unknown token rather than erroring, so a bad link still shows "not valid"
+  // instead of a network failure.
+  //
+  // ── `Promise.resolve(...)` IS LOAD-BEARING. IT IS THE FIX FOR A TOTAL OUTAGE ──
+  // This line read `supabase.rpc(...).catch(...)`. What `rpc()` returns is a
+  // PostgrestFilterBuilder — a THENABLE, not a Promise. It has `.then()`; it does not
+  // have `.catch()`. So the line threw `supabase.rpc(...).catch is not a function`
+  // SYNCHRONOUSLY, inside `load()`, which is called at the bottom of this module with
+  // no error handling — and an async function that throws returns a rejected promise
+  // nobody is listening to.
+  //
+  // The consequence: EVERY approval link, of every kind, stopped at "Loading…" and
+  // never rendered anything. No error on screen, nothing in the console (an unhandled
+  // rejection is not a console error), and the three RPCs above visibly succeeded in
+  // the network tab — so the page looked like a slow server rather than a dead one.
+  // Reproduced against the live database and the token in `confirmation_request` on
+  // 2026-08-06, on the page as committed, before any change in this pass.
+  //
+  // The version drift that caused it is the second half of the lesson, recorded
+  // because the fix does not remove it: this page imports
+  // `https://esm.sh/@supabase/supabase-js@2` — an UNPINNED major range, resolved at
+  // page load, off a CDN. The builder used to extend Promise; it no longer does. So a
+  // patch release on someone else's server disabled the entire client-facing half of
+  // this product with no deploy, no commit and no signal. See docs/CLIENT-PORTAL.md
+  // §"Open questions" — pinning is a decision, not a cleanup.
+  //
+  // `Promise.resolve(thenable)` adopts it and gives back a real Promise, so this is
+  // correct against both the old shape and the new one.
+  Promise.resolve(
+    supabase.rpc('confirmation_opened', { p_token: token, p_user_agent: navigator.userAgent })
+  ).catch(() => { /* 366 not applied yet, or offline. The page is unaffected. */ });
+
+  if (data.status === 'not_found') { done('⚠️', 'This link is not valid', 'It may have been mistyped. Ask for a new one.'); return; }
+  if (data.status === 'expired') { done('⏰', 'This link has expired', 'Ask for a new one — nothing is lost.'); return; }
+
+  // Photos are OPTIONAL and their absence is never an error. On a database where
+  // 304_approval_photos.sql has not been applied the RPC does not exist and `ph.error`
+  // is set — the approval must still render and still be signable. An extra with no
+  // photos is a legal extra (PRD R4 says "0-8"), so the two cases collapse to the
+  // same empty list rather than to a failure screen.
+  data.photos = (ph && ph.data && Array.isArray(ph.data.photos)) ? ph.data.photos : [];
+  // Same tolerance as the photos line above, and for the same reason: an
+  // unmigrated server, an empty result and a token that is not live are all
+  // "no project view", and the page must render identically for all three.
+  data.__project = (proj && proj.data && proj.data.project_id) ? proj.data : null;
+  data.__header = (hdr && hdr.data) ? hdr.data : {};
+  // Null unless this version REPLACED one. `revised:false` (a first issue) and an
+  // unmigrated server both collapse to null, and the banner simply does not render —
+  // an "updated" notice on an original would be a lie on the page where trust IS the
+  // product.
+  data.__changes = (chg && chg.data && chg.data.revised) ? chg.data : null;
+  data.__company = (cmp && cmp.data && cmp.data.company) ? cmp.data.company : null;
+  data.__contact = (cmp && cmp.data && cmp.data.contact) ? cmp.data.contact : null;
+  applyDemo(data);
+
+  // THE CONVERSATION IS FETCHED BEFORE ANY BRANCH (DEF-5).
+  //
+  // It used to be fetched between the EWA dispatch and the priced render, which meant
+  // exactly two of the three documents this page can draw ever had a thread:
+  //   * an EWA returned at the `kind === 'ewa'` dispatch, above the fetch, so an owner
+  //     holding an authorization link could not see a single message either side had
+  //     written about it;
+  //   * an ANSWERED link returned even earlier, so the moment a client signed, the
+  //     discussion that led to the signature disappeared from the only copy they have.
+  // Both are REQ-LC33 — "Stage 3 is readable forever, BY BOTH PARTIES, at the same
+  // address" — and the party with the least access and the most at stake is the one
+  // who signed. So the fetch is hoisted above every branch that renders a document,
+  // and each of them renders it.
+  //
+  // confirmation_thread (308) supersedes confirmation_questions (220): it returns the
+  // contractor's replies too and walks the revision lineage, so a conversation
+  // survives a Revise & Resend instead of restarting at the new link.
+  await loadThread(data);
+
+  // ANSWERED IS THE SAME DOCUMENT (hadar, 2026-08-10: "why the approved change order
+  // looks different?").
+  //
+  // It rendered its own screen — a tick, a line of text and the raw frozen wording in
+  // a grey box — because it predates the document renderer and nobody joined them up.
+  // So the moment a client signed, the page they had been reading was replaced by a
+  // different-looking page about the same thing: no letterhead, no sections, no
+  // photographs beside them, no summary. The party with the most at stake got the
+  // worst copy, which is precisely backwards.
+  //
+  // There is ONE document now. `renderPriced` draws it whether it is open or
+  // answered; the status band at the top and the action band at the bottom are what
+  // change. Everything the old branch was right about is kept — the frozen wording,
+  // the photographs and the discussion all stay at this address forever, because
+  // dropping any of them would leave the signer holding less evidence than the party
+  // they signed with.
+  //
+  // The plain (unpriced) path keeps its own renderer and is passed the same flag.
+  if (data.status === 'already_answered') {
+    if (data.kind === 'ewa') { /* fall through to the EWA renderer below */ }
+    else if (data.amount_cents != null) { renderPriced(data, null); return; }
+    else { renderPlain(data, null); return; }
+  }
+
+  // THE PHONE'S LIST SCREEN, off the same token. Placed AFTER the superseded and
+  // already-answered branches on purpose: those two say something urgent and specific
+  // about THIS link, and a client who followed a stale link deserves to be told so
+  // rather than dropped on a project index that silently omits the document they were
+  // looking for. `data.__project` is null unless the token is live, so a stale link
+  // cannot reach this anyway — the ordering makes the message better, not the gate.
+  if (view === 'project' && data.__project) {
+    document.body.classList.add('hastabs');
+    screen(projectHtml(data) + tabsHtml(data, 'project'));
+    const ask = document.getElementById('askfromproject');
+    if (ask) ask.onclick = () => askQuestion(data);
+    return;
+  }
+
+  // R3 AC2: an EWA is a DIFFERENT INSTRUMENT and gets a different page. Dispatch on
+  // `kind`, which confirmation_fetch already returns, NOT on the absence of a price:
+  // "no amount_cents" is also true of a legacy decision-confirm, and rendering an
+  // authorization as one of those would drop the proceed term and the settlement
+  // window — the two clauses that decide whether work starts today.
+  if (data.kind === 'ewa') {
+    // Terms live in their own table (303) and are frozen alongside shown_content.
+    // A fetch failure leaves them null, and renderEwa refuses to render an incomplete
+    // authorization rather than showing a signable page with clauses missing.
+    try {
+      const { data: t } = await supabase.rpc('ewa_terms_fetch', { p_token: token });
+      ewaTerms = t ?? null;
+    } catch { ewaTerms = null; }
+  }
+
+  renderDocument(data);
+  watchForReplies(data);
+}
+
+/**
+ * Fetch the conversation onto `d.__thread`.
+ *
+ * Separated from `load()` so the same call serves three moments: the first render,
+ * the return trip after the client asks something, and the poll that notices the
+ * contractor answered. One fetch, one shape, no second parser.
+ *
+ * A failure leaves the PREVIOUS thread in place rather than blanking it. Losing
+ * signal mid-poll must never make a client's own question disappear off the page
+ * they are looking at — that reads as "it did not send".
+ */
+async function loadThread(d) {
+  try {
+    const { data: th } = await supabase.rpc('confirmation_thread', { p_token: token });
+    if (Array.isArray(th)) d.__thread = th;
+    else if (!Array.isArray(d.__thread)) d.__thread = [];
+  } catch { if (!Array.isArray(d.__thread)) d.__thread = []; }
+  return d.__thread;
+}
+
+/**
+ * Draw whichever document this token carries.
+ *
+ * ONE dispatch, called from three places — the first load, the return from the
+ * question screen, and the Back buttons — because there used to be three copies of
+ * `d.amount_cents != null ? renderPriced : renderPlain` and none of them knew about
+ * the EWA branch, which lived only inside `load()`. An EWA that reached a Back button
+ * was therefore redrawn as a priced approval with no price: the proceed term and the
+ * settlement window silently gone from a page still offering a signature.
+ *
+ * `notice` is a one-line banner ("Your question was sent"), rendered by the document
+ * renderers above the thread. It is a parameter and not state, so it appears once and
+ * does not survive a reload — a stale "sent ✓" is a claim about the past.
+ */
+function renderDocument(d, notice) {
+  if (d.kind === 'ewa') {
+    if (typeof window.renderEwa !== 'function') {
+      // ewa.js failed to load. Refuse rather than fall through to a renderer that
+      // would silently omit the terms this document turns on.
+      done('⚠️', 'This authorization could not load',
+        'Please open the link again. Nothing here was recorded.');
+      return;
+    }
+    window.renderEwa(d, ewaTerms, { screen, done, esc, usd, initials, answer,
+                                    askQuestion, declineFlow, photoStrip, threadHtml,
+                                    notice: notice || null });
+    return;
+  }
+  // A price present means this is a priced approval; otherwise the legacy confirm.
+  (d.amount_cents != null) ? renderPriced(d, notice) : renderPlain(d, notice);
+}
+
+/**
+ * NOTICE WHEN THE CONTRACTOR ANSWERS, without asking the client to do anything.
+ *
+ * The gap this closes: the client asks "does that include the permit?", the
+ * contractor replies from his phone, and the client — who has no account, no app and
+ * no notification — sits on a page that will never change. The only way they learned
+ * a reply existed was to go back into their messages and tap the link again, which is
+ * precisely the "would someone who does not think in software succeed here" test in
+ * CLAUDE.md. Most people simply wait, and the contractor reads that as being ignored.
+ *
+ * Two triggers, and the first is the one that matters:
+ *   * `visibilitychange` — the phone was locked, or they switched to Messages to text
+ *     the contractor, and came back. That is when a reply has most likely landed.
+ *   * a slow poll while the page is genuinely on screen.
+ *
+ * ONLY THE THREAD CARD IS REPLACED, never the page. A re-render would wipe a
+ * half-typed signature out of the name field under the client's thumb, and this page
+ * exists to collect exactly that signature. `#thread` is the seam.
+ *
+ * It stops the moment the document is answered: a terminal record does not change,
+ * and polling it forever is battery spent on a question already settled.
+ */
+const REPLY_POLL_MS = 25000;
+function watchForReplies(d) {
+  let stopped = false;
+  const stop = () => { stopped = true; };
+  // Re-read after any answer this page itself records. `answer()` and the decline
+  // path both replace the whole screen, so the poller would be updating an element
+  // that no longer exists.
+  window.addEventListener('ezjb:answered', stop);
+
+  const tick = async () => {
+    if (stopped || document.visibilityState !== 'visible') return;
+    const before = (d.__thread || []).length;
+    await loadThread(d);
+    const host = document.getElementById('thread');
+    if (!host || (d.__thread || []).length === before) return;
+    // Replace the card in place and say so. Without the cue a reply can appear
+    // above the fold while the client is reading the price and never be noticed.
+    host.outerHTML = threadHtml(d, true);
+  };
+
+  document.addEventListener('visibilitychange', () => { void tick(); });
+  const timer = setInterval(() => { if (stopped) clearInterval(timer); else void tick(); },
+                            REPLY_POLL_MS);
+}
+
+// PRD R4 — the photo strip.
+//
+// The <=3s-on-LTE AC is met by three things together, and none of them alone:
+//   1. `url` is a Storage signed URL carrying a resize+quality transform, so the
+//      bytes on the wire are a phone-sized JPEG and not a 9 MB camera original.
+//   2. `eager` is decided on the device against a stated byte budget
+//      (src/approvalphotos.ts). Only what fits in the budget loads with the page;
+//      the rest is loading="lazy", which the browser does not fetch at all until the
+//      client scrolls to it. So the load time does not grow with photo count.
+//   3. the tiles reserve their space, so a slow photo never reflows the page.
+//
+// The transform is a storage-tier feature and can refuse. `onerror` falls back to the
+// untransformed object exactly once (`this.onerror = null` first, or a broken object
+// loops forever). Slower, still the right photo, never an empty box.
+//
+// Each tile links to the full-size original: the client zooming into the crack is the
+// entire point of attaching a photo to a price. A plain <a> does that with no
+// lightbox, no JS, and no way to get stuck in a modal on a phone.
+function photoStrip(photos) {
+  if (!photos || !photos.length) return '';
+  const tiles = photos.map((p) => {
+    const full = esc(p.fallback_url || p.url);
+    const when = p.captured_at_ms
+      ? new Date(Number(p.captured_at_ms)).toLocaleDateString() : '';
+    // NO DATE BURNED INTO THE TILE. It was a white caption over the bottom of every
+    // photograph — on a document, that reads as part of the evidence rather than as
+    // metadata, and the design does not have it. The capture date is on the record;
+    // the tile is the picture.
+    return `<a class="shot" href="${full}" target="_blank" rel="noopener" title="${esc(when)}">
+        <img src="${esc(p.url)}" data-full="${full}" alt="Photo of the work"
+             loading="${p.eager ? 'eager' : 'lazy'}" decoding="async"
+             ${p.eager ? 'fetchpriority="high"' : ''}
+             onerror="this.onerror=null;this.src=this.dataset.full">
+      </a>`;
+  }).join('');
+  const first = photos[0] && (photos[0].fallback_url || photos[0].url);
+  return `<div class="shots">${tiles}</div>
+    ${first ? `<a class="allshots" href="${esc(first)}" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      View all photos (${photos.length})</a>` : ''}`;
+}
+
+/**
+ * "WHAT CHANGED" — the banner over a revised change order (hadar's design, 2026-08-09/10).
+ *
+ * THE PROBLEM IT SOLVES. REQ-LC22 retires the old link and issues a new one, so from
+ * the client's side a revision arrives as a second text carrying a second document
+ * that looks almost exactly like the first. Spotting the difference is entirely their
+ * job. A homeowner who cannot see what moved either re-reads everything or — far more
+ * likely — approves without doing so, which is a signature given without knowing what
+ * changed.
+ *
+ * IT IS A SUMMARY, NOT THE INSTRUMENT, and the copy says so in as many words. Mandate
+ * #5: the frozen `shown_content` below is what is being signed. This sits ABOVE the
+ * document as a "look here" and never inside it. 400 computes it from the structured
+ * columns of the two versions rather than diffing the rendered legal text, because a
+ * text diff of an instrument produces line-noise on any rewording — and the only
+ * thing worse than not telling someone what changed is telling them wrongly on the
+ * page where they sign.
+ *
+ * COLLAPSED BY DEFAULT on a phone, because the design draws it that way and because
+ * the banner's one sentence is the part that must be read; the columns are the detail
+ * for someone who wants it. <details> does this with no JS and no state to get wrong.
+ */
+function changesHtml(d) {
+  const c = d.__changes;
+  if (!c) return '';
+  const when = c.updated_at
+    ? new Date(c.updated_at).toLocaleString(undefined,
+        { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : '';
+  // "after your conversation" is TWO FACTS, not a causal claim: there were messages on
+  // the version this replaced, and then the document changed. Both are checkable. The
+  // page must not assert that the conversation caused the change — it does not know.
+  const lead = c.after_conversation
+    ? 'This change order was updated after your conversation.'
+    : 'This change order was updated and replaces the earlier version.';
+
+  const cell = (f) => {
+    if (f.key === 'price') {
+      const now = f.now != null ? usd(f.now) : (f.now_nte != null ? `up to ${usd(f.now_nte)}` : '—');
+      const was = f.was != null ? usd(f.was) : (f.was_nte != null ? `up to ${usd(f.was_nte)}` : null);
+      return `<div class="wcc"><div class="wch">Price</div>
+        <div class="wcv">${f.changed && was ? `<s>${esc(was)}</s> → ` : ''}${esc(now)}</div>
+        ${f.changed ? '' : '<div class="wcm">No change</div>'}</div>`;
+    }
+    if (f.key === 'schedule') {
+      const now = f.now_days ? `Adds ${esc(String(f.now_days))} working day${f.now_days === 1 ? '' : 's'}`
+                             : esc(f.now || 'No change');
+      return `<div class="wcc"><div class="wch">Schedule</div><div class="wcv">${now}</div></div>`;
+    }
+    // Exclusions. The WHOLE new text, not a word-level diff: "Added: …" would require
+    // knowing which clause is new, and getting that wrong on the not-included list is
+    // the single most expensive mistake this page could make.
+    return `<div class="wcc"><div class="wch">${esc(f.label)}</div>
+      <div class="wcv">${esc(f.now || 'Nothing excluded')}</div>
+      ${f.was ? `<div class="wcm">Previously: ${esc(f.was)}</div>` : ''}</div>`;
+  };
+
+  const fields = Array.isArray(c.fields) ? c.fields : [];
+  return `<div class="wcbar">
+    <details class="wcd" open>
+      <summary class="wctop">
+        <span class="wcmark">↻</span>
+        <span class="wcmsg">
+          <span class="wcwhen">${when ? `Updated ${esc(when)}` : 'Updated'}</span>
+          <span class="wclead">${esc(lead)}</span>
+        </span>
+        <span class="wcbtn">See what changed</span>
+      </summary>
+      <div class="wcgrid">${fields.map(cell).join('')}</div>
+      ${c.scope_rewritten ? `<p class="wcnote"><b>The work itself was rewritten.</b>
+        Please read the description below again rather than relying on this summary.</p>` : ''}
+      <p class="wcnote">This is a summary to show you where to look. What you approve
+        is the document below${c.versions > 1 ? ` — version ${esc(String(c.versions))}` : ''}.</p>
+      <a class="wclink" href="#thread">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;vertical-align:-3px"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+        <b>View conversation</b><br><span class="wcm">See the discussion →</span></a>
+    </details>
+  </div>`;
+}
+
+/**
+ * THE PROJECT PAGE — the phone half of the portal (hadar's mobile design, 2026-08-09).
+ *
+ * On a desktop the project lives in a sidebar beside the document. A 390px phone has
+ * no room beside anything, so the same content becomes its own SCREEN and the
+ * document gets a "← All change orders" way back to it. Same data, same server gate
+ * (`confirmation_project_v1`, live tokens only) — the difference is layout, not
+ * permission, and there is deliberately no second authorization path here.
+ *
+ * IT IS A VIEW OF THE SAME URL, not a second page. `?t=<token>&v=project` renders
+ * this; dropping `v` renders the document. That matters more than it looks: the
+ * token is the credential, the client got exactly one link by SMS, and a portal
+ * spread over two addresses would mean a second link to lose. Back and forward work
+ * because each view is a real history entry.
+ */
+function projectHtml(d) {
+  const pr = d.__project;
+  if (!pr) return '';
+  const company = d.company_name || 'Your contractor';
+  const orders = Array.isArray(pr.orders) ? pr.orders : [];
+  const waiting = orders.filter((o) => !o.answered_action);
+  const answered = orders.filter((o) => o.answered_action);
+  const approved = answered.filter((o) => o.answered_action === 'confirmed');
+
+  const row = (o, tick) => {
+    const label = `${o.co_number != null ? `<b>CO #${esc(String(o.co_number))}</b> ` : ''}${esc(o.title || 'Extra work')}`;
+    const amt = o.amount_cents != null ? `<span class="sra">${esc(usd(o.amount_cents))}</span>` : '';
+    const meta = tick
+      ? (o.answered_at ? `Approved ${esc(new Date(o.answered_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }))}` : 'Approved')
+      : (o.issued_at ? esc(new Date(o.issued_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })) : '');
+    const inner = `${tick ? '<span class="srtick">✓</span>' : ''}
+      <span style="flex:1;min-width:0">
+        <span class="srt">${label}</span>
+        ${meta ? `<span class="srm">${meta}</span>` : ''}
+      </span>${amt}${o.token ? '<span class="srchev">›</span>' : ''}`;
+    // Only a LIVE token opens a row. Everything else is a fact, not a door — an
+    // approved change order whose link has been answered has no page left to open,
+    // and a chevron promising one is a lie the client discovers by tapping.
+    return o.token
+      ? `<a class="srow${o.token === token ? ' here' : ''}" href="?t=${encodeURIComponent(o.token)}">${inner}</a>`
+      : `<div class="srow">${inner}</div>`;
+  };
+
+  return `
+    <div class="pbar">
+      <div class="logo">${esc(initials(company))}</div>
+      <div class="pbn">${esc(company)}</div>
+    </div>
+    <div class="wrap">
+      <div class="phero">
+        <div class="pheroname">${esc(pr.project_name || d.job_label || 'This job')}</div>
+        ${pr.project_address ? `<div class="saddr">${esc(pr.project_address)}</div>` : ''}
+      </div>
+
+      <h2 class="ph2">Change orders</h2>
+      <div class="scounts">
+        <div class="scount need"><div class="scl">Needs your approval</div><div class="scv">${waiting.length}</div></div>
+        <div class="scount"><div class="scl">Approved</div><div class="scv">${approved.length}</div></div>
+      </div>
+
+      ${waiting.length ? `<div class="slab">Needs your approval</div>${waiting.map((o) => row(o, false)).join('')}` : ''}
+      ${answered.length ? `<div class="slab">Answered</div>${answered.map((o) => row(o, o.answered_action === 'confirmed')).join('')}` : ''}
+
+      <div class="sask">
+        <div class="saskh">Questions?</div>
+        <div class="saskt">Message ${esc(company)} directly if anything here is unclear.
+          Asking approves nothing.</div>
+        <button class="ghost" id="askfromproject" style="margin-top:10px">Ask a question</button>
+      </div>
+      <div class="sfoot">Secure approvals powered by EZChangeOrders</div>
+    </div>`;
+}
+
+/**
+ * The phone's bottom bar.
+ *
+ * TWO TABS, NOT THREE. The design draws Project · Messages · Documents. The first two
+ * are real — the project view above, and the discussion, which already exists on
+ * both sides and now carries photos. THERE IS NO DOCUMENTS FEATURE: nothing in this
+ * product stores a client-visible document library, so a third tab would be a button
+ * that either does nothing or opens an empty room. It is left out rather than
+ * stubbed. When documents exist, this is the one place that changes.
+ *
+ * Hidden on desktop, where the sidebar is always on screen and a floating bar would
+ * be navigation for a page that is not navigating.
+ */
+function tabsHtml(d, active) {
+  if (!d.__project) return '';
+  const tab = (key, label, glyph, href) =>
+    `<a class="tab${active === key ? ' on' : ''}" href="${href}">
+       <span class="tabg">${glyph}</span><span>${label}</span></a>`;
+  const base = `?t=${encodeURIComponent(token)}`;
+  return `<nav class="tabs">
+    ${tab('project', 'Project', '⌂', `${base}&v=project`)}
+    ${tab('messages', 'Messages', '💬', `${base}#thread`)}
+  </nav>`;
+}
+
+/**
+ * THE SIDEBAR (hadar's desktop portal design, 2026-08-09).
+ *
+ * What it is FOR: a client who has approved three change orders on this job and has
+ * two waiting is not reading one document, they are managing a relationship. The
+ * sidebar is the only place this page has ever told them that. It carries the
+ * project, both lists, and one way to reach a human.
+ *
+ * ─── IT IS GATED, AND THE GATE IS ON THE SERVER ─────────────────────────────────
+ * `confirmation_project_v1` returns {} unless the token is LIVE — not superseded and
+ * not yet answered (399, hadar's choice 2026-08-09). So an old link forwarded to a
+ * neighbour still opens the document it was minted for and shows NO sidebar. This
+ * function never has to decide that; it renders what it is given, and an absent
+ * project is simply a page with one column. Do not add a client-side test here — a
+ * check in this file protects nothing, because the data would already have arrived.
+ *
+ * DRAFTS ARE NOT IN `orders` (the server excludes them). A client must never learn
+ * that a draft exists, let alone what it might cost.
+ */
+function sidebarHtml(d) {
+  const pr = d.__project;
+  if (!pr) return '';
+  const company = (d.__company && d.__company.name) || d.company_name || 'Your contractor';
+  // The person to message, when we know one. The design addresses a human ("Message
+  // John Davis"); with no contact on file the company is the honest stand-in and we
+  // never invent a name.
+  const who = (d.__contact && d.__contact.name) || company;
+  const orders = Array.isArray(pr.orders) ? pr.orders : [];
+  const mine = (o) => o.token && o.token === token;
+
+  const waiting = orders.filter((o) => !o.answered_action);
+  const answered = orders.filter((o) => o.answered_action);
+
+  // A row links only when a LIVE token exists for it. Everything else renders as
+  // plain text: a dead link on a homeowner's page is worse than no link, because
+  // tapping it produces an error page about a document they were told they could see.
+  const row = (o, tick) => {
+    const label = `${o.co_number != null ? `<b>CO #${esc(String(o.co_number))}</b> ` : ''}${esc(o.title || 'Extra work')}`;
+    const amt = o.amount_cents != null ? `<span class="sra">${esc(usd(o.amount_cents))}</span>` : '';
+    const when = tick
+      ? (o.answered_at ? `Approved ${esc(new Date(o.answered_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }))}` : 'Approved')
+      : (o.issued_at ? esc(new Date(o.issued_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })) : '');
+    // "From <name>" — the design's second line. Omitted rather than faked when nobody
+    // is on file: a row that names the wrong person on a money document is worse than
+    // a row with one line less.
+    const from = (!tick && who && who !== company) ? `<span class="srm">From ${esc(who)}</span>` : '';
+    const inner = `${tick ? '<span class="srtick">✓</span>' : ''}
+      <span style="flex:1;min-width:0">
+        <span class="srt">${label}</span>${from}${when ? `<span class="srm">${when}</span>` : ''}
+      </span>${amt}<span class="srchev">›</span>`;
+    return (o.token && !mine(o))
+      ? `<a class="srow" href="?t=${encodeURIComponent(o.token)}">${inner}</a>`
+      : `<div class="srow${mine(o) ? ' here' : ''}">${inner}</div>`;
+  };
+
+  return `<aside class="side">
+    <div class="sbrand">
+      <div class="logo">${esc(initials(company))}</div>
+      <div>
+        <div class="sbc">${esc(company)}</div>
+        ${d.__company && d.__company.tagline ? `<div class="sbt">${esc(d.__company.tagline)}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="sh">Your project</div>
+    ${pr.hero_url ? `<img class="phero" src="${esc(pr.hero_url)}" alt="" loading="lazy">` : ''}
+    <div class="sproj">${esc(pr.project_name || d.job_label || 'This job')}</div>
+    ${pr.project_address && pr.project_address !== (pr.project_name || '')
+      ? `<div class="saddr">${esc(pr.project_address)}</div>` : ''}
+    <a class="slink" href="?t=${encodeURIComponent(token)}&v=project">View project details →</a>
+
+    <div class="sh">Change orders</div>
+    <div class="scounts">
+      <div class="scount need"><div class="scl">Needs your approval</div><div class="scv">${waiting.length}</div></div>
+      <div class="scount"><div class="scl">Approved</div><div class="scv">${answered.filter((o) => o.answered_action === 'confirmed').length}</div></div>
+    </div>
+
+    ${waiting.length ? `<div class="slab">Needs your approval</div>${waiting.map((o) => row(o, false)).join('')}` : ''}
+    ${answered.length ? `<div class="slab">Answered</div>${answered.map((o) => row(o, o.answered_action === 'confirmed')).join('')}` : ''}
+
+    <a class="slink" href="?t=${encodeURIComponent(token)}&v=project">View all change orders →</a>
+
+    <div class="sask">
+      <div class="saskh">Questions?</div>
+      <div class="saskrow">
+        <div class="lhav">${esc(initials(who))}</div>
+        <div class="saskt">Message ${esc(who)} directly if anything here is unclear.
+          Asking approves nothing.</div>
+      </div>
+      <button class="ghost sasbtn" id="asksidebar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+        Message ${esc(firstWord(who))}</button>
+    </div>
+    <div class="sfoot">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:14px;height:14px;vertical-align:-2px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      Secure approvals<br>powered by EZChangeOrders
+    </div>
+  </aside>`;
+}
+
+/**
+ * The document's identity line — "CHANGE ORDER #4 · Issued Aug 9 · Requested by …".
+ *
+ * These are the three facts a paper change order carries in its header, and every
+ * one of them was already on the row and simply never returned to this page (399).
+ *
+ * `requested_by` arrives NULL when nobody was named: the server strips the seeded
+ * role word rather than letting "Requested by: Owner" print on a document somebody
+ * is about to sign. An absent fact is omitted here, never rendered as "Not set" —
+ * a homeowner reading a blank field learns nothing except that the app has one.
+ */
+function identityHtml(h) {
+  if (!h) return '';
+  const bits = [];
+  if (h.issued_at) bits.push(`Issued ${esc(new Date(h.issued_at).toLocaleDateString(undefined,
+    { month: 'short', day: 'numeric', year: 'numeric' }))}`);
+  if (h.requested_by) bits.push(`Requested by ${esc(h.requested_by)}`);
+  if (h.co_number == null && !bits.length) return '';
+  return `<div class="ident">
+    ${h.co_number != null ? `<span class="idn">Change order #${esc(String(h.co_number))}</span>` : ''}
+    ${bits.map((b) => `<span class="idm">${b}</span>`).join('')}
+  </div>`;
+}
+
+/**
+ * The contract summary.
+ *
+ * WHAT IS MISSING AND WHY IT IS NOT INVENTED. The design opens this table with
+ * "Original contract amount — $74,000.00" and closes with a new contract total
+ * derived from it. This product does not hold a base contract value; nothing in the
+ * schema has one. So those two rows are OMITTED, and the note under the table says
+ * the figures cover change orders only.
+ *
+ * The alternative — summing change orders and calling the result a contract total —
+ * would print a number that is wrong by the entire value of the original contract,
+ * on the page where somebody signs. Mandate #6 is about exactly this: the app
+ * authors no figure it cannot prove.
+ */
+function summaryHtml(d) {
+  const pr = d.__project;
+  const prior = pr ? pr.approved_total_cents : d.approved_running_cents;
+  if (prior == null && d.amount_cents == null) return '';
+  const rows = [];
+  if (prior != null) {
+    rows.push(`<tr><td>Change orders you have already approved</td><td>${esc(usd(prior))}</td></tr>`);
+  }
+  if (d.amount_cents != null) {
+    rows.push(`<tr class="this"><td>This change order</td><td>+ ${esc(usd(d.amount_cents))}</td></tr>`);
+  }
+  if (prior != null && d.amount_cents != null) {
+    rows.push(`<tr class="tot"><td>Total in change orders if you approve</td><td>${esc(usd(prior + d.amount_cents))}</td></tr>`);
+  }
+  return `<div class="card">
+    <div class="kicker" style="color:var(--steel)">Summary</div>
+    <table class="csum">${rows.join('')}</table>
+    <p class="csumnote">These figures cover change orders on this job only. They do
+      not include your original contract amount.</p>
+  </div>`;
+}
+
+/**
+ * Photos sent WITH a message (398).
+ *
+ * Same failure handling as `photoStrip` — swap to the untransformed object exactly
+ * once on error, and link each tile to the full-size original so a client can zoom
+ * into what they are being shown. Deliberately NOT the same element: `photoStrip`
+ * draws its own `card`, and a card nested inside a message clause would break the
+ * bubble it belongs to. These sit inside the message, which is the whole point of
+ * attaching them to it rather than to the document.
+ *
+ * TOLERATES A SERVER THAT HAS NOT BEEN MIGRATED. Before 398, `confirmation_thread`
+ * returns rows with no `media` key at all — so this must read an absent field as "no
+ * pictures", not as an error. An old server and a message with no photos are the
+ * same thing to a reader, and the page renders identically for both.
+ */
+function messageShots(media) {
+  if (!media || !media.length) return '';
+  const tiles = media.map((p) => {
+    const full = esc(p.fallback_url || p.url);
+    return `<a href="${full}" target="_blank" rel="noopener"
+              style="display:inline-block;margin:6px 6px 0 0">
+        <img src="${esc(p.url)}" data-full="${full}" alt="Photo from the contractor"
+             loading="lazy" decoding="async"
+             style="max-width:170px;max-height:170px;border-radius:10px;
+                    border:1px solid #e4e0d6;display:block"
+             onerror="this.onerror=null;this.src=this.dataset.full">
+      </a>`;
+  }).join('');
+  return `<div style="margin-top:6px">${tiles}</div>`;
+}
+
+/**
+ * The conversation, rendered on the client's own page.
+ *
+ * Shown ABOVE the actions, not below: a reply that answers their question is the
+ * thing most likely to change the answer they give, and putting it under the
+ * Approve button means they decide before they read it.
+ *
+ * ALWAYS RENDERS THE CARD, even when the thread is empty. It used to return '' on an
+ * empty thread, on the reasoning that a heading with nothing under it looks broken —
+ * true of a heading, and wrong of a seam. `watchForReplies` replaces `#thread` in
+ * place when a reply lands, and with no element on the page there was nothing to
+ * replace: the first reply to a client who had not yet asked anything could never
+ * appear. The empty state now says what is true ("no messages yet") and, more
+ * usefully, says what asking does — which is the affordance a homeowner who wants to
+ * negotiate is looking for and could previously only find by reading a button label.
+ *
+ * `highlight` marks a card redrawn by the poller, so a reply that lands above the
+ * fold while the client is reading the price is not silently absorbed into the page.
+ */
+function threadHtml(d, highlight) {
+  const t = d.__thread || [];
+  const waitingOnThem = t.length && t[t.length - 1].side === 'client';
+  const msgs = t.map((m) => `<div class="clause" style="margin-top:10px">
+      <b>${m.side === 'client' ? 'You asked' : esc(d.company_name || 'The contractor')}</b>
+      · ${esc(m.at ? new Date(m.at).toLocaleString() : '')}
+      <div style="margin-top:3px;color:#26292e">${esc(m.body)}</div>
+      ${messageShots(m.media)}
+    </div>`).join('');
+
+  // WHAT HAPPENS NEXT, in the reader's terms, not the system's.
+  //
+  // The rule underneath this sentence is mandate #2 and R5b's standing prohibition:
+  // "price changes resolve only through revision + fresh approval — never through
+  // thread agreement". A contractor typing "ok, $1,500" in this thread has changed
+  // nothing, and neither has a client typing "I'll pay $1,500". If the page does not
+  // say so, a homeowner who negotiates a number in the discussion reasonably believes
+  // they have agreed a price, and the next thing they see is a bill for the old one.
+  // So the page states the mechanism instead of leaving it to be discovered: a new
+  // number arrives as a new link to approve.
+  // ANSWERED IS A DIFFERENT CARD. REQ-LC23 closes the thread on the answer, and the
+  // server has enforced it since 308 — a reply written afterwards is rejected. So the
+  // answered card must not invite one. Telling a client "ask something else" on a
+  // page where the server would refuse it is the silent-delivery-failure shape this
+  // repo already found once on the contractor's side (DEF-4); it is not repeated here.
+  const closed = d.status === 'already_answered';
+  const nextStep = closed
+    ? (t.length
+        ? `This is the discussion as it stood when you answered. It is kept with the
+           record and does not change.`
+        : '')
+    : !t.length
+    ? `Nothing here yet. If something is unclear — the price, what is included, the
+       timing — ask below. Asking approves nothing.`
+    : waitingOnThem
+    ? `${esc(d.company_name || 'The contractor')} has your message. You can still
+       approve or decline at any time, or ask something else.`
+    : `You can reply with another question, or approve or decline above.`;
+
+  // Nothing at all on an answered document that was never discussed: an empty
+  // "Discussion" card under a signature is a heading with no content, which is the
+  // one case the original `return ''` was right about.
+  if (closed && !t.length) return '';
+
+  return `<div class="card" id="thread"${highlight ? ' style="border-color:var(--orange)"' : ''}>
+    <div class="kicker">${highlight ? 'New reply' : 'Discussion'}</div>
+    ${msgs}
+    ${nextStep ? `<p class="clause" style="margin-top:${t.length ? '12' : '6'}px">${nextStep}</p>` : ''}
+    ${closed ? '' : `<p class="recordnote" style="margin-top:10px;text-align:left">If the
+      price or the work needs to change, they send you a new version to approve.
+      Agreeing to a number in this discussion does not change what you are signing
+      above.</p>`}
+    <p class="recordnote" style="margin-top:6px;text-align:left">This discussion is
+      part of the project record.</p>
+  </div>`;
+}
+
+/**
+ * Pull one labelled section out of the FROZEN wording.
+ *
+ * WHY READ THE INSTRUMENT INSTEAD OF ADDING FIELDS (hadar, 2026-08-05: "the
+ * recipient needs to be clear and upfront with the SOW, who is it from and what are
+ * the terms -- but first the SOW"). This page received `scope_title` and a price and
+ * nothing else: the actual scope text AND every flow term -- what is not included,
+ * when payment is due, what it does to the schedule -- existed only inside the
+ * collapsed "See the exact wording" box. A client could approve a priced change
+ * order having never seen the exclusions.
+ *
+ * Adding frozen columns for each would work and would also create a second copy of
+ * contractual text that can disagree with the instrument. Reading the sections OUT
+ * of shown_content cannot drift by construction: what is rendered IS what is signed
+ * and hashed (240_shown_content_integrity).
+ *
+ * Returns null for anything sent before the sections existed, and every caller falls
+ * back to the previous layout rather than showing an empty heading.
+ *
+ * ── THE ESCAPE BUG THIS FUNCTION SHIPPED WITH, recorded because the failure was
+ *    SILENT and the fallback hid it ──────────────────────────────────────────────
+ * The character class was written `'[\s\S]'` inside an ordinary JavaScript string.
+ * `\s` is not a recognised string escape, so the literal collapses to the two
+ * characters `s` and `S` and the regex compiled as `([sS]*?)` — a class matching only
+ * the letter s. It therefore matched NOTHING for every real document, `docSection`
+ * returned null on both calls, and `renderPriced`'s two fallbacks quietly took over:
+ * no SCOPE OF WORK block and no TERMS block on the page.
+ *
+ * The effect was the exact defect this function was written on 2026-08-05 to fix
+ * (hadar: "the recipient needs to be clear and upfront with the SOW … but first the
+ * SOW"). A client could approve a priced change order having seen a title, a number,
+ * and nothing about what is excluded, when payment is due, or what it does to the
+ * schedule — all of which were sitting inside the collapsed raw wording, which is
+ * where they were before the fix. Nothing threw, nothing logged, and the page looked
+ * deliberate. Verified by running the old expression against a real `shown_content`.
+ *
+ * `[\\s\\S]` is the correct escaping in a string literal. It is written that way
+ * rather than as a regex literal because `heading` is interpolated.
+ */
+function docSection(txt, heading) {
+  if (!txt) return null;
+  var re = new RegExp('(?:^|\n)' + heading + '\n([\\s\\S]*?)(?=\n\n[A-Z][A-Z &]{2,}\n|\n\nNothing proceeds|$)');
+  var m = txt.match(re);
+  return m && m[1].trim() ? m[1].trim() : null;
+}
+
+/**
+ * The SCOPE OF WORK block, split into the sections the contractor's own document
+ * already carries (hadar's design, 2026-08-10).
+ *
+ * PARSED FROM THE FROZEN TEXT, NEVER FROM THE LIVE COLUMNS. The worker writes these
+ * sections into `change_order` and `renderScope()` composes them into the instrument;
+ * reading the columns here would be a second source for the same words, and the day
+ * they disagree the client is signing one thing and reading another. So this splits
+ * `shown_content` — the exact string the signature covers — and every character
+ * rendered below came out of it.
+ *
+ * THE HEADINGS ARE THE DOCUMENT'S OWN, title-cased. The design labels them "Change to
+ * the work" / "Included" / "Not included"; the document says "WHAT WILL BE DONE" /
+ * "WHAT THIS INCLUDES" / "WHAT THIS DOES NOT INCLUDE". Friendlier words would be an
+ * editorial rewrite of a legal document's section headings by the page that displays
+ * it, which is the drift mandate #5 exists to stop. Case is presentation; wording is
+ * not. The full untouched text stays one tap away under "See the exact wording".
+ */
+var SEC_ICONS = {
+  'WHY THIS IS NEEDED':
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9.1 9a3 3 0 1 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
+  'WHAT WILL BE DONE':
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+  'WHAT THIS INCLUDES':
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  'WHAT THIS DOES NOT INCLUDE':
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m18 6-12 12"/><path d="m6 6 12 12"/></svg>',
+  'CONDITIONS':
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>',
+  'SCHEDULE':
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>',
+};
+
+function titleCase(h) {
+  var t = String(h || '').toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/** Ordered [{heading, body}] out of the SCOPE OF WORK block. Empty when the document
+ *  predates the sections — the caller then falls back to the plain block, so an older
+ *  instrument renders exactly as it always did rather than as an empty list. */
+function scopeSections(shown) {
+  // NOT docSection(). That helper stops at the next ALL-CAPS line — and every
+  // sub-heading inside the scope IS an all-caps line, so it returned only WHY THIS IS
+  // NEEDED and silently dropped WHAT WILL BE DONE, WHAT THIS INCLUDES, WHAT THIS DOES
+  // NOT INCLUDE and CONDITIONS. The client was shown one fifth of the work and the
+  // exclusions were not on the page at all, which is the single most expensive thing
+  // this document can omit.
+  //
+  // So the block is taken from SCOPE OF WORK to the next TOP-LEVEL band (FROM /
+  // TERMS), and split inside.
+  var m = String(shown || '').match(/(?:^|\n)SCOPE OF WORK\n([\s\S]*?)(?=\n\nFROM\n|\n\nTERMS\n|$)/);
+  var sow = m && m[1].trim();
+  if (!sow) return [];
+  var out = [];
+  var lines = sow.split('\n');
+  var cur = null;
+  for (var i = 0; i < lines.length; i++) {
+    var ln = lines[i];
+    // A heading is a whole line of capitals. Same shape the app's own scope block
+    // tests for, so the two screens agree about what a heading is.
+    if (/^[A-Z][A-Z '&]{2,}$/.test(ln.trim())) {
+      cur = { heading: ln.trim(), body: [] };
+      out.push(cur);
+    } else if (cur) {
+      cur.body.push(ln);
+    }
+  }
+  return out
+    .map(function (s) { return { heading: s.heading, body: s.body.join('\n').trim() }; })
+    .filter(function (s) { return s.body; });
+}
+
+function sectionsHtml(shown) {
+  var secs = scopeSections(shown);
+  if (!secs.length) return null;
+  return secs.map(function (s) {
+    var icon = SEC_ICONS[s.heading] || SEC_ICONS['CONDITIONS'];
+    var danger = s.heading.indexOf('NOT INCLUDE') >= 0;
+    return '<div class="sec">'
+      + '<span class="secico' + (danger ? ' warn' : '') + '">' + icon
+      // The design marks the exclusions with a dot. It is the one section a reader
+      // skims past and the one whose absence costs money later.
+      + (danger ? '<i class="secdot"></i>' : '') + '</span>'
+      + '<div><div class="sech">' + esc(titleCase(s.heading)) + '</div>'
+      + '<div class="secb">' + esc(s.body) + '</div></div></div>';
+  }).join('');
+}
+
+/**
+ * The one-line "we did the thing you just tapped" banner.
+ *
+ * Its own function because all three document renderers need it and the EWA renderer
+ * lives in another file. Green, at the top, above the fold: the client has just come
+ * back from a screen that took over the whole page, and without an acknowledgement
+ * the return reads as the tap having been ignored.
+ */
+function noticeHtml(text) {
+  if (!text) return '';
+  return `<div class="wrap"><div class="notice">${esc(text)}</div></div>`;
+}
+
+/**
+ * DESIGN PREVIEW (hadar, 2026-08-10: "even if you need to place pho[ny] data for now").
+ *
+ * The portal's letterhead, contact card, project photo and change-order number are
+ * all real columns with nothing in them yet — so the design cannot be judged, because
+ * half its elements have no content to draw. `?demo=1` fills ONLY the empty ones with
+ * obvious sample content so the layout can be reviewed.
+ *
+ * THREE RULES, because putting invented text on an approval page is otherwise exactly
+ * the thing this product must never do:
+ *   1. OPT-IN BY URL. It is unreachable from any link the app mints; a client can
+ *      only see it by typing the parameter themselves.
+ *   2. IT NEVER TOUCHES THE INSTRUMENT. The price, the scope, the frozen wording, the
+ *      signature and the thread are untouched — it fills letterhead and chrome only.
+ *      Nothing here can change what a document says or what approving it means.
+ *   3. IT ONLY FILLS BLANKS. A real value always wins, so a preview of a filled-in
+ *      account shows the account, not the sample.
+ * The page also says out loud that it is a preview, so a screenshot of it can never
+ * be mistaken for a real client's page.
+ */
+function applyDemo(d) {
+  if (!demo) return;
+  d.__company = Object.assign({
+    name: d.company_name || 'ABC Construction Company',
+    tagline: 'Built with care.',
+    address: '123 Any Street, Anytown, ST 12345',
+    phone: '(555) 123-4567',
+    email: 'info@abcconstruction.com',
+  }, d.__company || {}, {
+    // Object.assign keeps a real null over the sample, so blanks are filled explicitly.
+    tagline: (d.__company && d.__company.tagline) || 'Built with care.',
+    address: (d.__company && d.__company.address) || '123 Any Street, Anytown, ST 12345',
+    phone: (d.__company && d.__company.phone) || '(555) 123-4567',
+    email: (d.__company && d.__company.email) || 'info@abcconstruction.com',
+  });
+  d.__contact = d.__contact || {
+    name: 'John Davis', title: 'Project Manager',
+    phone: '(555) 987-6543', email: 'john@abcconstruction.com',
+  };
+  // The hero has no column yet. In preview it borrows the first photograph already
+  // attached to this change order — a real picture of this job, so the slot shows what
+  // it will look like without inventing an image.
+  if (d.__project && !d.__project.hero_url && d.photos && d.photos.length) {
+    d.__project.hero_url = d.photos[0].url;
+  }
+  d.__header = Object.assign({}, d.__header, {
+    co_number: (d.__header && d.__header.co_number) != null ? d.__header.co_number : 4,
+    requested_by: (d.__header && d.__header.requested_by) || 'John Davis',
+  });
+}
+
+/**
+ * THE LETTERHEAD — who is asking, and how to reach them (402).
+ *
+ * WHY IT IS ON A LEGAL DOCUMENT. A homeowner is being asked to authorise money by a
+ * link that arrived in a text from a number they may not have saved. Every paper
+ * change order carries the contractor's letterhead and a human being to call. A page
+ * showing a price and a bare company name is asking for a signature while withholding
+ * the two facts that make it checkable.
+ *
+ * EVERY FIELD IS OPTIONAL AND BLANKS ARE OMITTED, NOT LABELLED. A contractor who has
+ * filled in a phone and nothing else gets a shorter card, not a card with four empty
+ * rows. "Not set" beside a price is noise on the one screen that must not have any.
+ *
+ * The contact is the person who SENT this document, not the company owner — on a
+ * bigger crew those differ, and the client should call whoever actually raised it.
+ */
+function letterheadHtml(d) {
+  const c = d.__company;
+  const p = d.__contact;
+  const name = (c && c.name) || d.company_name;
+  if (!name && !p) return '';
+
+  const lines = [];
+  if (c && c.address) lines.push(esc(c.address));
+  const contactBits = [];
+  if (c && c.phone) contactBits.push(esc(c.phone));
+  if (c && c.email) contactBits.push(esc(c.email));
+  if (contactBits.length) lines.push(contactBits.join('&nbsp;&nbsp;|&nbsp;&nbsp;'));
+
+  const person = p && (p.name || p.phone || p.email) ? `
+    <div class="lhperson">
+      <div class="lhav">${esc(initials(p.name || name || '?'))}</div>
+      <div>
+        ${p.name ? `<div class="lhpn">${esc(p.name)}</div>` : ''}
+        ${p.title ? `<div class="lhpt">${esc(p.title)}</div>` : ''}
+        ${p.phone ? `<div class="lhpc"><a href="tel:${esc(String(p.phone).replace(/[^+\d]/g, ''))}">${esc(p.phone)}</a></div>` : ''}
+        ${p.email ? `<div class="lhpc"><a href="mailto:${esc(p.email)}">${esc(p.email)}</a></div>` : ''}
+      </div>
+    </div>` : '';
+
+  return `<div class="card lh">
+    <div class="lhco">
+      <div class="logo">${esc(initials(name || '?'))}</div>
+      <div>
+        <div class="lhcn">${esc(name || '')}</div>
+        ${c && c.tagline ? `<div class="lhtag">${esc(c.tagline)}</div>` : ''}
+        ${lines.map((l) => `<div class="lhline">${l}</div>`).join('')}
+      </div>
+    </div>
+    ${person}
+  </div>`;
+}
+
+/**
+ * The job on the left, the document's own number on the right — the design's second
+ * band, and the shape a paper change order has always had. `identityHtml` used to
+ * render this as one wrapped line under the price; here it is a two-column block at
+ * the head of the document, where a reader looks for "which job, which document".
+ */
+function jobIdentityHtml(d) {
+  const h = d.__header || {};
+  const pr = d.__project;
+  const bits = [];
+  if (h.issued_at) bits.push(`Issued: ${esc(new Date(h.issued_at).toLocaleDateString(undefined,
+    { month: 'short', day: 'numeric', year: 'numeric' }))}`);
+  if (h.requested_by) bits.push(`Requested by: ${esc(h.requested_by)}`);
+  const job = (pr && pr.project_name) || d.job_label || '';
+  // TWO ADDRESSES FOR ONE JOB IS WORSE THAN ONE.
+  //
+  // The design's band is a NAME over its address ("The Robinson Residence" / "123 Any
+  // Street"). Real projects are often named BY their address, and this account has a
+  // name of "1155 Stanyan st, San Francisco 94117" beside a stored address of "1-99
+  // Stockton St · San Francisco, CA" — two different streets, stacked, on the document
+  // that says where the work happens. A reader cannot tell which one is the job.
+  //
+  // So the address line is suppressed whenever the name is itself address-shaped: the
+  // contractor's own label for the job wins, and the document states one location.
+  // When the name is a real name ("The Robinson Residence") the address prints under
+  // it exactly as drawn.
+  const nameIsAddress = /\d/.test(job) && /\b(st|street|ave|avenue|rd|road|blvd|dr|drive|ln|lane|way|ct|court|pl|place)\b/i.test(job);
+  const addr = (pr && pr.project_address && pr.project_address !== job && !nameIsAddress)
+    ? pr.project_address : '';
+  if (!job && !bits.length && h.co_number == null) return '';
+  return `<div class="idgrid">
+    <div>
+      <div class="idjob">${esc(job)}</div>
+      ${addr ? `<div class="idaddr">${esc(addr)}</div>` : ''}
+    </div>
+    <div>
+      <div class="idn">${h.co_number != null ? `Change order #${esc(String(h.co_number))}` : 'Change order'}</div>
+      ${bits.map((b) => `<div class="idm">${b}</div>`).join('')}
+    </div>
+  </div>`;
+}
+
+/**
+ * The document's headline.
+ *
+ * `scope_title` is FROZEN on the request, and every confirmation sent between 391 and
+ * 2026-08-10 froze the entire scope-of-work document into it (confirmations.ts passed
+ * `value` where `subject` belonged). The trigger refuses to correct it — correctly,
+ * because nothing the signer saw may change after they saw it.
+ *
+ * So when the frozen field is clearly not a title, the real one is taken from the
+ * project view, which reads `change_order.scope`. Both strings are the contractor's
+ * own words; this only picks the one that is a title. If neither is available it says
+ * "Extra work" rather than shouting a thousand characters, which is what it did.
+ */
+function headline(d) {
+  const frozen = (d.scope_title || '').trim();
+  const isProse = frozen.length > 90 || frozen.includes('\n');
+  if (frozen && !isProse) return frozen;
+  const orders = (d.__project && Array.isArray(d.__project.orders)) ? d.__project.orders : [];
+  const mine = orders.find((o) => o.token === token);
+  const real = mine && (mine.title || '').trim();
+  if (real && real.length <= 120) return real;
+  return 'Extra work';
+}
+
+/**
+ * THE PRICED CHANGE ORDER — rebuilt to the portal design's information architecture
+ * (hadar, 2026-08-10: "the structure is wrong, the division of the information in the
+ * different sections is wrong, and the way the information is presented is wrong").
+ *
+ * WHAT WAS ACTUALLY WRONG, since three rounds of CSS did not fix it: the page was an
+ * app screen made of stacked cards — kicker, title, price, terms, photos, totals —
+ * each a peer of the others. The design is a DOCUMENT: one sheet, read top to bottom,
+ * whose bands answer a fixed sequence of questions.
+ *
+ *   1. WHO IS ASKING          letterhead + the human to call
+ *   2. ABOUT WHICH JOB        job address | this document's own number and date
+ *   3. FOR WHAT, AND HOW MUCH the work, in words, beside the number
+ *   4. WHAT EXACTLY           the sections, beside the photographs of them
+ *   5. WHEN                   schedule impact, its own band, with the new end date
+ *   6. WHAT IT DOES TO THE $  contract summary
+ *   7. WHAT SIGNING MEANS     the approval paragraph
+ *   8. THE ACT                approve · ask · decline
+ *
+ * That order is not decoration. It is the order a person needs the facts in before
+ * they can honestly agree, and every band that moves out of it makes somebody sign
+ * something they have not finished reading.
+ *
+ * THE PARTS THE DESIGN DOES NOT DRAW, KEPT ANYWAY, and where they went:
+ *   * DECLINE. PRD R5 has three outcomes and the design shows two. A page offering
+ *     only "approve" and "ask" makes refusing feel like something you have to go
+ *     around the app to do. It sits under the two buttons as a quiet link.
+ *   * THE SIGNATURE FIELD. Approval is a signature (mandate #2, REQ-VAL). The design
+ *     shows a bare Approve button; that button stays disabled until a name is typed,
+ *     with the field above it and labelled.
+ *   * "SEE THE EXACT WORDING". Mandate #5 — what is signed is the frozen text, and it
+ *     must be reachable. It joins the footer row beside Print.
+ */
+function renderPriced(d, notice) {
+  // OPEN or ANSWERED — the same document. Only the band at the top and the band at
+  // the bottom differ; everything between them is the record and does not change
+  // because somebody signed it.
+  const answered = d.status === 'already_answered';
+  const company = (d.__company && d.__company.name) || d.company_name || 'Your contractor';
+  const priced = usd(d.amount_cents);
+  const isNte = d.nte_cents != null;
+
+  const secs = sectionsHtml(d.shown_content);
+  const sow = docSection(d.shown_content, 'SCOPE OF WORK');
+  const termsBlock = docSection(d.shown_content, 'TERMS');
+
+  // The TERMS block, split into the one line that gets its own band (schedule) and
+  // the rest. Price lines are dropped: the figure is rendered large above and a
+  // second quieter copy reads as a different number.
+  const termLines = (termsBlock || '').split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !/^Price:/.test(l) && !/^Not to exceed:/.test(l)
+                    && !/^Work will not exceed /.test(l));
+  const scheduleLine = termLines.find((l) => /^Schedule:/i.test(l)) || null;
+  // "Not included:" is already a section with its own mark and its own list. Repeating
+  // it as a run-on line under Terms made the exclusions appear twice, once formatted
+  // and once as a paragraph with bullets inside it.
+  const otherTerms = termLines.filter((l) => l !== scheduleLine)
+    .filter((l) => !/^Not included:/i.test(l) && !/^•/.test(l));
+
+  // A ONE-LINE SUMMARY UNDER THE TITLE, taken from the document's own opening
+  // sentence. The design has a written summary; nothing in the schema stores one, and
+  // inventing a sentence to describe a legal document is not on the table. The first
+  // sentence of WHY THIS IS NEEDED is the contractor's own words and is already in
+  // the instrument, so it restates nothing and adds nothing.
+  // NO LEDE. It was the first sentence of WHY THIS IS NEEDED — which renders in full
+  // as the first section immediately below, so the page said the same thing twice,
+  // eight lines apart. The design's one-liner is a SEPARATE written summary; nothing
+  // stores one, and repeating a section to fill the slot is worse than an empty slot.
+  const lede = '';
+
+  screen(`
+    <div class="shell">
+    ${sidebarHtml(d)}
+    <div class="main">
+    ${d.__project ? `<div class="backbar"><a href="?t=${encodeURIComponent(token)}&v=project">← All change orders</a></div>` : ''}
+    ${noticeHtml(notice)}
+    ${demo ? '<div class="wrap"><div class="demobar">Design preview — the letterhead and contact details on this page are sample text, not this account\u2019s.</div></div>' : ''}
+    ${/* NO SEPARATE BANNER WHEN ANSWERED (hadar, 2026-08-10: "an approved change
+         order looks like this -- just read only and with a sign approved -- it is
+         not different"). An answered document is the SAME page: same sidebar, same
+         letterhead, same bands, same order. The only difference is that the controls
+         at the bottom have become a stamp. A status band across the top would be a
+         second difference, and the instruction was that there is one. */ ''}
+    ${changesHtml(d)}
+    <div class="wrap">
+      <div class="sheet">
+
+        ${letterheadHtml(d)}
+        ${jobIdentityHtml(d)}
+
+        <div class="band bandtitle">
+          <div class="btmain">
+            <h1 class="doctitle">${esc(headline(d))}</h1>
+            ${lede ? `<p class="doclede">${esc(lede)}</p>` : ''}
+          </div>
+          <div class="btprice">
+            <div class="pvbig">${esc(priced)}</div>
+            <div class="pvlab">${isNte ? 'Not to exceed' : 'Fixed price'}</div>
+          </div>
+        </div>
+
+        <div class="band bandbody">
+          <div class="bsecs">
+            ${secs || (sow ? `<div class="sow">${esc(sow)}</div>` : '')}
+          </div>
+          <div class="bshots">
+            ${photoStrip(d.photos)}
+          </div>
+        </div>
+
+        ${scheduleLine ? `
+        <div class="band bandsched">
+          <div class="sec" style="border:0;padding:0">
+            <span class="secico">${SEC_ICONS['SCHEDULE']}</span>
+            <div><div class="sech">Schedule impact</div>
+              <div class="secb">${esc(sentence(scheduleLine.replace(/^Schedule:\s*/i, '')))}</div></div>
+          </div>
+        </div>` : ''}
+
+        ${otherTerms.length ? `
+        <div class="band">
+          <div class="bandh">Terms</div>
+          ${otherTerms.map((l) => `<div class="tline">${esc(l)}</div>`).join('')}
+        </div>` : ''}
+
+        ${nteBand(d)}
+        ${summaryBand(d)}
+
+        <div class="band">
+          <div class="bandh">Approval</div>
+          <!-- THE PARAGRAPH IS PART OF THE DOCUMENT, not part of the form. It states
+               what approving MEANS, and it is exactly as relevant to someone reading
+               back what they agreed to as to someone deciding. It stays on both. -->
+          <p class="apara">By approving this change order, you authorise
+            ${esc(company)} to carry out the additional work described above, for the
+            amount and schedule impact stated. This becomes part of the contract.${answered ? '' : `
+            Nothing proceeds until you approve.`}</p>
+          ${answered ? stampHtml(d) : `
+          <label class="signlab" for="name">Type your full name to sign</label>
+          <input class="sign" id="name" placeholder="Your full name" autocomplete="name">
+          <div class="acts">
+            <button class="approve" id="approve" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:18px;height:18px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Approve ${isNte ? esc(usd(d.nte_cents)) : esc(priced)}</button>
+            <button class="ghost askbtn" id="ask">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+              <span><b>Have a question?</b><br>Message ${esc(firstWord(company))}</span></button>
+          </div>
+          <button class="linkbtn" id="decline">Decline — do not proceed</button>
+          <p class="recordnote">Your response, your name, and the date and time become
+            part of the project record. No account needed.</p>`}
+        </div>
+
+        <div class="band bandfoot">
+          <a href="#" id="exact">See the exact wording</a>
+          <span>|</span>
+          <a href="#" id="printit">Print or save as PDF</a>
+          ${d.__changes && d.__changes.versions > 1
+            ? `<span>|</span><a href="#thread">View previous versions (${esc(String(d.__changes.versions))})</a>` : ''}
+        </div>
+        <details class="exact" id="exactbox">
+          <summary>The exact wording</summary>
+          <div class="doc">${esc(d.shown_content)}</div>
+        </details>
+      </div>
+
+      ${threadHtml(d)}
+    </div>
+    </div>
+    </div>
+    ${tabsHtml(d, null)}`);
+
+  if (d.__project) document.body.classList.add('hastabs');
+
+  if (!answered) {
+    const nameEl = document.getElementById('name');
+    const approveEl = document.getElementById('approve');
+    nameEl.addEventListener('input', () => { approveEl.disabled = nameEl.value.trim().length < 2; });
+    approveEl.onclick = () => answer('confirmed', null, nameEl.value.trim());
+    document.getElementById('ask').onclick = () => askQuestion(d);
+    document.getElementById('decline').onclick = () => declineFlow(d);
+  }
+  const sideAsk = document.getElementById('asksidebar');
+  if (sideAsk) sideAsk.onclick = () => askQuestion(d);
+  document.getElementById('printit').onclick = (e) => { e.preventDefault(); window.print(); };
+  document.getElementById('exact').onclick = (e) => {
+    e.preventDefault();
+    const box = document.getElementById('exactbox');
+    box.open = true; box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+}
+
+/**
+ * THE APPROVED STAMP — the single difference between an open document and a signed
+ * one. It sits where the name field and the buttons were, in the same band, so the
+ * page's shape does not move when a client returns to it.
+ *
+ * A record, not a control. The server refuses a second answer, so there is no button
+ * here that could work; showing one would be an invitation to a refusal.
+ */
+function stampHtml(d) {
+  const approved = d.answered_action === 'confirmed';
+  const when = d.answered_at
+    ? new Date(d.answered_at).toLocaleString(undefined,
+        { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : '';
+  return `<div class="stamp ${approved ? 'ok' : 'no'}">
+    <span class="stampmark">${approved ? '✓' : '✋'}</span>
+    <span>
+      <span class="stampt">${approved ? 'Approved' : 'Declined — do not proceed'}</span>
+      <span class="stampm">${d.signed_name ? `Signed ${esc(d.signed_name)}` : 'Answered'}${when ? ` · ${esc(when)}` : ''}</span>
+      <span class="stampm">This is the exact wording, kept as it was when you answered. It does not change.</span>
+    </span>
+  </div>`;
+}
+
+/**
+ * The status band on an ANSWERED document — what the amber "updated" band is to an
+ * open one. It says what happened, who signed, and when, and it says the record is
+ * closed rather than inviting an action that would be refused.
+ */
+function answeredBanner(d) {
+  const approved = d.answered_action === 'confirmed';
+  const when = d.answered_at
+    ? new Date(d.answered_at).toLocaleString(undefined,
+        { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : '';
+  return `<div class="wrap"><div class="abar ${approved ? 'ok' : 'no'}">
+    <span class="amark">${approved ? '✓' : '✋'}</span>
+    <span>
+      <span class="awhen">${approved ? 'Approved' : 'Declined'}${d.signed_name ? ` — signed ${esc(d.signed_name)}` : ''}</span>
+      <span class="alead">${when ? `Answered ${esc(when)}. ` : ''}Your answer stands. This page keeps the document exactly as it was.</span>
+    </span>
+  </div></div>`;
+}
+
+/**
+ * The bottom band on an answered document: the signature as a RECORD, not a form.
+ *
+ * No name field, no Approve, no Decline — the server refuses a second answer and a
+ * control that cannot work is worse than no control. Asking a question stays
+ * available through the sidebar where the thread is still open.
+ */
+function signedBand(d) {
+  const approved = d.answered_action === 'confirmed';
+  const when = d.answered_at ? new Date(d.answered_at).toLocaleString() : '';
+  return `<div class="band">
+    <div class="bandh">${approved ? 'Approved' : 'Declined'}</div>
+    <table class="csum">
+      ${d.signed_name ? `<tr><td>Signed by</td><td>${esc(d.signed_name)}</td></tr>` : ''}
+      ${when ? `<tr><td>Answered</td><td>${esc(when)}</td></tr>` : ''}
+      <tr class="tot"><td>Outcome</td><td>${approved ? 'Approved' : 'Declined — do not proceed'}</td></tr>
+    </table>
+    <p class="csumnote">This is the exact wording, kept as it was when you answered.
+      It does not change.</p>
+  </div>`;
+}
+
+/** "Dealer deale" -> "Dealer". The design addresses a person by first name on the ask
+ *  button; with no contact on file the company's first word is the closest true
+ *  thing, and it is never a name we made up. */
+function firstWord(s) { return String(s || '').trim().split(/\s+/)[0] || 'them'; }
+
+/** "no change." -> "No change". The frozen text composes these as sentence fragments
+ *  inside a paragraph; lifted out into a row of their own they need a capital and no
+ *  trailing stop. Presentation only — not a word is changed. */
+function sentence(s) {
+  var t = String(s || '').trim().replace(/\.$/, '');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/** The not-to-exceed clause, as its own band. PRD R3: a cap is a different instrument
+ *  from a fixed price and the qualifying sentence is part of it, not a footnote. */
+function nteBand(d) {
+  if (d.nte_cents == null) return '';
+  return `<div class="band"><div class="bandh">Not to exceed</div>
+    <p class="apara">Work will not exceed ${esc(usd(d.nte_cents))} without a new approval.</p></div>`;
+}
+
+/** Contract summary as a band inside the sheet, not a card beside it. */
+function summaryBand(d) {
+  const pr = d.__project;
+  const prior = pr ? pr.approved_total_cents : d.approved_running_cents;
+  if (prior == null && d.amount_cents == null) return '';
+  const rows = [];
+  if (prior != null) rows.push(`<tr><td>Change orders you have already approved</td><td>${esc(usd(prior))}</td></tr>`);
+  if (d.amount_cents != null) rows.push(`<tr class="this"><td>This change order</td><td>+ ${esc(usd(d.amount_cents))}</td></tr>`);
+  if (prior != null && d.amount_cents != null) {
+    rows.push(`<tr class="tot"><td>Total in change orders if you approve</td><td>${esc(usd(prior + d.amount_cents))}</td></tr>`);
+  }
+  return `<div class="band"><div class="bandh">Contract summary</div>
+    <table class="csum">${rows.join('')}</table>
+    <p class="csumnote">These figures cover change orders on this job only. They do not
+      include your original contract amount.</p></div>`;
+}
+
+// ASK A QUESTION — not a decline.
+//
+// This used to call answer('declined', …), which permanently declined the item and
+// burned the single-use token, so a client who asked a question could never approve
+// afterwards. It also made the decline status meaningless, because "I have a
+// question" and "do not proceed" wrote the same row. A question is now a message on
+// its own thread: it commits nobody, needs no signature, and leaves Approve live —
+// PRD R5b, "the Approve button remains pinned at every point in the thread".
+//
+// ── ASKING IS NO LONGER A DEAD END ─────────────────────────────────────────────
+// A successful ask used to end on `done('💬', 'Question sent', …)`: a terminal
+// screen, with no way back to the document and no way to ask a second thing. The
+// product ask this page serves is "where they can approve, communicate, negotiate",
+// and negotiating is by definition more than one message. Every path off that screen
+// was outside the app — find the text again, tap the link again, read the whole
+// document again — and each of those is a place a non-technical homeowner stops.
+//
+// So a sent question returns to the DOCUMENT, with the thread refetched so their own
+// words are on the page (proof it landed, which is what the terminal screen was
+// really for) and with Approve, Decline and Ask all live again. The banner carries
+// the acknowledgement the old screen carried.
+function askQuestion(d) {
+  screen(`
+    <div class="wrap" style="padding-top:24px">
+      <h1 class="plain">What's your question?</h1>
+      <textarea id="note" placeholder="What would you like to ask or change?"></textarea>
+      <div class="btns">
+        <button class="yes" id="send">Send to ${esc(d.company_name || 'the contractor')}</button>
+        <button class="ghost" id="back">Back</button>
+      </div>
+      <p class="recordnote">Asking does not approve or decline anything. You can still
+        approve after they answer. If you are asking for a different price, they will
+        send you a new version to approve — this one stays as it is until then.</p>
+    </div>`);
+  document.getElementById('send').onclick = async () => {
+    const note = document.getElementById('note').value.trim();
+    if (!note) return;
+    document.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    const { data, error } = await supabase.rpc('confirmation_ask', {
+      p_token: token, p_note: note, p_user_agent: navigator.userAgent,
+    });
+    if (error) {
+      // A question can be refused for one reason that is NOT a network problem: the
+      // link was retired while this screen was open (250 + confirmation_question_
+      // not_superseded). Saying "that didn't send, tap again" there would send them
+      // round a loop that can never succeed, on a document that no longer exists.
+      // Named, for the same reason `answer()` names it.
+      if ((error.message || '').includes('replaced by a newer one') ||
+          error.hint === 'link_superseded') {
+        screen(`<div class="done"><div class="mark err">🔄</div>
+          <h2>This version was replaced</h2>
+          <p>The contractor sent an updated version while this page was open. Your
+             question was not sent. Please open the most recent link they texted
+             you.</p></div>`);
+        return;
+      }
+      screen(`<div class="done"><div class="mark err">⚠️</div>
+        <h2>That didn't send</h2><p>Nothing was recorded. Please tap again.</p>
+        <div class="btns"><button class="yes" onclick="location.reload()">Try again</button></div></div>`);
+      return;
+    }
+    if (data && data.status === 'already_answered') {
+      done('✅', 'Already answered', 'Your first answer stands.'); return;
+    }
+    // Refetch rather than appending the local string: the server stamps the time and
+    // trims the note, and the thread walks the revision lineage. Rendering our own
+    // copy would put a message on screen that differs from the record. If the refetch
+    // fails, `loadThread` keeps the previous thread and the banner still tells the
+    // truth — the question is recorded either way.
+    await loadThread(d);
+    renderDocument(d, 'Sent. They have your question — you can still approve or decline below.');
+  };
+  document.getElementById('back').onclick = () => renderDocument(d);
+}
+
+// DECLINE — a real, terminal, signed answer. It stops work and the contractor acts
+// on it, so it carries the same signature an approval does: unsigned, anyone holding
+// the link could halt a job. The reason stays optional; demanding an explanation to
+// say no is how you get no answer at all.
+function declineFlow(d) {
+  screen(`
+    <div class="wrap" style="padding-top:24px">
+      <h1 class="plain">Decline this?</h1>
+      <p class="recordnote" style="margin:0 0 10px">This tells ${esc(d.company_name || 'the contractor')}
+        not to proceed. It is final and becomes part of the project record.</p>
+      <textarea id="note" placeholder="Optional — why?"></textarea>
+      <input class="sign" id="dname" placeholder="Type your full name to sign" autocomplete="name">
+      <div class="btns">
+        <button class="decline" id="send" disabled>Decline — do not proceed</button>
+        <button class="ghost" id="back">Back</button>
+      </div>
+    </div>`);
+  const dn = document.getElementById('dname');
+  const sendEl = document.getElementById('send');
+  dn.addEventListener('input', () => { sendEl.disabled = dn.value.trim().length < 2; });
+  sendEl.onclick = () =>
+    answer('declined', document.getElementById('note').value, dn.value.trim());
+  // Back goes through the ONE dispatch. This line used to re-decide the document type
+  // from `amount_cents`, which is null for an EWA as well as for a legacy confirm — so
+  // backing out of a decline on an authorization redrew it as a plain confirmation
+  // with its proceed term and settlement window gone, still offering a signature.
+  document.getElementById('back').onclick = () => renderDocument(d);
+}
+
+// Legacy no-price confirmation (a decision, no cost change). Kept working.
+function renderPlain(d, notice) {
+  const verb = d.kind === 'confirm' ? 'confirm' : 'acknowledge';
+  screen(`
+    ${noticeHtml(notice)}
+    <div class="wrap" style="padding-top:24px">
+      <div class="who">For ${esc(d.counterparty)}</div>
+      <h1 class="plain">Please read this and ${verb} it.</h1>
+      <div class="plaincard">${esc(d.shown_content)}</div>
+      ${/* An EWA (PRD R3 step 1) is "condition description + photos" and carries no
+            price, so it renders through here. Leaving the strip off this path would
+            drop the photos from the one instrument whose entire content IS the
+            condition being photographed. */ ''}
+      ${photoStrip(d.photos)}
+      ${/* The discussion was MISSING from this renderer entirely, while the "Ask a
+            question instead" button below has always been offered here. So a client
+            on a plain confirmation could ask, and then never see their own question,
+            never see the answer, and have no evidence either had happened. The same
+            hole as DEF-5, on the third of the three documents. */''}
+      ${threadHtml(d)}
+      <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
+      <div class="btns">
+        <button class="yes" id="yes" disabled>Yes — that's right</button>
+        <button class="no" id="no">No — that's not right</button>
+        <button class="ghost" id="askp">Ask a question instead</button>
+      </div>
+      <p class="recordnote">Your answer, your name, and the date &amp; time become part of the project record. No account needed.</p>
+    </div>`);
+  // A Decision is signed like any other item (PRD R10). It carries no money, but a
+  // confirmed spec — "the vanity is 34 inches" — is exactly what a rework argument
+  // turns on months later, so it is worth the same signature as a priced extra.
+  //
+  // Saying NO is signed too. This line used to read "Saying NO still needs no name:
+  // identity is not the price of declining" — true once, and left behind when declines
+  // became signed (declineFlow below, enforced by 210_approval_signature.sql). It
+  // described a path that no longer exists, in the one file where a maintainer might
+  // believe it and take the signature back off a decline.
+  const plainName = document.getElementById('name');
+  const yesEl = document.getElementById('yes');
+  plainName.addEventListener('input', () => { yesEl.disabled = plainName.value.trim().length < 2; });
+  yesEl.onclick = () => answer('confirmed', null, plainName.value.trim());
+  // "No" is a real decline (signed, terminal). Asking is its own, unsigned path.
+  document.getElementById('no').onclick = () => declineFlow(d);
+  document.getElementById('askp').onclick = () => askQuestion(d);
+}
+
+async function answer(action, note, name) {
+  document.querySelectorAll('button').forEach((b) => (b.disabled = true));
+  // Stop the reply poller BEFORE the round trip, not after it. Every branch below
+  // replaces the whole screen, so from here on there is no `#thread` element for the
+  // poller to update; and on the success path the document is terminal, where R5b
+  // closes the thread and nothing further can arrive. A poll that fired in between
+  // would be a request made on behalf of a page that no longer exists.
+  window.dispatchEvent(new Event('ezjb:answered'));
+  const { data, error } = await supabase.rpc('confirmation_respond', {
+    p_token: token, p_action: action, p_note: note || null,
+    p_user_agent: navigator.userAgent,   // an identity SIGNAL, not proof.
+    p_signed_name: name || null,
+  });
+
+  if (error) {
+    // The database refuses an unsigned priced approval (210_approval_signature.sql).
+    // A normal reader cannot reach this — the button stays disabled until a name is
+    // typed — so this is a direct RPC call or a broken client. Say what is missing
+    // rather than "that didn't send", which would be the wrong reason.
+    // Retired between opening the page and tapping. Rare, but it is exactly the
+    // race the supersede rule exists to catch, so name it.
+    if ((error.message || '').includes('replaced by a newer one') ||
+        error.hint === 'link_superseded') {
+      screen(`<div class="done"><div class="mark err">🔄</div>
+        <h2>This version was replaced</h2>
+        <p>The contractor sent an updated version while this page was open.
+           Nothing was recorded. Please open the most recent link they texted you.</p></div>`);
+      return;
+    }
+    const needsSignature =
+      (error.message || '').includes('requires a typed signature') ||
+      error.hint === 'signature_required';
+    if (needsSignature) {
+      screen(`<div class="done"><div class="mark err">✋</div>
+        <h2>A name is required</h2>
+        <p>Saying yes is a signature, so it has to be signed.
+           Nothing was recorded. Open the link again and type your full name.</p>
+        <div class="btns"><button class="yes" onclick="location.reload()">Open it again</button></div></div>`);
+      return;
+    }
+    screen(`<div class="done"><div class="mark err">⚠️</div>
+      <h2>That didn't send</h2>
+      <p>Nothing was recorded. Please tap again.</p>
+      <div class="btns"><button class="yes" onclick="location.reload()">Try again</button></div></div>`);
+    return;
+  }
+  // A CONFIRMATION OVER THE DOCUMENT, NOT INSTEAD OF IT (hadar, 2026-08-10: "once a
+  // change order is approved -- need popup not a whole page").
+  //
+  // It used to replace the entire page with a green tick on white. Two things were
+  // wrong with that, and the second one matters more than the first:
+  //   * The client had just signed something and the thing they signed vanished at
+  //     the moment of signing. The one screen where "what did I just agree to?" is
+  //     most likely to be asked was the one screen that could no longer answer it.
+  //   * "You can close this page" is an instruction to leave, given to somebody whose
+  //     next reasonable act is to re-read the terms or keep the record.
+  // So the document stays on screen, dimmed, and the outcome arrives over it.
+  if (data.status === 'already_answered') {
+    outcomeModal('already', 'Already answered', 'Your first answer stands.');
+    return;
+  }
+  outcomeModal(
+    action === 'confirmed' ? 'approved' : 'declined',
+    action === 'confirmed' ? (name ? `Approved — signed ${name}` : 'Approved') : 'Sent — do not proceed',
+    action === 'confirmed'
+      ? 'The contractor has your answer. This page stays here — you can re-read it or keep it for your records.'
+      : 'The contractor has your answer.');
+}
+
+/**
+ * The outcome, as a sheet over the document.
+ *
+ * NO "CLOSE THIS PAGE". The only control is Done, which dismisses the overlay and
+ * leaves the client on the document they just signed. Nothing about the record
+ * changes when it is dismissed — the answer is already committed server-side, and
+ * this is an acknowledgement, not a step.
+ *
+ * The buttons underneath are disabled by `answer()` before the round trip, so the
+ * document behind this is inert: dismissing the sheet cannot lead to a second
+ * signature.
+ */
+function outcomeModal(kind, title, body) {
+  const mark = kind === 'approved' ? '✓' : kind === 'declined' ? '✋' : '✓';
+  const wrap = document.createElement('div');
+  wrap.className = 'omwrap';
+  wrap.innerHTML = `<div class="ombox" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <div class="ommark ${esc(kind)}">${mark}</div>
+      <h2 class="omh">${esc(title)}</h2>
+      <p class="omp">${esc(body)}</p>
+      <button class="approve omdone">Done</button>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector('.omdone').onclick = close;
+  // The dim dismisses too — a sheet must never trap someone (the same rule the app's
+  // own drawers follow). A tap INSIDE the box does not.
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  document.addEventListener('keydown', function esc2(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc2); }
+  });
+  wrap.querySelector('.omdone').focus();
+}
+
+// NOTHING MAY LEAVE THIS PAGE ON "Loading…" FOREVER.
+//
+// `load()` used to be called bare. It is an async function, so anything it threw
+// became an unhandled rejection: no screen, no console error, and a client left
+// staring at a spinner with no way to tell whether the link was broken, the signal
+// was bad, or they had done something wrong. That is exactly how the `.catch`
+// outage above stayed invisible — the failure had a message and nowhere to put it.
+//
+// The recovery screen says the only two things a homeowner can act on: try again,
+// or ask for the link again. It deliberately does NOT show the exception. A stack
+// trace tells this reader nothing and looks like the app broke on them.
+load().catch((e) => {
+  // Kept for whoever is looking at a device with a console attached. It is the only
+  // place the real reason survives.
+  console.error('[confirm] load failed', e);
+  screen(`<div class="done"><div class="mark err">⚠️</div>
+    <h2>This didn't load</h2>
+    <p>Something went wrong opening this. Nothing here was recorded.</p>
+    <div class="btns"><button class="yes" onclick="location.reload()">Try again</button></div>
+    <p class="recordnote">If it keeps happening, ask your contractor to text you the
+      link again.</p></div>`);
+});
+</script>
+</body>
+</html>
