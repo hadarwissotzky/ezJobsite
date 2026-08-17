@@ -63,6 +63,62 @@ Deno.serve(async (req) => {
    * It is READ-ONLY and sends nothing. Same auth as a send — a message SID is not a
    * secret, but the numbers and bodies inside it are, so this must not be open.
    */
+  /**
+   * REGISTRATION STATE — `{ diag: true }`.
+   *
+   * Read-only, sends nothing, same auth as everything else here. It exists because
+   * "still 30034" is a symptom, not a diagnosis: A2P is a THREE-step chain (brand →
+   * campaign → number attached to the campaign's Messaging Service) and a carrier
+   * rejection looks identical whichever step is missing. Without this, every attempt
+   * ends with a human being asked to go read a console — which is where the work does
+   * not belong (hadar was asked three times).
+   *
+   * Returns only status fields. No message bodies, no destinations.
+   */
+  if ((payload as { diag?: boolean }).diag === true) {
+    const sid1 = Deno.env.get('TWILIO_ACCOUNT_SID');
+    const token1 = Deno.env.get('TWILIO_AUTH_TOKEN');
+    const from1 = Deno.env.get('TWILIO_FROM') ?? '';
+    if (!sid1 || !token1) return json({ ok: false, error: 'SMS not configured' }, 503);
+    const auth = { Authorization: 'Basic ' + btoa(`${sid1}:${token1}`) };
+    const get = async (u: string) => {
+      try {
+        const r = await fetch(u, { headers: auth });
+        return await r.json();
+      } catch (e) { return { error: String(e) }; }
+    };
+    const brands = await get('https://messaging.twilio.com/v1/a2p/BrandRegistrations?PageSize=5');
+    const svcs = await get('https://messaging.twilio.com/v1/Services?PageSize=5');
+    const services = (svcs?.services ?? []) as Array<{ sid: string; friendly_name: string }>;
+    // Per service: its campaign (us_app_to_person) and its attached numbers. The
+    // campaign is the step that actually clears 30034.
+    const detail = [];
+    for (const sv of services.slice(0, 5)) {
+      const camp = await get(`https://messaging.twilio.com/v1/Services/${sv.sid}/Compliance/Usa2p`);
+      const nums = await get(`https://messaging.twilio.com/v1/Services/${sv.sid}/PhoneNumbers?PageSize=20`);
+      detail.push({
+        service: sv.sid, name: sv.friendly_name,
+        campaigns: (camp?.compliance ?? []).map((c: Record<string, unknown>) => ({
+          sid: c.sid, status: c.campaign_status, useCase: c.us_app_to_person_usecase,
+          errors: c.errors,
+        })),
+        numbers: (nums?.phone_numbers ?? []).map((n: Record<string, unknown>) => n.phone_number),
+      });
+    }
+    return json({
+      ok: true,
+      // Which of the two shapes TWILIO_FROM is. An MG SID means a Messaging Service
+      // (campaign-aware); a bare number sends outside any campaign, which is 30034.
+      from: from1.startsWith('MG') ? { kind: 'messaging_service', sid: from1 }
+                                   : { kind: 'raw_number', number: from1 },
+      brands: (brands?.data ?? []).map((b: Record<string, unknown>) => ({
+        sid: b.sid, status: b.status, type: b.brand_type ?? b.entity_type,
+        failureReason: b.failure_reason,
+      })),
+      services: detail,
+    });
+  }
+
   const lookupSid = (payload.sid ?? '').trim();
   if (lookupSid) {
     if (!/^SM[0-9a-f]{32}$/i.test(lookupSid)) {
