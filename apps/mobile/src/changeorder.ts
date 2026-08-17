@@ -1109,6 +1109,56 @@ export async function setDraftFlowFields(
   return { ok: true };
 }
 
+/**
+ * WHO THIS EXTRA IS FOR — written to the DRAFT, on its own (hadar 2026-08-14: "once a
+ * client is selected we need to save it to the CO").
+ *
+ * Picking a client in the send sheet used to live only in that sheet's state: close it
+ * without sending and the choice was gone, and the draft still read "No client selected
+ * yet". Worse, the choice never reached the record the send is ABOUT — so an extra could
+ * be sent to somebody while its own `who_directed` still held the unnamed sentinel.
+ *
+ * ITS OWN WRITER, NOT `priceDraftExtra`, for that function's own stated reason: it
+ * takes `amountCents: number` and stamps `numbers_confirmed_at_ms` on every call.
+ * Naming a client on an unpriced draft would have been refused for want of a price, and
+ * saving one would have claimed a read-back (mandate #6) that never happened.
+ *
+ * DRAFT-ONLY, by the `WHERE`. Once an extra is sent, who it was addressed to is part of
+ * the instrument: `confirmation_request.counterparty_label` is frozen into what the
+ * client signed, and quietly re-pointing the record afterwards would make the app
+ * disagree with the document.
+ */
+export async function setDraftClient(
+  db: AbstractPowerSyncDatabase, changeOrderId: string, whoDirected: string
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const name = whoDirected.trim();
+  if (!name) return { ok: false, reason: 'a client needs a name' };
+
+  const upd = await db.execute(
+    `UPDATE change_order SET who_directed = ? WHERE id = ? AND status = 'draft'`,
+    [name, changeOrderId]);
+  if (!upd.rowsAffected) {
+    return { ok: false, reason: 'this extra is not a draft anymore' };
+  }
+  // Same outbox discipline as its siblings: while the server has never seen this extra,
+  // the queued INSERT is rewritten under its own mutation_id so the first thing the
+  // server sees already names the client.
+  const q = await db.getAll<{ mutation_id: string; payload_json: string }>(
+    `SELECT mutation_id, payload_json FROM change_order_outbox WHERE change_order_id = ?`,
+    [changeOrderId]);
+  if (q.length) {
+    let p: any = null;
+    try { p = JSON.parse(q[0].payload_json); } catch { /* corrupt: drain will park it */ }
+    if (p) {
+      const json = JSON.stringify({ ...p, who_directed: name });
+      await db.execute(
+        `UPDATE change_order_outbox SET payload_json = ?, payload_sha256 = ? WHERE mutation_id = ?`,
+        [json, sha256(json), q[0].mutation_id]);
+    }
+  }
+  return { ok: true };
+}
+
 /** Move a DRAFT to the job a human picked (flow step 2). The queued INSERT
  *  payload follows, same rules as priceDraftExtra: refresh under the same
  *  mutation_id while the server has never seen it. */

@@ -47,8 +47,43 @@ Deno.serve(async (req) => {
   if (userErr || !userData?.user) return json({ ok: false, error: 'not authenticated' }, 401);
 
   // 2. Validate input.
-  let payload: { to?: string; body?: string };
+  let payload: { to?: string; body?: string; sid?: string };
   try { payload = await req.json(); } catch { return json({ ok: false, error: 'bad json' }, 400); }
+
+  /**
+   * STATUS LOOKUP — `{ sid: "SM..." }` instead of `{ to, body }`.
+   *
+   * WHY IT IS HERE. Twilio's create call returns `queued`, which means "we accepted
+   * it", NOT "the handset got it". Everything after that — carrier filtering, an
+   * unverified trial destination, A2P 10DLC rejection — lands minutes later on the
+   * message resource and NOWHERE ELSE. Without this, "Twilio said ok and the text
+   * never arrived" is a dead end that can only be resolved by a human reading the
+   * Twilio console (hadar was asked twice; that is the wrong place to put the work).
+   *
+   * It is READ-ONLY and sends nothing. Same auth as a send — a message SID is not a
+   * secret, but the numbers and bodies inside it are, so this must not be open.
+   */
+  const lookupSid = (payload.sid ?? '').trim();
+  if (lookupSid) {
+    if (!/^SM[0-9a-f]{32}$/i.test(lookupSid)) {
+      return json({ ok: false, error: 'not a message sid' }, 400);
+    }
+    const sid0 = Deno.env.get('TWILIO_ACCOUNT_SID');
+    const token0 = Deno.env.get('TWILIO_AUTH_TOKEN');
+    if (!sid0 || !token0) return json({ ok: false, error: 'SMS not configured' }, 503);
+    const r = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${sid0}/Messages/${lookupSid}.json`,
+      { headers: { Authorization: 'Basic ' + btoa(`${sid0}:${token0}`) } });
+    const m = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ ok: false, error: m?.message ?? `twilio ${r.status}` }, 502);
+    return json({
+      ok: true, sid: m?.sid ?? null, status: m?.status ?? null,
+      // THE TWO FIELDS THAT ACTUALLY EXPLAIN A MISSING TEXT. 21608 = trial account,
+      // destination not verified. 30034 = A2P 10DLC unregistered, carrier-filtered.
+      errorCode: m?.error_code ?? null, errorMessage: m?.error_message ?? null,
+      to: m?.to ?? null, from: m?.from ?? null,
+    });
+  }
   const to = (payload.to ?? '').trim();
   const body = (payload.body ?? '').trim();
   if (!/^\+?[0-9\s\-().]{7,20}$/.test(to)) return json({ ok: false, error: 'invalid destination' }, 400);
@@ -77,5 +112,8 @@ Deno.serve(async (req) => {
   });
   const out = await resp.json().catch(() => ({}));
   if (!resp.ok) return json({ ok: false, error: out?.message ?? `twilio ${resp.status}` }, 502);
-  return json({ ok: true, sid: out?.sid ?? null });
+  // `status` rides back with the SID. It is 'queued' or 'accepted' here and NEVER
+  // 'delivered' — the delivery verdict arrives later and is read with the sid lookup
+  // above. Returned so the caller never has to guess which of the two it holds.
+  return json({ ok: true, sid: out?.sid ?? null, status: out?.status ?? null });
 });

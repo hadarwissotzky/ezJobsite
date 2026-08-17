@@ -51,7 +51,7 @@ import type { SendBlocker } from '../sendreadiness';
 import { nteClause, type PriceMode, type VoicePriceReading } from '../voiceprice';
 import { Icon, type IconName } from './icon';
 import {
-  Button, Card, PhotoGrid, PersonRow, Row, ScreenHeader, Section, VoiceClip,
+  BottomSheet, Button, Card, PhotoGrid, PersonRow, Row, ScreenHeader, Section, VoiceClip,
   type PhotoTile,
 } from './kit';
 import { RecordApproval } from './recordapproval';
@@ -920,12 +920,29 @@ export type FullHistoryProps = {
   onBack: () => void;
 };
 
+/**
+ * THE FULL HISTORY IS A BOTTOM SHEET, NOT A SCREEN (hadar 2026-08-14: "we can eliminate
+ * the full history form — the bottom popup should be that behaviour, and everywhere it
+ * is called it should be a bottom popup history").
+ *
+ * It was a `Frame` — a whole screen with its own back control — reached from four
+ * places: the Activity sheet, the ⋯ overflow, the version row, and the sealed record.
+ * So looking up what happened to an extra REPLACED the extra, and getting back meant a
+ * navigation rather than a dismissal. As a sheet it lays over the record it is about,
+ * which is where a history belongs: you are still looking at the same thing.
+ *
+ * Changing the component rather than the four call sites is deliberate — the callers
+ * all already say "show me the history", and none of them should have to know how it
+ * is presented. The one structural change is in App.tsx, which must now mount this
+ * ALONGSIDE the record instead of instead of it; a modal returned on its own dims a
+ * screen that is no longer there.
+ */
 export function FullHistory(props: FullHistoryProps) {
   const sealed = stageOf(props.status) === 'locked';
   const unstamped = props.events.filter((e) => e.atMs === null).length;
 
   return (
-    <Frame title={t('det.historyTitle')} status={props.status} onBack={props.onBack}>
+    <BottomSheet visible tall title={t('det.historyTitle')} onClose={props.onBack}>
       <Text style={[T.bodySteel, st.hint]}>{t('det.historyNote')}</Text>
 
       <Section title={t('det.historyTitle')}>
@@ -970,7 +987,7 @@ export function FullHistory(props: FullHistoryProps) {
       {sealed && (
         <Notice tone="neutral" icon="lock" keys={['elock.lockedTitle', 'elock.lockedBody']} />
       )}
-    </Frame>
+    </BottomSheet>
   );
 }
 

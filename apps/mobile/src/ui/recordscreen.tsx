@@ -53,7 +53,7 @@ import { t } from '../i18n';
 import { C, F } from './theme';
 import { useRecordFacts } from './recordfacts';
 import { Button } from './kit';
-import { ExtraDraftScreen } from './extradraft';
+import { ExtraDraftScreen, type PriceMode } from './extradraft';
 import type { CaptureDelivery } from '../uploader';
 import {
   ExtraNegotiationScreen,
@@ -149,6 +149,8 @@ export type RecordScreenProps = {
   onRevise: () => void;
   /** Open one collapsed field / the detail subscreens (extradetails.tsx). */
   onOpenDetail: (field: ExtraDetailField) => void;
+  /** Tapping one of the three pricing modes under the price on a draft. */
+  onPickPriceMode?: (mode: PriceMode) => void;
   /** Rename from the header, in place. Stage 1 only — passed straight to the draft
    *  screen, which gates it on `isDraft`. */
   onRetitle?: (next: string) => void;
@@ -157,11 +159,11 @@ export type RecordScreenProps = {
   /** The client's type on this job, already translated. */
   clientTypeLabel?: string | null;
   /** Record a voice note onto this extra — its own act, not the camera's. */
-  onAddVoice?: () => void;
   /** Add ANOTHER person on the chain (architect, inspector, the GC above you) without
    *  changing who this extra is for. Offered once a client exists — before that, the
    *  thing to do is name the client, not collect bystanders. */
   onAddContact?: () => void;
+  onPickPhoto?: () => Promise<string | null>;
   onViewHistory: () => void;
   /** The whole price + terms composer — the draft screen's secondary action. */
   onEditDetails: () => void;
@@ -257,6 +259,10 @@ export function RecordScreen(props: RecordScreenProps) {
           onAddContact={props.onAddContact}
           onEditDescription={() => props.onOpenDetail('scope')}
           onEditCost={() => props.onOpenDetail('cost')}
+          // Every mode opens the SAME cost editor. Two of the three need a number and
+          // the third means dropping one, so none of them may be applied by a single
+          // tap on this screen — the editor is where a figure meets its read-back.
+          onPickPriceMode={(m) => props.onPickPriceMode?.(m)}
           onEditBilling={() => props.onOpenDetail('billing')}
           onEditSchedule={() => props.onOpenDetail('schedule')}
           onEditExclusions={() => props.onOpenDetail('exclusions')}
@@ -300,6 +306,9 @@ export function RecordScreen(props: RecordScreenProps) {
           // an approval record is the exact failure that screen exists to prevent.
           chain={rec.history.filter((e) => e.kind !== 'signed')}
           approver={approver}
+          // The same list the negotiation screen gets, so the people section reads
+          // identically either side of the seal (hadar, 2026-08-14).
+          contributors={contributors}
           onBack={props.onBack}
           onViewSignedApproval={props.onViewSignedApproval}
           onViewFullHistory={props.onViewHistory}
@@ -337,7 +346,6 @@ export function RecordScreen(props: RecordScreenProps) {
         onRevise={props.onRevise}
         onOpenDetail={props.onOpenDetail}
         onAddContact={props.onAddContact}
-        onAddVoice={mayAppend ? props.onAddVoice : undefined}
         version={lifecycle.version}
         // The SAME single lightbox the other two stages use — one viewer for the
         // whole record. Legal on a frozen extra: looking at evidence is not editing it.
@@ -358,6 +366,9 @@ export function RecordScreen(props: RecordScreenProps) {
         // the change order). Gated on the same `mayAppend`: a sealed record takes
         // no new bytes at all, by any door.
         onSnapPhoto={mayAppend ? props.onSnapPhoto : undefined}
+        // Same gate for the roll: a sealed record takes no new bytes by ANY door, and
+        // the library is a door.
+        onPickPhoto={mayAppend ? props.onPickPhoto : undefined}
       />
     );
   })();

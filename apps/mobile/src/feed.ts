@@ -10,10 +10,16 @@
  */
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 
+import { CO_PHOTO_SUBQUERY } from './changeorder.ts';
+
 export type FeedItem = {
   id: string;
   scope: string;
   amountCents: number | null;
+  /** The change-order number — the shared row card's kicker (2026-08-13). `nteCents`
+   *  was added beside it in the same change, to label the price fixed-vs-cap, and
+   *  removed again when that label came off the card; nothing else read it. */
+  coNumber: number | null;
   status: string;
   openQuestions: number;
   projectId: string;
@@ -40,6 +46,21 @@ export type FeedItem = {
    */
   createdBy: string | null;
   createdAtMs: number;
+  /**
+   * Relpath of the extra's FIRST photo, for the row's thumbnail. Null when the extra
+   * is voice-only — the card then draws the microphone placeholder (hadar, 2026-08-14:
+   * "make sure to place the first image if exists").
+   *
+   * Same rule as the job and Home lists — `CO_PHOTO_SUBQUERY`, imported rather than
+   * re-written, so "the first photo" cannot come to mean three different things on
+   * three screens showing the same extra.
+   *
+   * KNOWN AND STATED: `capture_commit` is a DEVICE-LOCAL table. On a company feed
+   * spanning other members' work, their media is not on this phone, so those rows
+   * legitimately have no thumbnail. That is a missing local file, not a missing photo,
+   * and it degrades to the placeholder rather than to a broken image.
+   */
+  photoRelpath: string | null;
 };
 
 export async function companyFeed(
@@ -50,19 +71,24 @@ export async function companyFeed(
   // at_ms tie (two acts stamped the same Date.now() in one flow), and the sort is
   // deterministic — id breaks the tie (review 2026-07-25).
   const rows = await db.getAll<{
-    id: string; scope: string; amount_cents: number | null; status: string;
+    id: string; scope: string; amount_cents: number | null;
+    co_number: number | null; status: string;
     open_questions: number; project_id: string; project_name: string | null;
     at_ms: number; actor: string | null; last_act: string | null;
     created_by: string | null; created_at_ms: number;
+    photo_relpath: string | null;
   }>(
-    `SELECT co.id, co.scope, co.amount_cents, COALESCE(co.status,'draft') AS status,
+    `SELECT co.id, co.scope, co.amount_cents, co.co_number,
+            COALESCE(co.status,'draft') AS status,
             (SELECT COUNT(*) FROM co_question q WHERE q.change_order_id = co.id) AS open_questions,
             co.project_id,
             (SELECT name FROM project WHERE id = co.project_id) AS project_name,
             COALESCE(la.at_ms, co.numbers_confirmed_at_ms, co.created_at_ms, 0) AS at_ms,
             la.name AS actor, la.act AS last_act,
             fa.name AS created_by,
-            COALESCE(co.created_at_ms, fa.at_ms, 0) AS created_at_ms
+            COALESCE(co.created_at_ms, fa.at_ms, 0) AS created_at_ms,
+            -- change_order is aliased co above, which is what the subquery assumes.
+            ${CO_PHOTO_SUBQUERY} AS photo_relpath
        FROM change_order co
        LEFT JOIN (
          SELECT subject_id, name, act, at_ms,
@@ -84,9 +110,11 @@ export async function companyFeed(
       LIMIT ?`, [limit]);
   return rows.map((r) => ({
     id: r.id, scope: r.scope, amountCents: r.amount_cents, status: r.status,
+    coNumber: r.co_number,
     openQuestions: r.open_questions ?? 0,
     projectId: r.project_id, projectName: r.project_name, atMs: r.at_ms,
     actor: r.actor, lastAct: r.last_act,
     createdBy: r.created_by, createdAtMs: r.created_at_ms ?? 0,
+    photoRelpath: r.photo_relpath,
   }));
 }

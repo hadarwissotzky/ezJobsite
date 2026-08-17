@@ -100,7 +100,7 @@ export function Section({ title, children, style }: {
  * pushing its footer off-screen. Same `behavior` split as authscreen.tsx — one
  * keyboard strategy in the app, not two.
  */
-export function BottomSheet({ visible, title, onClose, children, footer, tall }: {
+export function BottomSheet({ visible, title, onClose, children, footer, tall, bottomAnchored }: {
   visible: boolean;
   /** Already translated. Names the ONE thing this sheet edits. */
   title: string;
@@ -112,6 +112,13 @@ export function BottomSheet({ visible, title, onClose, children, footer, tall }:
    *  people): a short drawer shows three names and hides the rest behind a scroll
    *  nobody knows is there. A form sheet stays short — it should not grow to fit. */
   tall?: boolean;
+  /**
+   * Sit the content at the BOTTOM of the sheet, against the footer, instead of at the
+   * top. For a conversation: three messages in a 90% sheet otherwise cling to the
+   * header with a screenful of nothing under them, when the thing being read runs
+   * upwards from the reply box. Content still scrolls once it outgrows the space.
+   */
+  bottomAnchored?: boolean;
 }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -132,7 +139,9 @@ export function BottomSheet({ visible, title, onClose, children, footer, tall }:
           </View>
           <ScrollView
             style={st.sheetBody}
-            contentContainerStyle={{ paddingBottom: 8 }}
+            contentContainerStyle={bottomAnchored
+              ? { paddingBottom: 8, flexGrow: 1, justifyContent: 'flex-end' }
+              : { paddingBottom: 8 }}
             keyboardShouldPersistTaps="handled"
           >
             {children}
@@ -354,7 +363,11 @@ export function PersonRow({ name, role, photoUri, kind = 'other' }: {
    *  one that reads differently. */
   kind?: 'approver' | 'crew' | 'other';
 }) {
-  const bg = kind === 'approver' ? C.approve : kind === 'crew' ? C.brand : C.ink;
+  // INK AND STEEL, NOT TWO GREENS. Green means "where this extra stands" and nothing
+  // else (hadar, 2026-08-14); a person is not a status. The two discs were #536B49 and
+  // #4E6243 — eight points apart, one colour to the eye — so this also gives the signer
+  // a mark that actually differs from the crew's.
+  const bg = kind === 'approver' ? C.ink : kind === 'crew' ? C.steel : C.muted;
   return (
     <View style={st.person}>
       {photoUri
@@ -604,7 +617,16 @@ export function SyncedPill({ label }: { label: string }) {
 
 /* ----------------------------------------------------------------- actions -- */
 
-export type ButtonVariant = 'primary' | 'green' | 'secondary' | 'ghost' | 'danger' | 'dangerFill';
+/**
+ * `neutral` is `secondary` with the ACCENT REMOVED — an ink outline, ink label.
+ *
+ * It exists because of one rule (hadar, 2026-08-14): "if you want the message section
+ * to be distinct you can't use the same colour palette for anything else." On the three
+ * record screens green now means ONE thing — the state band that says where the extra
+ * stands — so the actions under it cannot be green too. `secondary` keeps its brand
+ * outline for the rest of the app, which was not part of that review.
+ */
+export type ButtonVariant = 'primary' | 'green' | 'secondary' | 'neutral' | 'ghost' | 'danger' | 'dangerFill';
 
 /**
  * The one button. Every variant is 58pt tall — `T.btn`'s gloves floor, mandate #3 —
@@ -615,13 +637,32 @@ export type ButtonVariant = 'primary' | 'green' | 'secondary' | 'ghost' | 'dange
  * when two buttons share a bar.
  */
 export function Button({
-  label, onPress, variant = 'primary', icon, disabled, style, accessibilityLabel, compact,
+  label, onPress, variant = 'primary', icon, disabled, refused, style, accessibilityLabel,
+  compact,
 }: {
   label: string;
   onPress: () => void;
   variant?: ButtonVariant;
   icon?: IconName;
   disabled?: boolean;
+  /**
+   * LOOKS REFUSED, STILL ANSWERS THE TAP.
+   *
+   * hadar, 2026-08-17: "now the remind button is not clickable." He was right, and it
+   * was `disabled` doing exactly what `disabled` does — swallowing the touch. The
+   * reason was on screen, as a 13pt caption under the button, and he never saw it.
+   *
+   * That is the dead control CLAUDE.md §1 rules out: someone for whom software is not
+   * second nature has no way to tell "this button is refused, and here is why" from
+   * "this app is broken". A tap that produces NOTHING is unreadable; a tap that
+   * produces a reason is a working app with a rule.
+   *
+   * So `refused` dims it exactly like `disabled` — he can see before touching that it
+   * will not go — but the press still fires, and the handler is expected to say why
+   * somewhere he will actually read. Use `disabled` when a tap genuinely has nothing
+   * to say; use `refused` whenever there is a reason worth hearing.
+   */
+  refused?: boolean;
   /** Tight text + padding for a row of several buttons (the negotiation moves). */
   compact?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -629,6 +670,7 @@ export function Button({
 }) {
   const fg = variant === 'primary' || variant === 'green' || variant === 'dangerFill' ? C.card
     : variant === 'secondary' ? C.brand
+    : variant === 'neutral' ? C.ink
     : variant === 'danger' ? C.danger
     : C.steel;
   return (
@@ -636,7 +678,9 @@ export function Button({
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
-      accessibilityState={{ disabled: !!disabled }}
+      // Announced as disabled either way: a refused control IS unavailable, and a
+      // screen reader must say so even though the tap is still answered.
+      accessibilityState={{ disabled: !!disabled || !!refused }}
       accessibilityLabel={accessibilityLabel ?? label}
       style={({ pressed }) => [
         T.btn, st.btn, compact && st.btnCompact, st[variant],
@@ -644,7 +688,8 @@ export function Button({
         // "Send for approval" solid black whether or not the checklist is complete —
         // the reason it can't go is the red line above it, not a faded button. Only
         // outline/ghost variants use the old opacity dim.
-        disabled && (variant === 'primary' || variant === 'green' ? st.primaryOff : T.btnOff),
+        (disabled || refused)
+          && (variant === 'primary' || variant === 'green' ? st.primaryOff : T.btnOff),
         pressed && !disabled && st.pressed, style,
       ]}
     >
@@ -1070,7 +1115,23 @@ const st = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 0.6,
   },
   sheetX: { minHeight: 32, minWidth: 32, alignItems: 'center', justifyContent: 'center' },
-  sheetBody: { paddingHorizontal: 18, paddingTop: 12 },
+  /**
+   * `flexShrink: 1` IS WHAT MAKES A SHEET SCROLL (hadar 2026-08-14: "the bottom popup
+   * activity needs to scroll — give us the ability to see all of the information").
+   *
+   * Without it this ScrollView had no flex at all, so inside a height-bounded sheet it
+   * laid itself out to its CONTENT's height and simply overran the bottom edge. A
+   * ScrollView whose frame is taller than the space it sits in has nothing to scroll:
+   * it believes everything is already visible, and the rows past the edge are clipped
+   * with no way to reach them. The full history was ten events and a signed panel; you
+   * could see six.
+   *
+   * SHRINK, NOT GROW. `flex: 1` would fix the tall sheets and break every short one —
+   * a five-row form sheet would stretch to fill 88% of the screen with white space
+   * under it. Shrink only bites when the content is bigger than the room, which is
+   * exactly and only when scrolling is wanted.
+   */
+  sheetBody: { flexShrink: 1, paddingHorizontal: 18, paddingTop: 12 },
   sheetFoot: {
     paddingHorizontal: 18, paddingTop: 10, paddingBottom: 28,
     borderTopWidth: 1, borderTopColor: C.line,
@@ -1187,6 +1248,7 @@ const st = StyleSheet.create({
   // rather than dropping to a light-grey pill.
   primaryOff: { opacity: 0.9 },
   secondary: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: C.brand },
+  neutral: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: C.ink },
   ghost: { backgroundColor: 'transparent' },
   danger: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: C.danger },
   // FILLED danger — for the one tap that destroys something. The outline `danger`

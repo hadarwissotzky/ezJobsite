@@ -145,7 +145,7 @@ const EN: Record<string, string> = {
   'fx.r3a': "You'll review it and ", 'fx.r3b': 'choose who gets it.',
   // Mandate #2 in the words of the person it protects.
   'fx.safe': 'Nothing is sent\nuntil you say so.',
-  'fx.s1': 'Record', 'fx.s2': 'Review', 'fx.s3': 'Choose owner', 'fx.s4': 'Send',
+  'fx.s1': 'Record', 'fx.s2': 'Review', 'fx.s3': 'Choose client', 'fx.s4': 'Send',
   'fx.start': 'Start recording',
   'fx.coach': 'Show me what to say',
   // ── step 2, the coach. The reframe first: this is a thing he does every day.
@@ -189,8 +189,8 @@ const EN: Record<string, string> = {
   'gs.g.days': 'Amount of time (days)',
   'gs.g.notes': 'Additional notes',
   'gs.g.optional': '(optional)',
-  'gs.g.notesHint': 'Anything else the owner should know?',
-  'gs.g.next': 'Review & choose owner',
+  'gs.g.notesHint': 'Anything else the client should know?',
+  'gs.g.next': 'Review & choose client',
   'gs.g.why': 'Add a price and answer the schedule to continue.',
   'gs.g.notSaved': 'Could not save',
   'gs.r.kicker': 'Review before sending',
@@ -339,12 +339,14 @@ const EN: Record<string, string> = {
   'job.statApproved': 'Approved',
   'job.changeOrders': 'Change orders',
   'job.chipNeeds': 'Needs approval',
-  'job.chipWaiting': 'Waiting on owner',
+  'job.chipWaiting': 'Waiting on client',
   'job.chipApproved': 'Approved',
   'job.coNo': 'Change Order #{n}',
   'job.coNoNumber': 'Change order',
   'job.initiated': 'Initiated {d}',
-  'job.requestedBy': 'Requested by {name}',
+  // See `feed.raisedByLab`. A job's person is who ASKED for the work; the feed's is who
+  // RAISED the record. Different humans, so different words.
+  'job.requestedByLab': 'Requested by',
   'job.addsDays': 'Adds {n} working days',
   'job.noScheduleChange': 'No schedule change',
   'job.inConversation': 'In conversation',
@@ -515,7 +517,7 @@ const EN: Record<string, string> = {
 
   // --- signing (§7.1) ---
   'sig.required': 'Signature required',
-  'sig.ownersMobile': 'Owner’s mobile — you enter it, not them',
+  'sig.ownersMobile': 'Client’s mobile — you enter it, not them',
   'sig.sendCode': 'Send code',
   'sig.noSms': 'No SMS provider yet — code would be texted to {phone}. For now: {code}',
   'sig.enterCode': '6-digit code',
@@ -551,26 +553,25 @@ const EN: Record<string, string> = {
   // Sent-for-approval screen (mockup 2026-07-24)
   'sent.viewRequest': 'View request',
   'sent.title': 'SENT FOR APPROVAL',
-  'sent.readyTitle': 'One more step: send it',
   'sent.waiting': 'Waiting for a yes.',
-  'sent.readySub': 'It hasn’t reached them yet. Tap Send below to text it over.',
+  // THE FAILED HAND-OFF (hadar, 2026-08-14 — Send now sends; this screen is the
+  // receipt). Worded around the ONE fact that matters and is easy to get wrong: the
+  // request exists and the row has left draft, so this is not "nothing happened" —
+  // it is "the client has not been told yet".
+  'sent.failTitle': 'It didn’t go out',
+  'sent.failSub': 'The request is ready — the client just hasn’t been sent the link yet.',
+  'sent.failChip': 'Not delivered',
+  'sent.barFailed': 'Not delivered',
+  'sent.retry': 'Send it now →',
+  'sent.failNotHanded': 'You closed the sharing screen before it sent.',
   'sent.job': 'Job',
   'sent.request': 'Request',
   'sent.to': 'Send to',
   'sent.status': 'Status',
   'sent.waitingChip': 'Waiting for a yes',
-  'sent.notSentChip': 'Not sent yet',
-  'sent.share': 'Send by text →',
-  // Shown INSTEAD of `sent.share` when the automatic-SMS button is also on
-  // screen: two controls that both say "send by text" read as duplicates of
-  // one act. This one is the phone's own share sheet — the other way.
-  'sent.shareOther': 'Send it another way →',
-  'sent.autoFailed': 'Couldn’t text it automatically. Use “Send it another way” below.',
   // The sheet's own title bar.
   'sent.barSent': 'Sent',
-  'sent.barReady': 'Ready to send',
-  'sent.textAuto': 'Text it to {name} now →',
-  'sent.foot': 'You’ll get a notification when the homeowner responds.',
+  'sent.foot': 'You’ll get a notification when the client responds.',
   'conf.send': 'Send it →',
   'conf.noLogin': 'No login needed — anyone with this link can answer it.',
 
@@ -633,7 +634,7 @@ const EN: Record<string, string> = {
   // owner cannot act without it; `recommended` states a fact and never scolds. If
   // the soft lines read like errors, a contractor fills all four out of guilt and
   // the gate has quietly become the checklist D3 refuses to build.
-  'send.blocked.noDescription': 'Nobody has written up what the work is yet — that is the part the owner reads.',
+  'send.blocked.noDescription': 'Nobody has written up what the work is yet — that is the part the client reads.',
   // ONE line covers both halves of `no_cost` (a missing amount, and a
   // time-and-materials extra missing its cap) because REQ-LC12 makes them one
   // blocker. It deliberately does not open with "no price": on the T&M case a
@@ -678,6 +679,15 @@ const EN: Record<string, string> = {
   'erec.nte': 'Not to exceed {amount}',
   'erec.mini': 'mini',
   'erec.yourPrice': 'Your quote',
+  // ── the three pricing modes, under the figure on the draft (design c3) ──
+  // Each sub-line says what the mode PROMISES, in the words the promise is made in —
+  // "won't exceed" is the whole meaning of a cap and is what the owner is agreeing to.
+  'price.modeFixed': 'Fixed',
+  'price.modeFixedSub': 'Price is final',
+  'price.modeCap': 'Cap (NTE)',
+  'price.modeCapSub': "Won't exceed",
+  'price.modeAuth': 'Authorize',
+  'price.modeAuthSub': 'Price follows',
   'erec.onPhone': 'On this phone · not backed up yet',
   'erec.capture': 'Capture',
   'erec.capturedWhen': 'Captured {when}',
@@ -707,7 +717,7 @@ const EN: Record<string, string> = {
   // sentence as the only explanation for a dead control has been told nothing
   // (mandate #5). The caller had shipped all of them as baked English.
   'erec.errSaveScope': 'That did not save — the extra has been sent, or the text was empty.',
-  'erec.errPriceFirst': 'Type the price first. Saving without one would store $0, and $0 tells the owner the work is free.',
+  'erec.errPriceFirst': 'Type the price first. Saving without one would store $0, and $0 tells the client the work is free.',
   'erec.errFollowOn': 'Could not start the follow-on extra: {why}',
   'erec.errWrongJob': 'Open this extra from its own job to send it — the approver list comes from that job.',
   'erec.errStillLoading': 'This extra is still loading — try again in a moment.',
@@ -716,7 +726,34 @@ const EN: Record<string, string> = {
   'r3.unpricedRow': 'Send the price',
   // R8 remind
   'r8.remind': 'Remind',
-  'r8.tooSoon': 'You reminded them today already. One reminder a day per extra.',
+  // The reminder reached nobody: no number on file AND the share sheet was closed.
+  'r8.notDelivered': 'It didn’t go out. Nobody has been reminded yet.',
+  // What the reminder actually did. Counted, never assumed.
+  'r8.sentOne': 'Reminder texted — same link as before.',
+  'r8.sentN': 'Reminder texted to {n} people — same link as before.',
+  'r8.sentByHand': 'Sent from your phone — same link as before.',
+  // The acknowledgement popup after a reminder. It says WHICH of the three things
+  // happened, because they need different next moves from him.
+  'r8.ackTexted': 'Reminder sent',
+  'r8.ackTextedN': 'Reminder sent to {n} people',
+  // "SENT", NOT "DELIVERED", and the difference is not pedantic (verified 2026-08-17):
+  // Twilio returns `queued` the instant it accepts a message, and the carrier's verdict
+  // lands minutes later. Our very first real send came back `undelivered` with carrier
+  // error 30034 while the app would have said the client had it. A claim that outruns
+  // its evidence is the defect this project keeps re-learning — so the copy says what
+  // we actually know: it went to their phone number.
+  'r8.ackSameLink': 'Sent to their phone — same link as before.',
+  'r8.ackByHand': 'Sent from your phone',
+  'r8.ackFailed': 'Nobody was reminded',
+  // WHY the phone's own share sheet opened instead of a text going out by itself.
+  // Three causes, three different fixes — and only one of them is the contractor's.
+  'r8.noRecipient': 'Sent from your phone. This extra has no saved recipient to text.',
+  'r8.noNumber': 'Sent from your phone. We don’t have a phone number on file for them.',
+  'r8.smsOff': 'Sent from your phone. Automatic texting isn’t switched on for this account yet.',
+  // Names the RULE and the fact, so a refusal reads as a rule rather than a fault.
+  // "One a day" protects the relationship the app exists to protect — a client nudged
+  // three times in an afternoon stops opening the link.
+  'r8.tooSoon': 'You already reminded them today. One reminder a day, so it stays a nudge and not nagging.',
   'r8.inDiscussion': 'They asked a question and are waiting on you. Answer it first.',
   'r8.notSent': 'This has not been sent yet.',
   'r8.noLink': 'No link on this phone for that extra. Send it again to create one.',
@@ -836,7 +873,9 @@ const EN: Record<string, string> = {
   'feed.earlier': 'Earlier',
   'feed.sub': 'Everything across your jobs',
   // Who RAISED the extra (not who touched it last) — the company stream's row meta.
-  'feed.raisedBy': 'Raised by {name}',
+  // The card sets the NAME in ink and keeps the label quiet, so the two halves are
+  // separate strings rather than one interpolated sentence.
+  'feed.raisedByLab': 'Raised by',
   'set.title': 'Settings',
   'set.companyTitle': 'Company settings',
   'set.profile': 'Your profile',
@@ -1007,13 +1046,13 @@ const EN: Record<string, string> = {
   'co.processing': 'Reading your recording… price and details will fill in as soon as it’s written down.',
   'co.toReview': 'Continue to review →',
   'co.reviewTitle': 'Review & send',
-  'co.reviewNote': 'This is what the owner will see. Review everything before sending.',
-  'co.sendOwner': 'Send to owner for approval',
+  'co.reviewNote': 'This is what the client will see. Review everything before sending.',
+  'co.sendOwner': 'Send to client for approval',
   'co.saveDraft': 'Save draft',
   'co.photosAuto': 'Photos are attached automatically when it sends.',
   'co.auditNote': 'Secure. Audit trail included.',
   'co.qWho': 'Who asked for it?',
-  'co.qWhoPh': 'Customer or owner name',
+  'co.qWhoPh': 'Client name',
   'co.qBilling': 'When do you bill it?',
   'co.billNext': 'Next invoice',
   // The tenant switcher. Only ever seen by someone who belongs to more than one.
@@ -1218,7 +1257,7 @@ const EN: Record<string, string> = {
   'xt.code_permit': 'Code or permit',
   'xt.site_condition': 'Found on site',
   'xt.scope_clarification': 'Scope clarification',
-  'role.owner': 'Owner',
+  'role.owner': 'Client',
   'role.general_contractor': 'General contractor',
   'role.designer': 'Designer / architect',
   'role.internal_specialist': 'Internal specialist',
@@ -1233,7 +1272,49 @@ const EN: Record<string, string> = {
     'Check this person can approve costs on this job.',
   'r5c.becauseRoleUnconfirmed':
     '{type} → {name}, your {role}. Check they can approve costs on this job.',
-  'r5c.sendTo': 'Send to',
+  // ── who this goes to, and what that does ──
+  // Two sections because they are two different acts, and the hint under the button
+  // says which one this tap is: a client turns the draft into something signable, a
+  // teammate does not.
+  'r5c.askTeam': 'Ask someone on your team to review it',
+  // The router's guess is OFFERED, never assumed. "Use them" is the act of accepting it.
+  // The two sections, named so they cannot be mistaken for each other. One decides
+  // whether this becomes a signable document; the other does not.
+  // Two words, not a sentence in caps. The explainer carries the meaning underneath.
+  'r5c.secClient': 'Client',
+  'r5c.secClientSub': 'They sign it. This becomes a real change order.',
+  'r5c.secTeam': 'Your team',
+  'r5c.secTeamSub': 'They just take a look. It stays a draft.',
+  'r5c.required': 'Required',
+  'r5c.optional': 'Optional',
+  'r5c.whoSigns': 'Client — the one who signs this',
+  'r5c.noClientYet': 'No client chosen for this change order yet.',
+  // Names the STATE of this change order, not a general fact. "Nobody selected yet"
+  // reads as an instruction; this reads as a status, which is what it is.
+  'r5c.noneSelected': 'No client selected yet',
+  'r5c.chooseClient': 'Choose a client',
+  // Named on the extra, but with no way to reach them. States the real gap instead of
+  // pretending nobody was ever chosen.
+  'r5c.savedNoContact': '{name} is on this change order, but has no phone or email yet.',
+  // The guess, in one line, with WHY compressed to the fact that matters: this person
+  // is the client on this job, not on this change order.
+  'r5c.suggested': '{name} — client on this job',
+  'r5c.useThem': 'Use them',
+  'r5c.useSuggested': 'Send it to {name}',
+  'r5c.chooseSomeoneElse': 'Choose someone else',
+  'r5c.noTeam': 'Nobody else is on your team yet.',
+  'r5c.inviteTeam': 'Invite someone',
+  'r5c.inviteNoCompany': 'Set up your company first, then you can invite people to it.',
+  'r5c.inviteFailedH': 'Could not create the invite',
+  'r5c.askFailed': 'Could not ask them',
+  'r5c.clientNotSaved': 'Could not save the client',
+  'r5c.teamMate': 'Teammate',
+  'r5c.askReview': 'Ask for a review',
+  'r5c.needSomeone': 'Pick someone first.',
+  'r5c.staysDraft': 'Stays a draft. Nothing goes to the client.',
+  'r5c.goesToClient': 'Goes out for signature.',
+  'r5c.askedN': 'Asked {n} to review it',
+  'r5c.sendTo': 'Who gets this?',
   'r5c.change': 'Change',
   'r5c.whatKind': 'What kind of extra is this?',
   'r5c.untyped': 'Not set',
@@ -1251,6 +1332,10 @@ const EN: Record<string, string> = {
   'r5c.noSignerH': 'No one is on this job yet.',
   'r5c.noSignerB': 'Add the person who signs off before sending.',
   'r5c.sendIt': 'Send it',
+  // Shown WHILE it sends. Minting the instrument, freezing its text and pushing the
+  // photos to the client's page takes seconds on a jobsite connection; a button that
+  // just dims for that long reads as a tap that did not register.
+  'r5c.sending': 'Sending…',
   'r5c.needSigner': 'Add a signer first',
   'erec.deliveryNote':
     'Delivery channel and state are recorded on the server and appear in the evidence bundle.',
@@ -1317,8 +1402,10 @@ const EN: Record<string, string> = {
   'draft.bannerReadyGaps1': 'Ready to send. One more would help you get a yes — it is not required.',
   'draft.bannerReadyGaps': 'Ready to send. {n} more would help you get a yes — they are not required.',
   'draft.notADraft': 'This extra has already left this phone. It cannot be sent again from here.',
+  // The people who matter on this extra, in their own section. They used to live under
+  // "Raw collected information" — but a client is not something the phone captured.
   'draft.raw': 'Raw collected information',
-  'draft.rawNote': 'The owner does not see this part.',
+  'draft.rawNote': 'The client does not see this part.',
   'draft.noNotes': 'Nothing has been written down for this extra yet.',
   'draft.photosN': '{n} photos',
   'draft.addMore': 'Add more',
@@ -1335,13 +1422,15 @@ const EN: Record<string, string> = {
   // The AI's write-up. It sits under `draft.rawNote` ("the owner does not see this
   // part") because REQ-LC43 puts `change_order.summary` outside the instrument.
   'draft.writeUp': 'What the app made of it',
-  'draft.alsoOnJob': 'ALSO ON THIS JOB',
-  'draft.requestedBy': 'Client',
   'draft.capturedWith': 'How this was captured',
   'draft.scope': 'Scope of work (sent to client)',
-  'draft.scopeNote': 'This is exactly what the owner reads.',
+  'draft.scopeNote': 'This is exactly what the client reads.',
   'draft.description': 'Description of work',
   'draft.cost': 'Cost',
+  // The heading over the hero figure. "Price", not "Cost": cost is what the work costs
+  // the contractor, price is what the owner is being asked to agree to — and this
+  // section is the second one, which is why it is the one that carries the modes.
+  'draft.priceSection': 'Price',
   'draft.billing': 'Payment timing',
   'draft.schedule': 'Impact on schedule',
   'draft.exclusions': "What's not included",
@@ -1390,11 +1479,25 @@ const EN: Record<string, string> = {
   'neg.openedTimes': 'Opened {n} times',
   'neg.openedTodayAt': 'today at {time}',
   'neg.changeResend': 'Change & resend',
-  'neg.callOwner': 'Call owner',
+  'neg.callOwner': 'Call client',
   'neg.viewDetails': 'View details',
   'neg.synced': 'Synced',
   'neg.tabInfo': 'Info',
   'neg.tabMessages': 'Messages',
+  // ── the attachment tray behind the plus ──
+  'neg.attachOpen': 'Attach',
+  // ── dictation ──
+  // Each refusal names what to DO, not what failed: "unsupported" on its own tells a
+  // contractor standing in a basement nothing he can act on.
+  'neg.dictate': 'Speak your message',
+  'neg.dictStop': 'Stop listening',
+  'neg.dictDenied': 'Speech access is off. Turn it on in Settings to talk instead of type.',
+  'neg.dictUnsupported': 'This phone cannot transcribe offline. Type the message, or record a voice note on the record itself.',
+  'neg.dictFailed': 'Could not hear that. Try again, or type it.',
+  'neg.attachClose': 'Close attachments',
+  'neg.trayCamera': 'Camera',
+  'neg.trayPhotos': 'Photos',
+  'neg.trayContact': 'Contact',
   'neg.tabActivity': 'Activity',
   'neg.remindShort': 'Remind',
   'neg.reviseShort': 'Revise & resend',
@@ -1449,7 +1552,6 @@ const EN: Record<string, string> = {
   'elock.agreedTitle': 'What was agreed',
   'elock.rowScope': 'Approved scope',
   'elock.rowIncluded': 'Included',
-  'elock.rowExclusions': 'Not included',
   'elock.currentVersion': 'Version: V{n}',
   'elock.viewPrevious': 'View previous',
   'elock.noPrevious': 'Original',
@@ -1458,9 +1560,7 @@ const EN: Record<string, string> = {
   'elock.sigTitle': 'Signature & approval',
   'elock.sigBody': 'View the final signed approval and sign-off details',
   'elock.viewConversation': 'View conversation',
-  'elock.rowPhotos': 'Photos',
   'elock.rowSchedule': 'Schedule impact',
-  'elock.rowBilling': 'Payment timing',
   // The never-filled-in lines. They say what the DOCUMENT does, not what the
   // contractor failed to do — on a sealed record "he didn't fill it in" and "the
   // agreement is silent on it" are different claims, and only the second one is true.
@@ -1519,7 +1619,7 @@ const EN: Record<string, string> = {
   'det.tabRaw': 'Raw captured notes',
   'det.tabClient': 'Client-facing scope of work',
   'det.sowPlaceholder': 'Write what the work is, in plain words.',
-  'det.sowEmpty': 'Nothing is written yet. This is what the owner reads — say what the work is.',
+  'det.sowEmpty': 'Nothing is written yet. This is what the client reads — say what the work is.',
   'det.charCount': '{n}/{of}',
   'det.charFull': 'that is as long as it goes',
   'det.useNotes': 'Use captured notes',
@@ -1588,7 +1688,7 @@ const EN: Record<string, string> = {
   'scope.emptyTitle': 'No scope of work yet',
   'scope.emptyBody': 'Describe the work the way you would explain it on site. This is what the client reads and signs.',
   'scope.tooShort': 'Too short to send.',
-  'scope.capDraft': 'The owner signs this.',
+  'scope.capDraft': 'The client signs this.',
   'scope.capSent': 'Exactly as sent.',
   'scope.capSigned': 'Exactly as signed.',
   'client.title': 'Who is this for?',
@@ -1611,9 +1711,16 @@ const EN: Record<string, string> = {
   // The no-owner card on the draft screen. Split into heading + sentence because it
   // is a card, not a row: the heading states the gap, the sentence says why it
   // matters, and the footnote promises that everyone else comes after.
-  'client.noOwnerH': 'No owner selected yet',
+  'client.noOwnerH': 'No client selected yet',
   'client.noOwnerB': 'Choose who will approve this extra before you send it.',
-  'client.chooseOwner': 'Choose owner',
+  'client.chooseOwner': 'Choose client',
+  // THE DISPLAY NAME FOR AN UNNAMED CLIENT. Deliberately NOT the same thing as
+  // `UNNAMED_CLIENT` in startextra.ts, which is the stored sentinel 'Owner' and must
+  // not move: `isNamedClient` compares against it, so renaming it would make every
+  // existing extra suddenly claim it was requested by a person called "Owner" — and
+  // for anything already sent it sits in `counterparty_label`, inside a frozen
+  // instrument somebody has signed. The word on the screen changes; the data does not.
+  'client.unnamed': 'Client',
   'client.othersLater': 'You can add others later.',
   'client.removePerson': 'Remove {name} from this job',
   'client.removeTitle': 'Remove {name} from this job?',
@@ -1655,20 +1762,19 @@ const EN: Record<string, string> = {
   'rec.hide': 'Hide the recordings',
   'rec.whyRaw': 'This is what was said on site, word for word. It is kept as it was captured and is never edited.',
   'sheet.frozen': 'This was sent, so it cannot be changed. To change it, use Change & resend — that sends the client a new version.',
-  'client.addContactSub': 'An architect, inspector, or the GC — kept on this job',
-  'det.modeNteSub': 'Time and materials, with a cap the owner approves.',
+  'det.modeNteSub': 'Time and materials, with a cap the client approves.',
   'det.total': 'Total price',
   'det.cap': 'Not to exceed',
   // R3: T&M ALWAYS carries a cap. The line says what an uncapped one costs the owner,
   // because "required" on its own never explains why anyone should care.
-  'det.capRequired': 'Time and materials always needs a cap. Without one the owner is approving an open bill.',
+  'det.capRequired': 'Time and materials always needs a cap. Without one the client is approving an open bill.',
   'det.readback': 'You are sending {amount}',
-  'det.readbackNone': 'No amount yet. Type what you told the owner.',
+  'det.readbackNone': 'No amount yet. Type what you told the client.',
   'det.capReadback': 'The cap you are sending is {amount}',
-  'det.schedUnsureSub': 'The owner sees this as “to be confirmed”. That is an honest answer.',
+  'det.schedUnsureSub': 'The client sees this as “to be confirmed”. That is an honest answer.',
   'det.schedDaysLabel': 'How many days',
   'det.exclusionsHint':
-    'What is NOT part of this price. Leave it blank and the owner may assume it is included.',
+    'What is NOT part of this price. Leave it blank and the client may assume it is included.',
   'det.exclusionsPlaceholder': 'e.g. paint, fixtures, permit fees',
   'det.exclusionsNone': 'Nothing was listed as excluded.',
 
@@ -1680,10 +1786,10 @@ const EN: Record<string, string> = {
   'det.noPlace': 'No location was recorded',
   'det.someNoPlace': '{n} photo(s) here have no location saved — the phone had no fix at the time.',
   'det.noPhotos': 'No photos on this extra yet.',
-  'det.bestTitle': 'Best photo for the owner',
-  'det.pickBest': 'Mark best photo for owner',
-  'det.pickBestWhy': 'The one you pick shows first on the page the owner opens.',
-  'det.pickBestOn': 'Tap the photo the owner should see first.',
+  'det.bestTitle': 'Best photo for the client',
+  'det.pickBest': 'Mark best photo for client',
+  'det.pickBestWhy': 'The one you pick shows first on the page the client opens.',
+  'det.pickBestOn': 'Tap the photo the client should see first.',
   'det.pickBestCancel': 'Stop choosing',
   'det.clearBest': 'No best photo',
   'det.bestBadge': 'BEST',
@@ -1829,7 +1935,7 @@ const ES: Record<string, string> = {
   'fx.r2a': 'Lo convertimos en un ', 'fx.r2b': 'borrador claro.',
   'fx.r3a': 'Lo revisas y ', 'fx.r3b': 'eliges quién lo recibe.',
   'fx.safe': 'No se envía nada\nhasta que tú lo digas.',
-  'fx.s1': 'Grabar', 'fx.s2': 'Revisar', 'fx.s3': 'Elegir dueño', 'fx.s4': 'Enviar',
+  'fx.s1': 'Grabar', 'fx.s2': 'Revisar', 'fx.s3': 'Elegir cliente', 'fx.s4': 'Enviar',
   'fx.start': 'Empezar a grabar',
   'fx.coach': 'Dime qué decir',
   'gf.h1': 'Solo cuéntanos',
@@ -1870,8 +1976,8 @@ const ES: Record<string, string> = {
   'gs.g.days': 'Cuánto tiempo (días)',
   'gs.g.notes': 'Notas adicionales',
   'gs.g.optional': '(opcional)',
-  'gs.g.notesHint': '¿Algo más que el dueño deba saber?',
-  'gs.g.next': 'Revisar y elegir dueño',
+  'gs.g.notesHint': '¿Algo más que el cliente deba saber?',
+  'gs.g.next': 'Revisar y elegir cliente',
   'gs.g.why': 'Agrega un precio y responde el plazo para continuar.',
   'gs.g.notSaved': 'No se pudo guardar',
   'gs.r.kicker': 'Revisa antes de enviar',
@@ -2010,12 +2116,12 @@ const ES: Record<string, string> = {
   'job.statApproved': 'Aprobados',
   'job.changeOrders': 'Órdenes de cambio',
   'job.chipNeeds': 'Necesita aprobación',
-  'job.chipWaiting': 'Esperando al dueño',
+  'job.chipWaiting': 'Esperando al cliente',
   'job.chipApproved': 'Aprobado',
   'job.coNo': 'Orden de cambio #{n}',
   'job.coNoNumber': 'Orden de cambio',
   'job.initiated': 'Iniciada {d}',
-  'job.requestedBy': 'Pedida por {name}',
+  'job.requestedByLab': 'Pedida por',
   'job.addsDays': 'Agrega {n} días hábiles',
   'job.noScheduleChange': 'Sin cambio de horario',
   'job.inConversation': 'En conversación',
@@ -2177,7 +2283,7 @@ const ES: Record<string, string> = {
   'st.failedBody': '{n} capturas están guardadas aquí pero no se pudieron respaldar. Siguen en este teléfono — no se perdieron. Necesitan atención.',
 
   'sig.required': 'Se requiere firma',
-  'sig.ownersMobile': 'Celular del dueño — lo escribes tú, no él',
+  'sig.ownersMobile': 'Celular del cliente — lo escribes tú, no él',
   'sig.sendCode': 'Mandar código',
   'sig.noSms': 'Todavía no hay servicio de SMS — el código se mandaría a {phone}. Por ahora: {code}',
   'sig.enterCode': 'código de 6 dígitos',
@@ -2211,22 +2317,20 @@ const ES: Record<string, string> = {
   // Pantalla de enviado para aprobación (maqueta 2026-07-24)
   'sent.viewRequest': 'Ver la solicitud',
   'sent.title': 'Enviado para aprobación',
-  'sent.readyTitle': 'Un paso más: envíalo',
   'sent.waiting': 'Esperando un sí.',
-  'sent.readySub': 'Todavía no le ha llegado. Toca Enviar abajo para mandárselo por texto.',
+  'sent.failTitle': 'No salió',
+  'sent.failSub': 'La solicitud está lista — al cliente todavía no le llegó el enlace.',
+  'sent.failChip': 'No entregado',
+  'sent.barFailed': 'No entregado',
+  'sent.retry': 'Enviarlo ahora →',
+  'sent.failNotHanded': 'Cerraste la pantalla para compartir antes de que se enviara.',
   'sent.job': 'Trabajo',
   'sent.request': 'Solicitud',
   'sent.to': 'Enviar a',
   'sent.status': 'Estado',
   'sent.waitingChip': 'Esperando un sí',
-  'sent.notSentChip': 'Sin enviar todavía',
-  'sent.share': 'Enviar por texto →',
-  'sent.shareOther': 'Enviarlo de otra forma →',
-  'sent.autoFailed': 'No se pudo enviar el texto automáticamente. Use “Enviarlo de otra forma” abajo.',
   'sent.barSent': 'Enviado',
-  'sent.barReady': 'Listo para enviar',
-  'sent.textAuto': 'Enviar texto a {name} ahora →',
-  'sent.foot': 'Recibirás una notificación cuando el propietario responda.',
+  'sent.foot': 'Recibirás una notificación cuando el cliente responda.',
   'conf.send': 'Mandarlo →',
   'conf.noLogin': 'No necesita cuenta — cualquiera con este enlace puede responder.',
 
@@ -2281,7 +2385,7 @@ const ES: Record<string, string> = {
   // por qué el dueño no puede aprobar sin eso; `recommended` solo constata un
   // hecho y nunca regaña. Si las líneas suaves suenan a error, él las llena por
   // culpa y la puerta se volvió la lista de requisitos que D3 no quiere.
-  'send.blocked.noDescription': 'Todavía nadie escribió en qué consiste el trabajo — eso es lo que el dueño lee.',
+  'send.blocked.noDescription': 'Todavía nadie escribió en qué consiste el trabajo — eso es lo que el cliente lee.',
   'send.blocked.noCost': 'Ponga el precio. Por tiempo y materiales también hace falta el tope “no excede”.',
   'send.recommended.noPhotos': 'No tiene fotos. Una foto es lo que resuelve el pleito después.',
   'send.recommended.noBillingTiming': 'No dijo cuándo lo cobra.',
@@ -2319,6 +2423,12 @@ const ES: Record<string, string> = {
   'erec.nte': 'No pasa de {amount}',
   'erec.mini': 'chico',
   'erec.yourPrice': 'Su cotización',
+  'price.modeFixed': 'Fijo',
+  'price.modeFixedSub': 'El precio es final',
+  'price.modeCap': 'Tope (NTE)',
+  'price.modeCapSub': 'No lo excederá',
+  'price.modeAuth': 'Autorizar',
+  'price.modeAuthSub': 'El precio va después',
   'erec.onPhone': 'En este teléfono · todavía sin respaldo',
   'erec.capture': 'Grabar',
   'erec.capturedWhen': 'Grabado {when}',
@@ -2337,7 +2447,7 @@ const ES: Record<string, string> = {
   'erec.evDeclined': 'Rechazado',
   'erec.noTime': 'sin hora registrada',
   'erec.errSaveScope': 'No se guardó — el extra ya se envió, o el texto estaba vacío.',
-  'erec.errPriceFirst': 'Escriba el precio primero. Guardar sin él dejaría $0, y $0 le dice al dueño que el trabajo es gratis.',
+  'erec.errPriceFirst': 'Escriba el precio primero. Guardar sin él dejaría $0, y $0 le dice al cliente que el trabajo es gratis.',
   'erec.errFollowOn': 'No se pudo iniciar el extra de seguimiento: {why}',
   'erec.errWrongJob': 'Abra este extra desde su propio trabajo para enviarlo — la lista de aprobadores viene de ese trabajo.',
   'erec.errStillLoading': 'Este extra todavía se está cargando — inténtelo en un momento.',
@@ -2346,7 +2456,19 @@ const ES: Record<string, string> = {
   'r3.unpricedRow': 'Envíe el precio',
   // R8 recordatorio
   'r8.remind': 'Recordar',
-  'r8.tooSoon': 'Ya le recordó hoy. Un recordatorio por día por cada extra.',
+  'r8.notDelivered': 'No salió. Todavía no se le ha recordado a nadie.',
+  'r8.sentOne': 'Recordatorio enviado por texto — el mismo enlace de antes.',
+  'r8.sentN': 'Recordatorio enviado a {n} personas — el mismo enlace de antes.',
+  'r8.sentByHand': 'Enviado desde su teléfono — el mismo enlace de antes.',
+  'r8.ackTexted': 'Recordatorio enviado',
+  'r8.ackTextedN': 'Recordatorio enviado a {n} personas',
+  'r8.ackSameLink': 'Enviado a su teléfono — el mismo enlace de antes.',
+  'r8.ackByHand': 'Enviado desde su teléfono',
+  'r8.ackFailed': 'No se le recordó a nadie',
+  'r8.noRecipient': 'Enviado desde su teléfono. Este extra no tiene un destinatario guardado.',
+  'r8.noNumber': 'Enviado desde su teléfono. No tenemos su número de teléfono.',
+  'r8.smsOff': 'Enviado desde su teléfono. El envío automático de textos no está activado todavía.',
+  'r8.tooSoon': 'Ya le recordó hoy. Un recordatorio por día, para que sea un aviso y no una molestia.',
   'r8.inDiscussion': 'Hizo una pregunta y está esperando su respuesta. Respóndala primero.',
   'r8.notSent': 'Esto todavía no se ha enviado.',
   'r8.noLink': 'No hay enlace en este teléfono para ese extra. Envíelo de nuevo para crear uno.',
@@ -2454,7 +2576,7 @@ const ES: Record<string, string> = {
   'feed.yesterday': 'Ayer',
   'feed.earlier': 'Antes',
   'feed.sub': 'Todo en tus trabajos',
-  'feed.raisedBy': 'Creado por {name}',
+  'feed.raisedByLab': 'Creado por',
   'set.title': 'Ajustes',
   'set.companyTitle': 'Ajustes de la empresa',
   'set.profile': 'Tu perfil',
@@ -2602,13 +2724,13 @@ const ES: Record<string, string> = {
   'co.processing': 'Leyendo tu grabación… el precio y los detalles se llenarán en cuanto quede escrita.',
   'co.toReview': 'Seguir a revisar →',
   'co.reviewTitle': 'Revisar y enviar',
-  'co.reviewNote': 'Esto es lo que verá el dueño. Revísalo todo antes de enviar.',
-  'co.sendOwner': 'Enviar al dueño para aprobación',
+  'co.reviewNote': 'Esto es lo que verá el cliente. Revísalo todo antes de enviar.',
+  'co.sendOwner': 'Enviar al cliente para aprobación',
   'co.saveDraft': 'Guardar borrador',
   'co.photosAuto': 'Las fotos se adjuntan solas al enviar.',
   'co.auditNote': 'Seguro. Con registro de auditoría.',
   'co.qWho': '¿Quién lo pidió?',
-  'co.qWhoPh': 'Nombre del cliente o dueño',
+  'co.qWhoPh': 'Nombre del cliente',
   'co.qBilling': '¿Cuándo lo cobras?',
   'co.billNext': 'Próxima factura',
   'co.switchLabel': 'Trabajando en',
@@ -2809,7 +2931,7 @@ const ES: Record<string, string> = {
   'xt.code_permit': 'Código o permiso',
   'xt.site_condition': 'Encontrado en la obra',
   'xt.scope_clarification': 'Aclaración de alcance',
-  'role.owner': 'Propietario',
+  'role.owner': 'Cliente',
   'role.general_contractor': 'Contratista general',
   'role.designer': 'Diseñador / arquitecto',
   'role.internal_specialist': 'Especialista interno',
@@ -2822,7 +2944,35 @@ const ES: Record<string, string> = {
     'Confirme que esta persona puede aprobar costos en esta obra.',
   'r5c.becauseRoleUnconfirmed':
     '{type} → {name}, su {role}. Confirme que puede aprobar costos en esta obra.',
-  'r5c.sendTo': 'Enviar a',
+  'r5c.askTeam': 'Pide a alguien de tu equipo que lo revise',
+  'r5c.secClient': 'Cliente',
+  'r5c.secClientSub': 'Firma esto. Se convierte en una orden de cambio real.',
+  'r5c.secTeam': 'Tu equipo',
+  'r5c.secTeamSub': 'Solo le echan un vistazo. Sigue siendo un borrador.',
+  'r5c.required': 'Obligatorio',
+  'r5c.optional': 'Opcional',
+  'r5c.whoSigns': 'Cliente — quien firma esto',
+  'r5c.noClientYet': 'Todavía no hay cliente elegido para esta orden de cambio.',
+  'r5c.noneSelected': 'Todavía no hay cliente elegido',
+  'r5c.chooseClient': 'Elegir un cliente',
+  'r5c.savedNoContact': '{name} está en esta orden de cambio, pero aún no tiene teléfono ni correo.',
+  'r5c.suggested': '{name} — cliente de esta obra',
+  'r5c.useThem': 'Usarlo',
+  'r5c.useSuggested': 'Enviárselo a {name}',
+  'r5c.chooseSomeoneElse': 'Elegir a otra persona',
+  'r5c.noTeam': 'Todavía no hay nadie más en tu equipo.',
+  'r5c.inviteTeam': 'Invitar a alguien',
+  'r5c.inviteNoCompany': 'Configura tu empresa primero y luego podrás invitar gente.',
+  'r5c.inviteFailedH': 'No se pudo crear la invitación',
+  'r5c.askFailed': 'No se les pudo avisar',
+  'r5c.clientNotSaved': 'No se pudo guardar el cliente',
+  'r5c.teamMate': 'Compañero',
+  'r5c.askReview': 'Pedir una revisión',
+  'r5c.needSomeone': 'Elige a alguien primero.',
+  'r5c.staysDraft': 'Sigue siendo un borrador. Nada va al cliente.',
+  'r5c.goesToClient': 'Sale para firma.',
+  'r5c.askedN': 'Le pediste a {n} que lo revise',
+  'r5c.sendTo': '¿Quién recibe esto?',
   'r5c.change': 'Cambiar',
   'r5c.whatKind': '¿Qué tipo de extra es este?',
   'r5c.untyped': 'Sin definir',
@@ -2836,6 +2986,7 @@ const ES: Record<string, string> = {
   'r5c.noSignerH': 'Nadie está en esta obra todavía.',
   'r5c.noSignerB': 'Agregue a la persona que autoriza antes de enviar.',
   'r5c.sendIt': 'Mandarlo',
+  'r5c.sending': 'Enviando…',
   'r5c.needSigner': 'Primero agregue quien firma',
   'erec.deliveryNote':
     'El canal y el estado de entrega quedan en el servidor y salen en el paquete de evidencia.',
@@ -2891,7 +3042,7 @@ const ES: Record<string, string> = {
   'draft.bannerReadyGaps': 'Listo para enviar. Otras {n} ayudarían a que le digan que sí — no son obligatorias.',
   'draft.notADraft': 'Este extra ya salió de este teléfono. No se puede volver a enviar desde aquí.',
   'draft.raw': 'Lo que se recogió en la obra',
-  'draft.rawNote': 'El dueño no ve esta parte.',
+  'draft.rawNote': 'El cliente no ve esta parte.',
   'draft.noNotes': 'Todavía no se ha escrito nada de este extra.',
   'draft.photosN': '{n} fotos',
   'draft.addMore': 'Agregar más',
@@ -2906,13 +3057,12 @@ const ES: Record<string, string> = {
   'draft.notesShow': 'Mostrar las grabaciones',
   'draft.notesHide': 'Ocultar las grabaciones',
   'draft.writeUp': 'Lo que entendió la app',
-  'draft.alsoOnJob': 'TAMBIÉN EN ESTE TRABAJO',
-  'draft.requestedBy': 'Cliente',
   'draft.capturedWith': 'Cómo se capturó',
   'draft.scope': 'Trabajo a realizar (lo que ve el cliente)',
-  'draft.scopeNote': 'Esto es exactamente lo que lee el dueño.',
+  'draft.scopeNote': 'Esto es exactamente lo que lee el cliente.',
   'draft.description': 'Descripción del trabajo',
   'draft.cost': 'Costo',
+  'draft.priceSection': 'Precio',
   'draft.billing': 'Cuándo se cobra',
   'draft.schedule': 'Efecto en el calendario',
   'draft.exclusions': 'Qué NO está incluido',
@@ -2956,11 +3106,21 @@ const ES: Record<string, string> = {
   'neg.openedTimes': 'Abierto {n} veces',
   'neg.openedTodayAt': 'hoy a las {time}',
   'neg.changeResend': 'Cambiar y reenviar',
-  'neg.callOwner': 'Llamar al dueño',
+  'neg.callOwner': 'Llamar al cliente',
   'neg.viewDetails': 'Ver detalles',
   'neg.synced': 'Sincronizado',
   'neg.tabInfo': 'Info',
   'neg.tabMessages': 'Mensajes',
+  'neg.attachOpen': 'Adjuntar',
+  'neg.dictate': 'Di tu mensaje',
+  'neg.dictStop': 'Dejar de escuchar',
+  'neg.dictDenied': 'El acceso al dictado está apagado. Actívalo en Ajustes para hablar en vez de escribir.',
+  'neg.dictUnsupported': 'Este teléfono no puede transcribir sin conexión. Escribe el mensaje, o graba una nota de voz en el registro.',
+  'neg.dictFailed': 'No se escuchó bien. Inténtalo otra vez, o escríbelo.',
+  'neg.attachClose': 'Cerrar adjuntos',
+  'neg.trayCamera': 'Cámara',
+  'neg.trayPhotos': 'Fotos',
+  'neg.trayContact': 'Contacto',
   'neg.tabActivity': 'Actividad',
   'neg.remindShort': 'Recordar',
   'neg.reviseShort': 'Revisar y reenviar',
@@ -3017,10 +3177,7 @@ const ES: Record<string, string> = {
   'elock.sigTitle': 'Firma y aprobación',
   'elock.sigBody': 'Ver la aprobación firmada y los detalles de la firma',
   'elock.viewConversation': 'Ver conversación',
-  'elock.rowExclusions': 'No incluido',
-  'elock.rowPhotos': 'Fotos',
   'elock.rowSchedule': 'Efecto en el calendario',
-  'elock.rowBilling': 'Cuándo se cobra',
   // Dicen lo que hace el DOCUMENTO, no lo que al contratista se le olvidó llenar.
   'elock.exclNone': 'Ninguno',
   'elock.photosNone': 'Esta aprobación no llevó fotos.',
@@ -3060,7 +3217,7 @@ const ES: Record<string, string> = {
   'det.tabRaw': 'Notas capturadas sin editar',
   'det.tabClient': 'Alcance del trabajo para el cliente',
   'det.sowPlaceholder': 'Escriba cuál es el trabajo, en palabras sencillas.',
-  'det.sowEmpty': 'Todavía no hay nada escrito. Esto es lo que lee el dueño — diga cuál es el trabajo.',
+  'det.sowEmpty': 'Todavía no hay nada escrito. Esto es lo que lee el cliente — diga cuál es el trabajo.',
   'det.charCount': '{n}/{of}',
   'det.charFull': 'hasta ahí llega',
   'det.useNotes': 'Usar las notas capturadas',
@@ -3124,7 +3281,7 @@ const ES: Record<string, string> = {
   'scope.emptyTitle': 'Aún no hay alcance de trabajo',
   'scope.emptyBody': 'Describa el trabajo como se lo explicaría a alguien en la obra. Esto es lo que el cliente lee y firma.',
   'scope.tooShort': 'Demasiado corto para enviar.',
-  'scope.capDraft': 'El propietario firma esto.',
+  'scope.capDraft': 'El cliente firma esto.',
   'scope.capSent': 'Exactamente como se envió.',
   'scope.capSigned': 'Exactamente como se firmó.',
   'client.title': '¿Para quién es?',
@@ -3144,9 +3301,10 @@ const ES: Record<string, string> = {
   'client.type.designer': 'Diseñador',
   'client.type.inspector': 'Inspector',
   'client.noContactPhone': 'Ese contacto no tiene teléfono.',
-  'client.noOwnerH': 'Aún no hay dueño seleccionado',
+  'client.noOwnerH': 'Aún no hay cliente seleccionado',
   'client.noOwnerB': 'Elija quién aprueba este extra antes de enviarlo.',
-  'client.chooseOwner': 'Elegir dueño',
+  'client.chooseOwner': 'Elegir cliente',
+  'client.unnamed': 'Cliente',
   'client.othersLater': 'Puede agregar a otros después.',
   'client.removePerson': 'Quitar a {name} de este trabajo',
   'client.removeTitle': '¿Quitar a {name} de este trabajo?',
@@ -3188,18 +3346,17 @@ const ES: Record<string, string> = {
   'rec.hide': 'Ocultar las grabaciones',
   'rec.whyRaw': 'Esto es lo que se dijo en la obra, palabra por palabra. Se guarda tal como se capturó y nunca se edita.',
   'sheet.frozen': 'Esto ya se envió, así que no se puede cambiar. Para cambiarlo use Cambiar y reenviar — eso le envía al cliente una versión nueva.',
-  'client.addContactSub': 'Un arquitecto, inspector o el GC — queda en este trabajo',
-  'det.modeNteSub': 'Por horas y materiales, con un tope que el dueño aprueba.',
+  'det.modeNteSub': 'Por horas y materiales, con un tope que el cliente aprueba.',
   'det.total': 'Precio total',
   'det.cap': 'Sin pasar de',
-  'det.capRequired': 'Por horas y materiales siempre necesita un tope. Sin tope, el dueño aprueba una cuenta abierta.',
+  'det.capRequired': 'Por horas y materiales siempre necesita un tope. Sin tope, el cliente aprueba una cuenta abierta.',
   'det.readback': 'Va a mandar {amount}',
-  'det.readbackNone': 'Todavía no hay monto. Escriba lo que le dijo al dueño.',
+  'det.readbackNone': 'Todavía no hay monto. Escriba lo que le dijo al cliente.',
   'det.capReadback': 'El tope que va a mandar es {amount}',
-  'det.schedUnsureSub': 'El dueño lo ve como “por confirmar”. Ésa es una respuesta honesta.',
+  'det.schedUnsureSub': 'El cliente lo ve como “por confirmar”. Ésa es una respuesta honesta.',
   'det.schedDaysLabel': 'Cuántos días',
   'det.exclusionsHint':
-    'Lo que NO entra en este precio. Si lo deja en blanco, el dueño puede pensar que sí entra.',
+    'Lo que NO entra en este precio. Si lo deja en blanco, el cliente puede pensar que sí entra.',
   'det.exclusionsPlaceholder': 'ej. pintura, accesorios, permisos',
   'det.exclusionsNone': 'No se anotó nada como excluido.',
 
@@ -3211,10 +3368,10 @@ const ES: Record<string, string> = {
   'det.noPlace': 'No se guardó ninguna ubicación',
   'det.someNoPlace': '{n} foto(s) aquí no tienen ubicación guardada — el teléfono no tenía señal de GPS.',
   'det.noPhotos': 'Todavía no hay fotos en este extra.',
-  'det.bestTitle': 'Mejor foto para el dueño',
-  'det.pickBest': 'Marcar la mejor foto para el dueño',
-  'det.pickBestWhy': 'La que escoja sale primero en la página que abre el dueño.',
-  'det.pickBestOn': 'Toque la foto que el dueño debe ver primero.',
+  'det.bestTitle': 'Mejor foto para el cliente',
+  'det.pickBest': 'Marcar la mejor foto para el cliente',
+  'det.pickBestWhy': 'La que escoja sale primero en la página que abre el cliente.',
+  'det.pickBestOn': 'Toque la foto que el cliente debe ver primero.',
   'det.pickBestCancel': 'Dejar de escoger',
   'det.clearBest': 'Sin mejor foto',
   'det.bestBadge': 'MEJOR',

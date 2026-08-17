@@ -6,7 +6,7 @@ import { PowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import * as Contacts from 'expo-contacts';
 import React from 'react';
-import { Alert, Dimensions, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Dimensions, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
 import { ago, projectCards, projectCoCounts, type ProjectCard } from './src/ui/home';
@@ -33,7 +33,7 @@ import { readCapture,
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
 import { photoCapture, pickFromLibrary, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { publishReplyMedia } from './src/replymediapublish';
-import { checkJobs, checkSendQuota, currentPlan, currentProductId, rememberEntitledPlan,
+import { checkJobs, checkMembers, checkSendQuota, currentPlan, currentProductId, rememberEntitledPlan,
          rememberEntitledProduct, type QuotaKind } from './src/quota';
 import { usageSummary, type UsageSummary } from './src/usage';
 import { UsageCard, UsageNudge } from './src/ui/usagecard';
@@ -51,6 +51,7 @@ import { Drawer } from './src/ui/drawer';
 import appJson from './app.json';
 import { ensurePairSchema, linkPair } from './src/pair';
 import { ensureAugmentSchema, noteAugment, appendAugmentDesc } from './src/augmentlog';
+import { reachable, remindTargets } from './src/remindrecipients';
 import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
@@ -74,14 +75,19 @@ import type { ExtraDetailField } from './src/ui/extranegotiation';
 import { sendReadiness, UNTITLED_SCOPE } from './src/sendreadiness';
 import { mergeTimeline, openCount, type MergedEvent } from './src/eventtimeline';
 import { SettingsScreen } from './src/ui/settingsscreen';
-import { billingTenantId, ensureBillingTenant, ensureOwnCompany, listMyCompanies,
-         myCompany, setActiveCompany } from './src/company';
+import { billingTenantId, createInvite, ensureBillingTenant, ensureOwnCompany,
+         listMembers, listMyCompanies, myCompany, setActiveCompany,
+         type Member } from './src/company';
 import { closeMyAccount } from './src/closeaccount';
 import { ensureLogoCached, pickLogo, removeCompanyLogo,
          saveCompanyLogo } from './src/companylogo';
 import { configureBilling, entitledPlanNow, entitledProductNow } from './src/billing';
 import { LABELS, labelHex } from './src/labels';
 import { companyFeed, type FeedItem } from './src/feed';
+import { ExtraCard } from './src/ui/extracard';
+import { setDraftClient } from './src/changeorder';
+import { requestExtraReview } from './src/reviewrequest';
+import { sendPlan, toggleMember } from './src/sendplan';
 import { registerPushToken } from './src/push';
 import { extraRecord, type ExtraRecord } from './src/record';
 import { DiscussionLog, ThreadScreen } from './src/ui/threadscreen';
@@ -104,7 +110,7 @@ import { fetchLatestProposalForCaptures, type Proposal } from './src/proposals';
 import { discardCapture, discardExtra, drainServerDiscards, drainDiscardedExtras, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
 import { startExtraFromCapture, titleExtraIfUntitled, retitleDraft, setDraftSummary,
          saveScopeOfWork, SCOPE_OF_WORK_MAX_CHARS,
-         SCOPE_MAX_CHARS, UNNAMED_CLIENT, isNamedClient } from './src/startextra';
+         SCOPE_MAX_CHARS, isNamedClient } from './src/startextra';
 import { cleanupTestData } from './src/testdatacleanup';
 import { logDiag } from './src/diaglog';
 // The send gate. hadar: "only then it can be sent to the owner for approval —
@@ -230,7 +236,7 @@ export const db = new PowerSyncDatabase({
 // Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
 // graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
 // wrong" until this could be read back off the device. One string, no data exposed.
-(globalThis as any).__EZ_BUILD__ = 'v149-annualtotal';
+(globalThis as any).__EZ_BUILD__ = 'v209-sentnotdelivered';
 // DEV-ONLY read handle. Stripped from any release build by the __DEV__ guard, which
 // Metro constant-folds to false — so this cannot ship. It exists because three separate
 // bugs today were diagnosed in seconds by asking the DEVICE what it holds, and guessed
@@ -543,7 +549,11 @@ export default function App() {
   const [homeExtras, setHomeExtras] = React.useState<Array<{
     id: string; scope: string; amount_cents: number | null; status: string;
     project_id: string; pname: string; who_directed: string; created_at_ms: number;
-    signed_by: string | null; questions: number; photo_relpath: string | null }>>([]);
+    signed_by: string | null; questions: number; photo_relpath: string | null;
+    // The change-order number is the shared card's kicker (2026-08-13). `nte_cents` and
+    // the schedule columns were added here in the same change and removed again when
+    // the pricing-type and schedule lines came off the card — they had no other reader.
+    co_number: number | null }>>([]);
   // The funnel ABOVE change orders — a walkthrough IS an extra in the making, and the
   // Extras tab must show the whole pipeline, not only the signed paperwork at the end.
   const [captured, setCaptured] = React.useState<Array<{
@@ -584,6 +594,22 @@ export default function App() {
     (globalThis as any).__showPaywall = () => { void openPaywall(); };
     // DEV ONLY — land on a job screen without tapping through Home. Takes a project id,
     // or defaults to the most recently touched job.
+    // DEV ONLY — open a record straight from the inspector, and optionally land on a
+    // stage's sheet. Reviewing the Messages sheet otherwise takes four taps through a
+    // job and a card, which is four taps I cannot make.
+    (globalThis as any).__openRecord = (coId?: string) => {
+      void (async () => {
+        const pick = coId ?? (await db.getAll<{ id: string }>(
+          `SELECT id FROM change_order WHERE status IN ('sent','opened','question')
+            ORDER BY created_at_ms DESC LIMIT 1`))[0]?.id;
+        if (pick) {
+          const row = (await db.getAll<{ project_id: string }>(
+            `SELECT project_id FROM change_order WHERE id = ?`, [pick]))[0];
+          if (row) setProjectId(row.project_id);
+          await openRecord(pick);
+        }
+      })();
+    };
     (globalThis as any).__openJob = (id?: string) => {
       void (async () => {
         const pick = id ?? (await db.getAll<{ id: string }>(
@@ -732,9 +758,19 @@ export default function App() {
     // Until then this is a request that EXISTS but has not reached the client, and
     // the screen must not claim "Sent / Waiting for a yes" (Codex P1, mandate #1).
     sentTo?: string | null; atMs?: number; shared?: boolean;
-    // The recipient's phone, when known — enables one-tap automatic SMS (Twilio via
-    // the send-sms Edge Function). Null falls back to the manual OS share.
-    phone?: string | null } | null>(null);
+    // The recipient's phone, when known — enables automatic SMS (Twilio via the
+    // send-sms Edge Function). Null falls back to the phone's own share sheet.
+    phone?: string | null;
+    /**
+     * Why delivery did NOT complete. Null/absent on a successful send.
+     *
+     * This is the honest half of "just send it" (hadar, 2026-08-14). The request and
+     * its frozen instrument exist either way — `markLocalSent` has already moved the
+     * row out of draft — so a failure here is not "nothing happened", it is "the
+     * client has not been told". The screen has to say that difference out loud, or
+     * the contractor walks away believing a link went out that did not.
+     */
+    failWhy?: string | null } | null>(null);
   // First send is the natural moment to ask for notifications ("we'll tell you when
   // they respond") — onboarding never asked (audit gap 1c). iOS shows the OS dialog
   // once ever; after that this no-ops. If granted, mint the push token immediately.
@@ -1080,7 +1116,7 @@ React.useEffect(() => {
 const remindExtra = async (
   c: { id: string; status: string; scope: string; amount: string },
   inDiscussion: boolean):
-  Promise<{ ok: boolean; why?: string }> => {
+  Promise<{ ok: boolean; why?: string; sent?: number; of?: number }> => {
   const link = await liveLinkFor(db, c.id);
   if (!link) return { ok: false, why: T('r8.noLink') };
   const verdict = canRemind(c.status,
@@ -1091,14 +1127,69 @@ const remindExtra = async (
     contractorName: prof?.company || prof?.name || 'Your contractor',
     scope: c.scope, amount: c.amount, url: link.url,
   });
-  const sh = await shareLink(link.url, text);
-  // Counted only AFTER the sheet returns. A contractor who opens it and backs out
-  // has not reminded anyone, and burning his one-a-day on a cancelled share would
-  // be the app lying about what it did.
-  if (!sh.ok) return { ok: false, why: sh.reason ?? 'could not share' };
+
+  /**
+   * A REMINDER IS A RESEND TO THE SAME PEOPLE (hadar, 2026-08-14: "a reminder is the
+   * act of resending the same CO to the same people again, and send an SMS like the
+   * first time to the clients and other people with a message and a link").
+   *
+   * It used to open the phone's share sheet and hand him a blank envelope — on a
+   * screen that had already named the right recipient two inches above the button
+   * ("Waiting on Hadar"). The app knew who and asked him anyway, which is three
+   * chances to nudge the wrong person.
+   *
+   * SAME LINK, NEVER A NEW TOKEN. `liveLinkFor` above, and nothing here mints
+   * anything — remind.ts's header owns why: a new token retires the link already
+   * sitting in the client's messages, so the nudge would break the thing it is
+   * nudging about.
+   *
+   * The share sheet SURVIVES as the fallback, for the two cases where automatic text
+   * cannot happen: no number on file, or Twilio not configured/refusing. Mandate #7 —
+   * the link must be able to reach the client with nothing configured.
+   */
+  const targets = await remindTargets(db, c.id);
+  const withPhone = reachable(targets);
+  let sent = 0;
+  for (const t of withPhone) {
+    const r = await sendSms(connector.client, t.phone as string, text);
+    if (r.ok) sent += 1;
+    else console.log('[remind] SMS to %s failed: %s', t.name, r.reason);
+  }
+
+  /**
+   * WHY THE SHARE SHEET APPEARED, IN WORDS (hadar, 2026-08-15: "when I click resend it
+   * still opens the share bottom popup for me to select contact members").
+   *
+   * It was doing exactly what it was built to do — and saying nothing, so it read as
+   * the feature not working. Three different things land here and they have three
+   * different fixes, only one of which is his:
+   *   · nobody recorded  — this extra has no approver row to text.
+   *   · no number        — we know who, not how. He can add it.
+   *   · texting is off   — `send-sms` is not deployed and Twilio is not configured
+   *                        (verified against the project 2026-08-15: neither exists).
+   *                        Nothing he can do on the phone, and telling him to "check
+   *                        the number" would send him hunting for a fault that is ours.
+   * The sheet still opens, because mandate #7 says the link must be able to reach the
+   * client with nothing configured. It just no longer arrives unexplained.
+   */
+  const fellBackWhy = targets.length === 0 ? 'r8.noRecipient'
+    : withPhone.length === 0 ? 'r8.noNumber'
+    : 'r8.smsOff';
+
+  if (sent === 0) {
+    const sh = await shareLink(link.url, text);
+    // Counted only AFTER the sheet returns. A contractor who opens it and backs out
+    // has not reminded anyone, and burning his one-a-day on a cancelled share would
+    // be the app lying about what it did.
+    if (!sh.ok) return { ok: false, why: sh.reason ?? T('r8.notDelivered') };
+  }
+
   await noteReminded(db, c.id);
   await refresh();
-  return { ok: true };
+  // The COUNT is reported, not assumed. "Reminded Sarah" and "reminded 0 of 2" must
+  // not read the same on a screen where the difference is whether anyone was told.
+  return { ok: true, sent, of: targets.length,
+           why: sent === 0 ? T(fellBackWhy as any) : undefined };
 };
 
 /** R5b/R7 Revise & resend — ONE handoff to the priced read-back composer, shared
@@ -1480,11 +1571,153 @@ const confirmPriced = async (): Promise<string | null> => {
   return r.id;
 };
 
+// DEV ONLY — open the send sheet for a change order id, without the four taps that
+// normally lead here.
+if (__DEV__) {
+  // Mirrors the REAL entry, including `setReturnRecordId` + leaving the record — a hook
+  // that skipped those could not have caught the bug it is here to check.
+  (globalThis as any).__sendPrep = (coId: string) => {
+    void (async () => {
+      const rows = await db.getAll<LedgerRow>(
+        `SELECT * FROM change_order WHERE id = ?`, [coId]);
+      if (!rows[0]) return;
+      setReturnRecordId(coId);
+      setNav('project');
+      closeRecord();
+      await openSendPrep(rows[0]);
+    })();
+  };
+  (globalThis as any).__closeSend = () => closeSendPrep();
+  (globalThis as any).__invite = () => { void inviteFromSend(); };
+  // Calls the SAME helper both taps call — a hook that re-implemented the write would
+  // prove nothing about the write.
+  (globalThis as any).__pickClient =
+    (id: string, name: string) => { void chooseClient({ id, name }); };
+}
+/**
+ * Invite a teammate from the send sheet.
+ *
+ * The SAME act as the Settings row — `createInvite`, the free-tier member cap, the
+ * share sheet — not a second implementation of it. The cap is checked BEFORE the RPC
+ * because an invite minted past the limit is a link that fails when the person taps
+ * it, which is a worse way to learn about a plan than being told now.
+ */
+const inviteFromSend = async () => {
+  try {
+    /**
+     * THE TENANT ID, NOT THE SYNCED ROW (hadar 2026-08-14: "invite someone doesn't
+     * work").
+     *
+     * It called `myCompany`, which reads the local `company` table — and on this device
+     * that table is EMPTY, because the deployed PowerSync rules do not include it. So
+     * every tap took the "set up your company first" branch on an account that has had a
+     * company since July. Same gap that hid the paid plan and blocked the team list; the
+     * same workaround applies — `billingTenantId` returns the id the SERVER handed us,
+     * remembered in device_settings, and `create_company_invite` re-checks ownership
+     * server-side anyway, so nothing is trusted that should not be.
+     */
+    const co = await myCompany(db, OWNER);
+    const companyId = co?.id ?? (await billingTenantId(db, OWNER));
+    if (!companyId) {
+      setAck({ kind: 'no', title: T('r5c.inviteFailedH'), detail: T('r5c.inviteNoCompany') });
+      return;
+    }
+    const q = await checkMembers(db, companyId);
+    if (!q.ok) { setQuota({ kind: 'members', limit: q.limit }); return; }
+    const r = await createInvite(connector.client, companyId, 'crew', CONFIRM_BASE);
+    if (!r.ok) {
+      // ROUTED TO `ack`, NOT `filed`. `filed` is write-only — nothing in this file
+      // renders it — so the previous version of this failed in total silence, which is
+      // exactly what "doesn't work" looks like from the outside.
+      setAck({ kind: 'no', title: T('r5c.inviteFailedH'), detail: r.reason });
+      return;
+    }
+    const msg = r.url
+      ? T({ k: 'set.inviteMsg', p: { company: co?.name ?? '' } } as any) + '\n\n' + r.url
+      : T({ k: 'set.inviteMsgCode', p: { company: co?.name ?? '', code: r.token } } as any);
+    try { await Share.share({ message: msg }); } catch { /* dismissed */ }
+  } catch (e: any) {
+    setAck({ kind: 'no', title: T('r5c.inviteFailedH'), detail: String(e?.message ?? e) });
+  }
+};
+
+/**
+ * CLOSING THE SEND SHEET GOES BACK TO THE EXTRA, not to the job (hadar 2026-08-14:
+ * "when I close the popup it should get me back to the change order").
+ *
+ * Opening this sheet from a record CLOSES the record first — the sheet is mounted in
+ * the job screen's tree, so getting to it means navigating there. Invisible while the
+ * sheet covers the screen, and then dismissing it revealed a job screen the person
+ * never asked for. `returnRecordId` already existed for this and was only honoured
+ * AFTER a successful send; backing out is the commoner path.
+ */
+/**
+ * CHOOSING THE CLIENT WRITES IT TO THE EXTRA (hadar 2026-08-14).
+ *
+ * Both places that pick one go through here, so the sheet's state and the record can
+ * never disagree. The local state is set FIRST and unconditionally: the tap must feel
+ * instant and must survive with no signal (mandate #7), and `setDraftClient` is a local
+ * SQLite write whose own outbox carries it up later.
+ *
+ * A refusal is SHOWN. The one that can really happen is "not a draft anymore" — the
+ * extra was sent from another device while this sheet was open — and silently keeping a
+ * selection the record rejected is how the app and the document drift apart.
+ */
+const chooseClient = async (m: { id: string; name: string }) => {
+  setSendPrep((p) => p && { ...p, chosenId: m.id, picking: false });
+  const coId = sendPrep?.co.id;
+  if (!coId) return;
+  const r = await setDraftClient(db, coId, m.name);
+  if (!r.ok) {
+    setAck({ kind: 'no', title: T('r5c.clientNotSaved'), detail: r.reason });
+  } else {
+    await refresh();
+  }
+};
+
+const closeSendPrep = () => {
+  setSendPrep(null);
+  const rid = returnRecordId;
+  if (rid) { setReturnRecordId(null); void openRecord(rid); }
+};
+
 const openSendPrep = async (c: LedgerRow) => {
   const t = (c.extra_type ?? null) as ExtraType | null;
   const { suggestion, roster } = await suggestFor(db, projectId, t);
-  setSendPrep({ co: c, type: t, suggestion, roster,
-                chosenId: null, picking: false, adding: null, busy: false });
+  // The group is read here, not at render: an empty list and a list that has not
+  // loaded yet look identical on screen, and "nobody to ask" is a fact worth being
+  // sure of before it is stated.
+  let members: Member[] = [];
+  try {
+    const co = await myCompany(db, OWNER);
+    if (co?.id) members = (await listMembers(db, co.id, OWNER)).filter((m) => !m.isMe);
+  } catch { /* no company row on this device — the section simply says so */ }
+  /**
+   * A CLIENT ALREADY ON THE RECORD IS A CHOICE, NOT A GUESS (hadar 2026-08-14: "I have
+   * a draft CO and there is a client assigned, but when I click send it says choose
+   * client").
+   *
+   * A gap I opened. Stopping the ROUTER'S SUGGESTION from auto-selecting was right —
+   * an inference must not arrive pre-confirmed. But `chosenId` was then hardcoded to
+   * null, which threw away the one thing that genuinely IS a selection: the client
+   * saved on this extra, which somebody picked and `setDraftClient` wrote to
+   * `who_directed`. So the sheet asked again for an answer it already had.
+   *
+   * The two are told apart by their SOURCE, not by how they look: `who_directed` is a
+   * decision on the record; `suggestion` is the router reading the job. Only the first
+   * seeds the sheet.
+   *
+   * Matched on the normalised name because `who_directed` stores a NAME, not a roster
+   * id — same key rule as `saveClientApprover`, so "Sarah  Miller" and "sarah miller"
+   * are the same person and a saved client is not lost to a stray space.
+   */
+  const key = (v: string) => v.trim().toLowerCase().replace(/\s+/g, ' ');
+  const saved = isNamedClient(c.who_directed)
+    ? roster.find((r) => key(r.name) === key(c.who_directed)) ?? null
+    : null;
+
+  setSendPrep({ co: c, type: t, suggestion, roster, members, memberIds: [],
+                chosenId: saved?.id ?? null, picking: false, adding: null, busy: false });
 };
 
 // Fill the add-someone form from the device's contacts. The native picker is
@@ -1646,6 +1879,49 @@ const changeType = async (t: ExtraType | null) => {
   setSendPrep((p) => p && { ...p, type: t, suggestion, roster, chosenId: null });
 };
 
+/**
+ * HAND THE LINK OVER. One tap sends; the screen after it is a receipt, not a step.
+ *
+ * hadar, 2026-08-14: "when I click to send it waits, thinks for 5 seconds and then
+ * brings this page up — no need for it, it should just send. The next step is a popup
+ * with a confirmation of sent or failed."
+ *
+ * WHY THE INTERSTITIAL WAS WRONG, not merely slow. It asked the contractor to confirm
+ * an act he had already confirmed: he chose the client in the send sheet and tapped
+ * Send on a screen that told him it was going out for signature. That IS the mandate
+ * #2 confirmation — a human looked at the price and the recipient before anything
+ * committed. A second "one more step" bought no additional consent; what it bought
+ * was a state nobody wants, where the instrument exists, the row has left draft, and
+ * the client has heard nothing — which the old screen then had to explain with a
+ * "Not sent yet" chip under the word "Sent".
+ *
+ * TWO ROUTES, IN THIS ORDER, because the link must be able to reach the client with
+ * nothing configured (mandate #7):
+ *   1. Automatic SMS, when we hold a number. Arrives from the contractor's own
+ *      Twilio number without him leaving the app.
+ *   2. The phone's own share sheet — always available, works when Twilio is not
+ *      deployed or not configured, and is the ONLY route when we have no number.
+ * A failed SMS falls through to (2) rather than stopping: the messaging service being
+ * down must not be the reason a client never sees a change order.
+ */
+const deliverLink = async (a: { url: string; shown: string; phone?: string | null }):
+  Promise<{ ok: true } | { ok: false; why: string }> => {
+  if (a.phone) {
+    const r = await sendSms(connector.client, a.phone, `${a.shown}\n\n${a.url}`);
+    if (r.ok) return { ok: true };
+    // Logged, not shown. Twilio being unconfigured is a fact about the deployment,
+    // not about this send — and it is not what stopped the link going out, because
+    // the share sheet below is still open in front of him.
+    console.log('[send] automatic SMS unavailable: %s', r.reason);
+  }
+  const s = await shareLink(a.url, a.shown);
+  if (s.ok) return { ok: true };
+  // `shareLink` returns a reason only when it BROKE. No reason means the share sheet
+  // came up and was dismissed — the contractor chose not to send, which is not an
+  // error and must not be reported to him as one.
+  return { ok: false, why: s.reason ?? T('sent.failNotHanded') };
+};
+
 const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // R3: an EWA is a DIFFERENT INSTRUMENT and takes a different sender — no price, no
   // running total, kind='ewa'. Branching inside sendForConfirmation would have put a
@@ -1674,15 +1950,25 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     if (!re.ok) { setUi({ k: 'refused', why: T(re.reason as any) }); return; }
     await markLocalSent(db, c.id);
     if (to) await markApproverUsed(db, to.id);
+    // THE SHEET STAYS UP UNTIL THE HAND-OFF IS DONE. Two reasons, and the second is
+    // the one that bites: it keeps "Sending…" on screen instead of dropping the
+    // contractor onto the record for the seconds this takes; and closing it first
+    // means asking iOS to present the share sheet while a modal dismissal is still
+    // animating, which it can simply refuse.
+    const d0 = await deliverLink({ url: re.url, shown: re.shownContent, phone: to?.phone ?? null });
     setSendPrep(null);
-    void signalSaved();  // felt confirmation the commitment was sent (gap #7)
+    // The chirp fires on DELIVERY, not on minting. It is the felt confirmation that
+    // the commitment went out (gap #7); playing it over a failed hand-off would make
+    // the one non-visual signal this app gives say the opposite of the screen.
+    if (d0.ok) void signalSaved();
     setSentLink({ url: re.url, shown: re.shownContent,
       // No amount for an EWA: it is stored with amount_cents = 0, so `c.amount` is
       // "$0.00" — and the EWA contract states NO price. Showing $0.00 misrepresents
       // it (Codex P2). Its terms (rate/cap) live in the frozen instrument itself.
       scope: c.scope, amount: undefined,
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
-      sentTo: to?.name ?? c.who_directed ?? null, atMs: Date.now(), phone: to?.phone ?? null });
+      sentTo: to?.name ?? c.who_directed ?? null, atMs: Date.now(), phone: to?.phone ?? null,
+      shared: d0.ok, failWhy: d0.ok ? null : d0.why });
     await refresh();
     return;
   }
@@ -1786,12 +2072,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       await noteApprover(db, { changeOrderId: c.id, approverId: to.id,
                                name: to.name, role: to.role, atMs: sentAtMs });
     }
+    // Closed AFTER the hand-off, not before — see the EWA path above for why.
+    const d = await deliverLink({ url: r.url, shown: r.shownContent, phone: to?.phone ?? null });
     setSendPrep(null);
-    void signalSaved();  // felt confirmation the commitment was sent (gap #7)
+    if (d.ok) void signalSaved();  // felt confirmation the commitment WENT OUT (gap #7)
     setSentLink({ url: r.url, shown: r.shownContent,
       scope: c.scope, amount: c.amount,
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
-      sentTo: to?.name ?? c.who_directed ?? null, atMs: sentAtMs, phone: to?.phone ?? null });
+      sentTo: to?.name ?? c.who_directed ?? null, atMs: sentAtMs, phone: to?.phone ?? null,
+      shared: d.ok, failWhy: d.ok ? null : d.why });
     await refresh();
   } else setUi({ k: 'refused', why: r.reason });
 };
@@ -1811,6 +2100,16 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     chosenId: string | null;     // null = take the suggestion
     picking: boolean;            // showing the full roster to override
     adding: null | { name: string; role: ApproverRole; phone: string };
+    /**
+     * MY GROUP — the people who can be asked to REVIEW this (hadar 2026-08-14).
+     * Separate from `roster` on purpose, because they are separate things and the
+     * sheet must not blur them: `roster` is the client side (who signs, one of them),
+     * `members` is my company (who gets a notification, any number of them).
+     * Empty is normal and not an error — a solo operator has no group, and on a device
+     * whose `company_member` has not synced this is also empty.
+     */
+    members: Member[];
+    memberIds: string[];
     busy: boolean;
   } | null>(null);
 
@@ -2493,7 +2792,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         setHomeExtras(await db.getAll(
           `SELECT co.id, co.scope, co.amount_cents, co.status, co.project_id,
                   COALESCE(p.name, '') AS pname, co.who_directed, co.created_at_ms,
-                  co.signed_by,
+                  co.signed_by, co.co_number,
                   ${CO_PHOTO_SUBQUERY} AS photo_relpath,
                   (SELECT COUNT(*) FROM co_question q WHERE q.change_order_id = co.id) AS questions
              FROM change_order co LEFT JOIN project p ON p.id = co.project_id
@@ -5307,6 +5606,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
   /** Open one of the extra's detail subscreens, seeding the editor buffers from the
    *  row that is on screen. Nothing is written until Save; backing out discards. */
+  // DEV ONLY — open the history sheet over whatever record is showing. Assigned here
+  // rather than in the mount effect above: `openDetail` is declared in this scope and
+  // the effect's closure caught it before it existed.
+  if (__DEV__) (globalThis as any).__history = () => openDetail('history');
   const openDetail = (field: ExtraDetailField | 'history') => {
     const c = recordLc?.co;
     if (!c) return;
@@ -5536,20 +5839,6 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     const back = () => setDetail(null);
     const d = detail;
 
-    if (d.field === 'history') {
-      return (
-        <FullHistory
-          status={record.status}
-          events={recordTimeline}
-          formatAt={createdLabel}
-          approval={approval}
-          total={record.priced ? record.amount : null}
-          scheduleLine={scheduleSentence(co.schedule_effect, co.schedule_days)}
-          onBack={back}
-        />
-      );
-    }
-
     if (d.field === 'photos') {
       // Appending evidence is legal in Stages 1 and 2 (the augment log is
       // append-only and never touches the frozen instrument) and forbidden once the
@@ -5690,7 +5979,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         <>
         {ackEl}
         <StepReview
-          toName={owner?.name ?? recordLc?.view.requestedBy ?? UNNAMED_CLIENT}
+          // The stored sentinel is the string 'Owner'; what a person READS is
+          // translated. See `client.unnamed` for why the two must stay apart.
+          toName={owner?.name ?? recordLc?.view.requestedBy ?? T('client.unnamed')}
           toAddr={owner?.phone ?? null}
           jobName={jobName}
           scope={record.title}
@@ -5723,7 +6014,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     }
     return (
       <StepDone
-        toName={owner?.name ?? UNNAMED_CLIENT}
+        toName={owner?.name ?? T('client.unnamed')}
         onView={() => { setGStep(null); setGuidedOn(false); void markFirstExtraSeen(db); setNav('home'); }}
         onAnother={() => {
           setGStep(null); setGuidedOn(false); void markFirstExtraSeen(db);
@@ -5866,12 +6157,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         undelivered={recordUndelivered}
         onBack={closeRecord}
         onCapture={() => augmentExtra(record.id)}
-        // KNOWN LIMITATION, stated rather than hidden: there is no voice-ONLY capture
-        // mode. `augmentExtra` opens the fused REQ-CAP-FUSED screen, which does record
-        // voice — so this is the right destination, not a stand-in. What it is not is a
-        // shortcut straight to the recorder. The button previously carried the camera's
-        // accessibility label, so a screen reader announced "add photo" on the mic.
-        onAddVoice={() => augmentExtra(record.id)}
+        // The composer's own mic used to point here too. It does not any more: it runs
+        // live dictation into the reply field (livedictation.ts), which is what a
+        // microphone in a message box should do. `augmentExtra` — the fused capture
+        // screen that adds voice or photos to the RECORD — keeps this door and the two
+        // on the locked screen, so nothing was removed, only un-crossed.
         delivery={recordDelivery}
         // GRANTED FROM THE SCREEN IT IS BLOCKING (hadar 2026-08-06: the user has to be
         // able to solve this). The cellular default is OFF for a good reason — a 200 MB
@@ -6014,12 +6304,64 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           if (!r.ok) throw new Error(r.reason);
           return r.captureId;
         }}
-        // R8: remind. The verdict above decides whether the button is live; this is
-        // the act, and `remindExtra` re-checks and returns its own refusal (no live
-        // link, rate limit, a cancelled share sheet) for the screen to print.
-        onRemind={() => remindExtra(
-          { id: record.id, status: record.status, scope: record.title, amount: record.amount },
-          (questions[record.id] ?? 0) > 0)}
+        /**
+         * THE ROLL, for a message. The same commit path as the camera above — a picked
+         * photo is stamped and committed like any other capture (mandate #9) before its
+         * id ever reaches the composer, so the composer never holds undurable bytes.
+         *
+         * `fromLibrary` is what the stamp carries honestly: this photo was taken at a
+         * time and place this app cannot vouch for, and the record says so rather than
+         * implying the contractor shot it on site just now.
+         */
+        onPickPhoto={async () => {
+          const picked = await pickFromLibrary();
+          if (!picked.ok) return null;
+          const stamp = await stampNow();
+          const r = await performCapture(db, {
+            ownerId: OWNER, projectId: recordLc?.co?.project_id ?? projectId,
+            input: picked.input, stamp,
+          });
+          if (!r.ok) throw new Error(r.reason);
+          return r.captureId;
+        }}
+        /**
+         * R8: remind. The verdict above decides whether the button is live; this is
+         * the act, and `remindExtra` re-checks and returns its own refusal (no live
+         * link, rate limit, a cancelled share sheet).
+         *
+         * THE OUTCOME GOES TO THE ACK POPUP (hadar, 2026-08-15: "after a reminder it
+         * needs to have some sort of bottom popup notifying the user if it succeeded
+         * or not — right now nothing is showing up").
+         *
+         * It used to go to a caption inside the waiting card, which is invisible: the
+         * tap that texts a client and the tap that does nothing at all looked
+         * identical on a screen he is reading at arm's length in daylight. A
+         * reminder is a message to another human — the app does not get to be quiet
+         * about whether it went.
+         *
+         * A SUCCESS AUTO-DISMISSES; A REFUSAL WAITS. Same rule as every other ack
+         * here: news he expected costs no tap (mandate #3), and a reason that
+         * vanishes on its own is a reason nobody read.
+         */
+        onRemind={async () => {
+          const r = await remindExtra(
+            { id: record.id, status: record.status, scope: record.title, amount: record.amount },
+            (questions[record.id] ?? 0) > 0);
+          if (!r.ok) {
+            setAck({ kind: 'no', title: T('r8.ackFailed'), detail: r.why ?? null });
+          } else if ((r.sent ?? 0) > 0) {
+            setAck({ kind: 'ok',
+              title: (r.sent ?? 0) === 1
+                ? T('r8.ackTexted')
+                : T({ k: 'r8.ackTextedN', p: { n: String(r.sent) } } as any),
+              detail: T('r8.ackSameLink') });
+          } else {
+            // It went out, but by his own hand through the share sheet — and the
+            // reason the automatic path could not be used is the useful half.
+            setAck({ kind: 'ok', title: T('r8.ackByHand'), detail: r.why ?? null });
+          }
+          return r;
+        }}
         // REQ-LC22. `threadState.canRevise` (which is `canSupersede`) decides inside
         // the screen; the old `canSupersede(record.status) && row` here was that rule
         // stated twice, and the `row` half of it silently removed Revise from every
@@ -6030,6 +6372,23 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           closeRecord(); startRevision(c);
         }}
         onOpenDetail={(field) => openDetail(field)}
+        /**
+         * PICKING A PRICING MODE opens the cost editor already switched to it, rather
+         * than writing anything here. `authorize` seeds the editor with `fixed` and an
+         * EMPTY amount: that state IS the authorize case — an extra with no figure is
+         * only a RECOMMENDED gap, never a blocker, so it sends as "the owner authorises
+         * the work and the price follows". Clearing a price is a money change and gets
+         * the same editor, the same read-back and the same Save as setting one.
+         */
+        onPickPriceMode={(m) => {
+          openDetail('cost');
+          setDetail((d) => (d && d.field === 'cost'
+            ? { ...d,
+                priceMode: m === 'nte' ? 'nte' : 'fixed',
+                ...(m === 'authorize' ? { amountText: '', nteText: '' } : {}),
+                ...(m === 'fixed' ? { nteText: '' } : {}) }
+            : d));
+        }}
         // Rename from the header, in place. `retitleDraft`'s own WHERE status='draft'
         // is the guard (REQ-LC14/LC8) — a refused write is REPORTED, never swallowed.
         // The HEADER rename writes the title. Separate from saveScope since 391;
@@ -6102,6 +6461,25 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         } : undefined}
       />
       {discardSheet}
+      {/* THE HISTORY, AS A SHEET OVER THE RECORD (2026-08-14). It used to be returned
+          from the detail router as a whole SCREEN, which meant looking up what happened
+          to an extra replaced the extra. A sheet cannot be returned that way — a modal
+          rendered on its own dims a screen that is no longer mounted — so it moved here,
+          beside the record it is about. Every caller (the Activity sheet, the ⋯
+          overflow, the version row, the sealed record) is unchanged: they all just say
+          "show the history". */}
+      {detail?.field === 'history' && (
+        <FullHistory
+          status={record.status}
+          events={recordTimeline}
+          formatAt={createdLabel}
+          approval={approval}
+          total={record.priced ? record.amount : null}
+          scheduleLine={scheduleSentence(recordLc?.co?.schedule_effect ?? null,
+                                         recordLc?.co?.schedule_days ?? null)}
+          onBack={() => setDetail(null)}
+        />
+      )}
       {/* The signed document. Mounted AFTER the screen: a Modal declared before its
           sibling content does not present on iOS (found the hard way, 2026-07-31). */}
       {approvalDoc && (
@@ -6425,6 +6803,38 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     draft:    { border: '#c3bab2', text: '#6b625b' },
     declined: { border: '#e0a59c', text: '#8B5148' },
   };
+  /**
+   * THE CHIP EVERY EXTRA ROW WEARS — one source for Home, the company feed AND the
+   * Job screen (2026-08-13).
+   *
+   * There were two palettes for the same five states: the Job screen carried its own
+   * blue/amber/green outline map inline, and Home and the feed used `chipStyle` above.
+   * The same extra therefore wore a different colour depending on which screen you
+   * opened it from, which is the opposite of what a status chip is for.
+   *
+   * This is the Job screen's palette — outlined on white, with `approved` the one that
+   * takes a tint — extended to the two states it never had to draw: `draft` (Home shows
+   * unsent work; a job screen only lists sent extras) and `declined`.
+   */
+  const extraChip = (st: string) => {
+    const map: Record<string, { color: string; bg: string; line: string }> = {
+      waiting:  { color: '#2E5AA8', bg: '#FFFFFF', line: '#B9CBE8' },
+      needs:    { color: '#C2610C', bg: '#FFFFFF', line: '#F0C89B' },
+      approved: { color: '#3A5230', bg: '#EDF2E9', line: '#C3D3BA' },
+      draft:    { color: '#6b625b', bg: '#FFFFFF', line: '#D8D2CA' },
+      declined: { color: '#8B5148', bg: '#FFFFFF', line: '#E0A59C' },
+    };
+    const c = map[st] ?? map.draft;
+    // "Not sent" rather than "Created" for a draft: what a draft needs to say on a row
+    // is where it stands, and the thing that has not happened is the send.
+    const label = st === 'draft' ? T('home.notSent')
+      : st === 'waiting' ? T('job.chipWaiting')
+      : st === 'needs' ? T('job.chipNeeds')
+      : st === 'approved' ? T('job.chipApproved')
+      : (stateColor[st]?.label ?? st);
+    return { ...c, label };
+  };
+
   /** The chip as both screens draw it: outlined, sentence case, one label per state. */
   const stateChip = (st: string) => (
     <View style={[s.exChip, { borderColor: chipStyle[st].border }]}>
@@ -6485,35 +6895,43 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           return days.map((day) => (
             <React.Fragment key={day.key}>
               <Text style={s.feedDayHead}>{day.label}</Text>
-              <View style={s.exGroup}>
-                {day.items.map((f, i) => {
+              <View style={s.exList}>
+                {day.items.map((f) => {
                   const st = stateKey(f.status, f.openQuestions);
-                  // WHERE · WHO RAISED IT · WHEN, one line, joined rather than nested so a
-                  // missing piece shortens the line instead of dropping it. The author is
-                  // omitted when unknown (feed.ts) — never rendered as "Unknown".
-                  const meta = [
-                    f.projectName,
-                    f.createdBy ? T({ k: 'feed.raisedBy', p: { name: f.createdBy } } as any) : null,
-                    f.createdAtMs > 0 ? shortDate(f.createdAtMs, nowMs) : null,
-                  ].filter(Boolean).join(' · ');
                   return (
-                    <Pressable key={f.id} style={[s.exRow, i > 0 && s.exRowRule]}
+                    <ExtraCard key={f.id} chip={extraChip(st)}
+                      kicker={f.coNumber != null
+                        ? T({ k: 'job.coNo', p: { n: f.coNumber } })
+                        : T('job.coNoNumber')}
+                      title={f.scope}
+                      // THE FIRST PHOTO, when this device holds it (hadar, 2026-08-14).
+                      // `companyFeed` joins it with the same `CO_PHOTO_SUBQUERY` the job
+                      // and Home lists use, so one extra shows one cover everywhere.
+                      // Voice-only extras — and other members' rows, whose media is not
+                      // on this phone — fall back to the microphone placeholder rather
+                      // than to a broken image.
+                      photoUri={f.photoRelpath ? FS.documentDirectory + f.photoRelpath : null}
+                      // WHO RAISED IT gets the card's PERSON slot — a glyph and ink
+                      // under the title (hadar, 2026-08-14) — not a third grey line
+                      // between the job name and the date. On a company-wide stream
+                      // "whose extra is this" is the question an owner opens the screen
+                      // to ask, and it was the least visible thing on the row.
+                      // Omitted when unknown (feed.ts) — never rendered as "Unknown":
+                      // inventing an author on a record that will carry a signature is
+                      // the one thing this line must not do.
+                      person={f.createdBy
+                        ? { label: T('feed.raisedByLab'), name: f.createdBy } : null}
+                      // The WHEN pairs with the WHO on the closing line, right-aligned.
+                      personRight={f.createdAtMs > 0 ? shortDate(f.createdAtMs, nowMs) : null}
+                      meta={[f.projectName]}
+                      conversation={f.openQuestions > 0 ? T('job.inConversation') : null}
+                      amount={f.amountCents != null ? `+${moneyWhole(f.amountCents)}` : null}
                       onPress={() => {
                         returnToFeedRef.current = true;
                         setShowFeed(false);
                         setProjectId(f.projectId);
                         void openRecord(f.id);
-                      }}>
-                      <View style={{ flex: 1 }}>
-                        {/* Two lines, as on Home: a real scope runs past one phone line,
-                            and the clipped words are the ones telling two extras apart. */}
-                        <Text style={s.exName} numberOfLines={2}>{f.scope}</Text>
-                        {!!meta && <Text style={s.exSub} numberOfLines={1}>{meta}</Text>}
-                        {f.amountCents != null && <Text style={s.exPrice}>{money(f.amountCents)}</Text>}
-                      </View>
-                      {stateChip(st)}
-                      <Text style={s.exChev}>›</Text>
-                    </Pressable>
+                      }} />
                   );
                 })}
               </View>
@@ -6600,40 +7018,37 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // matters is the record itself, one tap away — which is what the chevron says.
   // `i` is the index map() already passes; it only decides the hairline, so the
   // first row of a group does not draw a rule against the container's own edge.
+  /**
+   * ONE HOME ROW — the SAME card the Job screen and the company feed draw
+   * (`ExtraCard`), not a second shape for the same object.
+   *
+   * It used to be its own thing: no thumbnail, no change-order number, a two-line
+   * title, and the price as a small grey line under the meta instead of the
+   * second-loudest thing on the row. Reading the same extra here and inside its job
+   * showed two different objects — and every fix made to the job card (the truncating
+   * number, the clock in the date, the price sitting a line too low) silently never
+   * reached this one.
+   *
+   * WHAT CHANGES BETWEEN THE SCREENS IS THE META, and only the meta: Home spans jobs,
+   * so the job NAME is the first thing that must be said. Inside a job it never is.
+   */
   const extraRow = (e: Extra, i: number) => {
     const st = stateOf(e);
-    const cp = chipStyle[st];
+    const row = (
+      <ExtraCard key={e.id} chip={extraChip(st)}
+        kicker={e.co_number != null
+          ? T({ k: 'job.coNo', p: { n: e.co_number } })
+          : T('job.coNoNumber')}
+        title={e.scope || T('home.draftsSec')}
+        photoUri={e.photo_relpath ? FS.documentDirectory + e.photo_relpath : null}
+        meta={[e.pname || null, shortDate(e.created_at_ms)]}
+        conversation={(e.questions ?? 0) > 0 ? T('job.inConversation') : null}
+        amount={e.amount_cents != null ? `+${moneyWhole(e.amount_cents)}` : null}
+        onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }} />
+    );
     // Only a DRAFT is the owner's alone to destroy (discard.ts): once an extra is
     // sent, a counterparty may have opened it and answered, and that is their
     // evidence too. A non-draft row simply does not move.
-    const row = (
-      <Pressable key={e.id} style={[s.exRow, i > 0 && s.exRowRule]}
-        onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }}>
-        <View style={{ flex: 1 }}>
-          {/* Two lines, not one: a real scope ("Panel upgrade — code required")
-              is longer than one phone line, and truncating it hides the words
-              that tell the two panel extras apart. */}
-          <Text style={s.exName} numberOfLines={2}>{e.scope || T('home.draftsSec')}</Text>
-          {/* WHERE · WHEN, on one line. The date was missing entirely, so two extras
-              on the same job were told apart only by their price — and "which one did
-              I send last week" had no answer on this screen at all. Built by joining
-              what exists rather than nesting conditionals, so an extra with no job
-              still shows its date instead of dropping the whole line. */}
-          {(() => {
-            const meta = [e.pname, shortDate(e.created_at_ms)].filter(Boolean).join(' · ');
-            return meta ? <Text style={s.exSub} numberOfLines={1}>{meta}</Text> : null;
-          })()}
-          {e.amount_cents != null && <Text style={s.exPrice}>{money(e.amount_cents)}</Text>}
-        </View>
-        {/* EVERY row ends the same way: a status, not an action (hadar 2026-08-06).
-            A draft used to carry a green "Finish & send →" button, which read as the
-            one thing on the row you were meant to press — while the row itself, the
-            chevron, and the button all did exactly the same thing. One tap target,
-            stated once. What a draft needs to say here is where it stands: not sent. */}
-        {stateChip(st)}
-        <Text style={s.exChev}>›</Text>
-      </Pressable>
-    );
     return (
       <SwipeRow key={e.id} enabled={st === 'draft'} onDelete={() => void askDeleteExtra(e)}>
         {row}
@@ -6944,12 +7359,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                       </Pressable>
                     )}
                   </View>
-                  {/* ONE card per section, not one per row. Ten bordered cards on a
-                      cream page is ten edges, ten gutters and ten shadows competing
-                      with the content; a section is a single quiet surface with
-                      hairlines inside it (hadar 2026-08-06: "make the background
-                      cleaner"). */}
-                  <View style={s.exGroup}>{list.map(extraRow)}</View>
+                  {/* THE ROWS CARRY THEIR OWN BORDER NOW, so the section no longer
+                      draws one round them (2026-08-13). `exGroup` was a single quiet
+                      surface with hairlines inside it — the right answer when a row was
+                      a bare line of text. `ExtraCard` is a card, and nesting cards in a
+                      card gave every row two edges. Only the gutter survives. */}
+                  <View style={s.exList}>{list.map(extraRow)}</View>
                 </React.Fragment>
               );
             };
@@ -8170,14 +8585,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               thumbnail, a title, a type and an amount — two extras raised the same
               week on the same job were indistinguishable. */}
           {(() => {
-            // OUTLINED, not filled. The design's chips are a hairline in the status
-            // colour on white (approved is the one with a tint). Filled blocks the
-            // size of a word competed with the price for the same glance.
-            const chip = {
-              waiting:  { color: '#2E5AA8', bg: '#FFFFFF', line: '#B9CBE8', label: T('job.chipWaiting') },
-              needs:    { color: '#C2610C', bg: '#FFFFFF', line: '#F0C89B', label: T('job.chipNeeds') },
-              approved: { color: '#3A5230', bg: '#EDF2E9', line: '#C3D3BA', label: T('job.chipApproved') },
-            };
+            // The chip palette moved to `extraChip` so Home, the feed and this screen
+            // cannot drift apart — it was defined here AND as `chipStyle` above, and the
+            // same extra wore a different colour depending on which screen you opened it
+            // from. Outlined, not filled: a filled block the size of a word competed
+            // with the price for the same glance.
             const rows = jobFilter === null ? coRows
               : jobFilter === 'needs' ? jobNeeds
               : jobFilter === 'waiting' ? jobWaiting : jobApproved;
@@ -8188,91 +8600,30 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
             return rows.map((c) => {
               const bucket = jobBucket(c);
-              const ch = chip[bucket];
-              // The schedule line, as the design writes it. Null stays null — an
-              // unanswered question is omitted, never rendered as "no change", which
-              // would be an answer nobody gave.
-              const sched = c.schedule_effect === 'adds_days' && c.schedule_days
-                ? T({ k: 'job.addsDays', p: { n: c.schedule_days } })
-                : c.schedule_effect === 'no_change' ? T('job.noScheduleChange')
-                : null;
               const asked = isNamedClient(c.who_directed) ? c.who_directed : null;
               return (
-                <Pressable key={c.id} style={s.jsCard} onPress={() => { void openRecord(c.id); }}
-                  accessibilityRole="button" accessibilityLabel={c.scope}>
-                  {c.photo_relpath
-                    ? <Image source={{ uri: FS.documentDirectory + c.photo_relpath }}
-                        style={s.jsThumb} resizeMode="cover" />
-                    : <View style={[s.jsThumb, s.coThumbEmpty]}>
-                        <Icon name="microphone" size={22} color="#8A93A0" /></View>}
-
-                  {/* ONE FLEXIBLE COLUMN, TWO ROWS — not three side-by-side columns.
-                      The card was thumb | text | price, and the price block does not
-                      shrink (RN defaults flexShrink to 0), so on a 393pt screen the
-                      text column was left ~10pt and "Change Order #16" rendered one
-                      character per line straight down the card.
-                      The design stacks instead: the chip sits top-right on the number's
-                      row, the price sits mid-right on the meta's row, and both rows
-                      span the full width beside the thumbnail. */}
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <View style={s.jsCardTop}>
-                      <Text style={s.jsCardNo} numberOfLines={1}>
-                        {c.co_number != null
-                          ? T({ k: 'job.coNo', p: { n: c.co_number } })
-                          : T('job.coNoNumber')}
-                      </Text>
-                      <View style={[s.jsChip, { backgroundColor: ch.bg, borderColor: ch.line }]}>
-                        <Text style={[s.jsChipT, { color: ch.color }]} numberOfLines={1}>
-                          {ch.label}</Text>
-                      </View>
-                    </View>
-
-                    <Text style={s.jsCardName} numberOfLines={2}>{c.scope}</Text>
-
-                    <View style={s.jsCardBottom}>
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        {/* THE DATE, WITHOUT THE TIME (design, 2026-08-13).
-                            This read `c.created`, which is `createdLabel` — "Aug 13 ·
-                            12:04 pm". On a 375pt screen that ran past the price and
-                            ellipsised to "Initiated Aug 13 · 12:...", so the line lost
-                            its end and the clock told nobody anything. `shortDate`
-                            exists for exactly this and says so in its own comment: a
-                            list is SCANNED, and the time of day doubles the width to
-                            answer a question nobody asks while looking for last
-                            Tuesday's extra. It also adds the year once the row is not
-                            from this one.
-
-                            Two lines, not one: with a named requester this legitimately
-                            does not fit, and half a name is worse than a wrap. */}
-                        <Text style={s.jsCardMeta} numberOfLines={2}>
-                          {T({ k: 'job.initiated', p: { d: shortDate(c.created_at_ms) } })}
-                          {asked ? ` • ${T({ k: 'job.requestedBy', p: { name: asked } })}` : ''}
-                        </Text>
-                        {sched && (
-                          <View style={s.jsCardSched}>
-                            <Icon name="cal" size={14} color="#4E6243" />
-                            <Text style={s.jsCardSchedT} numberOfLines={1}>{sched}</Text>
-                          </View>
-                        )}
-                        {(questions[c.id] ?? 0) > 0 && (
-                          <View style={s.jsCardSched}>
-                            <Icon name="updated" size={15} />
-                            <Text style={[s.jsCardSchedT, { color: '#B26A00' }]} numberOfLines={1}>
-                              {T('job.inConversation')}</Text>
-                          </View>
-                        )}
-                      </View>
-                      {c.amount_cents != null && (
-                        <View style={s.jsCardPrice}>
-                          <Text style={s.jsCardAmt} numberOfLines={1}>+{moneyWhole(c.amount_cents)}</Text>
-                          <Text style={s.jsCardAmtL} numberOfLines={1}>
-                            {c.nte_cents != null ? T('job.nte') : T('job.fixedPrice')}</Text>
-                        </View>
-                      )}
-                      <Icon name="chevRight" size={16} color="#8A93A0" />
-                    </View>
-                  </View>
-                </Pressable>
+                <ExtraCard key={c.id} chip={extraChip(bucket)}
+                  kicker={c.co_number != null
+                    ? T({ k: 'job.coNo', p: { n: c.co_number } })
+                    : T('job.coNoNumber')}
+                  title={c.scope}
+                  photoUri={c.photo_relpath ? FS.documentDirectory + c.photo_relpath : null}
+                  // INSIDE ONE JOB every row shares the address, so it is never said
+                  // here — the two facts that separate these rows are when it was
+                  // raised and who asked for it.
+                  // The same PERSON slot the feed uses, so a human is drawn one way on
+                  // every list in the app. The person differs — this is who ASKED for
+                  // the work, the feed's is who RAISED the record — which is exactly
+                  // why the label travels with the name.
+                  person={asked ? { label: T('job.requestedByLab'), name: asked } : null}
+                  // Same closing line as the feed. It keeps its "Initiated" word — inside
+                  // a job the rows differ by WHICH date this is, and the feed's bare date
+                  // sits under a heading that already said so.
+                  personRight={T({ k: 'job.initiated', p: { d: shortDate(c.created_at_ms) } })}
+                  meta={[]}
+                  conversation={(questions[c.id] ?? 0) > 0 ? T('job.inConversation') : null}
+                  amount={c.amount_cents != null ? `+${moneyWhole(c.amount_cents)}` : null}
+                  onPress={() => { void openRecord(c.id); }} />
               );
             });
           })()}
@@ -8312,38 +8663,90 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         const sp = sendPrep;
         const sug = sp.suggestion;
         const suggested = sug && sug.kind === 'suggested' ? sug.approver : null;
+        /**
+         * A SUGGESTION IS NOT A SELECTION (hadar 2026-08-14: "I opted to send a drafted
+         * change order, the change order has no client selected, no team members, and
+         * yet this is what I see" — a filled-in recipient and a live green Send).
+         *
+         * `chosen` used to fall back to the router's suggestion whenever nothing had
+         * been picked. Everything downstream then read as though a client existed: the
+         * card showed a name, `sendPlan` returned `approval`, the button went live, and
+         * the hint under it promised "this sends the change order for signature" — for
+         * an extra whose own draft screen says "No client selected yet". One tap from
+         * there and a signature request goes to somebody nobody chose.
+         *
+         * The suggestion still shows, with its reason, because that is R5c's whole
+         * point — but it is now a PROPOSAL you tap to accept, not a decision already
+         * taken on your behalf. Mandate #2 is a human confirming a commitment; tapping
+         * Send past a name the app filled in silently is not that confirmation, it is
+         * the absence of one.
+         */
         const chosen = sp.chosenId
           ? sp.roster.find((r) => r.id === sp.chosenId) ?? null
-          : sp.roster.find((r) => r.id === suggested?.id) ?? null;
-        const unconfirmed = !sp.chosenId && sug?.kind === 'suggested' && !sug.bindsMoney;
+          : null;
+        const proposal = !sp.chosenId
+          ? sp.roster.find((r) => r.id === suggested?.id) ?? null
+          : null;
+        const unconfirmed = !!chosen && sug?.kind === 'suggested'
+          && sug.approver.id === chosen.id && !sug.bindsMoney;
         return (
-          <Modal visible transparent animationType="slide"
-            onRequestClose={() => setSendPrep(null)}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(13,15,18,0.45)' }}>
-          <ScrollView contentContainerStyle={{ padding: 14, paddingTop: 64, paddingBottom: 40 }}
-            keyboardShouldPersistTaps="handled">
-          <View style={s.spCard}>
-            {/* THE DOCUMENT NAMES ITSELF FIRST (hadar's design, 2026-08-08). The
-                sheet used to open with "SEND TO / <scope> · <amount>" in one grey
-                line, which made the thing being sent smaller than the act of
-                sending it. Mandate #2 says the human confirms a COMMITMENT: the
-                first thing they must be able to read is which commitment. So the
-                scope is the headline and the kind + number sit under it, the same
-                identity line the record screen prints. */}
-            <Text style={s.spKicker}>{T('r5c.sendTo')}</Text>
-            <Text style={s.spTitle} numberOfLines={3}>{sp.co.scope}</Text>
-            <Text style={s.spDoc}>
-              {sp.co.co_number == null
-                ? T('r5c.docNo')
-                : T({ k: 'r5c.doc', p: { n: sp.co.co_number } })}
-            </Text>
+          /* A BOTTOM SHEET, like every other one on this record (2026-08-14). It was a
+             card floating in a dim, 64pt down from the top — the only modal in the app
+             that arrived from nowhere in particular. The sheet also gives the recipient
+             lists room to grow: a company with eight people had them running off a
+             fixed-height card. */
+          /* NOT `tall`. A fixed 90% left this sheet two-fifths full on a solo account —
+             the client, one line saying the team is empty, the button, and then a
+             screenful of nothing under it, which is the same floating-in-a-gap problem
+             the price section had. Without `tall` the sheet sizes to its content and
+             still grows to 88% when a real roster and a real team fill it. */
+          <BottomSheet visible title={T('r5c.sendTo')}
+            onClose={closeSendPrep}>
+          <View>
+            {/* NO DOCUMENT HEADER (hadar 2026-08-14: "no need for the title of the
+                change order and change order number — they just clicked on the button,
+                they know where it is from").
+                It was three lines of headline naming a document the reader had been
+                looking at one tap earlier, and it pushed the only DECISION on this
+                sheet — who gets it — below the fold. The 2026-08-08 note argued mandate
+                #2 needs the commitment named before it is confirmed; that still holds,
+                and it is satisfied by the screen this sheet opens ON TOP OF, which
+                states the scope, the price and the terms in full. Naming it twice is
+                not twice as confirmed. */}
 
             {/* The extra's KIND is set by the AI on processing (hadar, 2026-07-24:
                 "i don't want the user to tag it"); the manual type picker was
                 removed. sp.type still carries the AI's category for approver
                 routing — it just isn't asked here. */}
 
-            {/* ── who approves ── */}
+            {/* ── THE CLIENT ─────────────────────────────────────────────────────
+                A HEADING, because the section had none (hadar 2026-08-14: "no client
+                for the change order, it opens with SEND TO and lists hadar wissotzky,
+                not sure why — it needs to distinguish between client and team, the UX
+                and journey confuses me").
+                The team block had a heading and this one did not, so the two read as
+                different KINDS of thing rather than as two parallel choices: a bare
+                person row under the document looked like a fact about the extra instead
+                of a slot waiting to be filled. Both now say what they are and what
+                picking them does. */}
+            {!sp.adding && !sp.picking && (
+              <>
+                {/* LABEL AND TAG. The explainer sentence under each heading is gone
+                    (hadar 2026-08-14: "too much text, a lot of things going on — I am at
+                    a jobsite, I am asking myself what do you want from me?").
+                    "They sign it. This becomes a real change order." was true and it was
+                    also the third line of prose before he reached a single control. What
+                    each choice DOES is still said — once, in the line under the button,
+                    where it changes with what he has picked and is read at the moment it
+                    matters. Twice is not clearer, it is longer. */}
+                <View style={[s.spSecLab, { marginTop: 2 }]}>
+                  <Text style={s.spSecName}>{T('r5c.secClient')}</Text>
+                  <View style={[s.spTag, s.spTagReq]}>
+                    <Text style={[s.spTagT, { color: '#3A5230' }]}>{T('r5c.required')}</Text>
+                  </View>
+                </View>
+              </>
+            )}
             {sp.adding ? (
               <View style={{ marginTop: 18 }}>
                 <Text style={s.spSecH}>{T('r5c.whoApproves')}</Text>
@@ -8400,7 +8803,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                 <Text style={s.spSecH}>{T('r5c.whoApproves')}</Text>
                 {sp.roster.map((m) => (
                   <Pressable key={m.id} style={s.spRow}
-                    onPress={() => setSendPrep((p) => p && { ...p, chosenId: m.id, picking: false })}>
+                    onPress={() => { void chooseClient(m); }}>
                     <View style={s.spAvatar}><Icon name="person" size={21} color="#4a4a46" /></View>
                     <View style={{ flex: 1 }}>
                       <Text style={s.spRowT} numberOfLines={1}>{m.name}</Text>
@@ -8417,18 +8820,66 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   <Text style={s.spChev}>›</Text>
                 </Pressable>
               </View>
+            ) : !chosen ? (
+              /* NOTHING IS SELECTED, AND THAT IS THE LOUDEST THING HERE (hadar
+                 2026-08-14: "my takeaway — who gets this? → HW. That is wrong").
+                 He read it exactly as it was drawn. The suggestion was a full bordered
+                 card carrying an 18pt name; the "no client chosen" line was quiet grey
+                 above it. The biggest thing on a sheet titled "Who gets this?" was a
+                 person's name, so the sheet appeared to answer its own question with
+                 somebody nobody had picked.
+                 Inverted: the EMPTY SLOT is the object now — dashed, stated, with the
+                 one action that fills it directly beneath. The router's guess survives
+                 as a single quiet line, because it is a shortcut, not a state. */
+              <>
+                {/* THE EMPTY SLOT IS THE BUTTON. It was a dashed box saying "No client
+                    selected yet" with a bordered "Choose a client" directly beneath —
+                    two objects stating one fact and offering one act. The gap it names
+                    and the tap that fills it are the same place now. */}
+                {/* NAMED ON THE RECORD BUT NOT ON THE ROSTER. `who_directed` stores a
+                    NAME; sending needs a person with a phone or an email. Somebody typed
+                    into the composer lands here — and telling him to "choose a client"
+                    when the extra plainly names one is the same confusion this whole
+                    sequence has been fixing. Say what is actually missing. */}
+                {isNamedClient(sp.co.who_directed) && (
+                  <Text style={s.spEmpty}>
+                    {T({ k: 'r5c.savedNoContact', p: { name: sp.co.who_directed } } as any)}
+                  </Text>
+                )}
+                <Pressable style={s.spSlot}
+                  onPress={() => setSendPrep((p) => p && { ...p, picking: true })}
+                  accessibilityRole="button">
+                  <Icon name="personAdd" size={22} color="#4E6243" />
+                  <Text style={s.spSlotT}>{T('r5c.chooseClient')}</Text>
+                </Pressable>
+                {proposal && (
+                  /* ONE LINE. Enough to offer it, not enough to be mistaken for the
+                     answer. The reason it was suggested moved into the picker, where
+                     somebody comparing candidates can read it. */
+                  <Pressable style={s.spSuggest}
+                    accessibilityRole="button"
+                    accessibilityLabel={T({ k: 'r5c.useSuggested', p: { name: proposal.name } } as any)}
+                    onPress={() => { void chooseClient(proposal); }}>
+                    <Text style={s.spSuggestT} numberOfLines={2}>
+                      {T({ k: 'r5c.suggested', p: { name: proposal.name } } as any)}
+                    </Text>
+                    <Text style={s.spSuggestUse}>{T('r5c.useThem')}</Text>
+                  </Pressable>
+                )}
+              </>
             ) : chosen ? (
               <>
-                <Pressable style={s.spRow}
+                <Pressable style={s.spPicked}
                   onPress={() => setSendPrep((p) => p && { ...p, picking: true })}>
-                  <View style={s.spAvatar}><Icon name="person" size={21} color="#4a4a46" /></View>
+                  <View style={s.spAvatar}><Icon name="approved" size={21} color="#3A5230" /></View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.spRowT} numberOfLines={1}>{chosen.name}</Text>
-                    {/* The REASON, shown verbatim. R5c: "with the reason visible". A
-                        pre-filled recipient the sender cannot check is the failure. */}
-                    <Text style={s.spRowSub} numberOfLines={2}>
-                      {sp.chosenId ? roleLabel(chosen.role) : reasonText(sug!)}
-                    </Text>
+                    {/* The REASON, shown verbatim. R5c: "with the reason visible" — a
+                        pre-filled recipient the sender cannot check IS the failure this
+                        line exists to prevent, so two lines was the wrong budget: it cut
+                        "…on this job → hadar wissotzky" off at the arrow, hiding the half
+                        that names who it landed on. */}
+                    <Text style={s.spRowSub} numberOfLines={2}>{roleLabel(chosen.role)}</Text>
                   </View>
                   <Text style={s.spChangeT}>{T('r5c.change')}</Text>
                 </Pressable>
@@ -8462,32 +8913,115 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               </>
             )}
 
-            {/* Send is DISABLED until somebody is named. Sending a priced commitment
-                to nobody is not a degraded send, it is a lost one — and a refused
-                button now LOOKS refused and says what would un-refuse it, instead of
-                being a black button whose tap does nothing. */}
+            {/* ── MY GROUP ─────────────────────────────────────────────────────
+                WHO YOU SEND TO DECIDES THE STAGE (hadar 2026-08-14). A client turns
+                this draft into a signing instrument; a teammate does not — they get a
+                notification, the extra stays a draft, and the review carries on. The
+                two are drawn as separate sections with different words for that reason,
+                and `sendPlan` (sendplan.ts) is the one place the rule is decided.
+
+                A teammate is NEVER given a signing link. `request_extra_review` (407)
+                mints no confirmation_request and cannot touch `change_order`; the
+                strongest thing a colleague can do is open the draft and keep working. */}
             {!sp.adding && !sp.picking && (
+              <View style={{ marginTop: 20 }}>
+                <View style={s.spSecLab}>
+                  <Text style={s.spSecName}>{T('r5c.secTeam')}</Text>
+                  <View style={[s.spTag, s.spTagOpt]}>
+                    <Text style={[s.spTagT, { color: '#6b625b' }]}>{T('r5c.optional')}</Text>
+                  </View>
+                </View>
+                {sp.members.map((m) => {
+                  const on = sp.memberIds.includes(m.memberId);
+                  return (
+                    <Pressable key={m.memberId} style={s.spRow}
+                      accessibilityRole="button" accessibilityState={{ selected: on }}
+                      onPress={() => setSendPrep((p) => p && {
+                        ...p, memberIds: [...toggleMember(
+                          { clientId: p.chosenId, memberIds: p.memberIds }, m.memberId).memberIds] })}>
+                      <View style={s.spAvatar}>
+                        <Icon name={on ? 'approved' : 'person'} size={21}
+                          color={on ? '#3A5230' : '#4a4a46'} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.spRowT} numberOfLines={1}>
+                          {m.name ?? T('r5c.teamMate')}</Text>
+                        <Text style={s.spRowSub} numberOfLines={1}>{T('set.role.' + m.role as any)}</Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+
+                {/* THE INVITE, WHERE THE NEED IS FELT (hadar 2026-08-14: "I am missing a
+                    link to invite someone to the team — it is an opportunity to invite
+                    someone").
+                    Reaching for a colleague and finding nobody there is the one moment
+                    somebody actually wants to add one; sending them to Settings to look
+                    for it is sending them away from the thought. Same act as the
+                    Settings row — same RPC, same plan cap, same share sheet — offered
+                    here rather than duplicated. */}
+                <Pressable style={s.spLink} onPress={() => { void inviteFromSend(); }}
+                  accessibilityRole="button">
+                  <Icon name="personAdd" size={18} color="#4E6243" />
+                  <Text style={s.spLinkT}>{T('r5c.inviteTeam')}</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {/* Send is DISABLED until SOMEBODY is named — a client to sign it, or a
+                colleague to look at it. Sending a priced commitment to nobody is not a
+                degraded send, it is a lost one; and a refused button now looks refused
+                and says what would un-refuse it. */}
+            {!sp.adding && !sp.picking && (() => {
+              const plan = sendPlan({ clientId: chosen?.id ?? null, memberIds: sp.memberIds });
+              const memberRows = sp.memberIds
+                .map((id) => sp.members.find((m) => m.memberId === id))
+                .filter((m): m is Member => !!m);
+              return (
               <>
-                <Pressable style={[s.spSend, (!chosen || sp.busy) && s.spSendOff]}
-                  disabled={!chosen || sp.busy}
+                <Pressable style={[s.spSend, (plan.kind === 'nothing' || sp.busy) && s.spSendOff]}
+                  disabled={plan.kind === 'nothing' || sp.busy}
                   onPress={async () => {
                     setSendPrep((p) => p && { ...p, busy: true });
-                    await sendPricedApproval(sp.co, chosen);
+                    // The client half FIRST: it is the one that changes the record's
+                    // stage, and if it fails there is nothing to tell anybody about.
+                    if (plan.kind === 'approval' && chosen) {
+                      await sendPricedApproval(sp.co, chosen);
+                    }
+                    if (memberRows.length) {
+                      const r = await requestExtraReview(connector.client, sp.co.id,
+                        memberRows.map((m) => m.userId));
+                      if (!r.ok) {
+                        setAck({ kind: 'no', title: T('r5c.askFailed'), detail: r.reason });
+                      }
+                      else if (plan.kind === 'review') {
+                        // Nothing else says anything happened: the sheet closes onto an
+                        // unchanged draft, which is exactly right and exactly silent.
+                        setSendPrep(null);
+                        setAck({ kind: 'ok',
+                          title: T({ k: 'r5c.askedN', p: { n: String(r.notified) } } as any) });
+                      }
+                    }
                     setSendPrep((p) => p && { ...p, busy: false });
                   }}>
                   <Icon name="send" size={23} color="#fff" />
-                  <Text style={s.spSendT}>{T('r5c.sendIt')}</Text>
+                  <Text style={s.spSendT}>
+                    {sp.busy ? T('r5c.sending')
+                      : plan.kind === 'review' ? T('r5c.askReview') : T('r5c.sendIt')}
+                  </Text>
                 </Pressable>
-                {!chosen && <Text style={s.spHint}>{T('r5c.needSigner')}</Text>}
-                <Pressable style={s.spCancel} onPress={() => setSendPrep(null)}>
-                  <Text style={s.spCancelT}>{T('common.cancel')}</Text>
-                </Pressable>
+                {/* What this tap will DO, in one line, before it is tapped. The two
+                    outcomes are genuinely different and the button alone cannot say so. */}
+                <Text style={s.spHint}>
+                  {plan.kind === 'nothing' ? T('r5c.needSomeone')
+                    : plan.kind === 'review' ? T('r5c.staysDraft')
+                    : T('r5c.goesToClient')}
+                </Text>
               </>
-            )}
+              );
+            })()}
           </View>
-          </ScrollView>
-          </View>
-          </Modal>
+          </BottomSheet>
         );
       })()}
 
@@ -8504,7 +9038,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               glyph sat alone in the corner with nothing naming the sheet, so the
               screen's first readable word was its own headline. */}
           <View style={s.sentBar}>
-            <Text style={s.sentBarT}>{T(sentLink.shared ? 'sent.barSent' : 'sent.barReady')}</Text>
+            <Text style={s.sentBarT}>{T(sentLink.shared ? 'sent.barSent' : 'sent.barFailed')}</Text>
             <Pressable style={s.sentClose} hitSlop={14} onPress={() => {
               setSentLink(null); setPhotoNote(null);
               if (returnRecordId) { const rid = returnRecordId; setReturnRecordId(null); void openRecord(rid); }
@@ -8529,11 +9063,17 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           {sentLink.shared ? (
             <View style={s.sentArt}><Icon name="checklist" size={104} /></View>
           ) : (
-            <View style={s.sentBadge}><Icon name="send" size={29} color="#1A7F37" /></View>
+            <View style={s.sentBadgeBad}><Icon name="alert" size={29} color="#8A1F11" /></View>
           )}
 
-          <Text style={s.sentH}>{T(sentLink.shared ? 'sent.title' : 'sent.readyTitle')}</Text>
-          <Text style={s.sentSub}>{T(sentLink.shared ? 'sent.waiting' : 'sent.readySub')}</Text>
+          <Text style={s.sentH}>{T(sentLink.shared ? 'sent.title' : 'sent.failTitle')}</Text>
+          <Text style={s.sentSub}>{T(sentLink.shared ? 'sent.waiting' : 'sent.failSub')}</Text>
+          {/* THE REASON, VERBATIM. "Couldn't send" with no cause leaves the contractor
+              tapping the same button hoping; the number being unreachable and the share
+              sheet being dismissed are different problems with different fixes. */}
+          {!sentLink.shared && !!sentLink.failWhy && (
+            <Text style={s.sentWhyBad}>{sentLink.failWhy}</Text>
+          )}
 
           {/* THE ROWS ARE STACKED, NOT OPPOSED. Label over value with a glyph in the
               left gutter — the design's shape, and the one that survives real data:
@@ -8583,8 +9123,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             {/* No glyph on Status — the chip is the mark. */}
             <View style={[s.sentRow, s.sentRowLast]}>
               <Text style={[s.sentLab, { flex: 1 }]}>{T('sent.status')}</Text>
-              <View style={s.sentChip}><Text style={s.sentChipT}>
-                {T(sentLink.shared ? 'sent.waitingChip' : 'sent.notSentChip')}</Text></View>
+              <View style={sentLink.shared ? s.sentChip : s.sentChipBad}>
+                <Text style={sentLink.shared ? s.sentChipT : s.sentChipBadT}>
+                  {T(sentLink.shared ? 'sent.waitingChip' : 'sent.failChip')}</Text></View>
             </View>
           </View>
 
@@ -8595,49 +9136,25 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               telling him to tap Send and the button that sends. The one thing this
               sheet exists for was the third control down the screen. */}
 
-          {/* ONCE IT HAS GONE, THE SEND CONTROLS GO (hadar's design, 2026-08-08: the
-              sent state carries "View request" and nothing else). Both stayed on
-              screen after a successful send, the loud one still saying "Text it to
-              Dave now" over a status chip reading "Waiting for a yes" — an invitation
-              to send the same document twice. Re-sending is not lost: the record's
-              Remind (R8) owns it, with the backoff rules a raw re-send has not got. */}
+          {/* A SUCCESSFUL SEND CARRIES NO SEND CONTROLS (hadar's design, 2026-08-08:
+              the sent state is "View request" and nothing else). Re-sending is not
+              lost — the record's Remind (R8) owns it, with the backoff rules a raw
+              re-send has not got.
 
-          {/* AUTOMATIC SMS (REQ-VAL8) — one tap texts the link via Twilio when we
-              have the recipient's number. Falls back to the manual share below if it
-              is not configured/deployed, so the link can ALWAYS reach the client. */}
-          {!sentLink.shared && !!sentLink.phone && sentLink.url && (
-            <Pressable style={s.confirmWide} onPress={async () => {
-              const r = await sendSms(connector.client, sentLink.phone as string,
-                `${sentLink.shown}\n\n${sentLink.url}`);
-              if (!r.ok) { setUi({ k: 'refused', why: T('sent.autoFailed') }); return; }
-              setSentLink((sl) => sl && { ...sl, shared: true });
-            }}>
-              <Text style={s.confirmT}>{T({ k: 'sent.textAuto', p: { name: sentLink.sentTo ?? '' } } as any)}</Text>
-            </Pressable>
-          )}
-
-          {/* The link goes to the client by TEXT — a link the contractor sends
-              themselves arrives from a number the client recognises, not spam
-              (REQ-VAL8). The always-works manual path.
-
-              ITS LABEL DEPENDS ON WHETHER THE BUTTON ABOVE EXISTS. With a number on
-              file the screen showed "Text it to hadar now →" and, under it, "Send by
-              text →" — two controls claiming the same job, and the quiet one looked
-              like the plain-language version of the loud one. It is not: it is the
-              route out through the phone's own share sheet, which is why it survives
-              (mandate #7 — the link must be able to reach the client with nothing
-              configured). So when both are on screen this one says it is the OTHER
-              way, not the same way. */}
+              ON FAILURE THERE IS EXACTLY ONE BUTTON, and it is the same act the Send
+              button just attempted: try both routes again, SMS first, then the phone's
+              own share sheet. The screen used to offer two — "Text it to Dave now" and
+              "Send it another way" — which asked a man on a ladder to diagnose which
+              transport had failed before he could get the link out. */}
           {!sentLink.shared && (
-            <Pressable style={sentLink.phone ? s.coSendRow : s.confirmWide} onPress={async () => {
-              const r = await shareLink(sentLink.url, sentLink.shown);
-              if (!r.ok) setUi({ k: 'refused', why: r.reason ?? 'could not share' });
-              // Only NOW has the link reached the client — flip to the sent state.
-              else setSentLink((sl) => sl && { ...sl, shared: true });
+            <Pressable style={s.confirmWide} onPress={async () => {
+              const again = await deliverLink({
+                url: sentLink.url, shown: sentLink.shown, phone: sentLink.phone ?? null });
+              if (again.ok) void signalSaved();
+              setSentLink((sl) => sl && {
+                ...sl, shared: again.ok, failWhy: again.ok ? null : again.why });
             }}>
-              <Text style={sentLink.phone ? s.dmeta : s.confirmT}>
-                {T(sentLink.phone ? 'sent.shareOther' : 'sent.share')}
-              </Text>
+              <Text style={s.confirmT}>{T('sent.retry')}</Text>
             </Pressable>
           )}
 
@@ -8654,7 +9171,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             </Pressable>
           )}
 
-          <Text style={s.sentFoot}>{T('sent.foot')}</Text>
+          {/* Only when it actually went. "You'll get a notification when the client
+              responds" under a failed hand-off promises an answer from somebody who
+              was never asked. */}
+          {sentLink.shared && <Text style={s.sentFoot}>{T('sent.foot')}</Text>}
         </View>
         </ScrollView>
         </View>
@@ -8792,6 +9312,12 @@ const s = StyleSheet.create({
   sentArt: { marginTop: 6, marginBottom: 14, alignItems: 'center', justifyContent: 'center' },
   sentBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#E9F6ED',
     alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 12 },
+  sentBadgeBad: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#FCECE8',
+    alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 12 },
+  // The verbatim failure reason. Quieter than the headline and narrower than the
+  // card, because it is evidence for the retry — not the message itself.
+  sentWhyBad: { fontFamily: 'Barlow_400Regular', fontSize: 13.5, color: '#8A1F11',
+    textAlign: 'center', marginTop: 6, marginBottom: 2, lineHeight: 19 },
   sentAmt: { fontFamily: 'Oswald_700Bold', fontSize: 19, color: '#131110', marginLeft: 12 },
   sentWhen: { fontFamily: 'Barlow_400Regular', fontSize: 13.5, color: '#8A93A0', marginTop: 1 },
   // `alignSelf: 'stretch'` because sentCard centres its children: without it this
@@ -8817,6 +9343,12 @@ const s = StyleSheet.create({
   sentChip: { borderRadius: 8, borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FEF6E7',
     paddingVertical: 4, paddingHorizontal: 10 },
   sentChipT: { fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#B26A00' },
+  // RED, NOT AMBER. Amber is "waiting on somebody else", which is the successful
+  // state one line above; a failed hand-off is waiting on YOU and must not wear the
+  // same colour as the thing it is not.
+  sentChipBad: { borderRadius: 8, borderWidth: 1, borderColor: '#C0442E', backgroundColor: '#FCECE8',
+    paddingVertical: 4, paddingHorizontal: 10 },
+  sentChipBadT: { fontFamily: 'Barlow_600SemiBold', fontSize: 12.5, color: '#8A1F11' },
   sentFoot: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#8A93A0',
     textAlign: 'center', marginTop: 12, lineHeight: 18 },
   cardH: { color: '#5E666E', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
@@ -9196,6 +9728,10 @@ const s = StyleSheet.create({
   // square corners to the group's radius, and SwipeRow's reveal to the card.
   exGroup: { backgroundColor: '#fff', borderColor: '#ece5de', borderWidth: 1,
     borderRadius: 14, marginHorizontal: 16, marginBottom: 14, overflow: 'hidden' },
+  // Gutter only. The rows inside are `ExtraCard`s and draw their own border, so this
+  // must NOT add a second one — `exGroup` above is kept for the surfaces that still
+  // hold bare rows rather than cards.
+  exList: { marginHorizontal: 16, marginBottom: 6 },
   exRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff',
     paddingVertical: 14, paddingHorizontal: 16 },
   exRowRule: { borderTopWidth: 1, borderTopColor: '#f0ebe6' },  // ink-100 hairline
@@ -9507,9 +10043,14 @@ const s = StyleSheet.create({
   logoRemoveT: { fontFamily: 'Inter_600SemiBold', fontSize: 15.5, color: '#cf222e' },
 
   // ── edit acknowledgement ──
+  // BOTTOM-ANCHORED (hadar, 2026-08-15: "it needs to have some sort of bottom
+  // popup"). Every other transient surface in this app is a bottom sheet, and an ack
+  // floating in the middle of the screen was the one thing that arrived somewhere
+  // else — over the content it is reporting on, under the thumb that cannot reach it.
+  // At the bottom it lands where his hand already is and where he has learned to look.
   ackWrap: { flex: 1, backgroundColor: 'rgba(20,22,20,0.35)', alignItems: 'center',
-    justifyContent: 'center', padding: 30 },
-  ackBox: { width: '100%', maxWidth: 320, backgroundColor: '#FFFFFF', borderRadius: 16,
+    justifyContent: 'flex-end', paddingHorizontal: 14, paddingBottom: 28 },
+  ackBox: { width: '100%', maxWidth: 460, backgroundColor: '#FFFFFF', borderRadius: 18,
     paddingHorizontal: 22, paddingTop: 22, paddingBottom: 20, alignItems: 'center' },
   // A refusal is not a confirmation wearing a different icon: it carries the warning
   // hairline so the two are told apart before either is read.
@@ -9606,10 +10147,24 @@ const s = StyleSheet.create({
   jsPillT: { fontFamily: 'Inter_500Medium', fontSize: 13.5, color: '#3f423e' },
   jsPillTOn: { color: '#FFFFFF', fontFamily: 'Inter_600SemiBold' },
 
-  jsCard: { flexDirection: 'row', gap: 10, backgroundColor: '#FFFFFF', borderWidth: 1,
-    borderColor: '#E4E1D9', borderRadius: 8, padding: 10, marginBottom: 8 },
-  jsThumb: { width: 76, height: 76, borderRadius: 6, backgroundColor: '#EFEBE3' },
-  jsCardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // ── the record row's type scale (hadar 2026-08-13: "increase the gaps between
+  // lines and increase the font of the smaller letters") ──────────────────────────
+  // The card had one dominant size (the 18pt title) and everything else at 10.5-12pt,
+  // which read as a headline with fine print under it. The supporting lines carry the
+  // facts somebody actually scans for — which extra, when, how long, how much — so
+  // they were too quiet, and packed too tightly to separate at a glance. Small type is
+  // raised roughly a point each and the vertical rhythm opened up; the title and the
+  // price keep their sizes, because the hierarchy was right, only the floor was low.
+  // WIDTH RECLAIMED FROM THE FURNITURE, NOT FROM THE TYPE (2026-08-13). The widest
+  // pair this row can hold — "Change Order #18" beside "Waiting on owner" — overran a
+  // 375pt screen by a few points and clipped the chip. The fix is not to shrink the
+  // text that was just deliberately enlarged: the thumbnail gives up 4pt and the two
+  // gaps 3pt between them, which buys the top row its margin and widens the meta and
+  // schedule lines underneath for free.
+  jsCard: { flexDirection: 'row', gap: 9, backgroundColor: '#FFFFFF', borderWidth: 1,
+    borderColor: '#E4E1D9', borderRadius: 8, padding: 12, marginBottom: 8 },
+  jsThumb: { width: 72, height: 72, borderRadius: 6, backgroundColor: '#EFEBE3' },
+  jsCardTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   // flexShrink, not flex — the number gives way to the chip rather than the other way
   // round, and never collapses below a readable width.
   // THE NUMBER HOLDS ITS WIDTH; THE CHIP IS WHAT GIVES.
@@ -9621,21 +10176,21 @@ const s = StyleSheet.create({
   // job, which is the exact confusion this card was redesigned to end. The chip can
   // afford to lose a character because its meaning is carried three other ways: its
   // colour, its outline, and the filter pill the reader just tapped.
-  jsCardNo: { flexShrink: 0, fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#2F5233' },
+  jsCardNo: { flexShrink: 0, fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#2F5233' },
   jsChip: { flexShrink: 1, marginLeft: 'auto', borderRadius: 999, borderWidth: 1,
-    paddingHorizontal: 8, paddingVertical: 3 },
-  jsChipT: { fontFamily: 'Inter_600SemiBold', fontSize: 10.5, letterSpacing: 0.1 },
-  jsCardName: { fontFamily: 'Inter_700Bold', fontSize: 18, lineHeight: 22, color: '#131110',
-    marginTop: 2, letterSpacing: -0.3 },
-  jsCardMeta: { fontFamily: 'Inter_400Regular', fontSize: 12, color: '#6b625b', marginTop: 3 },
-  jsCardSched: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
-  jsCardSchedT: { fontFamily: 'Inter_400Regular', fontSize: 12, color: '#6b625b' },
+    paddingHorizontal: 7, paddingVertical: 3 },
+  jsChipT: { fontFamily: 'Inter_600SemiBold', fontSize: 11, letterSpacing: 0.1 },
+  jsCardName: { fontFamily: 'Inter_700Bold', fontSize: 18, lineHeight: 23, color: '#131110',
+    marginTop: 5, letterSpacing: -0.3 },
+  jsCardMeta: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#6b625b', marginTop: 2 },
+  jsCardSched: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  jsCardSchedT: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#6b625b' },
   // The second row: meta on the left, price and chevron pinned right. Both hold their
   // width (flexShrink 0) so the text column is what gives, not the money.
-  jsCardBottom: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: 4 },
+  jsCardBottom: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 6 },
   jsCardPrice: { flexShrink: 0, alignItems: 'flex-end' },
-  jsCardAmt: { fontFamily: 'Inter_700Bold', fontSize: 20, color: '#2F5233', letterSpacing: -0.5 },
-  jsCardAmtL: { fontFamily: 'Inter_400Regular', fontSize: 12, color: '#6b625b', marginTop: 1 },
+  jsCardAmt: { fontFamily: 'Inter_700Bold', fontSize: 18, color: '#2F5233', letterSpacing: -0.5 },
+  jsCardAmtL: { fontFamily: 'Inter_400Regular', fontSize: 12.5, color: '#6b625b', marginTop: 2 },
   jsChev: { fontFamily: 'Inter_400Regular', fontSize: 20, color: '#b3aaa2', marginTop: 2 },
   jsEmpty: { fontFamily: 'Inter_400Regular', fontSize: 14.5, color: '#8c959f',
     textAlign: 'center', paddingVertical: 24 },
@@ -9651,6 +10206,63 @@ const s = StyleSheet.create({
   spDoc: { fontFamily: 'Inter_400Regular', fontSize: 16, color: '#8A8A80', marginTop: 6 },
   spSecH: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#6F7A5E',
     textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 10 },
+
+  // ── the send sheet's hierarchy (rebuilt 2026-08-14) ─────────────────────────────
+  // hadar: "it's hard to tell without spending time to learn this form what it is —
+  // lacks UX balance that visually sets intuitively."
+  //
+  // THE DIAGNOSIS: everything weighed the same. The chosen client, "choose someone
+  // else" and "invite someone" were three identical bordered cards — same border, same
+  // radius, same 44pt disc, same 18pt bold label. Identical shape reads as identical
+  // meaning, so nothing said which one was the decision, which was an alternative, and
+  // which was an unrelated action. With no visual ranking the eye cannot skim; you have
+  // to READ all of it, which is the complaint.
+  //
+  // THE RULE APPLIED: a STATE is a filled card. An ALTERNATIVE is an outlined row. An
+  // ACTION is a text link. Three jobs, three shapes.
+  spSecLab: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 22 },
+  // Sentence case, one or two words. The old labels were sentences set in caps with
+  // letter-spacing — "ASK SOMEONE ON YOUR TEAM TO REVIEW IT" wrapped to two lines, and
+  // a label that wraps is a sentence wearing a label's clothes.
+  // 22, not 19 (hadar: "their titles are so small, the only thing I see is HW"). The
+  // section names have to out-weigh whatever sits under them, or the loudest NAME on
+  // the sheet becomes its apparent answer.
+  spSecName: { fontFamily: 'Inter_700Bold', fontSize: 22, color: '#131110', letterSpacing: -0.3 },
+  // Required vs optional, stated once and visibly, instead of left to the prose.
+  spTag: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2.5 },
+  spTagReq: { backgroundColor: '#EDF2E9' },
+  spTagOpt: { backgroundColor: '#EFEBE3' },
+  spTagT: { fontFamily: 'Inter_600SemiBold', fontSize: 11.5, letterSpacing: 0.3 },
+  spSecSub: { fontFamily: 'Inter_400Regular', fontSize: 14.5, color: '#6b625b', marginTop: 3 },
+  // CHOSEN: filled, not outlined. A selection should look settled.
+  spPicked: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 12,
+    minHeight: 64, borderRadius: 14, backgroundColor: '#EDF2E9',
+    borderWidth: 1, borderColor: '#C3D3BA', paddingHorizontal: 14, paddingVertical: 10 },
+  // An ACTION, not an option. No border, no disc competing with the recipients.
+  spLink: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, marginTop: 6 },
+  spLinkT: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#4E6243' },
+  // Left-aligned like everything else it sits under. Centred text inside a
+  // left-aligned form has nothing to hang from.
+  spEmpty: { fontFamily: 'Inter_400Regular', fontSize: 15, color: '#8A8A80', marginTop: 10 },
+
+  // THE EMPTY SLOT. Dashed, because a dashed outline reads as "something goes here"
+  // in a way a solid one never does — a solid box with grey text reads as a disabled
+  // item that already has content.
+  spSlot: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12,
+    minHeight: 62, borderRadius: 14, borderWidth: 1.5, borderStyle: 'dashed',
+    borderColor: '#7E8C72', paddingHorizontal: 16 },
+  spSlotT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#2F3D28' },
+  // The act that fills the slot, directly under it and clearly primary WITHIN the
+  // section — outlined rather than filled, so it never competes with Send.
+  spChoose: { minHeight: 54, borderRadius: 12, borderWidth: 1.5, borderColor: '#3E4A33',
+    alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  spChooseT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#2F3D28' },
+  // The router's guess, demoted to one quiet line. It used to be the largest object on
+  // the sheet; a shortcut must never outrank the decision it shortcuts.
+  spSuggest: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 46,
+    marginTop: 8 },
+  spSuggestT: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14.5, color: '#6b625b' },
+  spSuggestUse: { fontFamily: 'Inter_700Bold', fontSize: 14.5, color: '#4E6243' },
   spWarn: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 18,
     backgroundColor: '#FBEFD8', borderRadius: 12, padding: 14 },
   spWarnT: { fontFamily: 'Inter_400Regular', fontSize: 15.5, lineHeight: 21, color: '#8A5A11' },

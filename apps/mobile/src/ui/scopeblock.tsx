@@ -125,6 +125,21 @@ export function ScopeBlock({ text, stage, onEdit, missing, pending, pendingLabel
               {line || ' '}
             </Text>
           ))}
+
+          {/* THE CAPTION LIVES INSIDE THE CARD (hadar 2026-08-14: "put it inside the
+              scope card").
+              It used to sit under the box, on the cream page, between this card and the
+              price card — so "The client signs this." read as a line floating in the gap
+              belonging to neither, the same complaint the price section had just been
+              fixed for. It is a footnote ABOUT this document, so it belongs on the same
+              sheet of paper, separated by a rule rather than by empty space. */}
+          <View style={st.capRule} />
+          <Text style={[st.caption, missing && st.captionWarn]}>
+            {missing
+              ? t('scope.tooShort')
+              : t(stage === 'draft' ? 'scope.capDraft'
+                : stage === 'sent' ? 'scope.capSent' : 'scope.capSigned')}
+          </Text>
         </View>
       ) : (
         // THE GAP, DRAWN AS AN EMPTY STATE (hadar 2026-08-06, with a competitor's
@@ -166,14 +181,6 @@ export function ScopeBlock({ text, stage, onEdit, missing, pending, pendingLabel
           two sentences" the draft banner was already trimmed for. */}
       {!!footer && <View style={{ marginTop: 10 }}>{footer}</View>}
 
-      {!!body && (
-        <Text style={[st.caption, missing && st.captionWarn]}>
-          {missing
-            ? t('scope.tooShort')
-            : t(stage === 'draft' ? 'scope.capDraft'
-              : stage === 'sent' ? 'scope.capSent' : 'scope.capSigned')}
-        </Text>
-      )}
     </View>
   );
 }
@@ -182,7 +189,7 @@ const st = StyleSheet.create({
   wrap: { marginTop: 14 },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   editHit: { minHeight: 32, justifyContent: 'center' },
-  edit: { fontFamily: F.bodySemi, fontSize: 14.5, color: C.brand },
+  edit: { fontFamily: F.bodySemi, fontSize: 14.5, color: C.ink },
   box: {
     marginTop: 7,
     backgroundColor: C.raised,
@@ -206,6 +213,9 @@ const st = StyleSheet.create({
   // NOT `C.danger`. Red said "you broke something" about a field nobody has filled in
   // yet — and while the pipeline is running it is not even his to fill.
   emptyBody: { fontFamily: F.body, fontSize: 13.5, lineHeight: 19, color: C.muted, textAlign: 'center' },
-  caption: { fontFamily: F.body, fontSize: 12.5, color: C.muted, marginTop: 7 },
+  // A hairline, full-bleed inside the box's padding, so the footnote is separated from
+  // the document without being pushed off it.
+  capRule: { height: 1, backgroundColor: C.line, marginTop: 12, marginHorizontal: -12 },
+  caption: { fontFamily: F.body, fontSize: 12.5, color: C.muted, marginTop: 8 },
   captionWarn: { color: C.danger, fontFamily: F.bodySemi },
 });

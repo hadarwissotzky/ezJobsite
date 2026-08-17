@@ -49,12 +49,13 @@ import { canDelete, canSend, chipKey, displayStatus, stageOf } from '../extralif
 import { canSendExtra } from '../extraprocstate';
 import { t } from '../i18n';
 import {
-  APP_NAME, Button, Card, MoneyBlock, ChecklistRow, PersonRow, PhotoGrid, Row, ScreenHeader, Section,
+  APP_NAME, Button, Card, MoneyBlock, ChecklistRow, PhotoGrid, Row, ScreenHeader, Section,
   StatusBanner, SyncedPill, VoiceClip, type ChecklistState, type PhotoTile, type RowTone,
 } from './kit';
 import { C, F, T, label as labelStyle, money as moneyStyle, tint } from './theme';
-import { touchTargets } from './tokens';
+import { shadows, touchTargets } from './tokens';
 import { Icon } from './icon';
+import { PeopleInvolved, rosterOf } from './peopleinvolved';
 import { ScopeBlock } from './scopeblock';
 import type { CaptureDelivery } from '../uploader';
 
@@ -68,6 +69,15 @@ const OWNER_LINE = '#E9D5A6';
 const OWNER_MARK = '#C8901E';
 
 const st = StyleSheet.create({
+  // Full-bleed (the page pads 18 and this cancels it), closed by a hairline and a
+  // shadow so the form below reads as UNDER the header rather than next in a list.
+  // Same values as the negotiation and locked screens' — one header, three stages.
+  headerSlab: {
+    backgroundColor: C.card,
+    marginHorizontal: -18, paddingHorizontal: 18, paddingBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: C.line,
+    ...shadows.card,
+  },
   // The draft banner, as the design draws it: a filled ochre disc + the state, then
   // the count and why, then the gaps as tappable "+ Add …" buttons.
   draftBanner: {
@@ -127,7 +137,20 @@ const st = StyleSheet.create({
     paddingHorizontal: 14,
   },
   ownerGapBtnT: { fontFamily: F.bodyBold, fontSize: 18, color: C.brandDark },
-  ownerGapChev: { fontFamily: F.body, fontSize: 22, color: C.brand },
+  ownerGapChev: { fontFamily: F.body, fontSize: 22, color: C.ink },
+  // ── the three pricing modes (design c3) ──
+  // Equal thirds, so no mode looks like the default by being wider. The selected one
+  // takes the ink border and the darker type; the other two stay quiet. Above the
+  // touch-target floor because this is a gloved thumb changing what a client signs.
+  modes: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  mode: { flex: 1, minHeight: touchTargets.minimum, borderWidth: 1, borderColor: C.line,
+    borderRadius: 12, backgroundColor: C.card, paddingVertical: 9,
+    paddingHorizontal: 8, justifyContent: 'center' },
+  modeOn: { borderColor: C.ink, borderWidth: 1.5, backgroundColor: C.surfaceMuted },
+  modeT: { fontFamily: F.bodyBold, fontSize: 14, color: C.steel },
+  modeTOn: { color: C.ink },
+  modeS: { fontFamily: F.body, fontSize: 11.5, lineHeight: 15, color: C.muted, marginTop: 1 },
+  modeSOn: { color: C.steel },
   ownerGapFoot: { fontFamily: F.body, fontSize: 13.5, color: C.muted, marginTop: 10 },
 });
 
@@ -159,6 +182,12 @@ export type ExtraDraftProps = {
   proc: ProcState;
   /** 'nte' adds the not-to-exceed cap to the money line. R3: T&M always carries one. */
   priceMode: 'fixed' | 'nte';
+  /**
+   * Tapping one of the three pricing modes under the price. NEVER writes a figure by
+   * itself — it opens the cost editor set to that mode, because every mode change
+   * moves money and money goes through the read-back (mandate #6). See `PriceModes`.
+   */
+  onPickPriceMode?: (mode: PriceMode) => void;
   /** The stored flow values, raw (`next_invoice` · `adds_days` · …). Raw and not
    *  pre-formatted so that NULL keeps its one meaning — nobody has answered — which
    *  is the fact the recommended list is counting. */
@@ -316,6 +345,14 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
   const items = checklist(props);
 
   const scrollRef = React.useRef<ScrollView>(null);
+  // DEV ONLY — drive this screen's scroll from the inspector, so a section can be
+  // reviewed without a thumb.
+  React.useEffect(() => {
+    if (__DEV__) {
+      (globalThis as any).__draftScroll =
+        (y: number) => scrollRef.current?.scrollTo({ y, animated: false });
+    }
+  }, []);
   React.useEffect(() => {
     if (props._fixtureScrollY != null) {
       scrollRef.current?.scrollTo({ y: props._fixtureScrollY, animated: false });
@@ -363,6 +400,13 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             now sits above the title where the design puts it. It used to be a
             hand-rolled line underneath, which read as a caption and spent a line
             of a 375pt screen doing it. */}
+        {/* THE HEADER SLAB — the same header region as the other two stages
+            (hadar, 2026-08-14). What this is and where it stands are one surface,
+            closed by a rule and a shadow; everything you can act on sits under it in
+            plain cards. The slab ends at the state banner and not lower, because on a
+            draft the price is BELOW the scope (391) — the scope is content here, not
+            header. */}
+        <View style={st.headerSlab}>
         <ScreenHeader
           title={rec.title}
           kicker={kicker(props)}
@@ -429,6 +473,17 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             )}
         </View>
 
+        </View>
+
+        {/* WHO IS ON THIS, DIRECTLY UNDER THE STATE — the same slot the negotiation and
+            sealed screens give it (hadar, 2026-08-14: "same location"). It sat below
+            the scope AND the price here, so the same section appeared in a different
+            place on each of the three stages of one record.
+            It reads correctly in this slot as well as consistently: on a draft the
+            client is the gap that decides whether any of the work below can be sent at
+            all, and it used to be found only by scrolling past it. */}
+        <PeopleSection {...props} />
+
         {/* 391 — THE SCOPE OF WORK LEADS, above the price.
             It rendered 620px down the screen, below the money, the blocker banner and
             the raw-capture card, clipped at five lines behind "Show more" — measured
@@ -466,7 +521,28 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
         />
 
         {props.kind === 'extra'
-          ? <DraftMoney rec={rec} priceMode={props.priceMode} heard={props.priceHeard ?? null} />
+          ? (
+            /* A SECTION, NOT A FIGURE ON THE PAGE (hadar 2026-08-14: "the price section
+               still doesn't look like a section — it is a grey background, it looks like
+               a gap with a floating number on it").
+               He was right, and literally: everything around it — the scope, the terms,
+               the raw capture — is a card on the cream page, and the price was the one
+               block with nothing under it. So the eye read the cream as a GAP between
+               two sections and the number as something that had come loose into it.
+               The money that the whole document turns on looked like a layout mistake.
+               Same card, same heading treatment as its neighbours, with the mode
+               selector inside it because the mode is part of what the price MEANS. */
+            <Section title={t('draft.priceSection')}>
+              <DraftMoney rec={rec} priceMode={props.priceMode} heard={props.priceHeard ?? null} />
+              {/* The mode reads off the RECORD, not off a separate flag: an extra with
+                  no figure IS the authorize case, whatever `priceMode` happens to say. */}
+              {props.onPickPriceMode && (
+                <PriceModes
+                  mode={!rec.priced ? 'authorize' : priceModeOf(props.priceMode)}
+                  onPick={props.onPickPriceMode} />
+              )}
+            </Section>
+          )
           : (
             // R6b AC2: a Decision shows no figure anywhere on the screen.
             <Text style={[moneyStyle, { fontSize: 24, color: C.ink, marginTop: 8 }]}>
@@ -645,6 +721,54 @@ function kicker({ kind, extraNo, rec }: ExtraDraftProps): string {
  *  confirmed by a human — the label says so, and the system never authors one.
  *  An unpriced extra says "No price given yet" at full size, never a dash: a dash
  *  reads as a rendering fault, and "no cost change" would tell an owner it is free. */
+export type PriceMode = 'fixed' | 'nte' | 'authorize';
+
+/** Widen the stored two-value mode to the selector's three. */
+const priceModeOf = (m: 'fixed' | 'nte'): PriceMode => m;
+
+/**
+ * HOW THIS IS PRICED — the design's three modes, under the figure (c3 in the demo;
+ * hadar 2026-08-13: "the process does not follow the rest of the design, it is missing
+ * a section").
+ *
+ * All three are states this app already supports, which is why this is a selector and
+ * not a new feature:
+ *   · Fixed      — an amount, no cap. The price is the price.
+ *   · Cap (NTE)  — `nte_cents` set. `sendReadiness` BLOCKS on a cap with no ceiling,
+ *                  because a not-to-exceed clause with no number in it is not a softer
+ *                  promise, it is a promise that says nothing while looking like a limit.
+ *   · Authorize  — no amount at all. Sendable: `no_cost` is only a RECOMMENDED gap for
+ *                  an extra, never a blocker. The owner authorises the work and the
+ *                  price follows.
+ *
+ * TAPPING A MODE OPENS THE COST EDITOR; it never sets a price here. Two of the three
+ * modes need a number, the third means dropping one, and a figure that reaches a
+ * document without passing a human read-back is the failure mandate #6 exists for.
+ */
+function PriceModes({ mode, onPick }: { mode: PriceMode; onPick: (m: PriceMode) => void }) {
+  const modes: { key: PriceMode; title: string; sub: string }[] = [
+    { key: 'fixed',     title: t('price.modeFixed'), sub: t('price.modeFixedSub') },
+    { key: 'nte',       title: t('price.modeCap'),   sub: t('price.modeCapSub') },
+    { key: 'authorize', title: t('price.modeAuth'),  sub: t('price.modeAuthSub') },
+  ];
+  return (
+    <View style={st.modes}>
+      {modes.map((m) => {
+        const on = m.key === mode;
+        return (
+          <Pressable key={m.key} style={[st.mode, on && st.modeOn]}
+            onPress={() => onPick(m.key)}
+            accessibilityRole="button" accessibilityState={{ selected: on }}
+            accessibilityLabel={`${m.title} — ${m.sub}`}>
+            <Text style={[st.modeT, on && st.modeTOn]} numberOfLines={1}>{m.title}</Text>
+            <Text style={[st.modeS, on && st.modeSOn]} numberOfLines={2}>{m.sub}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function DraftMoney({ rec, priceMode, heard }: {
   rec: ExtraRecord; priceMode: 'fixed' | 'nte';
   heard?: { words: string; label: string; onUse: () => void } | null;
@@ -751,6 +875,92 @@ function bannerPills(r: SendReadiness, items: readonly ChecklistItem[]): readonl
 /* -------------------------------------------------------------------- raw -- */
 
 /**
+ * WHO IS ON THIS EXTRA — the SHARED section (hadar, 2026-08-14: "the people section
+ * needs to be the same in all 3 stages, same location, looks the same").
+ *
+ * This screen used to draw its own: a vertical list of labelled rows ("Requested by",
+ * "Source", "Also on this job") under a heading reading "Who is on this", while the
+ * negotiation screen drew a horizontal who's-who strip headed "People involved" and the
+ * sealed record drew nothing. Three answers to one question, and the person who pays
+ * for that is the one CLAUDE.md §1 names — someone for whom software is not second
+ * nature, re-learning where the people live every time the extra changes stage.
+ *
+ * The rows are gone; `PeopleInvolved` renders all of it. What stays here is the only
+ * part that is genuinely about THIS stage: a draft may have nobody yet, and that gap is
+ * what blocks sending.
+ */
+function PeopleSection(p: ExtraDraftProps) {
+  const { rec } = p;
+  // The crew person who stood in front of it, if the record names one.
+  const source = rec.people.find((pp) => pp.kind === 'crew') ?? null;
+  const owner = !!p.requestedBy;
+  // ONE list, built once and de-duplicated in one pass by `rosterOf`: the client, the
+  // on-site source, then everybody else on the job.
+  //
+  // EVERYONE ELSE IS HIDDEN UNTIL THERE IS A CLIENT (hadar, 2026-08-08: "we need first
+  // to select an owner before we choose additional people to send to"). An extra with
+  // no signer that still lists three names reads as "somebody will get this" — and
+  // nobody will.
+  const people = rosterOf(
+    p.requestedBy
+      ? {
+          name: p.requestedBy,
+          role: p.clientTypeLabel || t('erec.approverRole'),
+          // The client column opens the client editor: on a draft the signer is still
+          // a choice, and this is the one place on the screen that says who it is.
+          onPress: p.onEditClient ?? p.onEditDetails,
+        }
+      : null,
+    [
+      ...(source ? [{ name: source.name, role: t('draft.sourceRole') }] : []),
+      ...(owner
+        ? (p.jobPeople ?? []).map((m) => ({
+            name: m.name,
+            role: m.role,
+            onRemove: p.onRemovePerson ? () => p.onRemovePerson?.(m.id, m.name) : undefined,
+          }))
+        : []),
+    ]
+  );
+  return (
+    <PeopleInvolved
+      people={people}
+      onAddContact={owner ? p.onAddContact : undefined}
+      empty={
+        // THE NEGATIVE STATE IS A CARD, NOT A ROW (hadar's design, 2026-08-08). It was
+        // one warn-toned row among eight others — the same size and shape as "Payment
+        // timing" — so the one gap that decides whether this extra can be signed read
+        // as the eighth-most-important thing on the screen. It is not: nobody can
+        // approve an extra addressed to nobody.
+        <View style={st.ownerGap}>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={st.ownerGapDisc}>
+              <Icon name="person" size={22} color={OWNER_MARK} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={st.ownerGapH}>{t('client.noOwnerH')}</Text>
+              <Text style={st.ownerGapB}>{t('client.noOwnerB')}</Text>
+            </View>
+          </View>
+          <Pressable
+            onPress={p.onEditClient ?? p.onEditDetails}
+            accessibilityRole="button"
+            accessibilityLabel={t('client.chooseOwner')}
+            style={({ pressed }) => [st.ownerGapBtn, pressed && { opacity: 0.75 }]}
+          >
+            <Text style={[st.ownerGapBtnT, { flex: 1 }]}>{t('client.chooseOwner')}</Text>
+            <Text style={st.ownerGapChev}>›</Text>
+          </Pressable>
+          {/* The promise that makes the hiding above honest: the other people are not
+              gone, they are next. */}
+          <Text style={st.ownerGapFoot}>{t('client.othersLater')}</Text>
+        </View>
+      }
+    />
+  );
+}
+
+/**
  * The evidence, kept visibly apart from the client-facing scope below.
  *
  * The separation is the point of the two headings: this is what was captured on
@@ -796,6 +1006,19 @@ function RawSection(p: ExtraDraftProps) {
           Source). The client-facing prose now lives once, under SCOPE → Description
           of work; the REQ-LC43 concern it used to carry — that an AI summary is not
           the frozen instrument — is handled there. */}
+      {/* WHAT PRODUCED THIS, beside what it produced. It used to sit between the
+          client and the rest of the people, splitting the one group on the screen
+          that is a list of people. */}
+      {p.capturedWith != null && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 48,
+            paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: C.line }}>
+            <View style={{ flex: 1 }}>
+              <Text style={labelStyle}>{t('draft.source')}</Text>
+              <Text style={[T.bodySteel, { fontSize: 14, marginTop: 3 }]}>{p.capturedWith}</Text>
+            </View>
+          </View>
+      )}
+
       {rec.voices.length === 0 && (
         <Text style={[T.bodySteel, { fontSize: 13.5 }]}>{t('draft.noNotes')}</Text>
       )}
@@ -889,145 +1112,6 @@ function RawSection(p: ExtraDraftProps) {
           {t({ k: 'erec.evidenceMore', p: { n: rec.photosTruncated } })}
         </Text>
       )}
-
-      {/* Requested-by is a FIELD (the composer asks it), so an unanswered one is
-          offered to be filled. The capture source is a stored FACT, so an absent one
-          is omitted — showing "Not set" beside it would invite him to fix something
-          that is not his to fix.
-          Both are drawn as a LABEL ROW WITH A PERSON UNDER IT rather than as a
-          name in the value column: the design gives each an avatar, and a name is
-          the one value on this screen that belongs to somebody rather than
-          describing the work. */}
-      <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 6 }}>
-        {p.requestedBy ? (
-          <Pressable
-            onPress={p.onEditClient ?? p.onEditDetails}
-            accessibilityRole="button"
-            accessibilityLabel={t('draft.requestedBy')}
-            style={{ flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingVertical: 6 }}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={labelStyle}>{t('draft.requestedBy')}</Text>
-              <PersonRow name={p.requestedBy}
-                role={p.clientTypeLabel || t('erec.approverRole')} kind="approver" />
-            </View>
-            <Text style={{ fontFamily: F.body, fontSize: 22, color: C.muted }}>›</Text>
-          </Pressable>
-        ) : (
-          // THE NEGATIVE STATE IS A CARD, NOT A ROW (hadar's design, 2026-08-08).
-          // It was one warn-toned row among eight other rows — the same size and
-          // shape as "Payment timing", so the one gap that decides whether this
-          // extra can be signed read as the eighth-most-important thing on the
-          // screen. It is not: nobody can approve an extra addressed to nobody.
-          // So it gets a card, a heading that states the gap in words, and one
-          // button that does the one thing.
-          <View style={st.ownerGap}>
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <View style={st.ownerGapDisc}>
-                <Icon name="person" size={22} color={OWNER_MARK} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={st.ownerGapH}>{t('client.noOwnerH')}</Text>
-                <Text style={st.ownerGapB}>{t('client.noOwnerB')}</Text>
-              </View>
-            </View>
-            <Pressable
-              onPress={p.onEditClient ?? p.onEditDetails}
-              accessibilityRole="button"
-              accessibilityLabel={t('client.chooseOwner')}
-              style={({ pressed }) => [st.ownerGapBtn, pressed && { opacity: 0.75 }]}
-            >
-              <Text style={[st.ownerGapBtnT, { flex: 1 }]}>{t('client.chooseOwner')}</Text>
-              <Text style={st.ownerGapChev}>›</Text>
-            </Pressable>
-            {/* The promise that makes the hiding below honest: the other people are
-                not gone, they are next. */}
-            <Text style={st.ownerGapFoot}>{t('client.othersLater')}</Text>
-          </View>
-        )}
-
-        {/* SOURCE = the on-site person, drawn like "Requested by": avatar + name +
-            "On-site observation". The capture-method string is the fallback only. */}
-        {source ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 56,
-            paddingVertical: 6, borderTopWidth: 1, borderTopColor: C.line }}>
-            <View style={{ flex: 1 }}>
-              <Text style={labelStyle}>{t('draft.source')}</Text>
-              <PersonRow name={source.name} role={t('draft.sourceRole')} kind="crew" />
-            </View>
-          </View>
-        ) : p.capturedWith != null ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 48,
-            paddingVertical: 6, borderTopWidth: 1, borderTopColor: C.line }}>
-            <View style={{ flex: 1 }}>
-              <Text style={labelStyle}>{t('draft.source')}</Text>
-              <Text style={[T.bodySteel, { fontSize: 14, marginTop: 3 }]}>{p.capturedWith}</Text>
-            </View>
-          </View>
-        ) : null}
-
-        {/* EVERYTHING ABOUT OTHER PEOPLE IS HIDDEN UNTIL THERE IS AN OWNER
-            (hadar, 2026-08-08: "we need first to select an owner before we choose
-            additional people to send to"). The "Add someone else" row was already
-            gated this way; the roster list under it was not, so an extra with no
-            owner still showed a list of people it could not be sent to — three
-            names and no signer reads as "somebody will get this". One `owner`
-            predicate now governs both, so the section either asks for the owner or
-            shows the people, never both.
-
-            Once an owner exists: an extra rarely involves only the person who signs
-            it — an architect, an inspector, or the GC above you may all need to be
-            reachable on this job. Adding here NEVER changes who approves (see
-            `saveClient`).
-
-            Rendered exactly like the two rows above so the section reads as one list
-            of humans, not two features. Not tappable: there is nothing to change
-            about them from here, and a chevron that opened an editor would suggest
-            this extra owns them — it does not. */}
-        {owner && (p.jobPeople ?? []).length > 0 && (
-          <View style={{ borderTopWidth: 1, borderTopColor: C.line, paddingTop: 6 }}>
-            <Text style={labelStyle}>{t('draft.alsoOnJob')}</Text>
-            {(p.jobPeople ?? []).map((m) => (
-              <View key={m.id} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <PersonRow name={m.name} role={m.role} kind="crew" />
-                </View>
-                {/* A VISIBLE ✕, not a swipe (hadar, 2026-08-05). The swipe this
-                    replaces was never shipped, and it was the wrong instinct here: a
-                    hidden gesture is what CLAUDE.md §1 rules out — someone who does
-                    not think in software has no reason to believe a row can be
-                    swiped, so the ability may as well not exist. On Home the swipe
-                    earns its keep because those rows are already tappable and a
-                    button would compete with the card; these rows do nothing at all,
-                    so the ✕ has the space and is the only affordance it needs.
-                    44pt (mandate #3). Nothing is removed by the tap itself — it
-                    opens the confirmation. */}
-                {p.onRemovePerson && (
-                  <Pressable
-                    onPress={() => p.onRemovePerson?.(m.id, m.name)}
-                    accessibilityRole="button"
-                    accessibilityLabel={t({ k: 'client.removePerson', p: { name: m.name } } as any)}
-                    hitSlop={8}
-                    style={({ pressed }) => [st.removeX, pressed && { opacity: 0.5 }]}
-                  >
-                    <Text style={st.removeXT}>✕</Text>
-                  </Pressable>
-                )}
-              </View>
-            ))}
-          </View>
-        )}
-
-        {owner && p.onAddContact && (
-          <Row
-            icon="people"
-            label={t('client.addContact')}
-            sub={t('client.addContactSub')}
-            chevron
-            onPress={p.onAddContact}
-          />
-        )}
-      </View>
     </Section>
   );
 }
@@ -1163,10 +1247,10 @@ function DescriptionBlock({ text, blocked, onPress }: {
           style={{ minHeight: touchTargets.minimum, flexDirection: 'row',
             alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}
         >
-          <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.brand }}>
+          <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.ink }}>
             {open ? t('draft.showLess') : t('draft.showMore')}
           </Text>
-          <Text style={{ fontFamily: F.body, fontSize: 13, color: C.brand }}>
+          <Text style={{ fontFamily: F.body, fontSize: 13, color: C.ink }}>
             {open ? '⌃' : '⌄'}
           </Text>
         </Pressable>

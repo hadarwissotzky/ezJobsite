@@ -21,7 +21,12 @@
 import React from 'react';
 import * as FS from 'expo-file-system/legacy';
 import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { t } from '../i18n';
+import { getLang, t } from '../i18n';
+import { dayLabel, groupByDay, messageTime } from '../chatday';
+
+/** The locale the reader's dates and clock are drawn in — the same rule the rest of
+ *  the app follows (mandate #5: dates follow the reader, never the record). */
+const localeTag = () => (getLang() === 'es' ? 'es-419' : 'en-US');
 import { clientMessageCount, threadState, type ThreadMessage } from '../discussion';
 import { PHOTO_ONLY_BODY } from '../discussionstore';
 // R7 owns what a status is CALLED. R5b owns whether the thread is open. Keeping the
@@ -48,7 +53,6 @@ function chipKind(s: LedgerStatus) {
  * would invite someone to add to a record after it was signed. Timestamps are on
  * every line because a log without them cannot show who was waiting on whom.
  */
-const msgAvatarStyle = { width: 30, height: 30, borderRadius: 15 } as const;
 // A photo inside a bubble. Small enough that three fit a 82%-wide bubble on a 13
 // mini, big enough to see what it is before tapping.
 const msgShotStyle = { width: 92, height: 92, borderRadius: 10 } as const;
@@ -63,7 +67,13 @@ export function DiscussionLog(props: {
   /** The client's display name — the heading becomes "Discussion with <name>" and
    *  the client's messages are labelled by name, not the generic "Client". */
   clientName?: string | null;
-  /** The client's photo, when the roster has one; initials otherwise. */
+  /**
+   * NO LONGER DRAWN IN THE THREAD (2026-08-13). The design identifies each message by
+   * a sender line inside the bubble — "DAVE · 5:19 PM" — rather than an avatar gutter,
+   * which in a 90%-height sheet costs 38pt of every message's width to repeat one fact
+   * the line already states. Kept in the props so callers do not have to change and so
+   * the roster photo is still available if an avatar returns.
+   */
   clientAvatar?: string | null;
   /** Open a photo sent in a message full-screen. Omitted where there is no lightbox
    *  — the tile then renders and simply does not respond, rather than opening a
@@ -75,108 +85,119 @@ export function DiscussionLog(props: {
   // The design labels the discussion by FIRST name ("Discussion with Sarah") and the
   // client avatar carries a SINGLE initial ("S"), not two.
   const clientFirst = clientName ? clientName.split(/\s+/)[0] : null;
-  const clientInitials = clientFirst ? clientFirst[0].toUpperCase() : null;
-  const heading = clientFirst ? t({ k: 'r5b.logHeadingWith', p: { name: clientFirst } }) : t('r5b.logHeading');
   return (
-    <View style={T.card}>
-      <Text style={label}>{heading}</Text>
-      {/* Chat bubbles (hadar, 2026-07-24: "an extra becomes like a chat or slack
-          channel"). Yours on the right, the client's on the left with their avatar
-          and name beside each message; undelivered replies say so (mandate #1). */}
-      <View style={{ marginTop: 10, gap: 12 }}>
-        {props.messages.map((m) => {
-          const mine = m.side === 'contractor';
-          const undelivered = mine && props.undelivered?.has(m.id);
-          const bubble = (
-            <View style={{ maxWidth: '82%', alignItems: mine ? 'flex-end' : 'flex-start' }}>
-              {/* Only YOUR messages carry a sender label ("You"), above-right. The
-                  client's messages are identified by their avatar to the left. */}
-              {mine && (
-                <Text style={{
-                  fontFamily: F.dispSemi, fontSize: 10.5, letterSpacing: 1,
-                  textTransform: 'uppercase', color: C.steel, marginBottom: 3, marginRight: 4,
-                }}>{t('r5b.fromYou')}</Text>
-              )}
-              <View style={{
-                borderRadius: 16, paddingVertical: 9, paddingHorizontal: 13,
-                backgroundColor: mine ? '#4E6243' : '#EFEBE3',
-                borderBottomRightRadius: mine ? 4 : 16,
-                borderBottomLeftRadius: mine ? 16 : 4,
-              }}>
-                {/* PHOTOS ABOVE THE WORDS. A message whose body is the photo-only
-                    mark is a picture, and printing "📷" over the picture it stands
-                    for would be a caption saying "image". */}
-                {!!m.photos?.length && (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6,
-                    marginBottom: m.text === PHOTO_ONLY_BODY ? 0 : 7 }}>
-                    {m.photos.map((ph) => {
-                      // Resolved once. `FS.documentDirectory` is typed nullable (it is
-                      // null on web, where this screen never runs); a null base with a
-                      // real relpath would render a file:// URI missing its root, so
-                      // the tile falls back to the missing-evidence state rather than
-                      // to a broken image.
-                      const uri = ph.relpath && FS.documentDirectory
-                        ? FS.documentDirectory + ph.relpath : null;
-                      return uri ? (
-                      <Pressable key={ph.captureId}
-                        onPress={() => props.onPressPhoto?.(uri)}
-                        accessibilityRole="imagebutton"
-                        accessibilityLabel={t('r5b.photoInMessage')}>
-                        <Image source={{ uri }} style={msgShotStyle} />
-                      </Pressable>
-                    ) : (
-                      // The row survived, the file did not (a restore, a purge). The
-                      // extra's grid draws the same tile for the same reason: a
-                      // missing photo is a fact worth stating, not a broken image.
-                      <View key={ph.captureId} style={[msgShotStyle, {
-                        alignItems: 'center', justifyContent: 'center',
-                        backgroundColor: '#EFEBE3' }]}>
-                        <Text style={{ ...T.bodySteel, fontSize: 10, textAlign: 'center' }}>
-                          {t('erec.evidenceMissing')}
-                        </Text>
-                      </View>
-                    ); })}
-                  </View>
-                )}
-                {m.text !== PHOTO_ONLY_BODY && (
-                  <Text style={[T.body, { fontSize: 14.5, lineHeight: 20,
-                    color: mine ? '#fff' : '#151A1E' }]}>{m.text}</Text>
-                )}
-              </View>
-              {/* Time BELOW the bubble; your delivered messages get a ✓✓ read-receipt,
-                  an undelivered one says so instead (mandate #1). */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3,
-                marginRight: mine ? 4 : 0, marginLeft: mine ? 0 : 4 }}>
-                <Text style={{ ...T.bodySteel, fontSize: 11.5 }}>{props.formatAt(m.atMs)}</Text>
-                {mine && (undelivered
-                  ? <Text style={{ ...T.bodySteel, fontSize: 11.5 }}>· {t('r5b.notSentYet')}</Text>
-                  : <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.brand }}>✓✓</Text>)}
+    // BARE, NOT A CARD (2026-08-13). This now renders inside the Messages sheet, whose
+    // own header already says "Messages" — so the card drew a second border, a second
+    // background and a second heading of the same thing, and the design's `.thread` is
+    // just messages with a margin. The "part of the job record" line goes with it: the
+    // sheet is opened from the record, and a conversation that lives on a record does
+    // not need to keep saying so under every screenful.
+    <View>
+      {/* THE CHAT — the design's bubbles, grouped by day the way WhatsApp does
+          (hadar 2026-08-13, with a screenshot: "group messages by date and add a time
+          to the message at the bottom right").
+
+          THE SENDER LINE IS GONE. It read "USTED · 25 JUL · 6:12 A.M." above every
+          message; the time has moved into the corner of the bubble where the reference
+          puts it, the day is now stated once per day on the divider, and what was left
+          was an uppercase name repeating what the alignment already says — yours on the
+          right, theirs on the left. Three lines of furniture became one line of words.
+
+          WHAT DID NOT GO IS THE DELIVERY STATE: a reply sitting in the outbox must say
+          so (mandate #1). It sits beside the time, where WhatsApp puts its ticks. */}
+      <View style={{ gap: 8 }}>
+        {groupByDay(props.messages).map((day) => (
+          <View key={day.key} style={{ gap: 8 }}>
+            {/* The divider: a centred pill, not a full-width rule. It is a label for
+                what follows, and a rule would read as a separator between two records. */}
+            <View style={{ alignItems: 'center', marginTop: 6, marginBottom: 2 }}>
+              <View style={{ backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: C.line,
+                borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 }}>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.steel }}>
+                  {dayLabel(day.atMs, Date.now(), localeTag(), {
+                    today: t('feed.today'), yesterday: t('feed.yesterday') })}
+                </Text>
               </View>
             </View>
-          );
-          // The client's messages carry the client's avatar to the left; yours
-          // sit flush right without one — the design draws the conversation as
-          // "them, over there; you, over here".
-          if (mine) {
-            return <View key={m.id} style={{ alignItems: 'flex-end' }}>{bubble}</View>;
-          }
-          return (
-            <View key={m.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
-              {props.clientAvatar
-                ? <Image source={{ uri: props.clientAvatar }} style={msgAvatarStyle} />
-                : (
-                  <View style={[msgAvatarStyle, { backgroundColor: C.approve, alignItems: 'center', justifyContent: 'center' }]}>
-                    <Text style={{ fontFamily: F.dispSemi, fontSize: 12, color: '#fff' }}>{clientInitials ?? '·'}</Text>
+
+            {day.items.map((m) => {
+              const mine = m.side === 'contractor';
+              const undelivered = mine && props.undelivered?.has(m.id);
+              // One stamp colour now that both bubbles are light. It reads as metadata
+              // on either side instead of needing a per-side alpha.
+              const stampColor = C.muted;
+              return (
+                <View key={m.id} style={{
+                  maxWidth: '82%', alignSelf: mine ? 'flex-end' : 'flex-start',
+                  borderRadius: 16, paddingVertical: 9, paddingHorizontal: 12,
+                  // BRANDING (hadar 2026-08-13): "the bubble colour should not be black
+                  // and white but similar to WhatsApp — greenish background and black".
+                  // Yours takes the brand-tinted fill and keeps INK text; theirs stays
+                  // white. Ink-on-tint rather than white-on-ink also fixes a smaller
+                  // thing: the timestamp and ticks were white on black at 55% opacity and
+                  // barely legible in daylight, which is where this app is read.
+                  backgroundColor: mine ? C.brandSoft : '#FFFFFF',
+                  borderWidth: 1, borderColor: mine ? '#D3DCC6' : C.line,
+                }}>
+                  {/* PHOTOS ABOVE THE WORDS. A message whose body is the photo-only
+                      mark is a picture, and printing "📷" over the picture it stands
+                      for would be a caption saying "image". */}
+                  {!!m.photos?.length && (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6,
+                      marginBottom: m.text === PHOTO_ONLY_BODY ? 0 : 7 }}>
+                      {m.photos.map((ph) => {
+                        const uri = ph.relpath && FS.documentDirectory
+                          ? FS.documentDirectory + ph.relpath : null;
+                        return uri ? (
+                          <Pressable key={ph.captureId} onPress={() => props.onPressPhoto?.(uri)}
+                            disabled={!props.onPressPhoto}>
+                            <Image source={{ uri }} style={msgShotStyle} resizeMode="cover" />
+                          </Pressable>
+                        ) : (
+                          // The row survived, the file did not (a restore, a purge). A
+                          // missing photo is a fact worth stating, not a broken image.
+                          <View key={ph.captureId} style={[msgShotStyle, {
+                            alignItems: 'center', justifyContent: 'center',
+                            backgroundColor: '#EFEBE3' }]}>
+                            <Text style={{ ...T.bodySteel, fontSize: 10, textAlign: 'center' }}>
+                              {t('erec.evidenceMissing')}
+                            </Text>
+                          </View>
+                        ); })}
+                    </View>
+                  )}
+                  {/* BIGGER AND HEAVIER THAN BODY TEXT ELSEWHERE (hadar 2026-08-13:
+                      "more bold — it is for people who work outdoors — and slightly
+                      bigger").
+                      16/22 semibold, not 14.5/21 regular. This is read at arm's length,
+                      in sun, through a screen that may have dust on it, by someone who
+                      is not going to stop and squint — and unlike a list row there is no
+                      density argument against it, because a conversation has one column
+                      and all the height it needs. Semibold rather than bold: 700 at this
+                      size starts to read as shouting, and every message would be doing
+                      it. */}
+                  {m.text !== PHOTO_ONLY_BODY && (
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 16, lineHeight: 22,
+                      color: C.ink }}>{m.text}</Text>
+                  )}
+                  {/* THE STAMP, BOTTOM RIGHT, inside the bubble. */}
+                  <View style={{ flexDirection: 'row', alignSelf: 'flex-end',
+                    alignItems: 'center', gap: 4, marginTop: 3 }}>
+                    <Text style={{ fontFamily: F.body, fontSize: 11, color: stampColor }}>
+                      {messageTime(m.atMs, localeTag())}
+                    </Text>
+                    {mine && (undelivered
+                      ? <Text style={{ fontFamily: F.body, fontSize: 11, color: stampColor }}>
+                          · {t('r5b.notSentYet')}</Text>
+                      : <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5,
+                          color: C.approve }}>✓✓</Text>)}
                   </View>
-                )}
-              {bubble}
-            </View>
-          );
-        })}
+                </View>
+              );
+            })}
+          </View>
+        ))}
       </View>
-      <Text style={{ ...T.bodySteel, fontSize: 11.5, marginTop: 10 }}>
-        {t('r5b.partOfRecord')}
-      </Text>
       {props.onOpen && (
         <Pressable onPress={props.onOpen} hitSlop={8} style={{ paddingTop: 10 }}>
           <Text style={{ ...label, color: C.orange }}>{t('r5b.openThread')} ›</Text>

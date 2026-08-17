@@ -149,6 +149,13 @@ export function FusedCapture({
   const [micOn, setMicOn] = React.useState(false);
   const [facing, setFacing] = React.useState<CameraType>('back');
   const [flash, setFlash] = React.useState<'off' | 'on'>('off');
+  /**
+   * THE FRONT CAMERA HAS NO LAMP. Asking iOS for a torch on it does nothing, so the
+   * button would go back to being the dead control this change is fixing — just on a
+   * different camera. Derived rather than stored so flipping to the front cannot leave
+   * a torch flag set behind it, and flipping back restores whatever was chosen.
+   */
+  const torchOn = flash === 'on' && facing === 'back';
   const [shots, setShots] = React.useState<Shot[]>([]);
   const [saving, setSaving] = React.useState(false);
   const [paused, setPaused] = React.useState(false);        // user tapped pause
@@ -469,12 +476,18 @@ export function FusedCapture({
         </View>
 
         <View style={st.topRight}>
-          <Pressable onPress={() => setFlash((f) => (f === 'off' ? 'on' : 'off'))} style={st.topBtn}>
-            <Icon name="flash" size={22} color={flash === 'on' ? C.caution : C.ink} />
-            <Text style={[st.topLab, flash === 'on' && st.topLabOn]}>
-              {flash === 'on' ? T('cap.flashOn') : T('cap.flashOff')}
-            </Text>
-          </Pressable>
+          {/* Hidden, not disabled-looking, on the front camera: there is no lamp to
+              turn on, and a greyed control still invites the tap that will do nothing. */}
+          {facing === 'back' && (
+            <Pressable onPress={() => setFlash((f) => (f === 'off' ? 'on' : 'off'))}
+              style={st.topBtn} accessibilityRole="button"
+              accessibilityState={{ selected: torchOn }}>
+              <Icon name="flash" size={22} color={torchOn ? C.caution : C.ink} />
+              <Text style={[st.topLab, torchOn && st.topLabOn]}>
+                {torchOn ? T('cap.flashOn') : T('cap.flashOff')}
+              </Text>
+            </Pressable>
+          )}
           <Pressable onPress={() => setFacing((f) => (f === 'back' ? 'front' : 'back'))} style={st.topBtn}>
             <Icon name="cameraFlip" size={22} color={C.ink} />
             <Text style={st.topLab}>{T('cap.flip')}</Text>
@@ -484,7 +497,22 @@ export function FusedCapture({
 
       {/* ---------- CAMERA BAND ---------- */}
       <View style={st.band}>
-        <CameraView ref={camRef} style={st.fill} facing={facing} flash={flash} />
+        {/* THE LIGHT STAYS ON — `enableTorch`, not just `flash` (hadar 2026-08-13:
+            "the flash doesn't run").
+            `flash="on"` fires the LED for a few milliseconds at the shutter and does
+            nothing before it. So the button lit up, the scene stayed dark, and the only
+            evidence it had worked at all arrived after the photo was already taken —
+            which reads, correctly, as a dead button.
+            That is also the wrong behaviour for this product. The place a contractor
+            reaches for this is a crawlspace or the back of a panel: he needs to SEE
+            what he is pointing at, frame it, and talk about it while the light is on.
+            A torch does that AND lights the photo; a shutter flash does neither until
+            it is too late to aim.
+            `mode="picture"` is set explicitly rather than left to the default, because
+            the flash/torch configuration is applied per mode and an implicit default is
+            not something to rely on for hardware that either turns on or does not. */}
+        <CameraView ref={camRef} style={st.fill} mode="picture" facing={facing}
+          flash={flash} enableTorch={torchOn} />
 
         {/* The cards sit in NORMAL FLOW inside an overlay, not absolutely positioned.
             They were absolute at first and it only worked on one screen height: the

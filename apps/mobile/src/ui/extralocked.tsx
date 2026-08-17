@@ -48,11 +48,12 @@ import {
   APP_NAME, Button, MoneyBlock, Card, PersonRow, PhotoGrid, Row, ScreenHeader, Section, StatusBanner, SyncedPill,
   type PhotoTile,
 } from './kit';
+import { PeopleInvolved, rosterOf } from './peopleinvolved';
 import { RecordApproval } from './recordapproval';
 import { RecordingsCard } from './recordings';
 import { ScopeBlock } from './scopeblock';
 import { C, F, T, label as labelStyle, money as moneyStyle, tint, type Tone } from './theme';
-import { radii, touchTargets } from './tokens';
+import { radii, shadows, touchTargets } from './tokens';
 
 export type ExtraLockedProps = {
   /** The sealed record. Only its FROZEN fields are presented as agreed terms — see the
@@ -76,6 +77,11 @@ export type ExtraLockedProps = {
   /** The single required approver (D4). Null when no approver is stored — then nothing
    *  is shown, never a placeholder person (record.ts's rule). */
   approver: { name: string; role?: string; photoUri?: string | null } | null;
+  /** Everyone else on the record — who captured it, who priced it, who was added.
+   *  Same prop and same source as the negotiation screen; this screen had no people
+   *  section at all before 2026-08-14 and so never asked for them. Read-only here:
+   *  a sealed record's roster is history, and nothing may be appended (REQ-LC30). */
+  contributors?: readonly { name: string; role?: string; photoUri?: string | null }[];
   /** What the approver typed back with their answer, when they typed anything. */
   approverNote?: string | null;
   /** Which version this row is (1 = the original), derived from the lineage. */
@@ -146,6 +152,12 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
             while the other two read "‹ Job". Same missing prop, a third workaround.
             The job belongs in the kicker, where it names the thing you are reading;
             the back control names where the tap goes. */}
+        {/* THE HEADER SLAB — the same three surfaces as the negotiation screen
+            (hadar, 2026-08-14). What this is, what it cost and where it stands are one
+            region, closed by a rule and a shadow; the record below sits under it in
+            plain cards. The seal and the lock strip belong INSIDE it: they are the
+            state of the extra, not content about it. */}
+        <View style={st.headerSlab}>
         <ScreenHeader
           title={rec.title}
           kicker={props.kicker}
@@ -166,7 +178,6 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
         {rec.priced ? (
           <MoneyBlock
             amount={rec.amount}
-            green
             subtitle={`${rec.nte ? t({ k: 'erec.nte', p: { amount: rec.nte } }) : t('erec.fixed')}`
               + `${rec.isMini ? ` · ${t('erec.mini')}` : ''} · ${t('erec.yourPrice')}`}
           />
@@ -213,6 +224,8 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
           </View>
         </View>
 
+        </View>
+
         {/* The two "views" that led to the seal — conversation + signature. */}
         <Card style={st.navCard}>
           <Row
@@ -232,6 +245,16 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
           />
         </Card>
 
+        {/* WHO IS ON THIS — the same section, in the same slot, as the other two stages
+            (hadar, 2026-08-14: "the people section needs to be the same in all 3
+            stages, same location, looks the same").
+            It was ABSENT here. The sealed record — the one screen that exists to settle
+            a dispute — was the only stage that could not answer "who agreed to this and
+            who else is on it", while both stages where the answer can still change
+            showed it plainly. The seal is a reason to make it READ-ONLY, which it is
+            (no add row, no ✕ — REQ-LC30), not a reason to delete the question. */}
+        <PeopleInvolved people={rosterOf(props.approver, props.contributors)} />
+
         {/* What was agreed — a plain card of rows (no section header). Scope/included/
             excluded open the signed document; the flow terms show their agreed value. */}
         <Card style={st.card12}>
@@ -244,25 +267,29 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
                 under "what was agreed". `description` is still excluded, for the reason
                 the header gives: it is built from `summary`, which is mutable. */}
             <ScopeBlock text={props.rec.scopeOfWork} stage="signed" />
+          {/* SAME ROWS, SAME ORDER, SAME WORDS AS THE NEGOTIATION SCREEN (hadar,
+              2026-08-14: "the sequence of the information needs to be the same").
+              Approving an extra used to reshuffle its own document: exclusions jumped
+              from last to third, photos from third to fourth, and four of the five
+              labels changed wording on the way ("Impact on schedule" → "Schedule
+              impact", "What's not included" → "Not included"). Nothing about the
+              record changed — only the screen — so a contractor comparing what he sent
+              against what was signed was comparing two differently-ordered documents.
+              The `neg.row*` keys are shared for exactly that reason: one vocabulary per
+              thing, across all three stages. */}
           <Row
-            icon="checklist"
-            label={t('elock.rowIncluded')}
-            value={t('draft.showMore')}
-            chevron
-            divider
-            onPress={props.onViewSignedApproval}
-          />
-          <Row
-            icon="excluded"
-            label={t('elock.rowExclusions')}
-            value={excluded ? t('draft.showMore') : t('elock.exclNone')}
+            icon="cost"
+            label={t('neg.rowCost')}
+            value={rec.priced
+              ? `${rec.amount.replace(/\.00\b/, '')} · ${rec.nte ? t({ k: 'erec.nte', p: { amount: rec.nte } }) : t('erec.fixed')}`
+              : t('elock.noAmount')}
             chevron
             divider
             onPress={props.onViewSignedApproval}
           />
           <Row
             icon="image"
-            label={t('elock.rowPhotos')}
+            label={t('neg.rowPhotos')}
             value={photos.length > 0
               ? t({ k: 'neg.photosN', p: { n: photos.length } })
               : t('elock.photosNone')}
@@ -283,15 +310,35 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
             </View>
           )}
           <Row
-            icon="clock"
-            label={t('elock.rowSchedule')}
+            icon="calendar"
+            label={t('neg.rowSchedule')}
             value={schedule.text}
             divider
           />
           <Row
             icon="payment"
-            label={t('elock.rowBilling')}
+            label={t('neg.rowBilling')}
             value={billing.text}
+            divider
+          />
+          {/* What is IN and what is OUT, adjacent — they are one question asked twice.
+              "Included" has no counterpart on the negotiation screen because there is
+              no signed document to open there; it sits beside Exclusions rather than
+              displacing a row the other stage also has. */}
+          <Row
+            icon="checklist"
+            label={t('elock.rowIncluded')}
+            value={t('draft.showMore')}
+            chevron
+            divider
+            onPress={props.onViewSignedApproval}
+          />
+          <Row
+            icon="excluded"
+            label={t('neg.rowExclusions')}
+            value={excluded ? t('draft.showMore') : t('elock.exclNone')}
+            chevron
+            onPress={props.onViewSignedApproval}
           />
         </Card>
 
@@ -356,13 +403,13 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
             is D6 — a NEW independent extra, not an amendment — and the copy under it
             says so; but it is one of the three buttons, not a boxed-off card. */}
         <View style={st.actions}>
-          <Button label={t('elock.viewApproval')} icon="doc" variant="secondary"
+          <Button label={t('elock.viewApproval')} icon="doc" variant="neutral"
             onPress={props.onViewSignedApproval} />
-          <Button label={t('elock.viewConversation')} icon="message" variant="secondary"
+          <Button label={t('elock.viewConversation')} icon="message" variant="neutral"
             onPress={props.onViewConversation ?? props.onViewFullHistory} style={{ marginTop: 10 }} />
-          <Button label={t('elock.viewHistory')} icon="clock" variant="secondary"
+          <Button label={t('elock.viewHistory')} icon="clock" variant="neutral"
             onPress={props.onViewFullHistory} style={{ marginTop: 10 }} />
-          <Button label={t('elock.another')} icon="extra" variant="secondary"
+          <Button label={t('elock.another')} icon="extra" variant="neutral"
             onPress={props.onCreateLinkedExtra} style={{ marginTop: 10 }} />
         </View>
       </ScrollView>
@@ -492,7 +539,7 @@ function ApprovalStep({ what, at, note }: {
 }) {
   return (
     <View style={st.step}>
-      <Icon name="approved" size={20} color={C.approve} />
+      <Icon name="approved" size={20} color={C.steel} />
       <View style={{ flex: 1 }}>
         <Text style={st.stepWhat}>{what}</Text>
         <Text style={st.stepAt}>{at}</Text>
@@ -546,6 +593,15 @@ function Notice({ tone, icon, title, body }: {
 /* -------------------------------------------------------------------- styles -- */
 
 const st = StyleSheet.create({
+  // Full-bleed (the page pads 18 and this cancels it), closed by a hairline and a
+  // shadow so the record below reads as UNDER the header rather than next in a list.
+  // Same values as the negotiation screen's — one header, three stages.
+  headerSlab: {
+    backgroundColor: C.card,
+    marginHorizontal: -18, paddingHorizontal: 18, paddingBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: C.line,
+    ...shadows.card,
+  },
   moneyRow: {
     flexDirection: 'row', alignItems: 'baseline',
     gap: 9, marginTop: 10, marginBottom: 14, flexWrap: 'wrap',
@@ -571,8 +627,8 @@ const st = StyleSheet.create({
     alignSelf: 'flex-start', paddingRight: 24,
     flexDirection: 'row', alignItems: 'center', gap: 4,
   },
-  moreT: { fontFamily: F.bodySemi, fontSize: 15, color: C.brand },
-  moreCaret: { fontFamily: F.body, fontSize: 13, color: C.brand },
+  moreT: { fontFamily: F.bodySemi, fontSize: 15, color: C.ink },
+  moreCaret: { fontFamily: F.body, fontSize: 13, color: C.ink },
 
   step: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 8 },
   stepWhat: { fontFamily: F.bodySemi, fontSize: 15.5, color: C.ink, lineHeight: 21 },

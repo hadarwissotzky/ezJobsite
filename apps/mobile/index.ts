@@ -1,3 +1,9 @@
+// FIRST, ABOVE EVERYTHING. It disarms react-native's `PushNotificationIOS` getter,
+// which throws at module scope in a build that does not link that native module — and
+// it only works if it runs before the first module that could read the property.
+// See `src/rnpushshim.ts` for the stack and why the fix lives there.
+import './src/rnpushshim';
+
 import { registerRootComponent } from 'expo';
 
 import App from './App';

@@ -43,21 +43,23 @@
  */
 import React from 'react';
 import { ScopeBlock } from './scopeblock';
-import { ActionSheetIOS, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActionSheetIOS, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { ExtraRecord } from '../record';
 import { truncate, type ThreadState } from '../discussion';
 import type { RemindVerdict } from '../remind';
 import { chipKey, displayStatus, type LedgerStatus } from '../extrastatus';
-import { t } from '../i18n';
+import { currentLang, t } from '../i18n';
+import { mergeDictation, startDictation } from '../livedictation';
 import { DiscussionLog } from './threadscreen';
+import { PeopleInvolved, rosterOf } from './peopleinvolved';
 import { RecordingsCard } from './recordings';
 import { Icon, type IconName } from './icon';
 import {
-  APP_NAME, Button, MoneyBlock, Card, Chip, PersonRow as PersonRowView, Row, ScreenHeader,
-  PhotoGrid, StatusBanner, TimelineRow, type PhotoTile,
+  APP_NAME, BottomSheet, Button, MoneyBlock, Card, Chip, PersonRow as PersonRowView, Row,
+  ScreenHeader, PhotoGrid, StatusBanner, TimelineRow, type PhotoTile,
 } from './kit';
 import { C, F, T, label as labelStyle, money as moneyStyle, tint } from './theme';
-import { radii, touchTargets } from './tokens';
+import { radii, shadows, touchTargets } from './tokens';
 
 /** One person on the record. `role` is the already-translated word, never a slug —
  *  the same rule kit.tsx states, for the same reason: a layout component must not
@@ -137,7 +139,16 @@ export type ExtraNegotiationProps = {
   /** Resolves with the verdict at press time — a reminder refused by the rate limit,
    *  or one the transport could not deliver (D5's loud failure), is SAID here. `why`
    *  arrives already translated. */
-  onRemind: () => Promise<{ ok: boolean; why?: string }>;
+  /**
+   * Send the reminder. Resolves with what actually happened, not just whether the app
+   * was willing: `sent` is how many people were TEXTED and `of` how many the extra was
+   * sent to (hadar, 2026-08-14 — a reminder resends to the same people).
+   *
+   * Both are reported because "reminded Sarah" and "reminded nobody, we have no number
+   * for her" must not read the same on the one screen whose whole job is telling him
+   * who he is waiting on.
+   */
+  onRemind: () => Promise<{ ok: boolean; why?: string; sent?: number; of?: number }>;
   /** Hands off to the priced read-back composer. This screen never issues a price
    *  itself (mandate #2). */
   onRevise: () => void;
@@ -154,11 +165,13 @@ export type ExtraNegotiationProps = {
    *  frozen record, same as the locked screen. */
   onPressPhoto?: (uri: string) => void;
   /** Record a voice note onto this extra — distinct from `onCapture` (the camera). */
-  onAddVoice?: () => void;
   /** Add another person on the chain. The record is frozen, but WHO IS REACHABLE on
    *  the job is not part of the instrument — adding an inspector mid-negotiation
    *  changes nothing the client signed. */
   onAddContact?: () => void;
+  /** Pick a photo already in the roll, for a message. Committed by the caller, which
+   *  returns its capture id — the composer never holds undurable bytes. */
+  onPickPhoto?: () => Promise<string | null>;
   onViewHistory: () => void;
   /** REQ-LC31 / D6 — where a conversation goes once the thread is closed: a NEW
    *  independent extra linked by origin. Optional because only the caller knows
@@ -205,15 +218,36 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
     if (props._fixtureScrollY != null) scroll.current?.scrollTo({ y: props._fixtureScrollY, animated: false });
   }, [props._fixtureScrollY]);
   const composerInput = React.useRef<TextInput>(null);
-  // Where the discussion block starts in the scroll content. Reply focuses the
-  // composer, and focusing a field that is off-screen pops the keyboard over
-  // nothing — the user taps Reply and watches the screen do apparently nothing.
-  const [discussionY, setDiscussionY] = React.useState(0);
   // A refused or failed action's reason. This screen has no other status surface,
   // and a button that silently does nothing is the failure this repo names most.
   const [actionNote, setActionNote] = React.useState<string | null>(null);
-  // The active pane under the waiting card (Info / Messages / Activity).
+  // The active pane under the waiting card (Info / Activity). Messages is NOT one of
+  // them any more — see `msgOpen`.
   const [tab, setTab] = React.useState<NegTab>('info');
+  /**
+   * MESSAGES IS A SHEET, NOT A PANE (hadar 2026-08-13: "messages should be full screen
+   * once it is clicked on, or 90% of the visual screen — it needs to be a bottom popup
+   * to maximise the screen view").
+   *
+   * As a tab it inherited everything above and below it: the header, the price, the
+   * waiting banner with its Remind button, the tab bar itself, and the anchored
+   * Change & resend / Add photo bar. On a 375pt screen that left the conversation about
+   * a third of the height — a reply box and roughly two messages — while the rest of the
+   * screen repeated facts the reader had already read on the way down.
+   *
+   * A conversation is the one thing on this record that grows without limit and is read
+   * in sequence. It needs the height. The sheet takes 90%, puts the composer in the
+   * footer where the keyboard pushes against it rather than over it, and leaves the
+   * record underneath exactly as it was for when it closes.
+   */
+  const [msgOpen, setMsgOpen] = React.useState(false);
+  // DEV ONLY — open the sheet from the inspector. Reviewing it otherwise needs a tap
+  // on the Messages tab, and the review machinery has no fingers.
+  React.useEffect(() => {
+    if (__DEV__) {
+      (globalThis as any).__msgSheet = (on?: boolean) => setMsgOpen(on !== false);
+    }
+  }, []);
 
   // The ⋯ nav overflow — the design carries it on this screen. It offers the two acts
   // that are not one-tap on the page itself: revise & resend, and the full history.
@@ -228,12 +262,26 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
 
   const remind = async () => {
     const r = await props.onRemind();
-    setActionNote(!r.ok && r.why ? r.why : null);
+    // THE OUTCOME IS THE CALLER'S TO ANNOUNCE (hadar, 2026-08-15). It owns the ack
+    // popup, which is a surface this screen cannot reach and — unlike this caption —
+    // one he actually sees. Saying it in both places would be the same sentence
+    // twice, in two type sizes, in two places on one screen.
+    setActionNote(null);
   };
 
+  /**
+   * Reply now OPENS THE SHEET rather than scrolling to a block on the page.
+   *
+   * It used to scroll to `discussionY` and focus the composer, because focusing a field
+   * that is off-screen pops the keyboard over nothing and the tap looks like it did
+   * apparently nothing. The sheet removes that whole problem: there is nowhere to
+   * scroll to, so there is nothing to get wrong. The focus is deferred one tick so the
+   * composer exists to receive it — focusing through a Modal that has not mounted is
+   * the same silent no-op in a different costume.
+   */
   const toReply = () => {
-    scroll.current?.scrollTo({ y: Math.max(0, discussionY - 12), animated: true });
-    composerInput.current?.focus();
+    setMsgOpen(true);
+    setTimeout(() => composerInput.current?.focus(), 350);
   };
 
   return (
@@ -245,6 +293,25 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
             the same way and the locked screen worked around it differently again,
             by hiding the job in the back control. Three screens, three answers to
             one missing prop. The prop exists now; they all use it. */}
+        {/* THE HEADER SLAB — three surfaces on this screen, not one (hadar, 2026-08-14:
+            "there is a lack of distinction between the message section which is green
+            and the menu below it and the people section... make a more distinctive
+            difference between what is clearly a messaging area in the header and the
+            actual functional part of the form").
+            He is describing a flat rhythm. Everything below the nav row was a cream
+            card on a cream page, separated by the same 10pt gap: the price, the green
+            waiting block, the tab bar, People, Scope. Five equal beats, so nothing told
+            the eye where the STATE of the extra stopped and the RECORD began — and the
+            tab bar, which is navigation, wore exactly the same costume as the two cards
+            it sits between.
+            Three surfaces now do that work, and each one means one thing:
+              · HEADER  — what this is, what it costs, where it stands. Card-coloured,
+                          full-bleed, closed by a rule and a shadow. The green waiting
+                          block lives INSIDE it, because it is status, not content.
+              · CONTROL — the tab bar, on the muted track, on the cream page. No border,
+                          no card: it is the boundary between the two regions.
+              · CONTENT — bordered cards on cream, as before. */}
+        <View style={st.headerSlab}>
         <ScreenHeader
           title={rec.title}
           kicker={props.kicker}
@@ -283,13 +350,30 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
           note={actionNote}
         />
 
-        <TabBar active={tab} onChange={setTab} />
+        </View>
+
+        <TabBar active={tab}
+          onChange={(k) => {
+            if (k === 'messages') setMsgOpen(true);
+            // ONE history popup, not two. This briefly had its own Activity sheet
+            // showing `rec.history`, with a button opening the full history over the
+            // top of it — a second sheet on a first, and two different renderings of
+            // the same question. `onViewHistory` opens the richer one (the merged
+            // local+server timeline plus the signed instrument), which is now itself a
+            // bottom sheet, so the tab and the ⋯ and the version row all land in the
+            // same place.
+            else if (k === 'activity') props.onViewHistory();
+            else setTab(k);
+          }} />
 
         {/* INFO — who is on the record and what the record says. Recent activity is NOT
             here (hadar): it lives under the Activity tab, not on the Info page. */}
         {tab === 'info' && (
           <>
-            <PeopleSection approver={approver} contributors={props.contributors}
+            {/* The SHARED section — same component, same look, same slot as the draft
+                and sealed screens (hadar, 2026-08-14). */}
+            <PeopleInvolved
+              people={rosterOf(approver, props.contributors)}
               onAddContact={props.onAddContact} />
             <DocumentSection
               rec={rec}
@@ -320,49 +404,43 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
           </>
         )}
 
-        {/* MESSAGES — the conversation. Its own onLayout carries the scroll target
-            for Reply; it must stay a DIRECT child of the scroll content or `y` stops
-            being content-relative and Reply scrolls to the wrong place. */}
-        {tab === 'messages' && (
-          <View onLayout={(e) => setDiscussionY(e.nativeEvent.layout.y)}>
-            {thread.messages.length > 0 ? (
-              <DiscussionLog
-                messages={thread.messages}
-                formatAt={props.formatAt}
-                undelivered={props.undelivered}
-                clientName={approver?.name ?? null}
-                clientAvatar={approver?.photoUri ?? null}
-                onPressPhoto={props.onPressPhoto}
-              />
-            ) : (
-              <Card>
-                <Text style={labelStyle}>{t('r5b.logHeading')}</Text>
-                <Text style={[T.bodySteel, st.empty]}>{t('r5b.noMessages')}</Text>
-              </Card>
-            )}
-            {thread.canReply
-              ? <ReplyComposer inputRef={composerInput} onReply={props.onReply} who={who ? firstName(who) : null} onSnapPhoto={props.onSnapPhoto} onAddVoice={props.onAddVoice} />
-              : <ClosedThread onNewLinkedExtra={props.onNewLinkedExtra} />}
-          </View>
-        )}
-
-        {/* ACTIVITY — the record's history. */}
-        {tab === 'activity' && (
-          <ActivitySection
-            history={rec.history}
-            onViewHistory={props.onViewHistory}
-          />
-        )}
       </ScrollView>
 
+      {/* THE CONVERSATION, AT 90% OF THE SCREEN. Outside the ScrollView and outside
+          the bottom bar: it is a sheet over the record, not a pane inside it.
+          The composer goes in `footer`, which BottomSheet pins under the scrolling
+          content and inside its KeyboardAvoidingView — so the keyboard pushes the
+          reply box up instead of covering it. */}
+      <BottomSheet visible={msgOpen} tall bottomAnchored title={t('neg.tabMessages')}
+        onClose={() => setMsgOpen(false)}
+        footer={thread.canReply
+          ? <ReplyComposer inputRef={composerInput} onReply={props.onReply}
+              who={who ? firstName(who) : null}
+              onSnapPhoto={props.onSnapPhoto}
+              onPickPhoto={props.onPickPhoto} onAddContact={props.onAddContact} />
+          : <ClosedThread onNewLinkedExtra={props.onNewLinkedExtra} />}>
+        {thread.messages.length > 0 ? (
+          <DiscussionLog
+            messages={thread.messages}
+            formatAt={props.formatAt}
+            undelivered={props.undelivered}
+            clientName={approver?.name ?? null}
+            clientAvatar={approver?.photoUri ?? null}
+            onPressPhoto={props.onPressPhoto}
+          />
+        ) : (
+          <Text style={[T.bodySteel, st.empty]}>{t('r5b.noMessages')}</Text>
+        )}
+      </BottomSheet>
+
       {/* Change & resend · Add photo or voice note — ANCHORED at the bottom of the
-          screen on every tab (Info/Messages/Activity), outside the scroll content. */}
+          screen on every tab, outside the scroll content. */}
       <View style={st.bottomBar}>
         {thread.canRevise && (
           <Button
             label={t('neg.changeResend')}
             icon="edit"
-            variant="secondary"
+            variant="neutral"
             onPress={props.onRevise}
             compact
             style={st.afterBtnRevise}
@@ -372,7 +450,7 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
           <Button
             label={t('neg.addEvidence')}
             icon="photocam"
-            variant="secondary"
+            variant="neutral"
             onPress={props.onCapture}
             compact
             style={st.afterBtnAdd}
@@ -397,7 +475,6 @@ function MoneyLine({ rec }: { rec: ExtraRecord }) {
   return (
     <MoneyBlock
       amount={rec.amount}
-      green
       subtitle={`${mode}${rec.isMini ? ` · ${t('erec.mini')}` : ''} · ${t('erec.yourPrice')}`}
     />
   );
@@ -479,7 +556,12 @@ function WaitingBlock(props: {
             label={props.who ? t({ k: 'neg.remindName', p: { name: firstName(props.who) } }) : t('neg.remindPlain')}
             variant="green"
             onPress={props.onRemind}
-            disabled={refusal !== null}
+            // REFUSED, NOT DEAD (hadar, 2026-08-17: "the remind button is not
+            // clickable"). It still looks off, but the tap now reaches `remindExtra`,
+            // which re-checks the same rule and returns the reason — and the caller
+            // puts that in the bottom ack popup, which he sees. The caption below
+            // stays for anyone reading before tapping.
+            refused={refusal !== null}
             style={st.remindInCard}
           />
         )}
@@ -501,7 +583,7 @@ function WaitingBlock(props: {
 function SyncedPill() {
   return (
     <View style={st.syncedPill}>
-      <Icon name="cloud" size={15} color={C.brand} />
+      <Icon name="cloud" size={15} color={C.steel} />
       <Text style={st.syncedT}>{t('neg.synced')}</Text>
     </View>
   );
@@ -593,81 +675,6 @@ function openedStamp(ms: number, fallback: (ms: number) => string): string {
   return fallback(ms);
 }
 
-/* ----------------------------------------------------------------- people -- */
-
-/** D4: exactly ONE approver, named first, with the rule stated in words. Anyone
- *  else on the record may read and ask; nobody else can approve, and a roster that
- *  did not say so would leave a contractor expecting an answer from the wrong
- *  person. Nothing is rendered for a person we hold no name for (record.ts's rule). */
-function PeopleSection({ approver, contributors, onAddContact }: {
-  approver: NegotiationPerson | null;
-  contributors?: readonly NegotiationPerson[];
-  onAddContact?: () => void;
-}) {
-  // ONE HUMAN, ONE ROW. The approver is also, routinely, the person who captured or
-  // sent the extra — a solo operator is every role at once, which CLAUDE.md says is
-  // the case the product must work for. Listing them under both headings printed the
-  // same name twice, and because the two sources are stored separately (the roster's
-  // typed name vs the profile's) the casing differed between them, so it read as two
-  // different people rather than one duplicate. Matched case- and space-insensitively
-  // for that reason: the strings are entered by hand in two places and will not
-  // agree on capitalisation.
-  const key = (n: string) => n.trim().toLowerCase().replace(/\s+/g, ' ');
-  const seen = new Set(approver ? [key(approver.name)] : []);
-  const others = (contributors ?? []).filter((p) => {
-    const k = key(p.name);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-  if (!approver && !others.length) return null;
-  // HORIZONTAL avatar row, not a vertical list — the design shows the people as a
-  // compact who's-who strip (avatar over name over role), with the approver first.
-  const roster = [
-    ...(approver ? [{ p: approver, kind: 'approver' as const, role: approver.role ?? t('erec.approverRole') }] : []),
-    ...others.map((p) => ({ p, kind: 'crew' as const, role: p.role ?? t('erec.crewRole') })),
-  ];
-  return (
-    <View>
-      <Card style={st.cardTight}>
-        <Text style={[labelStyle, st.peopleCardTitle]}>{t('neg.people')}</Text>
-        <View style={st.peopleRow}>
-          {roster.map(({ p, kind, role }, i) => (
-            <View key={`${p.name}-${i}`} style={[st.personCol, i > 0 && st.personDivider]}>
-              <Avatar name={p.name} kind={kind} photoUri={p.photoUri} />
-              <Text style={st.personName} numberOfLines={1}>{p.name}</Text>
-              <Text style={st.personRole} numberOfLines={2}>{role}</Text>
-            </View>
-          ))}
-        </View>
-        {/* Another person on the chain. Legal on a sent extra: the roster is who is
-            REACHABLE, not a term of the frozen instrument. */}
-        {onAddContact && (
-          <Pressable style={st.addPerson} onPress={onAddContact} accessibilityRole="button">
-            <Icon name="people" size={16} color={C.brand} />
-            <Text style={st.addPersonT}>{t('client.addContact')}</Text>
-          </Pressable>
-        )}
-      </Card>
-    </View>
-  );
-}
-
-/** The circular avatar for the people strip — initials on a coloured disc; the
- *  approver's disc reads differently (D4: only one person can approve). */
-function Avatar({ name, kind, photoUri }: {
-  name: string; kind: 'approver' | 'crew'; photoUri?: string | null;
-}) {
-  // A real photo wins; initials are the fallback so a person always has a mark.
-  if (photoUri) return <Image source={{ uri: photoUri }} style={st.avatar} />;
-  const initials = name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
-  return (
-    <View style={[st.avatar, { backgroundColor: kind === 'approver' ? C.approve : C.brand }]}>
-      <Text style={st.avatarT}>{initials}</Text>
-    </View>
-  );
-}
-
 /* ------------------------------------------------------------- discussion -- */
 
 /**
@@ -680,7 +687,8 @@ function Avatar({ name, kind, photoUri }: {
  * through revision plus a fresh approval, and the rule is stated where it could be
  * broken.
  */
-function ReplyComposer({ inputRef, onReply, who, onSnapPhoto, onAddVoice }: {
+function ReplyComposer({ inputRef, onReply, who, onSnapPhoto, onPickPhoto,
+                         onAddContact }: {
   inputRef: React.RefObject<TextInput | null>;
   /** Send the message. `captureIds` are photos already COMMITTED by the caller —
    *  the composer never holds undurable bytes. */
@@ -700,14 +708,155 @@ function ReplyComposer({ inputRef, onReply, who, onSnapPhoto, onAddVoice }: {
    * the message. Returns null when the shutter was cancelled or permission refused.
    */
   onSnapPhoto?: () => Promise<string | null>;
-  /** Record a voice note. Its own act, not the camera's. */
-  onAddVoice?: () => void;
+  /** Pick an existing photo — the one taken before anyone opened this app. Returns its
+   *  committed capture id, or null when the picker was cancelled. */
+  onPickPhoto?: () => Promise<string | null>;
+  /** Add somebody to this record. The third entry behind the plus. */
+  onAddContact?: () => void;
 }) {
   const [draft, setDraft] = React.useState('');
   const [shots, setShots] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [snapping, setSnapping] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  /**
+   * THE COMPOSER SWAPS ITS RIGHT-HAND CONTROLS AS YOU TYPE (hadar 2026-08-13, with a
+   * WhatsApp screenshot: "at the state of no text you see what I gave you; once you
+   * start to type the buttons on the right are swiped to the right and hidden and the
+   * send image is displayed — the goal is to maximise screen space").
+   *
+   * Empty: camera + voice, no send — there is nothing to send, and a permanently
+   * greyed send button is a control that spends its life saying no.
+   * Typing: those two slide right and collapse, send slides in, and the field takes
+   * back the ~124pt they were holding. On a 375pt screen that is a third of the row.
+   *
+   * `useNativeDriver: false` because WIDTH is what animates. Width is not a transform
+   * and cannot go to the native thread; opacity and translateX ride along on the same
+   * value so the two halves move together rather than cross-fading in place.
+   */
+  // DEV ONLY — type into the composer from the inspector, to review the swap without
+  // a keyboard. The draft is component state; there is no other way in.
+  React.useEffect(() => {
+    if (__DEV__) {
+      (globalThis as any).__composerType = (v: string) => setDraft(v);
+      (globalThis as any).__attachTray = (on?: boolean) => setAttachOpen(on !== false);
+    }
+  }, []);
+  /**
+   * THE PLUS, AND WHAT IT OPENS (hadar 2026-08-13).
+   *
+   * While typing, the two standalone shortcuts give way to ONE plus — their jobs move
+   * behind it, alongside the two that had no door at all: a photo already in the roll,
+   * and adding a person to this record. Tapping it opens the tray and turns the plus
+   * into a close, which dismisses the tray and puts the keyboard back.
+   *
+   * THE ICON IS A ROTATED PLUS, NOT A KEYBOARD. hadar asked for a keyboard glyph and
+   * the icon set has none — every icon here is a PNG asset, and inventing one is not
+   * something this change can do honestly. A plus rotated 45° is the same affordance
+   * stated with what exists: it says "close this", and closing it is what returns the
+   * keyboard. Swap in a keyboard asset and this becomes a one-line change.
+   */
+  const [attachOpen, setAttachOpen] = React.useState(false);
+
+  /**
+   * DICTATION — the mic fills the field as you speak (hadar 2026-08-13).
+   *
+   * The mic used to call `augmentExtra`, which edits the CHANGE ORDER's description. In
+   * a message composer that is the wrong act twice over: it is not a message, and a
+   * control drawn as a microphone silently editing the document a client is being asked
+   * to sign is the kind of surprise this app exists to remove. That door still exists —
+   * "Add photo or note" in the record's own bottom bar — so nothing is lost.
+   *
+   * WHILE LISTENING THE RIGHT-HAND CONTROLS BECOME ONE STOP BUTTON. Without that the
+   * mic would vanish the instant the first word landed (the shortcuts hide as soon as
+   * there is text) and there would be no way to end what you started.
+   *
+   * NOTHING SENDS ITSELF. Dictation fills the field and stops there — the words are a
+   * machine's reading of a voice, and a transcript that posted itself would be exactly
+   * the unconfirmed claim mandate #2 forbids. He reads it, then he presses send.
+   */
+  const [listening, setListening] = React.useState(false);
+  const dictation = React.useRef<{ stop: () => void } | null>(null);
+  const dictBase = React.useRef('');
+
+  const stopDictation = React.useCallback(() => {
+    dictation.current?.stop();
+    dictation.current = null;
+    setListening(false);
+  }, []);
+
+  // A recogniser left running when this unmounts holds the microphone — and the sheet
+  // closing is exactly when somebody stops thinking about it.
+  React.useEffect(() => () => { dictation.current?.stop(); }, []);
+
+  const startListening = async () => {
+    if (listening) { stopDictation(); return; }
+    setError(null);
+    dictBase.current = draft;
+    setListening(true);
+    const r = await startDictation({
+      lang: currentLang() === 'es' ? 'es-US' : 'en-US',
+      onText: (heard) => setDraft(mergeDictation(dictBase.current, heard)),
+      onEnd: (refusal) => {
+        dictation.current = null;
+        setListening(false);
+        if (refusal) {
+          setError(t(refusal === 'denied' ? 'neg.dictDenied'
+            : refusal === 'unsupported' ? 'neg.dictUnsupported' : 'neg.dictFailed'));
+        }
+      },
+    });
+    if ('refused' in r) {
+      setListening(false);
+      setError(t(r.refused === 'denied' ? 'neg.dictDenied'
+        : r.refused === 'unsupported' ? 'neg.dictUnsupported' : 'neg.dictFailed'));
+      return;
+    }
+    dictation.current = r;
+  };
+  const toggleAttach = () => {
+    setAttachOpen((o) => {
+      if (o) setTimeout(() => inputRef.current?.focus(), 60);
+      return !o;
+    });
+  };
+  const pick = async () => {
+    if (!onPickPhoto || snapping) return;
+    setSnapping(true);
+    try {
+      const id = await onPickPhoto();
+      if (id) { setShots((s) => [...s, id]); setError(null); setAttachOpen(false); }
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    } finally { setSnapping(false); }
+  };
+
+  const hasText = draft.trim().length > 0 || shots.length > 0;
+  // Listening pins the row in its EMPTY layout so the stop button can own the space —
+  // otherwise the first dictated word would slide the controls out from under the
+  // thumb that is about to press stop.
+  const swapped = hasText && !listening;
+  const swap = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    Animated.timing(swap, {
+      toValue: swapped ? 1 : 0, duration: 160, useNativeDriver: false,
+    }).start();
+  }, [swapped, swap]);
+  // Camera (when the caller has one) + the mic, which is always there because
+  // dictation needs no wiring from above — it talks to the phone.
+  const ICONS_W = (onSnapPhoto ? 46 + 8 : 0) + 46;
+  // Typing swaps two shortcuts for a plus and a send — 100pt of controls for 100pt of
+  // controls, so the field's gain comes from the gap between them, not from the count.
+  const TYPING_W = 46 + 8 + 46;
+  const iconsStyle = {
+    width: swap.interpolate({ inputRange: [0, 1], outputRange: [ICONS_W, 0] }),
+    opacity: swap.interpolate({ inputRange: [0, 0.6, 1], outputRange: [1, 0, 0] }),
+  };
+  const sendStyle = {
+    width: swap.interpolate({ inputRange: [0, 1], outputRange: [0, TYPING_W] }),
+    opacity: swap.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 0, 1] }),
+  };
 
   const send = async () => {
     const text = draft.trim();
@@ -735,10 +884,13 @@ function ReplyComposer({ inputRef, onReply, who, onSnapPhoto, onAddVoice }: {
     } finally { setSnapping(false); }
   };
 
-  // INLINE composer, matching the design: the field, a camera shortcut, and a round
-  // green send — one row — rather than a stacked field over a full-width button.
+  // The field, a camera shortcut, a voice shortcut and send — ONE ROW, matching the
+  // design's `.replybar`. No Card around it any more: the composer lives in the
+  // Messages sheet's footer, which already draws its own top rule and padding, so the
+  // card added a second border and a second background inside a bar that the design
+  // draws bare.
   return (
-    <Card>
+    <View>
       {/* ATTACHED PHOTOS SIT ABOVE THE FIELD, where he can see what he is about to
           send and take one off before he sends it. Removal is local-only and legal:
           nothing here has been sent, and the capture itself stays committed on the
@@ -761,6 +913,34 @@ function ReplyComposer({ inputRef, onReply, who, onSnapPhoto, onAddVoice }: {
           ))}
         </View>
       )}
+      {/* THE TRAY. Above the row, where the panel a plus opens belongs — not over the
+          conversation, which is the thing the sheet exists to show. */}
+      {attachOpen && (
+        <View style={st.tray}>
+          {onSnapPhoto && (
+            <Pressable style={st.trayItem} onPress={() => { setAttachOpen(false); void snap(); }}
+              accessibilityRole="button">
+              <View style={st.trayDisc}><Icon name="photocam" size={22} color={C.ink} /></View>
+              <Text style={st.trayT}>{t('neg.trayCamera')}</Text>
+            </Pressable>
+          )}
+          {onPickPhoto && (
+            <Pressable style={st.trayItem} onPress={() => { void pick(); }}
+              accessibilityRole="button">
+              <View style={st.trayDisc}><Icon name="image" size={22} color={C.ink} /></View>
+              <Text style={st.trayT}>{t('neg.trayPhotos')}</Text>
+            </Pressable>
+          )}
+          {onAddContact && (
+            <Pressable style={st.trayItem} onPress={() => { setAttachOpen(false); onAddContact(); }}
+              accessibilityRole="button">
+              <View style={st.trayDisc}><Icon name="personAdd" size={22} color={C.ink} /></View>
+              <Text style={st.trayT}>{t('neg.trayContact')}</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
       <View style={st.composerRow}>
         <TextInput
           ref={inputRef}
@@ -772,32 +952,59 @@ function ReplyComposer({ inputRef, onReply, who, onSnapPhoto, onAddVoice }: {
           accessibilityLabel={t('r5b.replyPlaceholder')}
           style={st.composerInput}
         />
-        {onSnapPhoto && (
-          <Pressable onPress={() => { void snap(); }} accessibilityRole="button"
-            disabled={snapping}
-            accessibilityLabel={t('neg.photoInMessage')}
-            style={[st.iconBox, snapping && { opacity: 0.5 }]}>
-            <Icon name="photocam" size={20} color={C.ink} />
+
+        {/* The two shortcuts, in a container whose WIDTH is what collapses. `overflow:
+            hidden` is what turns a shrinking box into a swipe-out — without it the
+            buttons would simply overlap the field on their way past it. */}
+        <Animated.View style={[st.swapBox, iconsStyle, listening && { width: 0 }]}>
+          <View style={st.swapRow}>
+            {onSnapPhoto && (
+              <Pressable onPress={() => { void snap(); }} accessibilityRole="button"
+                disabled={snapping}
+                accessibilityLabel={t('neg.photoInMessage')}
+                style={[st.iconBox, snapping && { opacity: 0.5 }]}>
+                <Icon name="photocam" size={20} color={C.ink} />
+              </Pressable>
+            )}
+            {/* THE MIC DICTATES. It does not record a voice note and it does not open
+                the change order — see the note on `listening`. */}
+            <Pressable onPress={() => { void startListening(); }} accessibilityRole="button"
+              accessibilityLabel={t('neg.dictate')} style={st.iconBox}>
+              <Icon name="micLine" size={22} color={C.ink} />
+            </Pressable>
+          </View>
+        </Animated.View>
+
+        {/* LISTENING: one stop button, holding the place the shortcuts had. */}
+        {listening && (
+          <Pressable onPress={stopDictation} accessibilityRole="button"
+            accessibilityLabel={t('neg.dictStop')} style={st.stopBtn}>
+            <Icon name="pause" size={20} color="#fff" />
           </Pressable>
         )}
-        {onAddVoice && (
-          // WIRED TO ITS OWN ACT. This was a copy of the camera button — same handler,
-          // same accessibility label — so a control drawn as a microphone opened the
-          // camera. Absent when the caller has no voice path, rather than lying.
-          <Pressable onPress={onAddVoice} accessibilityRole="button"
-            accessibilityLabel={t('neg.addVoice')} style={st.iconBox}>
-            <Icon name="micLine" size={22} color={C.ink} />
-          </Pressable>
-        )}
-        <Pressable onPress={() => { void send(); }} accessibilityRole="button"
-          accessibilityLabel={busy ? t('r5b.sending') : t('r5b.send')}
-          disabled={(!draft.trim() && !shots.length) || busy}
-          style={st.sendRound}>
-          <Icon name="send" size={20} color="#fff" />
-        </Pressable>
+
+        {/* The plus and send appear together, only when there is something to send. */}
+        <Animated.View style={[st.swapBox, sendStyle, listening && { width: 0 }]}>
+          <View style={st.swapRow}>
+            <Pressable onPress={toggleAttach} accessibilityRole="button"
+              accessibilityState={{ expanded: attachOpen }}
+              accessibilityLabel={attachOpen ? t('neg.attachClose') : t('neg.attachOpen')}
+              style={st.iconBox}>
+              <View style={attachOpen ? { transform: [{ rotate: '45deg' }] } : undefined}>
+                <Icon name="ntPlus" size={20} color={C.ink} />
+              </View>
+            </Pressable>
+            <Pressable onPress={() => { void send(); }} accessibilityRole="button"
+              accessibilityLabel={busy ? t('r5b.sending') : t('r5b.send')}
+              disabled={!hasText || busy}
+              style={st.sendBtn}>
+              <Icon name="send" size={20} color="#fff" />
+            </Pressable>
+          </View>
+        </Animated.View>
       </View>
       {error !== null && <Text style={st.failure}>{error}</Text>}
-    </Card>
+    </View>
   );
 }
 
@@ -856,7 +1063,7 @@ function DocumentSection({ rec, terms, onOpenDetail, onPressPhoto }: {
   const tone = (v: string | null) => v === null ? 'warn' as const : 'default' as const;
 
   // ONE grouped card with divider rows (no "what you sent them" header, no Photos row),
-  // real values on the right. Only "Recent activity" is a separate card (ActivitySection).
+  // real values on the right. Activity is no longer among them — it is a sheet.
   return (
     <Card style={st.cardTight}>
       {/* 391 — THE SCOPE IS NOT A ROW. It was `truncate(rec.description, 90)` with a
@@ -931,50 +1138,6 @@ function DocumentSection({ rec, terms, onOpenDetail, onPressPhoto }: {
   );
 }
 
-/* --------------------------------------------------------------- activity -- */
-
-const RECENT = 4;
-
-/**
- * The tail of the history, in the order record.ts built it.
- *
- * IT IS NOT RE-SORTED. record.ts deliberately appends events it holds NO TIME for
- * after the timestamped ones, marked "time not recorded", rather than inventing a
- * position for them — and re-sorting here would either fabricate that position or
- * drop them. Taking the tail preserves both the order and the marker.
- */
-function ActivitySection({ history, onViewHistory }: {
-  history: ExtraRecord['history'];
-  onViewHistory: () => void;
-}) {
-  const recent = history.slice(-RECENT);
-  // A header + "View full history ›" link, matching the design's compact Recent
-  // activity — the same shape as People Involved. Recent items render under it only
-  // when there are any; an empty log collapses to just the header and the link
-  // rather than a card announcing there is nothing to see.
-  return (
-    <View>
-      <Pressable style={st.peopleHead} onPress={onViewHistory} accessibilityRole="button">
-        <Text style={[labelStyle, st.sectionLabel]}>{t('neg.recentActivity')}</Text>
-        <Text style={st.viewAll}>{t('neg.viewHistory')} ›</Text>
-      </Pressable>
-      {recent.length > 0 && (
-        <Card>
-          {recent.map((h, i) => (
-            <TimelineRow
-              key={`${h.at}-${i}`}
-              at={h.at}
-              what={h.what}
-              hot={h.hot}
-              last={i === recent.length - 1}
-            />
-          ))}
-        </Card>
-      )}
-    </View>
-  );
-}
-
 /* ----------------------------------------------------------------- styles -- */
 
 const st = StyleSheet.create({
@@ -1033,24 +1196,55 @@ const st = StyleSheet.create({
   // The Info / Messages / Activity segmented control. One track; the active segment is
   // filled brand-green with light text, the rest are quiet. Tight padding so the active
   // pill fills the track height (the design's selection is a full-height segment).
+  /**
+   * THE HEADER SLAB. Full-bleed (the page pads 18 and this cancels it) so it runs
+   * edge to edge like a header and not like a wide card, closed by a hairline and a
+   * shadow so the content below is visibly UNDER it rather than next in a list.
+   *
+   * `C.card` against the page's `C.paper` is a quiet warm shift, not a colour change —
+   * enough to zone the region without competing with the green block inside it, which
+   * has to stay the loudest thing on the screen.
+   */
+  headerSlab: {
+    backgroundColor: C.card,
+    marginHorizontal: -18, paddingHorizontal: 18, paddingBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: C.line,
+    ...shadows.card,
+  },
+  /**
+   * THE TAB BAR IS A CONTROL, NOT A CARD.
+   *
+   * It had a card's costume — `C.card` fill, a border, radius 12 — sitting between two
+   * actual cards with the same fill, border and radius, at the same 10pt gap. Three
+   * identical boxes in a row, one of which was navigation.
+   * On the muted track it reads as a segmented control, which is what it is: iOS's own
+   * pattern, and the one thing on the page a contractor is meant to recognise without
+   * reading. The wider space above and below is the second half of the job — it is the
+   * seam between the header region and the record, so it gets more air than the 10pt
+   * rhythm the content cards share.
+   */
   tabBar: {
-    flexDirection: 'row', gap: 4, marginTop: 10, padding: 3,
-    borderWidth: 1, borderColor: C.line, borderRadius: 12, backgroundColor: C.card,
+    flexDirection: 'row', gap: 4, marginTop: 18, marginBottom: 6, padding: 3,
+    borderRadius: 12, backgroundColor: C.surfaceMuted,
   },
   tab: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 6, minHeight: 40, borderRadius: 9,
   },
-  tabOn: { backgroundColor: C.brand },
+  // A RAISED PILL, NOT A GREEN ONE. The selected tab was filled `C.brand`, which put a
+  // second solid green on a screen whose state band is already green (hadar,
+  // 2026-08-14). A light pill lifted off the muted track is iOS's own segmented
+  // control and needs no colour to say "you are here".
+  tabOn: { backgroundColor: C.raised, borderWidth: 1, borderColor: C.line },
   tabT: { fontFamily: F.bodySemi, fontSize: 14.5, color: C.ink },
-  tabTOn: { color: C.raised },
+  tabTOn: { color: C.ink },
 
   // The header "Synced" pill (green check on a brand-soft chip).
   syncedPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: C.brandSoft, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5,
+    backgroundColor: C.surfaceMuted, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5,
   },
-  syncedT: { fontFamily: F.bodySemi, fontSize: 12.5, color: C.brand },
+  syncedT: { fontFamily: F.bodySemi, fontSize: 12.5, color: C.steel },
 
   // Each Info detail is its OWN card (the design's separate-card list), so the row
   // padding is trimmed — the Card already supplies the inset.
@@ -1067,23 +1261,10 @@ const st = StyleSheet.create({
   actionLabel: { flexShrink: 1, fontFamily: F.bodySemi, fontSize: 12.5, color: C.ink, textAlign: 'center' },
   peopleHead: { flexDirection: 'row', alignItems: 'center', marginTop: 12, marginBottom: 6 },
   sectionLabel: { flex: 1, fontSize: 11.5, letterSpacing: 1.4, color: C.muted },
-  viewAll: { fontFamily: F.bodySemi, fontSize: 13, color: C.brand },
+  viewAll: { fontFamily: F.bodySemi, fontSize: 13, color: C.ink },
   // "PEOPLE INVOLVED" sits INSIDE the card, top-left, above the strip (the design puts
   // the heading in the card, not floating above it).
-  peopleCardTitle: { fontSize: 11.5, letterSpacing: 1.4, color: C.muted, marginBottom: 14 },
-  addPerson: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
-    minHeight: 44, marginTop: 10, borderTopWidth: 1, borderTopColor: C.line,
-  },
-  addPersonT: { fontFamily: F.bodySemi, fontSize: 14, color: C.brand },
-  peopleRow: { flexDirection: 'row' },
-  personCol: { flex: 1, alignItems: 'center', paddingHorizontal: 6 },
-  // Thin rule between people, as in the design's who's-who strip.
-  personDivider: { borderLeftWidth: 1, borderLeftColor: C.line },
-  avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
-  avatarT: { fontFamily: F.dispSemi, fontSize: 15, color: '#fff' },
-  personName: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.ink, marginTop: 7, textAlign: 'center' },
-  personRole: { fontFamily: F.body, fontSize: 12, color: C.muted, marginTop: 1, textAlign: 'center', lineHeight: 15 },
+  // The people strip's styles moved to `peopleinvolved.tsx` with the section itself.
   // Photos staged on the message, before it is sent.
   attachRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
   attachChip: {
@@ -1093,21 +1274,55 @@ const st = StyleSheet.create({
   },
   attachChipT: { fontFamily: F.bodySemi, fontSize: 13, color: C.brandDark },
   attachX: { fontFamily: F.body, fontSize: 15, color: C.steel, paddingHorizontal: 2 },
-  composerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // ── the reply bar, to the design's `.replybar` (applied 2026-08-13) ──
+  // 54pt controls on a 12pt radius, a WHITE field, and an INK send. Ours was a 48pt
+  // cream field with a round green send: the green read as a third status colour on a
+  // screen that already uses green for approved and for money, and cream-on-cream gave
+  // the one control you type into no edge of its own.
+  composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  // WIDER AND THINNER (hadar 2026-08-13). It was a 54pt box on a 12pt radius; the
+  // reference is a slim pill that grows only when the message does. The height it gives
+  // up goes back to the conversation, and the width comes from the two buttons that now
+  // collapse while you type.
   composerInput: {
     flex: 1, fontFamily: F.body, fontSize: 15.5, color: C.ink,
-    minHeight: touchTargets.minimum, maxHeight: 120,
-    // Rounded RECTANGLE, not a full pill — matching the design's input.
-    borderWidth: 1, borderColor: C.line, borderRadius: 14,
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, backgroundColor: C.card,
+    minHeight: 44, maxHeight: 120,
+    borderWidth: 1, borderColor: C.line, borderRadius: 22,
+    paddingHorizontal: 16, paddingTop: 11, paddingBottom: 11, backgroundColor: '#FFFFFF',
   },
   // Camera + mic each sit in an outlined box that shares the input's corner radius.
   iconBox: {
-    width: 46, height: 46, borderWidth: 1, borderColor: C.line, borderRadius: 14,
+    width: 46, height: 46, borderWidth: 1, borderColor: C.line, borderRadius: 23,
+    backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center',
+  },
+  // The animated slot whose WIDTH collapses. `overflow: hidden` is what makes a
+  // shrinking box read as a swipe-out rather than as buttons sliding over the field.
+  swapBox: { overflow: 'hidden', height: 46, justifyContent: 'center' },
+  swapRow: { flexDirection: 'row', gap: 8 },
+  // ── the attachment tray behind the plus ──
+  // Three equal columns, not a list: they are siblings of the same rank, and a list
+  // would rank them by accident of order. Discs match the composer's round controls so
+  // the tray reads as an extension of the bar rather than a menu from somewhere else.
+  tray: { flexDirection: 'row', paddingBottom: 12, paddingTop: 2 },
+  trayItem: { flex: 1, alignItems: 'center', gap: 6, minHeight: touchTargets.minimum },
+  trayDisc: {
+    width: 52, height: 52, borderRadius: 26, backgroundColor: '#FFFFFF',
+    borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center',
+  },
+  trayT: { fontFamily: F.body, fontSize: 12.5, color: C.steel },
+  // The design's send is a SQUARE ink button, not a green circle. Camera and voice are
+  // ours — the mock's bar carries only a field and a send — so they take the same 54pt
+  // box and sit quiet beside it; the one dark control on the row is the one that sends.
+  // Round, like the reference's send. It only exists while there is something to send,
+  // so it never needs a disabled state to sit in.
+  sendBtn: {
+    width: 46, height: 46, borderRadius: 23, backgroundColor: C.ink,
     alignItems: 'center', justifyContent: 'center',
   },
-  sendRound: {
-    width: 48, height: 48, borderRadius: 24, backgroundColor: C.brand,
+  // Listening. Caution-toned rather than danger: stopping is not destructive, and a red
+  // control beside a live microphone reads as "something is wrong".
+  stopBtn: {
+    width: 46, height: 46, borderRadius: 23, backgroundColor: C.caution,
     alignItems: 'center', justifyContent: 'center',
   },
   // The three moves across one row. `flex: 1` with a shared gap rather than fixed
