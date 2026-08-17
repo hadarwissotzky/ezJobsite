@@ -35,7 +35,7 @@ const SUPPORT_EMAIL = 'support@ezchangeorders.com';
 
 export function Drawer({
   visible, onClose, onProfile, onCompanySettings, onPlans,
-  planName, isFreePlan, isOwner,
+  planName, isFreePlan, isOwner, hasTeam,
   lang, onToggleLang, appVersion, confirmBase, onSignOut, onShowIntro, onSimulateFirstRun,
   companies, activeCompanyId, onSwitchCompany, onCloseAccount,
   buildLabel, updateReady, onApplyUpdate, onCheckUpdates, usage,
@@ -51,6 +51,9 @@ export function Drawer({
   isFreePlan: boolean;
   /** This user created/owns the company: gates the Upgrade CTA and the Settings row. */
   isOwner: boolean;
+  /** True only when there is somebody ELSE in the tenant. Names the row — a solo
+   *  operator gets "Your business", a crew gets "Company settings". Same screen. */
+  hasTeam?: boolean;
   lang: Lang;
   onToggleLang: () => void;
   appVersion: string;
@@ -256,8 +259,21 @@ export function Drawer({
               call site — the screen still exists and now has no entrance. */}
           <Group label={T('drawer.account')}>
             <Row icon="gear" label={T('drawer.profile')} onPress={go(onProfile)} />
+            {/* ONE DESTINATION, TWO NAMES (hadar, 2026-08-17: "where does the solo
+                operator add a logo or address?").
+                Every account has a tenant — `ensureBillingTenant` creates one named
+                after the person when they are solo, and calls it "the letterhead name
+                on a change order". So a freelancer HAS the thing behind this row and
+                needs it: his business name, address and licence are what a client
+                reads above a price, and the licence is legally required in most US
+                states.
+                What company.ts ruled out was making a freelancer read the word
+                COMPANY — "the freelancer never sees the word". That is a labelling
+                rule, not a reason to hide his letterhead, so the row is named for who
+                is reading it and goes to the same screen either way. */}
             {isOwner && (
-              <Row icon="job" label={T('set.companyTitle')} onPress={go(onCompanySettings)}
+              <Row icon="job" label={T(hasTeam ? 'set.companyTitle' : 'set.businessTitle')}
+                onPress={go(onCompanySettings)}
                 crown={isFreePlan} last />
             )}
           </Group>

@@ -19,7 +19,7 @@
  * is a server RPC (company.ts) — the client is never the authority on membership.
  */
 import React from 'react';
-import { Alert, Linking, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Linking, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { t } from '../i18n';
@@ -27,13 +27,15 @@ import type { Lang } from '../i18n';
 import { registerPushToken } from '../push';
 import { checkMembers, type QuotaKind } from '../quota';
 import { LockCrown } from './usagecard';
+import { Icon } from './icon';
 import { QuotaModal } from './quotamodal';
 import { C, F, T as TH, label } from './theme';
 import { TRADES, type Profile } from '../profile';
 import {
-  myCompany, listMembers, createInvite, acceptInvite, revokeMember,
+  resolveMyCompany, listMembers, createInvite, acceptInvite, revokeMember,
   type MyCompany, type Member,
 } from '../company';
+import { readLetterhead, saveLetterhead, type Letterhead } from '../letterhead';
 
 export function SettingsScreen(props: {
   db: AbstractPowerSyncDatabase;
@@ -46,6 +48,12 @@ export function SettingsScreen(props: {
    *  company OWNER; the drawer hides the entry point for everyone else. */
   mode: 'profile' | 'company';
   confirmBase: string;
+  /** The company logo as a LOCAL file path, or null. Drawn in the letterhead card so
+   *  the contractor sees what a client sees. */
+  logoUri?: string | null;
+  /** Opens the caller's logo sheet (App.tsx owns the picker and the upload). Omitted
+   *  = the logo tile is not pressable, which is right for a non-owner. */
+  onLogoPress?: () => void;
   onSaveProfile: (p: Profile) => Promise<void>;
   onSetLang: (l: Lang) => Promise<void>;
   onOpenPlans: () => void;
@@ -66,15 +74,48 @@ export function SettingsScreen(props: {
   const [note, setNote] = React.useState<string | null>(null);
   const [quotaHit, setQuotaHit] = React.useState<{ kind: QuotaKind; limit: number } | null>(null);
 
+  /**
+   * THE LETTERHEAD — what a client sees at the top of every change order.
+   *
+   * Read through an RPC, not from the local `company` table, which does not sync to
+   * the device (`letterhead.ts` explains why). `null` means "not read yet" and is
+   * kept distinct from "read, and empty": drawing empty inputs over a saved address
+   * and then saving them back is how a contractor silently loses his own letterhead.
+   */
+  const [lh, setLh] = React.useState<Letterhead | null>(null);
+  const [lhName, setLhName] = React.useState('');
+  const [lhAddress, setLhAddress] = React.useState('');
+  const [lhLicense, setLhLicense] = React.useState('');
+  const [lhSaved, setLhSaved] = React.useState(false);
+  const [lhErr, setLhErr] = React.useState<string | null>(null);
+
   // Notification permission is an OS truth, not ours to fake. We reflect it and offer
   // to request+register; we never claim "on" when the OS says otherwise.
   const [notif, setNotif] = React.useState<'unknown' | 'granted' | 'denied' | 'undetermined'>('unknown');
 
   const loadTeam = React.useCallback(async () => {
     try {
-      const c = await myCompany(db, userId);
+      // The RESOLVER, not `myCompany`: the local tables are empty on a device whose
+      // sync rules have never been deployed, and this screen would then show a
+      // contractor no company at all while the server holds his.
+      const c = await resolveMyCompany(db, supabase, userId);
       setCo(c);
       if (c) setMembers(await listMembers(db, c.id, userId));
+      // The letterhead comes from the SERVER even when `myCompany` found a row —
+      // the local table carries the name and none of the letterhead columns.
+      if (c) {
+        const r = await readLetterhead(supabase, c.id);
+        if (r.ok) {
+          setLh(r.letterhead);
+          setLhName(r.letterhead.name);
+          setLhAddress(r.letterhead.address ?? '');
+          setLhLicense(r.letterhead.license ?? '');
+        } else {
+          // Said out loud rather than shown as blank fields. A contractor who cannot
+          // reach the server must not be invited to type over what he cannot see.
+          setLhErr(r.reason);
+        }
+      }
     } catch { /* tables may not have synced yet */ }
   }, [db, userId]);
 
@@ -188,7 +229,8 @@ export function SettingsScreen(props: {
           <Text style={{ fontSize: 26, color: C.ink }}>‹</Text>
         </Pressable>
         <Text style={{ fontFamily: F.dispSemi, fontSize: 24, color: C.ink }}>
-          {props.mode === 'company' ? t('set.companyTitle') : t('set.profile')}
+          {props.mode !== 'company' ? t('set.profile')
+            : members.length > 1 ? t('set.companyTitle') : t('set.businessTitle')}
         </Text>
       </View>
 
@@ -239,6 +281,134 @@ export function SettingsScreen(props: {
         <Pressable onPress={save} style={saveBtn}>
           <Text style={saveBtnT}>{saved ? t('set.saved') : t('set.save')}</Text>
         </Pressable>
+      </View>
+      )}
+
+      {/* ---- Company letterhead ---- company mode only.
+          hadar, 2026-08-17: "the user needs to be able to add their logo, as part of
+          the company section in the drawer menu where the user can add company name,
+          logo, address, license (optional)."
+
+          IT IS FIRST, ABOVE THE TEAM, because it is what the screen is named after and
+          because it is the only part of this screen a CLIENT ever sees:
+          `confirmation_company_v1` prints these three lines and the logo at the top of
+          every change order. The team is internal; the letterhead is the company's
+          face. */}
+      {props.mode === 'company' && (
+      <View style={{ ...TH.card, marginTop: 14 }}>
+        <Text style={label}>{t('set.letterhead')}</Text>
+        <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 4 }}>
+          {t('set.letterheadWhy')}
+        </Text>
+
+        {/* THE LOGO AND THE NAME, SIDE BY SIDE — the shape of the thing being edited,
+            so he can see the letterhead rather than infer it from three text fields. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14 }}>
+          <Pressable
+            onPress={props.onLogoPress}
+            disabled={!props.onLogoPress}
+            accessibilityRole={props.onLogoPress ? 'button' : undefined}
+            accessibilityLabel={t(props.logoUri ? 'logo.change' : 'logo.add')}
+            style={{
+              width: 72, height: 72, borderRadius: 10, borderWidth: 1,
+              borderColor: C.line, backgroundColor: C.surfaceMuted,
+              alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+            }}>
+            {props.logoUri
+              ? <Image source={{ uri: props.logoUri }} style={{ width: '100%', height: '100%' }}
+                       resizeMode="contain" />
+              : <Icon name="image" size={24} color={C.muted} />}
+          </Pressable>
+          <View style={{ flex: 1 }}>
+            {/* The affordance is SPELLED OUT, not left to a tap-the-picture guess —
+                CLAUDE.md §1: a hidden gesture may as well not exist for someone who
+                does not think in software. */}
+            {!!props.onLogoPress && (
+              <Pressable onPress={props.onLogoPress} accessibilityRole="button"
+                style={{ minHeight: 44, justifyContent: 'center' }}>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 14.5, color: C.brand }}>
+                  {t(props.logoUri ? 'logo.change' : 'logo.add')}
+                </Text>
+              </Pressable>
+            )}
+            <Text style={{ ...TH.bodySteel, fontSize: 12 }}>{t('logo.note')}</Text>
+          </View>
+        </View>
+
+        {/* Could not be read: say so instead of drawing empty fields over a saved
+            letterhead he would then overwrite with blanks. */}
+        {lhErr !== null && lh === null ? (
+          <Text style={{ ...TH.bodySteel, fontSize: 13, marginTop: 14, color: C.danger }}>
+            {t('set.letterheadOffline')}
+          </Text>
+        ) : (
+        <>
+          <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 16, marginBottom: 6 }}>
+            {t('fr.companyName')}
+          </Text>
+          <TextInput style={inputStyle} value={lhName} onChangeText={setLhName}
+            editable={lh?.isOwner !== false}
+            placeholder={t('fr.companyName')} placeholderTextColor="#8c959f" />
+
+          <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 12, marginBottom: 6 }}>
+            {t('set.companyAddress')}
+          </Text>
+          <TextInput style={{ ...inputStyle, minHeight: 64 }} value={lhAddress}
+            onChangeText={setLhAddress} multiline
+            editable={lh?.isOwner !== false}
+            placeholder={t('set.companyAddressHint')} placeholderTextColor="#8c959f" />
+
+          {/* OPTIONAL, and labelled so (hadar). An unlicensed handyman doing $800 of
+              work is a real user; a required field would either stop him or teach him
+              to type junk into a document a client relies on. */}
+          <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 12, marginBottom: 6 }}>
+            {t('set.companyLicense')}
+          </Text>
+          <TextInput style={inputStyle} value={lhLicense} onChangeText={setLhLicense}
+            editable={lh?.isOwner !== false}
+            autoCapitalize="characters"
+            placeholder={t('set.companyLicenseHint')} placeholderTextColor="#8c959f" />
+
+          {lh?.isOwner === false ? (
+            // A crew member sees the letterhead and cannot edit it — same bar the
+            // server sets. A disabled Save with no explanation reads as broken.
+            <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 12 }}>
+              {t('set.letterheadOwnerOnly')}
+            </Text>
+          ) : (
+            <Pressable
+              onPress={async () => {
+                if (!co || busy) return;
+                setBusy(true); setLhErr(null);
+                const r = await saveLetterhead(supabase, {
+                  companyId: co.id, name: lhName, address: lhAddress, license: lhLicense,
+                });
+                setBusy(false);
+                if (!r.ok) { setLhErr(r.reason); return; }
+                setLhSaved(true);
+                setTimeout(() => setLhSaved(false), 1800);
+                // Re-read rather than assume: the server trims, collapses blanks to
+                // null, and refuses to blank the name. Echoing what we sent would show
+                // him a letterhead the server does not actually hold.
+                const back = await readLetterhead(supabase, co.id);
+                if (back.ok) {
+                  setLh(back.letterhead);
+                  setLhName(back.letterhead.name);
+                  setLhAddress(back.letterhead.address ?? '');
+                  setLhLicense(back.letterhead.license ?? '');
+                }
+              }}
+              style={saveBtn}>
+              <Text style={saveBtnT}>{lhSaved ? t('set.saved') : t('set.save')}</Text>
+            </Pressable>
+          )}
+          {!!lhErr && lh !== null && (
+            <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 8, color: C.danger }}>
+              {lhErr}
+            </Text>
+          )}
+        </>
+        )}
       </View>
       )}
 

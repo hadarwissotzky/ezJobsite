@@ -76,7 +76,7 @@ import { sendReadiness, UNTITLED_SCOPE } from './src/sendreadiness';
 import { mergeTimeline, openCount, type MergedEvent } from './src/eventtimeline';
 import { SettingsScreen } from './src/ui/settingsscreen';
 import { billingTenantId, createInvite, ensureBillingTenant, ensureOwnCompany,
-         listMembers, listMyCompanies, myCompany, setActiveCompany,
+         listMembers, listMyCompanies, myCompany, resolveMyCompany, setActiveCompany,
          type Member } from './src/company';
 import { closeMyAccount } from './src/closeaccount';
 import { ensureLogoCached, pickLogo, removeCompanyLogo,
@@ -211,7 +211,8 @@ import {
 } from './src/approverrouting';
 import { applyLocalApproval, centsFromInput, createChangeOrder, createLinkedExtra, drainChangeOrderOutbox,
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
-         createdLabel, markLocalSent, money, moneyWhole, parseMoney, validateLines, CO_PHOTO_SUBQUERY,
+         createdLabel, markLocalSent, money, moneyWhole, parseMoney, validateLines,
+         CO_AUTHOR_JOIN, CO_PHOTO_SUBQUERY,
          type LineItem, type LedgerRow, priceDraftExtra, setDraftFlowFields, rehomeDraftExtra,
          backfillCoNumbers,
          shortDate,
@@ -236,7 +237,7 @@ export const db = new PowerSyncDatabase({
 // Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
 // graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
 // wrong" until this could be read back off the device. One string, no data exposed.
-(globalThis as any).__EZ_BUILD__ = 'v209-sentnotdelivered';
+(globalThis as any).__EZ_BUILD__ = 'v215-homecard';
 // DEV-ONLY read handle. Stripped from any release build by the __DEV__ guard, which
 // Metro constant-folds to false — so this cannot ship. It exists because three separate
 // bugs today were diagnosed in seconds by asking the DEVICE what it holds, and guessed
@@ -550,6 +551,11 @@ export default function App() {
     id: string; scope: string; amount_cents: number | null; status: string;
     project_id: string; pname: string; who_directed: string; created_at_ms: number;
     signed_by: string | null; questions: number; photo_relpath: string | null;
+    // WHO RAISED IT. Home showed the date and no person at all, while the company feed
+    // showed both — the same object, two shapes (hadar, 2026-08-17). Null renders as
+    // ABSENT, never "Unknown": inventing an author on a record that carries a
+    // signature is the one thing this field must not do.
+    created_by: string | null;
     // The change-order number is the shared card's kicker (2026-08-13). `nte_cents` and
     // the schedule columns were added here in the same change and removed again when
     // the pricing-type and schedule lines came off the card — they had no other reader.
@@ -2794,8 +2800,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                   COALESCE(p.name, '') AS pname, co.who_directed, co.created_at_ms,
                   co.signed_by, co.co_number,
                   ${CO_PHOTO_SUBQUERY} AS photo_relpath,
+                  fa.name AS created_by,
                   (SELECT COUNT(*) FROM co_question q WHERE q.change_order_id = co.id) AS questions
              FROM change_order co LEFT JOIN project p ON p.id = co.project_id
+             -- The SAME join the company feed uses, imported rather than copied, so
+             -- one extra names one person on both screens.
+             LEFT JOIN ${CO_AUTHOR_JOIN} fa ON fa.subject_id = co.id AND fa.rn = 1
             WHERE co.status != 'superseded'
             ORDER BY co.created_at_ms DESC`));
         // Stage 1: captured walkthroughs not yet reviewed into a decision.
@@ -3016,12 +3026,28 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         const prod = await entitledProductNow();
         if (prod) await rememberEntitledProduct(db, prod);
         setPaywallProduct(await currentProductId(db));
-        const co = await myCompany(db, OWNER);
+        // SERVER FALLBACK, because the local tables are empty on a device whose sync
+        // rules have never been deployed — and everything below is gated on this
+        // answer, so an empty table silently deletes the Company row, the logo control
+        // and the letterhead from the menu (hadar, 2026-08-17: "i cannot see the
+        // company section").
+        const co = await resolveMyCompany(db, connector.client, OWNER);
         setCompanies(await listMyCompanies(db, OWNER));
         setIsOwner(!!co?.isOwner);
-        // SOLO IS NOT A COMPANY. `isOwner` is true for a freelancer's own tenant, so it
-        // can no longer be what reveals roster/invite UI — that would put "Company
-        // settings" in front of somebody who never said they had one.
+        /**
+         * A SOLO OPERATOR STILL HAS A LETTERHEAD.
+         *
+         * `hasTeam` used to gate the whole Company screen, on the reasoning that "solo
+         * is not a company" and the screen was nothing but a roster. That reasoning
+         * expired the moment the screen gained the letterhead: a one-man outfit's
+         * business name, address and licence number are exactly what has to appear on
+         * a change order — in most US states the licence is legally required — and
+         * CLAUDE.md is explicit that the product must work for a solo operator, with
+         * the office as a role and never a requirement.
+         *
+         * So the ENTRY is open to anyone who owns a tenant, and `hasTeam` now gates
+         * only the roster INSIDE it, which is the part that genuinely needs a team.
+         */
         setHasTeam(!!co && !prof?.isSolo);
         setCo(co ? { id: co.id, name: co.name } : null);
         // The logo rides this tick too. `logo_key` syncs down with the company row, so
@@ -6703,7 +6729,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       planName={T(('plan.' + planId) as any)}
       usage={usage}
       isFreePlan={planId === 'free'}
-      isOwner={hasTeam}
+      // The Company entry follows OWNERSHIP, not team size — see the note at
+      // `setHasTeam`. A solo contractor needs the letterhead behind this row.
+      isOwner={isOwner} hasTeam={hasTeam}
       logoUri={logoUri}
       companyName={co?.name ?? null}
       canEditLogo={isOwner}
@@ -6952,14 +6980,30 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // Settings / Team — profile editing + company membership (hadar 2026-07-25).
   if (showSettings && settingsProfile) {
     return (
+      <>
       <SettingsScreen
         db={db} supabase={connector.client} userId={OWNER} profile={settingsProfile}
         lang={lang} mode={settingsMode} confirmBase={CONFIRM_BASE}
+        // The letterhead card draws the logo and hands the tap back here — App.tsx
+        // owns the picker, the upload and the local cache (companylogo.ts), and a
+        // second copy of that flow inside Settings is a second place for it to break.
+        logoUri={logoUri} onLogoPress={() => setLogoSheet(true)}
         onSaveProfile={async (p) => { await saveProfile(connector, db, p); setSettingsProfile(p); await refresh(); }}
         onSetLang={async (l) => { setLang(l); setLangState(l); await saveLang(db, l); }}
         onOpenPlans={() => { setShowSettings(false); void openPaywall(); }}
         onBack={() => setShowSettings(false)}
       />
+      {/* THE OVERLAYS THIS SCREEN CAN OPEN HAVE TO BE RENDERED BY IT.
+          This branch is an EARLY RETURN — nothing below it in the tree mounts — so the
+          logo sheet lived in a branch that never runs while Settings is open. Tapping
+          "Add logo" on the letterhead card set `logoSheet = true` and drew nothing:
+          a dead control, which is the failure CLAUDE.md §1 calls unreadable (hadar,
+          2026-08-17: "i still cannot add logo").
+          `ackEl` comes too, or the outcome of a save — the "Logo updated" or the
+          reason it failed — would be equally invisible. */}
+      {logoEl}
+      {ackEl}
+      </>
     );
   }
 
@@ -7041,7 +7085,18 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           : T('job.coNoNumber')}
         title={e.scope || T('home.draftsSec')}
         photoUri={e.photo_relpath ? FS.documentDirectory + e.photo_relpath : null}
-        meta={[e.pname || null, shortDate(e.created_at_ms)]}
+        // THE SAME CLOSING LINE AS THE COMPANY FEED (hadar, 2026-08-17: "make sure
+        // the home change order records data structure and style looks like the
+        // company one, especially how the created and date are").
+        // Home used to print the date as the second grey meta line and name nobody, so
+        // the same extra read as a different object depending on which screen you
+        // opened it from. Now both put WHO raised it and WHEN on one footer row —
+        // person left in ink, date hard right — and leave the job name as the only
+        // meta line above it.
+        person={e.created_by
+          ? { label: T('feed.raisedByLab'), name: e.created_by } : null}
+        personRight={e.created_at_ms > 0 ? shortDate(e.created_at_ms) : null}
+        meta={[e.pname || null]}
         conversation={(e.questions ?? 0) > 0 ? T('job.inConversation') : null}
         amount={e.amount_cents != null ? `+${moneyWhole(e.amount_cents)}` : null}
         onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }} />

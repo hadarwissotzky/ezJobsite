@@ -871,6 +871,29 @@ export type LedgerRow = {
  * the cross-job Home/Activity query can reuse the exact same rule (one definition, no
  * drift). Assumes the outer query aliases change_order as `co`.
  */
+/**
+ * WHO RAISED AN EXTRA — the FIRST actor on it, as a joinable subquery.
+ *
+ * Join it as `fa` and read `fa.name` / `fa.at_ms`. Assumes the outer query aliases
+ * change_order as `co`, exactly like `CO_PHOTO_SUBQUERY` above.
+ *
+ * Exported rather than copied because it is now read by BOTH lists that show a person
+ * on a row — the company feed and Home — and hadar's ask was precisely that those two
+ * stop disagreeing (2026-08-17: "make sure the home change order records data
+ * structure and style looks like the company one"). Two copies of this window function
+ * is two chances for one of them to start naming a different human.
+ *
+ * DELIBERATELY NOT FILTERED TO act='captured'. That act is written by the capture flow,
+ * and an extra typed rather than spoken never gets one — filtering would leave those
+ * rows permanently anonymous. The earliest act of ANY kind is by definition the person
+ * who brought the extra into existence.
+ */
+export const CO_AUTHOR_JOIN = `(
+  SELECT subject_id, name, at_ms,
+         ROW_NUMBER() OVER (PARTITION BY subject_id ORDER BY at_ms ASC, id ASC) AS rn
+    FROM extra_actor WHERE subject_kind = 'change_order'
+)`;
+
 export const CO_PHOTO_SUBQUERY = `(
   SELECT cc.media_relpath FROM capture_commit cc
    WHERE cc.modality = 'photo' AND cc.capture_id IN (

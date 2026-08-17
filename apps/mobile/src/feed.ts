@@ -10,7 +10,7 @@
  */
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 
-import { CO_PHOTO_SUBQUERY } from './changeorder.ts';
+import { CO_AUTHOR_JOIN, CO_PHOTO_SUBQUERY } from './changeorder.ts';
 
 export type FeedItem = {
   id: string;
@@ -100,11 +100,7 @@ export async function companyFeed(
        -- capture flow, and an extra typed rather than spoken never gets one — filtering
        -- would leave those rows permanently anonymous. The earliest act of ANY kind is
        -- by definition the person who brought the extra into existence.
-       LEFT JOIN (
-         SELECT subject_id, name, at_ms,
-                ROW_NUMBER() OVER (PARTITION BY subject_id ORDER BY at_ms ASC, id ASC) AS rn
-           FROM extra_actor WHERE subject_kind = 'change_order'
-       ) fa ON fa.subject_id = co.id AND fa.rn = 1
+       LEFT JOIN ${CO_AUTHOR_JOIN} fa ON fa.subject_id = co.id AND fa.rn = 1
       WHERE COALESCE(co.status,'draft') <> 'superseded'
       ORDER BY at_ms DESC, co.id DESC
       LIMIT ?`, [limit]);

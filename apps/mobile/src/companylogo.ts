@@ -128,7 +128,29 @@ export async function saveCompanyLogo(
   } catch { return { ok: false, reason: 'read_failed' }; }
 
   const bytes = Buffer.from(b64, 'base64');
-  const key = `logo/${o.ownerId}/${sha256(bytes)}`;
+  /**
+   * THE OWNER'S UID COMES FIRST. NOT COSMETIC — IT IS THE RLS PREDICATE.
+   *
+   * `011_storage_policies.sql` allows a write only when the FIRST path segment is the
+   * caller's uid:
+   *
+   *     (storage.foldername(name))[1] = auth.uid()::text
+   *
+   * This key used to be `logo/<uid>/<hash>`, whose first segment is the literal word
+   * "logo". Every upload was refused with "new row violates row-level security policy",
+   * and the READ policy is the same shape, so the signed URL would have failed too.
+   * The logo feature has therefore never worked once since it was written on
+   * 2026-08-12 — the sheet opened, the picker opened, and the save died at the network
+   * with `upload_failed` (hadar, 2026-08-17: "cannot add a logo").
+   *
+   * `<uid>/logo/<hash>` satisfies the policy and matches every other object in this
+   * bucket. No new policy is needed, which is the point: a second policy carved out
+   * for one file type is a second thing that can drift from the first.
+   *
+   * Nothing to migrate — no `company.logo_key` was ever written successfully, so there
+   * are no old-format keys in the wild to keep reading.
+   */
+  const key = `${o.ownerId}/logo/${sha256(bytes)}`;
   const local = localLogoPath(o.companyId, key);
 
   /**

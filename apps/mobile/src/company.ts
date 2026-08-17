@@ -97,6 +97,48 @@ export async function billingTenantId(
   } catch { return null; }
 }
 
+/**
+ * WHICH COMPANY AM I IN — asked of the SERVER, when the device cannot answer.
+ *
+ * `myCompany()` reads the PowerSync-managed tables, and those hold zero rows on a
+ * device whose sync rules have never been deployed (verified on hadar's phone,
+ * 2026-08-17: 0 companies, 0 members, while the server held a real one). Everything
+ * gated on it vanished — the drawer's Company row, the logo control, the letterhead —
+ * so a shipped feature was invisible because of a bucket nobody has deployed.
+ *
+ * LOCAL FIRST, ALWAYS. When the tables have synced this costs nothing and works
+ * offline, which is mandate #7. The RPC is the fallback, not the path.
+ *
+ * It also REMEMBERS what it learns, so the next launch is local again even before sync
+ * arrives — the same trick `billingTenantId` uses, generalised from "who is buying" to
+ * "who am I".
+ */
+export async function resolveMyCompany(
+  db: AbstractPowerSyncDatabase, supabase: SupabaseClient, userId: string
+): Promise<MyCompany | null> {
+  const local = await myCompany(db, userId);
+  if (local) return local;
+  try {
+    const { data, error } = await supabase.rpc('my_company_v1');
+    if (error) return null;
+    const c = (data as { company?: Record<string, unknown> } | null)?.company;
+    if (!c) return null;
+    const id = String(c.id ?? '');
+    if (!id) return null;
+    // Cached for the next launch. Never overwrites a live membership — `myCompany`
+    // won above if there was one — so a stale id can only ever stand in for silence.
+    await rememberTenantId(db, id).catch(() => {});
+    return {
+      id,
+      name: String(c.name ?? ''),
+      role: String(c.role ?? 'owner') as MemberRole,
+      isOwner: c.is_owner === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Which tenant this DEVICE is working in. Device-local on purpose: the same person may
  *  keep the office iPad on the company and their own phone on their freelance work. */
 export async function setActiveCompany(
