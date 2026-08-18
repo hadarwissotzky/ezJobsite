@@ -975,6 +975,13 @@ const EN: Record<string, string> = {
   // Bodies for the three caps added 2026-08-04. Each names the cap, then the way
   // forward — a wall with no door is how a free user simply stops using the app.
   'quota.body.changeOrders': 'Your free plan includes {limit} sent change orders. Upgrade to send as many as you need.',
+  // The send gate's third state: held, legal, and said out loud (hadar, 2026-08-17:
+  // "queue it — but needs to prompt the user letting them know that they cannot send").
+  'gate.queuedNoCredits': 'You’re out of change orders, so this is waiting to send.',
+  'gate.fixBuyCredits': 'Add more and it goes out on its own — you don’t have to come back.',
+  'gate.queuedOne': '1 change order is waiting to send.',
+  'gate.queuedN': '{n} change orders are waiting to send.',
+  'gate.queuedTitle': 'Saved — waiting to send',
   'quota.body.photos': 'Your free plan includes {limit} photos. Upgrade for unlimited photos.',
   'quota.body.recordingMinutes': 'Your free plan includes {limit} minutes of recording. Upgrade for unlimited recording.',
   // ── usage, shown BEFORE the wall ──
@@ -2677,6 +2684,11 @@ const ES: Record<string, string> = {
   'quota.body.members': 'Tu plan gratis incluye hasta {limit} miembros del equipo. Mejora tu plan para agregar más.',
   'quota.body.jobs': 'Tu plan gratis incluye hasta {limit} trabajos. Archiva uno que ya terminaste, o mejora tu plan para agregar más.',
   'quota.body.changeOrders': 'Tu plan gratis incluye {limit} órdenes de cambio enviadas. Mejora tu plan para enviar las que necesites.',
+  'gate.queuedNoCredits': 'Se le acabaron las órdenes de cambio, así que esta está esperando para enviarse.',
+  'gate.fixBuyCredits': 'Agregue más y sale sola — no tiene que volver.',
+  'gate.queuedOne': '1 orden de cambio está esperando para enviarse.',
+  'gate.queuedN': '{n} órdenes de cambio están esperando para enviarse.',
+  'gate.queuedTitle': 'Guardada — esperando para enviarse',
   'quota.body.photos': 'Tu plan gratis incluye {limit} fotos. Mejora tu plan para tener fotos ilimitadas.',
   'quota.body.recordingMinutes': 'Tu plan gratis incluye {limit} minutos de grabación. Mejora tu plan para grabar sin límite.',
   'usage.yourPlan': 'Tu plan',
