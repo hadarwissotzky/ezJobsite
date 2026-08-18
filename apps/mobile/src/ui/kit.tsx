@@ -126,21 +126,33 @@ export function BottomSheet({ visible, title, onClose, children, footer, tall, b
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-      <Pressable style={st.sheetDim} onPress={onClose} accessibilityRole="button">
-        {/* The panel.
-            NO `onStartShouldSetResponder` (hadar, 2026-08-18: the signed approval, the
-            conversation and the full history "are not scrollable").
+      {/* THE DIM IS A SIBLING BEHIND THE PANEL, NOT ITS PARENT.
+          (hadar, 2026-08-18 — reported twice, because my first fix was wrong.)
 
-            It was here to stop the dim's press firing when a tap landed inside the
-            sheet — and it did, by claiming the touch responder on touch START. That is
-            before a drag has become a drag, so the ScrollView below could never take the
-            gesture and NO sheet in this app scrolled. Every sheet built on this shares
-            the bug, which is why all three broke at once.
+          The sheets did not scroll. First attempt removed an explicit
+          `onStartShouldSetResponder={() => true}` from the panel and kept the panel as a
+          Pressable, on the reasoning that its `onPress` was what stopped the dim closing.
+          THAT DID NOT FIX IT: a <Pressable> claims the touch responder on touch START by
+          design — that is how it detects a press at all — so the panel went on swallowing
+          every drag before the ScrollView could see it. Removing the explicit claim while
+          keeping the thing that makes the claim implicitly was no change at all.
 
-            The dim's press is still stopped: `onPress={() => {}}` makes this Pressable
-            handle the press itself, and a press handled by a child does not go on to fire
-            its parent's. The responder claim was never what was doing that work. */}
-        <Pressable style={[st.sheet, tall && st.sheetTall]} onPress={() => {}}>
+          The real problem was the SHAPE: a dim that WRAPS the panel forces the panel to
+          intercept, or every tap inside the sheet closes it. So the dim stops wrapping.
+          It is now an absolutely-filled Pressable UNDER the panel, and the panel is a
+          plain View that claims nothing. Tap outside -> the dim is what you hit -> close.
+          Touch inside -> nothing above the ScrollView wants the gesture -> it scrolls. */}
+      <View style={st.sheetDim}>
+        {/* HIDDEN FROM VOICEOVER, not labelled: a full-screen unlabelled button is worse
+            than none, and the sheet already has a titled ✕ that does the same thing. This
+            file holds no copy of its own (every string arrives translated via props), so
+            there is nothing here to label it WITH. */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants" />
+        <View style={[st.sheet, tall && st.sheetTall]}>
           <View style={st.sheetGrab} />
           <View style={st.sheetHead}>
             <Text style={st.sheetTitle}>{title}</Text>
@@ -158,8 +170,8 @@ export function BottomSheet({ visible, title, onClose, children, footer, tall, b
             {children}
           </ScrollView>
           {footer && <View style={st.sheetFoot}>{footer}</View>}
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
       </KeyboardAvoidingView>
     </Modal>
   );
