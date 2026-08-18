@@ -238,7 +238,7 @@ export const db = new PowerSyncDatabase({
 // Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
 // graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
 // wrong" until this could be read back off the device. One string, no data exposed.
-(globalThis as any).__EZ_BUILD__ = 'v216-smscost';
+(globalThis as any).__EZ_BUILD__ = 'v217-homefilters';
 // DEV-ONLY read handle. Stripped from any release build by the __DEV__ guard, which
 // Metro constant-folds to false — so this cannot ship. It exists because three separate
 // bugs today were diagnosed in seconds by asking the DEVICE what it holds, and guessed
@@ -7424,30 +7424,27 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
               and tapping it again clears. Never navigates. */}
           {!homeEmpty && (<>
           <View style={s.sumRow}>
-            <Pressable style={[s.sumChip, s.sumNeeds, homeFilter === 'needs' && s.sumChipOn]}
-              accessibilityState={{ selected: homeFilter === 'needs' }}
-              onPress={() => toggleFilter('needs')}>
-              <Text style={s.sumChipT}>{T('act.chipNeeds')}</Text>
-              <View style={[s.sumCount, s.sumCountDark]}>
-                <Text style={s.sumCountT}>{needs.length}</Text>
-              </View>
-            </Pressable>
-            <Pressable style={[s.sumChip, s.sumWait, homeFilter === 'waiting' && s.sumChipOn]}
-              accessibilityState={{ selected: homeFilter === 'waiting' }}
-              onPress={() => toggleFilter('waiting')}>
-              <Text style={[s.sumChipT, s.sumWaitT]}>{T('act.chipWaiting')}</Text>
-              <View style={[s.sumCount, s.sumCountWait]}>
-                <Text style={s.sumCountT}>{waitingList.length}</Text>
-              </View>
-            </Pressable>
-            <Pressable style={[s.sumChip, s.sumOk, homeFilter === 'approved' && s.sumChipOn]}
-              accessibilityState={{ selected: homeFilter === 'approved' }}
-              onPress={() => toggleFilter('approved')}>
-              <Text style={[s.sumChipT, s.sumOkT]}>{T('act.chipApproved')}</Text>
-              <View style={s.sumCheck}>
-                <Text style={s.sumCheckT}>✓</Text>
-              </View>
-            </Pressable>
+            {/* ONE LOUD CHIP, NEVER THREE. See `s.sumChip` for why. Each renders the
+                same way and differs only in its count badge's resting colour, so the
+                selected state is the only thing carrying emphasis. */}
+            {([
+              ['needs',    T('act.chipNeeds'),    needs.length,       s.sumCountDark],
+              ['waiting',  T('act.chipWaiting'),  waitingList.length, s.sumCountWait],
+              ['approved', T('act.chipApproved'), approvedList.length, s.sumCountOk],
+            ] as const).map(([key, label, count, badge]) => {
+              const on = homeFilter === key;
+              return (
+                <Pressable key={key} style={[s.sumChip, on && s.sumChipOn]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  onPress={() => toggleFilter(key as 'needs' | 'waiting' | 'approved')}>
+                  <Text style={[s.sumChipT, on && s.sumChipTOn]}>{label}</Text>
+                  <View style={[s.sumCount, badge, on && s.sumCountOn]}>
+                    <Text style={s.sumCountT}>{count}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
           </View>
 
           {/* Status sections in the mockup's order (waiting out first, then what needs
@@ -9809,21 +9806,44 @@ const s = StyleSheet.create({
   ctaSub: { color: '#c3bab2', fontFamily: 'Inter_400Regular', fontSize: 13.5, marginTop: 2 },  // ink-300
   // Summary chips — glance-and-jump into the filtered Activity tab.
   sumRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 14 },
+  /**
+   * QUIET UNTIL CHOSEN (hadar, 2026-08-18: "rather than them being 3 colors we need a
+   * better on-state design — the selected filter has the prominent color").
+   *
+   * All three used to be filled at once — ink, butter, mint — with the live one marked
+   * by a 2px ring. Three saturated chips competing on one row means the eye has to find
+   * a BORDER to answer "which am I looking at", and a border is the weakest signal
+   * available. Worse, the colours were reading as importance rather than as state: the
+   * amber chip looked like a warning whether or not it was selected.
+   *
+   * Now there is exactly one loud thing on the row. Unselected chips are the muted
+   * surface the rest of the app uses for inert controls; the selected one fills solid
+   * ink and inverts its text. Which subset you are looking at is answered by weight, not
+   * by hue — which also survives sunlight and colour-blindness, unlike three pastels a
+   * shade apart.
+   *
+   * THE COUNT KEEPS ITS SEMANTIC COLOUR when the chip is quiet, because that badge is
+   * the one place the number's MEANING matters — "3 need you" is a different fact from
+   * "3 approved". On the selected chip it goes translucent white, since the fill is
+   * already carrying the emphasis and a coloured dot on ink reads as a defect.
+   */
   sumChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
-    borderRadius: 12, borderWidth: 1, paddingVertical: 10 },
-  sumChipOn: { borderWidth: 2, borderColor: '#131110' },  // the live filter, ringed in ink
-  sumNeeds: { backgroundColor: '#f0ebe6', borderColor: '#e2dbd4' },   // ink-100 / ink-200
-  sumWait: { backgroundColor: '#fbf3d4', borderColor: '#efd667' },    // butter-100 / butter-400
-  sumOk: { backgroundColor: '#e4f4eb', borderColor: '#9fe0bb' },      // mint-100
-  sumChipT: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#131110' },
-  sumWaitT: { color: '#8a6d1f' },
-  sumOkT: { color: '#157a47' },
+    borderRadius: 12, borderWidth: 1, paddingVertical: 10,
+    backgroundColor: '#f4f1ec', borderColor: '#e2dbd4' },
+  sumChipOn: { backgroundColor: '#131110', borderColor: '#131110' },
+  // The three per-filter styles are gone: an unselected chip no longer has a colour of
+  // its own. Kept as no-ops would have been three names doing nothing, which is how a
+  // style sheet starts lying about what it controls.
+  sumChipT: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#5f574f' },
+  sumChipTOn: { color: '#ffffff' },
   sumCount: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
   sumCountDark: { backgroundColor: '#131110' },
   sumCountWait: { backgroundColor: '#c99a2e' },
+  sumCountOk: { backgroundColor: '#157a47' },
+  // On the selected (ink) chip: the badge stops competing and becomes a hole in the
+  // fill. A saturated dot on solid ink reads as something gone wrong.
+  sumCountOn: { backgroundColor: 'rgba(255,255,255,0.22)' },
   sumCountT: { fontFamily: 'Inter_700Bold', fontSize: 11.5, color: '#fff' },
-  sumCheck: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#157a47', alignItems: 'center', justifyContent: 'center' },
-  sumCheckT: { color: '#fff', fontSize: 12, fontFamily: 'Inter_700Bold' },
   secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 18,
     marginTop: 10, marginBottom: 10 },
   secLab: { fontFamily: 'Oswald_600SemiBold', fontSize: 15, color: '#6b625b', textTransform: 'uppercase', letterSpacing: 0.8 },
