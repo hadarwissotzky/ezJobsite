@@ -58,6 +58,15 @@ services:
         sync: false
       - key: DEEPGRAM_API_KEY
         sync: false
+      # SPENDS CREDITS. A v2 secret key, scoped to Customers + Purchases read_write and
+      # nothing else — it runs on every signature, so its blast radius is exactly its
+      # permission list. Without it the spend outbox drains to a recorded failure with a
+      # readable reason rather than retrying forever against nothing.
+      - key: REVENUECAT_SECRET_KEY
+        sync: false
+      # Not a secret; pinned so a second project cannot be spent against by accident.
+      - key: REVENUECAT_PROJECT_ID
+        value: proj960cec8c
 
   # ── the client's approval page ──────────────────────────────────────────────
   #
