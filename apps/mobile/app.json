@@ -15,7 +15,8 @@
         "NSPhotoLibraryUsageDescription": "EZjobsite attaches photos you pick to the decision they belong to.",
         "NSMicrophoneUsageDescription": "EZjobsite records what you say on site so nothing gets lost.",
         "NSLocationWhenInUseUsageDescription": "EZjobsite stamps each photo with where it was taken, so it is evidence of what happened on this job.",
-        "NSSpeechRecognitionUsageDescription": "EZjobsite turns what you said into text on this phone, so your notes fill themselves in."
+        "NSSpeechRecognitionUsageDescription": "EZjobsite turns what you said into text on this phone, so your notes fill themselves in.",
+        "ITSAppUsesNonExemptEncryption": false
       },
       "entitlements": {
         "aps-environment": "production"
