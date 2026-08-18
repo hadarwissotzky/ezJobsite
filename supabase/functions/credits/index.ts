@@ -231,18 +231,38 @@ Deno.serve(async (req) => {
       return json({ ok: true, reserved: false, reason: 'no_credits', available: purchased - open });
     }
 
+    /**
+     * THE IDEMPOTENCY KEY IS PER RESERVATION, NOT PER CHANGE ORDER.
+     *
+     * It was `res-${coId}` and that column is UNIQUE across the whole table — so once a
+     * reservation was RELEASED, re-reserving the same extra collided, and the 23505
+     * branch below reported `reserved: true` while holding NOTHING. The realistic path
+     * is the common one: a client declines, the contractor revises and resends, and from
+     * then on that change order is sent free forever, because at signature there is no
+     * OPEN reservation to consume. Reported success, reserved nothing — the worst
+     * available failure. Caught by reading the rows after a release, not by testing.
+     *
+     * 409's own comment says what this column is for: "The spend is idempotent on this."
+     * A spend belongs to ONE reservation, so the key is that reservation's identity.
+     * Uniqueness per change order is a DIFFERENT rule and already has its own mechanism —
+     * `one_open_reservation_per_co`, a PARTIAL index on state='OPEN', which permits
+     * exactly what this needs: one open at a time, and a fresh one after a release.
+     */
+    const reservationId = `cr-${crypto.randomUUID()}`;
     const { error: insErr } = await db.from('credit_reservation').insert({
-      id: `cr-${crypto.randomUUID()}`,
+      id: reservationId,
       company_id: companyId,
       change_order_id: coId,
       state: 'OPEN',
       is_free: usingFree,
-      idempotency_key: `res-${coId}`,
+      idempotency_key: reservationId,
     });
 
     if (insErr) {
-      // 23505 = this extra is already reserved. Success, not failure: the credit is
-      // held, and nothing is drawn down a second time.
+      // 23505 can now only come from `one_open_reservation_per_co` — the key above is a
+      // fresh uuid and cannot collide. So it genuinely means "this extra is already
+      // reserved and still open", which is success: the credit is held and nothing is
+      // drawn down twice.
       if ((insErr as { code?: string }).code === '23505') {
         return json({ ok: true, reserved: true, already: true });
       }
