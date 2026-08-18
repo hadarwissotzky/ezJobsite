@@ -6,7 +6,7 @@ import { PowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import * as Contacts from 'expo-contacts';
 import React from 'react';
-import { Alert, Dimensions, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, AppState, Dimensions, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppSchema } from './src/AppSchema';
 import { ago, projectCards, projectCoCounts, type ProjectCard } from './src/ui/home';
@@ -38,6 +38,7 @@ import { checkJobs, checkMembers, checkSendQuota, currentPlan, currentProductId,
 import { usageSummary, type UsageSummary } from './src/usage';
 import { UsageCard, UsageNudge } from './src/ui/usagecard';
 import { QuotaModal } from './src/ui/quotamodal';
+import { HeldSendModal } from './src/ui/heldsendmodal';
 import { SwipeRow } from './src/ui/swiperow';
 import { PaywallScreen } from './src/ui/paywallscreen';
 import { PLANS, type PlanId } from './src/plans';
@@ -134,6 +135,18 @@ import type { SendToPrefill, SendToProject } from './src/sendto';
 // all from "a client asked something" to the contractor noticing.
 import { ensureActivitySchema, activityFor, markRead,
          ensureRemindSchema, noteLinkSent, liveLinkFor, noteReminded } from './src/activitystore';
+// THE CREDIT GATE (hadar, 2026-08-17: "queue it — but needs to prompt the user letting
+// them know that they cannot send if they don't have credits"). Three modules, three
+// jobs, and they are deliberately not one: `credits` asks the server what is available
+// and holds one, `sendgate` decides what the tap does, `sendhold` is the durable queue
+// that makes "it goes out on its own" true rather than a slogan.
+import { creditBalance, releaseCredit, reserveCredit } from './src/credits';
+import { decideSend } from './src/sendgate';
+import { clearHold, ensureSendHoldSchema, heldSends, holdSend, holdsToDrain,
+         noteHoldAttempt } from './src/sendhold';
+// Prices and the checkout address come from the server, never from this binary — the
+// rail is a court case away from changing and must not need an App Store review.
+import { loadPricing, purchaseUrl, type PricingConfig } from './src/pricingconfig';
 // R8 / R5b push. Local notifications: the green light and a client question
 // reach the contractor with the phone in his pocket, with no provider behind it.
 import { ensureNotifySchema, notifyPermissionStatus, requestNotifyPermission,
@@ -401,6 +414,9 @@ function firstLine(text: string, max = 64): string {
   return line.slice(0, max - 1).trimEnd() + '…';
 }
 
+/** Guards `drainHolds` against two overlapping runs — see the comment there. */
+let draining = false;
+
 export default function App() {
   // The design language (prototype): condensed display for things you RECOGNISE,
   // humanist body for things you READ. Gated below so text never flashes unstyled.
@@ -452,6 +468,24 @@ export default function App() {
   const [logoUri, setLogoUri] = React.useState<string | null>(null);
   /** The company's CURRENT logo_key, so a removal can delete the file it cached. */
   const [logoKey, setLogoKey] = React.useState<string | null>(null);
+  /**
+   * ─── THE CREDIT GATE'S THREE PIECES OF STATE ──────────────────────────────────
+   *
+   * `pricing` is where the checkout lives. Null until the first read, and the buy button
+   * is simply absent until then rather than pointed at a guessed URL — `purchaseUrl`
+   * returns null without a token, and a dead checkout is the one failure that takes a
+   * contractor's money nowhere.
+   *
+   * `noCredits` is the prompt hadar asked for. It is NOT an error state: the change order
+   * is saved, held and going to send. It exists because a queue nobody is told about is
+   * worse than a refusal — he would walk away believing the client has it.
+   *
+   * `heldN` is how many are waiting, so the app can say so out loud instead of only at
+   * the moment of the tap.
+   */
+  const [pricing, setPricing] = React.useState<PricingConfig | null>(null);
+  const [noCredits, setNoCredits] = React.useState<null | { changeOrderId: string }>(null);
+  const [heldN, setHeldN] = React.useState(0);
   /**
    * Has `refresh()` ever completed? A REF, not state — nothing should re-render because
    * of it; it exists so the guided-start gate can refuse to fire on the empty lists that
@@ -1964,7 +1998,62 @@ const deliverLink = async (a: {
   return { ok: false, why: s.reason ?? T('sent.failNotHanded') };
 };
 
-const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
+/**
+ * THE ONE SEND. Every path that puts a priced commitment in front of a client comes
+ * through here — the guided first-run flow, the send-preview sheet, and the drain of
+ * anything that was waiting on a credit.
+ *
+ * ─── WHY THE CREDIT GATE IS AT THE TOP AND NOT AT EACH CALLER ───────────────────
+ * It is the choke point, and money gates belong at choke points. A gate copied into two
+ * callers is a gate one of them will drift out of, and the drift would not look like a
+ * bug — it would look like a contractor sending for free.
+ *
+ * It sits ABOVE the EWA branch on purpose. An EWA is a signed commitment on a change
+ * order row, sql/412 consumes a credit when it is signed, and letting it past the gate
+ * would mean the server spending a credit the client never reserved.
+ *
+ * ─── IT RETURNS WHETHER IT SENT ─────────────────────────────────────────────────
+ * It used to return nothing, and the guided flow read "did not throw" as "sent". With a
+ * third outcome that is neither success nor error — HELD — that reading becomes a lie:
+ * the walkthrough would show its "on its way" screen over a change order still sitting on
+ * the phone. So the outcome is a value, and every caller has to look at it.
+ */
+const sendPricedApproval = async (
+  c: LedgerRow, to: RosterMember | null,
+): Promise<{ sent: boolean; held?: boolean }> => {
+  /**
+   * HOLD A CREDIT FIRST — before anything is minted, sent or marked.
+   *
+   * The order matters in one direction only. Reserving after the send would mean a
+   * contractor at zero could send an unlimited number and the server would discover it
+   * afterwards; reserving before means the worst case is a reservation held against a
+   * send that then failed, and `releaseCredit` below gives it straight back.
+   *
+   * `reserveCredit` NEVER reports a network failure as a refusal (see credits.ts): an
+   * unreachable server yields `reserved: false, reason: 'unreachable'`, and this treats
+   * that as sendable. A basement is not a billing decision, and the server settles it on
+   * its own terms when the confirmation is minted.
+   */
+  const res = await reserveCredit(connector.client, c.id);
+  if (res.ok && !res.reserved && res.reason === 'no_credits') {
+    // HELD, AND SAID OUT LOUD. Not an error, not a refusal — mandate #1's rule about
+    // never acknowledging what has not happened, applied to sending. The recipient he
+    // just confirmed is stored WITH the hold so the retry reaches the same person.
+    await holdSend(db, {
+      changeOrderId: c.id,
+      approverId: to?.id ?? null, approverName: to?.name ?? null,
+      approverPhone: to?.phone ?? null,
+    });
+    setSendPrep(null);
+    setHeldN((await heldSends(db)).length);
+    setNoCredits({ changeOrderId: c.id });
+    return { sent: false, held: true };
+  }
+  // A reservation that FAILED (not refused — failed) is a server problem, and it must not
+  // become a silent free send. It is reported the way every other refusal on this path
+  // is, with the reason.
+  if (!res.ok) { setUi({ k: 'refused', why: res.reason }); return { sent: false }; }
+
   // R3: an EWA is a DIFFERENT INSTRUMENT and takes a different sender — no price, no
   // running total, kind='ewa'. Branching inside sendForConfirmation would have put a
   // dozen conditionals in the one function whose output a client signs.
@@ -1989,7 +2078,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       billingTiming: c.billing_timing, scheduleEffect: c.schedule_effect,
       scheduleDays: c.schedule_days, exclusions: c.exclusions,
     });
-    if (!re.ok) { setUi({ k: 'refused', why: T(re.reason as any) }); return; }
+    if (!re.ok) {
+      // THE CREDIT GOES BACK. Nothing was minted, so nothing will ever be signed against
+      // this reservation, and leaving it OPEN would charge him for an authorization that
+      // does not exist. Idempotent, and a failed release is not worth failing the report
+      // of the failure he is already being shown.
+      if (res.reserved) void releaseCredit(connector.client, c.id);
+      setUi({ k: 'refused', why: T(re.reason as any) });
+      return { sent: false };
+    }
     await markLocalSent(db, c.id);
     if (to) await markApproverUsed(db, to.id);
     // THE SHEET STAYS UP UNTIL THE HAND-OFF IS DONE. Two reasons, and the second is
@@ -2021,8 +2118,13 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       shared: d0.ok, failWhy: d0.ok ? null : d0.why,
       sms: { kind: 'ewa', companyName: prof0?.company || prof0?.name || null,
              jobLabel: projects.find((p) => p.id === projectId)?.name ?? null } });
+    // It went, so it is no longer waiting. Clearing here and not at the caller keeps the
+    // queue honest on EVERY path: an EWA sent from the drain, from the sheet or from the
+    // walkthrough all leave the same way.
+    await clearHold(db, c.id);
+    setHeldN((await heldSends(db)).length);
     await refresh();
-    return;
+    return { sent: true };
   }
 
   // The CONFIRM_BASE check that used to sit here moved INTO
@@ -2144,8 +2246,105 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       sms: { kind: 'confirm', companyName: prof?.company || prof?.name || null,
              jobLabel: projects.find((p) => p.id === projectId)?.name ?? null,
              amountText: c.amount } });
+    await clearHold(db, c.id);
+    setHeldN((await heldSends(db)).length);
     await refresh();
-  } else setUi({ k: 'refused', why: r.reason });
+    return { sent: true };
+  }
+  // The instrument was never minted. Same reasoning as the EWA branch above: hand the
+  // credit back rather than hold it against a send that did not happen.
+  if (res.reserved) void releaseCredit(connector.client, c.id);
+  setUi({ k: 'refused', why: r.reason });
+  return { sent: false };
+};
+
+/**
+ * SEND WHAT HAS BEEN WAITING ON A CREDIT.
+ *
+ * This is the half of hadar's instruction that the prompt alone does not satisfy. The app
+ * tells him "add more and it goes out on its own — you don't have to come back", and a
+ * promise made on screen is a promise the code owes. This is the code.
+ *
+ * ─── WHEN IT RUNS ───────────────────────────────────────────────────────────────
+ * When the app comes to the foreground, which is also the moment he returns from paying
+ * on the web — the flow the sentence was written for. It does NOT run in the background
+ * and nothing here wakes the phone; the honest boundary is that a contractor who buys
+ * credits on a laptop and never opens the app has nothing sent on his behalf.
+ *
+ * ─── WHY ONLY THE OPEN JOB'S HOLDS ──────────────────────────────────────────────
+ * `sendPricedApproval` builds the instrument from the OPEN project — its name goes into
+ * the frozen text a client signs, and `sendForConfirmation` files it under that project
+ * id. Draining a hold belonging to another job would therefore mint a change order
+ * addressed to the wrong jobsite, which is worse than a delayed send by a wide margin.
+ * `coRowsRef` holds exactly the open project's rows, so "is this row loaded" IS the test
+ * for "can this be sent correctly right now". Holds for other jobs keep waiting and go
+ * when he opens that job.
+ *
+ * ─── IT ASKS THE SERVER FIRST ───────────────────────────────────────────────────
+ * `holdsToDrain` decides how many attempts fire from the balance, so a queue of six does
+ * not become six sends the instant one bar of signal appears. Each send re-reserves
+ * anyway — the balance read is a throttle, never the authority.
+ */
+const drainHolds = async () => {
+  // A PLAIN FLAG, not a ref, and deliberately outside the component: the drain fires from
+  // a foreground listener and from a purchase return, and those can land together. It is
+  // not a hook because this function sits above the block where the hooks are declared,
+  // and a `useRef` here would put a hook call in a place where a later early return could
+  // change the hook order — the exact bug that took down every screen on 2026-08-16.
+  if (draining) return;
+  draining = true;
+  try {
+    const holds = await heldSends(db);
+    setHeldN(holds.length);
+    if (!holds.length) return;
+
+    const bal = await creditBalance(connector.client);
+    // The gate's own vocabulary, so a queued send and a fresh tap cannot disagree about
+    // what "may send" means. An unmetered plan drains everything it has.
+    const gate = decideSend({
+      metered: bal?.metered !== false,
+      available: bal?.available ?? 0,
+    });
+    if (gate.kind !== 'send') return;
+
+    const ready = holdsToDrain(holds, bal?.metered === false ? holds.length : bal?.available ?? null);
+    for (const h of ready) {
+      const row = coRowsRef.current.find((x) => x.id === h.changeOrderId);
+      // Not this job's, or gone. Not a failure and not an attempt — recording one would
+      // burn the retry budget of a hold that was never actually tried.
+      if (!row) continue;
+      // ALREADY PAST DRAFT means the client has it: a hydrate landed, or another device
+      // sent it. The hold is discharged rather than re-sent, because sending twice is a
+      // second instrument for one decision.
+      if (row.status !== 'draft') { await clearHold(db, h.changeOrderId); continue; }
+      try {
+        // The person he confirmed, not whoever the roster resolves to now. The live row
+        // is preferred when it is still there (it carries the role that gets copied onto
+        // the record) and the stored copy is the floor.
+        const live = h.approverId
+          // `projectId`, not a field on the row: a LedgerRow carries no project because
+          // `ledger()` only ever returns the OPEN project's rows. That is the same
+          // invariant the `!row` skip above relies on.
+          ? (await listRoster(db, projectId)).find((m) => m.id === h.approverId) ?? null
+          : null;
+        const to: RosterMember | null = live ?? (h.approverId && h.approverName ? {
+          id: h.approverId, name: h.approverName, role: 'owner' as ApproverRole,
+          lastUsedMs: 0, phone: h.approverPhone, email: null, chainSide: null,
+        } : null);
+        const out = await sendPricedApproval(row, to);
+        // `sent: false` with `held: true` means it hit the gate again — the balance moved
+        // under us. That is not a failed attempt, it is the queue working.
+        if (!out.sent && !out.held) {
+          await noteHoldAttempt(db, h.changeOrderId, 'send refused');
+        }
+      } catch (e: any) {
+        await noteHoldAttempt(db, h.changeOrderId, String(e?.message ?? e));
+      }
+    }
+    setHeldN((await heldSends(db)).length);
+  } finally {
+    draining = false;
+  }
 };
 
   /**
@@ -3040,6 +3239,25 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   // the Projects home, or the auto-select above, both land the right captures.
   React.useEffect(() => { if (ready) void refresh(); }, [projectId, ready, refresh]);
 
+  /**
+   * COMING BACK FROM PAYING IS THE MOMENT THE QUEUE MATTERS.
+   *
+   * The buy button hands him to Safari; the app is backgrounded while he pays and
+   * foregrounded when he is done. That transition is the ONLY signal this app gets that a
+   * web purchase happened — RevenueCat's grant lands server-side and nothing pushes it
+   * here — so it is what makes "add more and it goes out on its own" true.
+   *
+   * Also runs on any other return to the app, which is deliberate and cheap: the drain
+   * reads one balance and does nothing when nothing is waiting.
+   */
+  React.useEffect(() => {
+    if (!ready) return;
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active') void drainHolds();
+    });
+    return () => sub.remove();
+  }, [ready]);
+
   // Plan + ownership for the drawer. Keyed on OWNER (so it loads once the real user id
   // arrives after sign-in) and on menuOpen (so the plan box is current every time the
   // drawer is opened). Best-effort: a pre-migration/unsynced company reads free +
@@ -3083,6 +3301,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         const prod = await entitledProductNow();
         if (prod) await rememberEntitledProduct(db, prod);
         setPaywallProduct(await currentProductId(db));
+        // PRICES AND THE CHECKOUT ADDRESS. Never fails and never blocks: `loadPricing`
+        // falls back to its cache and then to compiled-in numbers, so a paywall in a
+        // basement shows last week's prices rather than nothing — the failure that makes
+        // a contractor conclude the app is broken and not come back to find out.
+        setPricing(await loadPricing(db, connector.client));
+        // Anything left waiting on a credit from a previous run goes NOW, before he has
+        // to ask. This is the launch half of "it goes out on its own"; the foreground
+        // listener below is the return-from-paying half.
+        void drainHolds();
         // SERVER FALLBACK, because the local tables are empty on a device whose sync
         // rules have never been deployed — and everything below is gated on this
         // answer, so an empty table silently deletes the Company row, the logo control
@@ -3239,6 +3466,11 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       await ensureNotifySchema(db);
       await ensureEventLogSchema(db);
       await ensureRemindSchema(db);
+      // The sends waiting on a credit. BEFORE the auth gate like the rest of these,
+      // because a hold written on the last run has to be readable on this one whether or
+      // not the session came back — the promise it carries ("it goes out on its own") was
+      // made to the person holding the phone, not to a session.
+      await ensureSendHoldSchema(db);
       // R1: the draft session store. A SEPARATE directory from capture-tmp, which
       // recoverySweep empties unconditionally — draft media must survive that sweep,
       // so it never lives there.
@@ -4650,6 +4882,37 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       onSeePlans={() => { setQuota(null); void openPaywall(); }} />
   ) : null;
 
+  /**
+   * "Saved — waiting to send." Mounted next to quotaEl and for the same structural
+   * reason: a RN <Modal> has to sit in the mounted subtree, and the screens below are
+   * early returns.
+   *
+   * ─── WHY THE BUY BUTTON LEAVES THE APP ──────────────────────────────────────────
+   * `purchaseUrl` is a RevenueCat Web Purchase Link, and a purchase made there carries no
+   * Apple commission (0% on external links in the US today) against 15% through IAP. That
+   * is the whole point of the model hadar chose on 2026-08-17: "avoid apple tax as much as
+   * we can". `co.id` is appended because it is the same App User ID `billing.ts` gives the
+   * SDK — without it the money attaches to an anonymous customer and buys nothing.
+   *
+   * Null URL = NO BUTTON. Not a disabled one, not one that opens the IAP paywall instead:
+   * the message about his change order is true either way, and a dead checkout is the one
+   * failure that costs real money.
+   */
+  const heldEl = noCredits ? (() => {
+    const url = pricing ? purchaseUrl(pricing, co?.id ?? null) : null;
+    return (
+      <HeldSendModal
+        held={heldN}
+        onBuy={url ? () => {
+          setNoCredits(null);
+          // The drain fires when he comes back (the AppState listener), so nothing here
+          // has to wait for or trust a redirect.
+          void Linking.openURL(url);
+        } : null}
+        onClose={() => setNoCredits(null)} />
+    );
+  })() : null;
+
   // The paywall (DEC-11) — a Modal, so mounted beside quotaEl in each early-return
   // screen; `visible` toggles it. Opened from a hit cap ("See plans") or Settings.
   const paywallEl = (
@@ -4964,7 +5227,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
        */
       <KeyboardAvoidingView style={s.njScreen}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {quotaEl}
+        {quotaEl}{heldEl}
       {jobCreatedEl}
         {discardSheet}
         {celebrateEl}
@@ -5565,7 +5828,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     );
     return (
       <View style={s.jpC}>
-        {quotaEl}
+        {quotaEl}{heldEl}
       {jobCreatedEl}
         {discardSheet}
         {celebrateEl}
@@ -6061,6 +6324,10 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       return (
         <>
         {ackEl}
+        {/* The walkthrough is its own early return and mounts none of the modals below,
+            so a first-time contractor whose very first send hits the gate would otherwise
+            watch the button stop working with no explanation at all. */}
+        {heldEl}
         <StepReview
           // The stored sentinel is the string 'Owner'; what a person READS is
           // translated. See `client.unnamed` for why the two must stay apart.
@@ -6085,8 +6352,12 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             // first-time user his change order was on its way when it was not — the one
             // claim this product cannot get wrong.
             try {
-              await sendPricedApproval(row, owner as any);
-              setGStep('done');
+              // THE OUTCOME IS READ. "Did not throw" is no longer the same as "sent":
+              // a held send returns `sent: false` and its own prompt is already on
+              // screen, so stepping to 'done' here would put "it's on its way" over a
+              // change order still sitting on the phone.
+              const out = await sendPricedApproval(row, owner as any);
+              if (out.sent) setGStep('done');
             } catch (e: any) {
               setAck({ kind: 'no', title: T('gs.r.failed'), detail: String(e?.message ?? e) });
             } finally { setGSending(false); }
@@ -7027,7 +7298,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         {bottomNav('company', false)}
         {drawerEl}
         {/* Feed can open the drawer too, so it needs the modals the drawer opens. */}
-        {quotaEl}
+        {quotaEl}{heldEl}
       {jobCreatedEl}
         {paywallEl}
       </View>
@@ -7523,7 +7794,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
             be mounted on all three; jobs already had them, home and activity did not.
             AFTER {drawerEl} deliberately: a Modal declared before its sibling content
             does not present on iOS. */}
-        {quotaEl}
+        {quotaEl}{heldEl}
       {jobCreatedEl}
         {/* AND THE SAME OMISSION BIT THE SWIPE-DELETE (hadar 2026-08-05: "the button
             is there but it doesn't delete once I confirm"). Home is the ONLY screen
@@ -7557,7 +7828,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     return (
       <View style={s.homeC}>
-        {quotaEl}
+        {quotaEl}{heldEl}
       {jobCreatedEl}
         {discardSheet}
         {celebrateEl}
@@ -7809,7 +8080,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
 
     return (
       <View style={s.homeC}>
-        {quotaEl}
+        {quotaEl}{heldEl}
         {jobCreatedEl}
         <View style={s.dashHdr}>
           <Pressable style={s.hdrBtn} hitSlop={12} accessibilityLabel={T('common.back')}
@@ -7989,7 +8260,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
         {bottomNav('activity', false)}
         {drawerEl}
         {/* Same reason as home — the drawer opens from here too. */}
-        {quotaEl}
+        {quotaEl}{heldEl}
       {jobCreatedEl}
         {paywallEl}
         {(bell || drafts.length > 0) && (
@@ -8031,7 +8302,7 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
   const startCaptureJob = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
   return (
     <View style={s.c}>
-      {quotaEl}
+      {quotaEl}{heldEl}
       {jobCreatedEl}
         {discardSheet}
       {celebrateEl}

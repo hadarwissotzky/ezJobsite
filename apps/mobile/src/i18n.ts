@@ -986,6 +986,10 @@ const EN: Record<string, string> = {
   'gate.queuedOne': '1 change order is waiting to send.',
   'gate.queuedN': '{n} change orders are waiting to send.',
   'gate.queuedTitle': 'Saved — waiting to send',
+  // The two buttons under it. "Add" and not "Buy": what he is short of is change orders
+  // he can send, and that is the noun the rest of this app already uses for them.
+  'gate.addCredits': 'Add change orders',
+  'gate.queuedOk': 'OK, got it',
   // The credit counter. Shown only to a metered plan, and only when the number is
   // actually known — see `credits.ts:balanceLine`.
   'credits.none': 'No change orders left',
@@ -2697,6 +2701,8 @@ const ES: Record<string, string> = {
   'quota.body.changeOrders': 'Tu plan gratis incluye {limit} órdenes de cambio enviadas. Mejora tu plan para enviar las que necesites.',
   'gate.queuedNoCredits': 'Se le acabaron las órdenes de cambio, así que esta está esperando para enviarse.',
   'gate.fixBuyCredits': 'Agregue más y sale sola — no tiene que volver.',
+  'gate.addCredits': 'Agregar órdenes de cambio',
+  'gate.queuedOk': 'Entendido',
   'gate.queuedOne': '1 orden de cambio está esperando para enviarse.',
   'gate.queuedN': '{n} órdenes de cambio están esperando para enviarse.',
   'gate.queuedTitle': 'Guardada — esperando para enviarse',
