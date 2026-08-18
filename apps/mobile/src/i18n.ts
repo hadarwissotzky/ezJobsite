@@ -56,6 +56,10 @@ const EN: Record<string, string> = {
   'cap.interrupted': 'A call took the microphone',
   'cap.tapToResume': 'Tap here to keep recording',
   'cap.sayWhat': 'Say what you found — the app is listening.',
+  // The reassurance card's own controls (hadar, 2026-08-18: let him clear the
+  // viewfinder). Hiding it never touches the recording.
+  'cap.hideCard': 'Hide this and show the camera',
+  'cap.showCard': 'Show recording details',
   'cap.sayWhatEx': '“Water heater’s cracked, needs replacing — about eighteen fifty.”',
   'cap.nothingYet': 'Nothing captured yet — say what happened, or snap a photo. Then tap Done.',
   // The capture screen, redesigned to the mockup (hadar, 2026-07-27). Every line is
@@ -1878,6 +1882,8 @@ const ES: Record<string, string> = {
   'cap.interrupted': 'Una llamada tomó el micrófono',
   'cap.tapToResume': 'Toca aquí para seguir grabando',
   'cap.sayWhat': 'Di lo que encontraste — la app te escucha.',
+  'cap.hideCard': 'Ocultar esto y ver la cámara',
+  'cap.showCard': 'Ver los detalles de la grabación',
   'cap.sayWhatEx': '“El calentador está rajado, hay que cambiarlo — como mil ochocientos cincuenta.”',
   'cap.nothingYet': 'Aún no hay nada — di qué pasó o toma una foto. Luego toca Listo.',
   // Pantalla de captura rediseñada (2026-07-27). NOTA: este español lo escribió

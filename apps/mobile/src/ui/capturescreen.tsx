@@ -284,7 +284,26 @@ export function FusedCapture({
   // the way of the viewfinder once he is actually doing the thing (hadar, 2026-07-27).
   // Pausing re-expands it, because a paused mic is exactly when "what is it doing now?"
   // needs a full-size answer.
-  const expanded = paused || (!spoke && shots.length === 0);
+  /**
+   * DISMISSED BY HAND, AND IT STAYS DISMISSED (hadar, 2026-08-18: "allow the user to
+   * close the message screen so they can see the full camera screen").
+   *
+   * The card auto-collapses once he starts talking or snaps a photo, which covers the
+   * common case and covers it well. It does not cover the one he hit: lining up a shot
+   * BEFORE saying anything, with a three-line card sitting over the viewfinder and no
+   * way to move it. Auto-behaviour that cannot be overridden is the app deciding it
+   * knows better than the person holding the phone.
+   *
+   * Sticky for the session on purpose. A card that reappeared on the next state change
+   * would have to be dismissed again mid-shot, which is worse than not offering it.
+   */
+  const [cardDismissed, setCardDismissed] = React.useState(false);
+
+  // The reassurance card is big on open — that is its whole job — and then gets out of
+  // the way of the viewfinder once he is actually doing the thing (hadar, 2026-07-27).
+  // Pausing re-expands it, because a paused mic is exactly when "what is it doing now?"
+  // needs a full-size answer.
+  const expanded = !cardDismissed && (paused || (!spoke && shots.length === 0));
 
   /** Close the sheet AND drop the viewer, so reopening never lands mid-photo.
    *  Android's back gesture routes here too: it shuts the viewer first if one is
@@ -539,6 +558,18 @@ export function FusedCapture({
             </View>
           ) : expanded ? (
             <View style={st.card}>
+              {/* CLEAR THE VIEWFINDER. Top-right, 44pt, and it hides only this card —
+                  the recording is untouched, which is the whole point: he is framing a
+                  shot, not stopping. The mic state stays readable in the collapsed
+                  strip that replaces this, so dismissing costs him no information. */}
+              <Pressable
+                onPress={() => setCardDismissed(true)}
+                accessibilityRole="button"
+                accessibilityLabel={T('cap.hideCard')}
+                hitSlop={8}
+                style={st.cardClose}>
+                <Text style={st.cardCloseT}>✕</Text>
+              </Pressable>
               <View style={st.cardTop}>
                 <View style={[st.micDisc, paused && st.micDiscPaused]}>
                   <Icon name={paused ? 'pause' : 'microphone'} size={30} color="#fff" />
@@ -561,7 +592,16 @@ export function FusedCapture({
             </View>
           ) : (
             // The collapsed strip: same information, one line, viewfinder free.
-            <View style={[st.card, st.cardSlim]}>
+            //
+            // TAPPABLE BOTH WAYS. Dismissing the big card is sticky, so without this the
+            // only route back would be ending the recording — and pausing later would
+            // leave a paused mic with no explanation anywhere on screen. Tapping the
+            // strip restores the full card; the ✕ hides it again. He owns the state in
+            // both directions and nothing reappears on its own.
+            <Pressable style={[st.card, st.cardSlim]}
+              onPress={() => setCardDismissed(false)}
+              accessibilityRole="button"
+              accessibilityLabel={T('cap.showCard')}>
               <View style={[st.micDot, paused && st.micDiscPaused]}>
                 <Icon name={paused ? 'pause' : 'microphone'} size={18} color="#fff" />
               </View>
@@ -569,7 +609,7 @@ export function FusedCapture({
                   height row, so as a direct child of this row it would size to zero. */}
               <View style={st.slimWave}><Wave level={level} active={recordingNow} /></View>
               <Text style={st.slimTime}>{two(Math.floor(secs / 60))}:{two(secs % 60)}</Text>
-            </View>
+            </Pressable>
           )}
 
           {/* The live words, over the camera, while he talks. Rough by design and
@@ -753,6 +793,13 @@ const st = StyleSheet.create({
   cardHintIcon: { fontSize: 17, color: C.brand },
   cardHintT: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.brand },
 
+  // The dismiss control. Absolutely positioned so it does not reflow the card's
+  // content, and 44pt of touch target (mandate #3) inside a much smaller glyph.
+  cardClose: {
+    position: 'absolute', top: 2, right: 2, width: 44, height: 44,
+    alignItems: 'center', justifyContent: 'center', zIndex: 2,
+  },
+  cardCloseT: { fontFamily: 'Inter_600SemiBold', fontSize: 17, color: '#8A8F8B' },
   cardSlim: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
   micDot: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.brand,
     alignItems: 'center', justifyContent: 'center' },

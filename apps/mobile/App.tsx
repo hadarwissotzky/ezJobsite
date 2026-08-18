@@ -238,7 +238,7 @@ export const db = new PowerSyncDatabase({
 // Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
 // graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
 // wrong" until this could be read back off the device. One string, no data exposed.
-(globalThis as any).__EZ_BUILD__ = 'v217-homefilters';
+(globalThis as any).__EZ_BUILD__ = 'v218-hidecard';
 // DEV-ONLY read handle. Stripped from any release build by the __DEV__ guard, which
 // Metro constant-folds to false — so this cannot ship. It exists because three separate
 // bugs today were diagnosed in seconds by asking the DEVICE what it holds, and guessed
