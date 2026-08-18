@@ -986,6 +986,11 @@ const EN: Record<string, string> = {
   'gate.queuedOne': '1 change order is waiting to send.',
   'gate.queuedN': '{n} change orders are waiting to send.',
   'gate.queuedTitle': 'Saved — waiting to send',
+  // The credit counter. Shown only to a metered plan, and only when the number is
+  // actually known — see `credits.ts:balanceLine`.
+  'credits.none': 'No change orders left',
+  'credits.one': '1 change order left',
+  'credits.n': '{n} change orders left',
   'quota.body.photos': 'Your free plan includes {limit} photos. Upgrade for unlimited photos.',
   'quota.body.recordingMinutes': 'Your free plan includes {limit} minutes of recording. Upgrade for unlimited recording.',
   // ── usage, shown BEFORE the wall ──
@@ -2695,6 +2700,9 @@ const ES: Record<string, string> = {
   'gate.queuedOne': '1 orden de cambio está esperando para enviarse.',
   'gate.queuedN': '{n} órdenes de cambio están esperando para enviarse.',
   'gate.queuedTitle': 'Guardada — esperando para enviarse',
+  'credits.none': 'No quedan órdenes de cambio',
+  'credits.one': 'Queda 1 orden de cambio',
+  'credits.n': 'Quedan {n} órdenes de cambio',
   'quota.body.photos': 'Tu plan gratis incluye {limit} fotos. Mejora tu plan para tener fotos ilimitadas.',
   'quota.body.recordingMinutes': 'Tu plan gratis incluye {limit} minutos de grabación. Mejora tu plan para grabar sin límite.',
   'usage.yourPlan': 'Tu plan',
