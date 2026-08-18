@@ -149,7 +149,10 @@ create table if not exists public.pricing_config (
   -- survive by showing "contact us" rather than a dead button.
   linkout_enabled      boolean not null default true,
   iap_enabled          boolean not null default true,
-  free_allowance       int not null default 3,
+  -- TWO, not three (hadar, 2026-08-17). It matches what already ships: `plans.ts`
+  -- free.changeOrders is 2, and a free tier that promised 3 here while the client
+  -- refused the third would be the app arguing with itself in front of a new user.
+  free_allowance       int not null default 2,
   updated_at           timestamptz not null default now()
 );
 
