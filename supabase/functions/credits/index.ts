@@ -136,16 +136,47 @@ Deno.serve(async (req) => {
   const plan = ((co as { plan?: string } | null)?.plan ?? 'free').toLowerCase();
   const metered = plan === 'free' || plan === 'packs';
 
-  // Open reservations are what the balance has to be reduced by.
+  /**
+   * OPEN reservations reduce what can still be sent — but ONLY THE PAID ONES.
+   *
+   * The two kinds are already accounted for differently, and counting them the same way
+   * subtracts a free send twice:
+   *   · a FREE reservation increments `free_allowance_used` the moment it is made, so it
+   *     has already come out of `freeLeft`;
+   *   · a PAID reservation changes nothing at RevenueCat until the signature spends it,
+   *     so it is invisible in the balance and must be subtracted here.
+   *
+   * Found live, on the run that proved the previous fix: one free reservation left
+   * `freeLeft: 1` and `available: 0`, which told a contractor with a free send in hand
+   * that he had none. `is_free` is excluded for that reason.
+   */
   const { count: openCount } = await db
     .from('credit_reservation')
     .select('id', { count: 'exact', head: true })
-    .eq('company_id', companyId).eq('state', 'OPEN');
+    .eq('company_id', companyId).eq('state', 'OPEN').eq('is_free', false);
   const open = openCount ?? 0;
 
-  const { data: billing } = await db
-    .from('company_billing').select('*').eq('company_id', companyId).maybeSingle();
-  const freeUsed = (billing as { free_allowance_used?: number } | null)?.free_allowance_used ?? 0;
+  /**
+   * FREE CREDITS USED = THE RESERVATIONS THAT PROVE IT. Not a counter.
+   *
+   * `company_billing.free_allowance_used` was the authority, and a counter that only
+   * ever goes up is wrong for a credit that can come back: a free-tier user whose client
+   * DECLINED lost the credit permanently, because `release` moves the reservation to
+   * RELEASED and no counter anywhere hears about it. The model says a credit is consumed
+   * when the homeowner SIGNS — a decline returns it, and that has to be true for the free
+   * two as well as the paid ones.
+   *
+   * Deriving it removes the class of bug rather than the instance. There is nothing to
+   * keep in step, a release restores the credit by definition, and the repair in 411
+   * (which set the counter to `count(is_free)`) becomes the permanent rule instead of a
+   * one-off fix. The column stays for now as a cache for the paywall to render offline;
+   * nothing decides anything from it.
+   */
+  const { count: freeUsedCount } = await db
+    .from('credit_reservation')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId).eq('is_free', true).neq('state', 'RELEASED');
+  const freeUsed = freeUsedCount ?? 0;
 
   const { data: cfg } = await db
     .from('pricing_config').select('free_allowance').eq('id', 1).maybeSingle();
@@ -218,18 +249,19 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: insErr.message }, 500);
     }
 
-    // ONLY NOW, and only for a row that did not already exist. A free send still never
-    // reaches RevenueCat — `is_free` is what the spend path reads to skip it — so the
-    // free tier keeps having no billing relationship at all.
-    if (usingFree) {
-      await db.from('company_billing').upsert({
-        company_id: companyId,
-        rc_app_user_id: companyId,
-        free_allowance_used: freeUsed + 1,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'company_id' });
-    }
-
+    /**
+     * `company_billing.free_allowance_used` IS DELIBERATELY NOT WRITTEN.
+     *
+     * It was maintained here until the derivation above replaced it. Keeping the write
+     * would leave a number that increments on reserve and never decrements on release —
+     * it already read "2 used" while the reservations said none were. A cache that is
+     * wrong is worse than no cache: the first screen to render it would show a
+     * contractor a free tier he had not used up.
+     *
+     * The column survives because 409 declared it and dropping a column is its own
+     * migration; nothing reads it, and `credit_reservation` is the only account of what
+     * was used.
+     */
     return json({ ok: true, reserved: true, free: usingFree });
   }
 
