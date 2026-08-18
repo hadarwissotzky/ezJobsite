@@ -193,6 +193,29 @@ export function FusedCapture({
   // The rough live transcript shown over the camera. Never stored; the real
   // transcript is made from the FILE after the session commits.
   const [liveText, setLiveText] = React.useState('');
+  /**
+   * DISMISSED BY HAND, AND IT STAYS DISMISSED (hadar, 2026-08-18: "allow the user to
+   * close the message screen so they can see the full camera screen").
+   *
+   * The card auto-collapses once he starts talking or snaps a photo, which covers the
+   * common case and covers it well. It does not cover the one he hit: lining up a shot
+   * BEFORE saying anything, with a three-line card sitting over the viewfinder and no
+   * way to move it. Auto-behaviour that cannot be overridden is the app deciding it
+   * knows better than the person holding the phone.
+   *
+   * Sticky for the session on purpose. A card that reappeared on the next state change
+   * would have to be dismissed again mid-shot, which is worse than not offering it.
+   *
+   * DECLARED HERE, WITH THE OTHER HOOKS, AND NOT WHERE IT IS USED. It was first put next
+   * to `expanded` further down — which sits AFTER the two permission early-returns at
+   * `if (!perm)` and `if (!perm.granted)`. On the first render permission is still
+   * resolving, the component returns early, and this hook never runs; on the next render
+   * it does. React counts hooks positionally, so the screen died with "Rendered more
+   * hooks than during the previous render" the moment permission resolved — every time,
+   * for everyone. Hooks go above every conditional return, without exception.
+   */
+  const [cardDismissed, setCardDismissed] = React.useState(false);
+
   const liveRef = React.useRef<LiveHandle | null>(null);
 
   React.useEffect(() => {
@@ -284,20 +307,6 @@ export function FusedCapture({
   // the way of the viewfinder once he is actually doing the thing (hadar, 2026-07-27).
   // Pausing re-expands it, because a paused mic is exactly when "what is it doing now?"
   // needs a full-size answer.
-  /**
-   * DISMISSED BY HAND, AND IT STAYS DISMISSED (hadar, 2026-08-18: "allow the user to
-   * close the message screen so they can see the full camera screen").
-   *
-   * The card auto-collapses once he starts talking or snaps a photo, which covers the
-   * common case and covers it well. It does not cover the one he hit: lining up a shot
-   * BEFORE saying anything, with a three-line card sitting over the viewfinder and no
-   * way to move it. Auto-behaviour that cannot be overridden is the app deciding it
-   * knows better than the person holding the phone.
-   *
-   * Sticky for the session on purpose. A card that reappeared on the next state change
-   * would have to be dismissed again mid-shot, which is worse than not offering it.
-   */
-  const [cardDismissed, setCardDismissed] = React.useState(false);
 
   // The reassurance card is big on open — that is its whole job — and then gets out of
   // the way of the viewfinder once he is actually doing the thing (hadar, 2026-07-27).
