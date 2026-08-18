@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- RELEASE ONLY. TestFlight and the App Store are signed with a DISTRIBUTION
+         profile, which carries `aps-environment: production`; a Release build declaring
+         `development` either fails export validation or registers against Apple's
+         sandbox APNs, where a production token is never delivered. Debug keeps its own
+         file (EZjobsite.entitlements) with `development`, which is what the dev-client
+         build on the tethered phone needs. Two build types, two answers, one file each —
+         the alternative is flipping one value by hand before every archive. -->
+    <key>aps-environment</key>
+    <string>production</string>
+  </dict>
+</plist>

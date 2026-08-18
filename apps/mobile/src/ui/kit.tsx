@@ -127,9 +127,20 @@ export function BottomSheet({ visible, title, onClose, children, footer, tall, b
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
       <Pressable style={st.sheetDim} onPress={onClose} accessibilityRole="button">
-        {/* The panel. `onStartShouldSetResponder` stops the dim's press from firing
-            when the tap lands inside the sheet. */}
-        <Pressable style={[st.sheet, tall && st.sheetTall]} onPress={() => {}} onStartShouldSetResponder={() => true}>
+        {/* The panel.
+            NO `onStartShouldSetResponder` (hadar, 2026-08-18: the signed approval, the
+            conversation and the full history "are not scrollable").
+
+            It was here to stop the dim's press firing when a tap landed inside the
+            sheet — and it did, by claiming the touch responder on touch START. That is
+            before a drag has become a drag, so the ScrollView below could never take the
+            gesture and NO sheet in this app scrolled. Every sheet built on this shares
+            the bug, which is why all three broke at once.
+
+            The dim's press is still stopped: `onPress={() => {}}` makes this Pressable
+            handle the press itself, and a press handled by a child does not go on to fire
+            its parent's. The responder claim was never what was doing that work. */}
+        <Pressable style={[st.sheet, tall && st.sheetTall]} onPress={() => {}}>
           <View style={st.sheetGrab} />
           <View style={st.sheetHead}>
             <Text style={st.sheetTitle}>{title}</Text>

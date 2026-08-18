@@ -12,8 +12,11 @@
 import React from 'react';
 import {Linking,ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { t } from '../i18n';
-import { PLANS, PAID_TIERS, type PlanId } from '../plans';
+import { PLANS, PAID_TIERS, offeredTiers, type PlanId } from '../plans';
 import { billingStatus, manageSubscriptionUrl, purchasePlan, restorePurchases } from '../billing';
+// Prices come from the server (`pricing_config`), never from this binary — the rail is a
+// court case away from changing and must not need an App Store review.
+import { money as packMoney, perCredit, type Pack } from '../pricingconfig';
 import { Icon } from './icon';
 import { C, F } from './theme';
 
@@ -68,9 +71,18 @@ export function annualSavingPct(plan: PlanId): number {
   return Math.round(((m - a) / m) * 100);
 }
 
-/** The best saving across the paid tiers — what the toggle advertises. */
-export function bestAnnualSavingPct(): number {
-  return PAID_TIERS.reduce((best, p) => Math.max(best, annualSavingPct(p)), 0);
+/**
+ * The best saving across the tiers a reader can actually BUY — what the toggle
+ * advertises.
+ *
+ * Over `offeredTiers`, not `PAID_TIERS`: advertising a discount that only exists on a
+ * hidden tier is a number on a purchase screen that nothing on the screen can deliver
+ * (mandate #6). Today Core carries the best rate anyway, so hiding Crew changes nothing
+ * visible — which is exactly why it would have gone unnoticed the day it did.
+ */
+export function bestAnnualSavingPct(currentPlan: PlanId = 'free'): number {
+  return offeredTiers(currentPlan)
+    .reduce((best, p) => Math.max(best, annualSavingPct(p)), 0);
 }
 
 export function PaywallScreen(props: {
@@ -88,9 +100,37 @@ export function PaywallScreen(props: {
    *  from Core-annual — `currentPlan` alone cannot. Null/undefined falls back to
    *  tier-level matching, which is what this screen did before the toggle existed. */
   currentProductId?: string | null;
+  /**
+   * ─── PAY AS YOU GO (hadar, 2026-08-18: "how do I get the selection for pay as you
+   * go") ─────────────────────────────────────────────────────────────────────────
+   *
+   * The answer that shaped this: PAY AS YOU GO IS NOT A TIER. A subscription is a state
+   * you enter; credits are a quantity you buy. So the packs are NOT a fourth card in the
+   * comparison column — putting them there would ask someone to choose between "20
+   * change orders" and "unlimited, monthly", which are answers to different questions.
+   *
+   * They sit in their own section above the tiers, because the ladder reads: you have a
+   * trial, you can buy more when you need them, and you stop counting when the business
+   * is working.
+   *
+   * Empty array = no packs configured, and the section does not render. `pricing_config`
+   * filters out any pack that grants nothing or costs nothing, so an empty list is a
+   * misconfiguration and one fewer option beats a broken one.
+   */
+  packs?: readonly Pack[];
+  /**
+   * Opens the checkout. NULL when there is no web rail with an address — `purchaseUrl`
+   * returns null without a token or a company id, and a buy button that opens a 404 is
+   * worse than none. The section then shows the prices without a door, which is still
+   * useful: he learns what it costs.
+   */
+  onBuyCredits?: (() => void) | null;
+  /** Change orders he can still send. Null = unknown or unlimited; the line is dropped
+   *  rather than rendered as zero. */
+  creditsLeft?: number | null;
 }) {
   const ready = billingStatus() === 'ready';
-  const best = bestAnnualSavingPct();
+  const best = bestAnnualSavingPct(props.currentPlan);
   /**
    * MONTHLY OR ANNUAL, chosen once for the whole screen (hadar 2026-08-13: "I need the
    * paywall to split between annual and monthly as any option across the 3 options").
@@ -331,7 +371,81 @@ export function PaywallScreen(props: {
           </View>
 
           {card('free')}
-          {PAID_TIERS.map(card)}
+
+          {/* PAY AS YOU GO — between the trial and the subscriptions, because that is the
+              order the ladder actually reads: you have a trial, you buy more when you
+              need them, you stop counting when the business is working.
+
+              THE PACK IS CHOSEN AT THE CHECKOUT, not here, and that is not a shortcut:
+              the RevenueCat purchase link opens the offering with every pack on it, so
+              three rows that each opened the same page would be three buttons pretending
+              to be different. The ladder is shown so the decision is INFORMED before he
+              leaves the app — including the per-change-order figure, which is the only
+              number that makes a bigger pack obviously better. */}
+          {!!props.packs?.length && (
+            <View style={{ backgroundColor: C.card, borderRadius: 16, borderWidth: 1,
+              borderColor: C.line, padding: 18, marginBottom: 12 }}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 20, color: C.ink }}>
+                {t('paywall.payg.title')}
+              </Text>
+              <Text style={{ fontFamily: F.body, fontSize: 14, color: C.steel, marginTop: 4 }}>
+                {t('paywall.payg.sub')}
+              </Text>
+
+              <View style={{ marginTop: 14 }}>
+                {props.packs.map((p, i) => {
+                  // The last pack is the cheapest per change order — `pricingconfig`
+                  // orders them by what they grant, so this is a property of the list
+                  // rather than a hardcoded id.
+                  const best = i === (props.packs!.length - 1);
+                  return (
+                    <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center',
+                      paddingVertical: 9,
+                      borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.line }}>
+                      <Text style={{ fontFamily: F.dispSemi, fontSize: 17, color: C.ink,
+                        width: 38 }}>{String(p.credits)}</Text>
+                      <Text style={{ fontFamily: F.body, fontSize: 14, color: C.steel, flex: 1 }}>
+                        {t({ k: 'paywall.payg.each', p: { each: perCredit(p) } } as any)}
+                      </Text>
+                      {best && (
+                        <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5,
+                          color: C.brandDark, backgroundColor: C.brandSoft,
+                          paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6,
+                          overflow: 'hidden', marginRight: 8 }}>
+                          {t('paywall.payg.best')}
+                        </Text>
+                      )}
+                      <Text style={{ fontFamily: F.dispSemi, fontSize: 17, color: C.ink }}>
+                        {packMoney(p.web)}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+
+              {/* NO DOOR IS BETTER THAN A DOOR TO A 404 — `onBuyCredits` is null when the
+                  web rail has no address. The prices above still stand on their own. */}
+              {props.onBuyCredits && (
+                <Pressable onPress={props.onBuyCredits}
+                  style={({ pressed }) => [{ marginTop: 14, minHeight: 50, borderRadius: 12,
+                    backgroundColor: C.ink, alignItems: 'center', justifyContent: 'center' },
+                    pressed && { opacity: 0.85 }]}>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>
+                    {t('paywall.payg.buy')}
+                  </Text>
+                </Pressable>
+              )}
+              {typeof props.creditsLeft === 'number' && (
+                <Text style={{ fontFamily: F.body, fontSize: 13, color: C.steel,
+                  textAlign: 'center', marginTop: 8 }}>
+                  {t({ k: props.creditsLeft === 1 ? 'credits.one' : 'credits.n',
+                       p: { n: String(props.creditsLeft) } } as any)}
+                </Text>
+              )}
+            </View>
+          )}
+
+          {offeredTiers(props.currentPlan).map(card)}
 
           {note && <Text style={{ fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 4 }}>{note}</Text>}
 

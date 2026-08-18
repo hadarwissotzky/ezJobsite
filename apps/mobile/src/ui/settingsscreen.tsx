@@ -36,6 +36,10 @@ import {
   type MyCompany, type Member,
 } from '../company';
 import { cacheLetterhead, readLetterhead, saveLetterhead, type Letterhead } from '../letterhead';
+// What the company has paid for. Owner-only, and the OWNER CHECK IS ON THE SERVER — see
+// billinghistory.ts; nothing here decides entitlement.
+import { billingHistory, invoiceAmount, isRefunded, receiptUrlFor,
+         type BillingHistory, type Invoice } from '../billinghistory';
 
 export function SettingsScreen(props: {
   db: AbstractPowerSyncDatabase;
@@ -62,12 +66,22 @@ export function SettingsScreen(props: {
   const { db, supabase, userId } = props;
   const [name, setName] = React.useState(props.profile.name);
   const [isSolo, setIsSolo] = React.useState(props.profile.isSolo);
-  const [company, setCompany] = React.useState(props.profile.company ?? '');
+  /** Read-only now: the Company screen owns this field. Kept in state so `save` can
+   *  write back what was loaded rather than blanking it — see the note in `save`. */
+  const [company] = React.useState(props.profile.company ?? '');
   const [trade, setTrade] = React.useState<string | null>(props.profile.trade);
   const [lang, setLang] = React.useState<Lang>(props.lang);
   const [saved, setSaved] = React.useState(false);
 
   const [co, setCo] = React.useState<MyCompany | null>(null);
+  /**
+   * Billing. `null` = NOT ASKED YET, which is a third state and must not render as
+   * "no invoices" — see billinghistory.ts on why an unreadable history and an empty one
+   * are different answers on the one screen where being wrong about money is
+   * unforgivable.
+   */
+  const [billing, setBilling] = React.useState<BillingHistory | null>(null);
+  const [billingBusy, setBillingBusy] = React.useState(false);
   const [members, setMembers] = React.useState<Member[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [joinToken, setJoinToken] = React.useState('');
@@ -124,6 +138,14 @@ export function SettingsScreen(props: {
     } catch { /* tables may not have synced yet */ }
   }, [db, userId]);
 
+  /** Fetched on demand rather than on mount: it is a network round-trip to a third
+   *  party, and most opens of this screen are for the roster or the letterhead. */
+  const loadBilling = React.useCallback(async () => {
+    setBillingBusy(true);
+    setBilling(await billingHistory(supabase));
+    setBillingBusy(false);
+  }, [supabase]);
+
   const loadNotif = React.useCallback(async () => {
     try {
       const N = await import('expo-notifications');
@@ -136,7 +158,12 @@ export function SettingsScreen(props: {
 
   const save = async () => {
     await props.onSaveProfile({
-      name: name.trim(), isSolo, company: isSolo ? null : company.trim(), trade,
+      name: name.trim(), isSolo,
+      // PRESERVED, never re-derived. This screen no longer EDITS the company name, but
+      // it still saves the profile — and writing null here would silently erase a name
+      // that `ensureBillingTenant` and the SMS sender still read. Solo clears it, which
+      // is a real statement ("I do not have one"), not a side effect.
+      company: isSolo ? null : company.trim(), trade,
     });
     if (lang !== props.lang) await props.onSetLang(lang);
     setSaved(true);
@@ -265,9 +292,25 @@ export function SettingsScreen(props: {
           <Toggle on={isSolo} onPress={() => setIsSolo(true)} label={t('fr.solo')} />
           <Toggle on={!isSolo} onPress={() => setIsSolo(false)} label={t('fr.company')} />
         </View>
+        {/* THE COMPANY-NAME FOLLOW-UP IS GONE (hadar, 2026-08-18).
+            
+            It asked the same question the Company screen asks, and the two wrote to
+            DIFFERENT stores: this one to `profile_company` in device_settings, the
+            other through `save_company_letterhead_v1` to `company.name` on the server.
+            The second is the authoritative one — it is what `confirmation_company_v1`
+            prints at the top of every change order a homeowner opens — so a contractor
+            who renamed his company here saw the old name on the document he sent, with
+            nothing on either screen explaining why.
+            
+            One field, one owner. The toggle stays because it still means something
+            (it gates the roster and the team surfaces); only the duplicate input goes,
+            and a pointer replaces it so the answer is DIRECTED rather than merely
+            missing — a user who does not think in software must not have to go
+            looking. */}
         {!isSolo && (
-          <TextInput style={inputStyle} value={company} onChangeText={setCompany}
-            placeholder={t('fr.companyName')} placeholderTextColor="#8c959f" />
+          <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 8, lineHeight: 18 }}>
+            {t('set.companyLivesInCompany')}
+          </Text>
         )}
         <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 12, marginBottom: 6 }}>{t('set.trade')}</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -531,6 +574,120 @@ export function SettingsScreen(props: {
           style={{ ...saveBtn, backgroundColor: C.ink, marginTop: 12 }}>
           <Text style={saveBtnT}>{t('quota.seePlans')}</Text>
         </Pressable>
+      </View>
+      )}
+
+      {/* ---- Billing ---- company mode, OWNER ONLY (hadar, 2026-08-18: "billing section
+          for the one that owns the account — display all the invoices").
+
+          BELOW the plan card on purpose: the plan is what you are on, this is what you
+          were charged, and the second only makes sense after the first.
+
+          THE OWNER CHECK IS THE SERVER'S. This renders whatever `billingHistory` returns
+          and `not_owner` is one of the answers — a crew member is told it is the owner's
+          screen rather than shown an empty list to misread. Gating the CARD on a local
+          flag instead would be a client deciding who may see money. */}
+      {props.mode === 'company' && (
+      <View style={{ ...TH.card, marginTop: 14 }}>
+        <Text style={label}>{t('set.billing')}</Text>
+
+        {billing === null ? (
+          // NOT ASKED YET — never "no invoices". The button is the ask.
+          <>
+            <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 4 }}>
+              {t('set.billingWhat')}
+            </Text>
+            <Pressable onPress={() => void loadBilling()} disabled={billingBusy}
+              style={{ ...saveBtn, backgroundColor: C.ink, marginTop: 12 }}>
+              <Text style={saveBtnT}>
+                {billingBusy ? t('set.billingLoading') : t('set.billingShow')}
+              </Text>
+            </Pressable>
+          </>
+        ) : !billing.ok ? (
+          <>
+            <Text style={{ ...TH.bodySteel, fontSize: 13, marginTop: 4, lineHeight: 19 }}>
+              {t(billing.reason === 'not_owner' ? 'set.billingOwnerOnly'
+                : billing.reason === 'no_company' ? 'set.billingNoCompany'
+                : 'set.billingUnavailable')}
+            </Text>
+            {/* Retry only where retrying could help. "Owner only" is not a transient
+                failure and a Try again under it would be a lie. */}
+            {billing.reason === 'unavailable' && (
+              <Pressable onPress={() => void loadBilling()} disabled={billingBusy}
+                style={{ ...saveBtn, backgroundColor: C.ink, marginTop: 12 }}>
+                <Text style={saveBtnT}>
+                  {billingBusy ? t('set.billingLoading') : t('set.billingRetry')}
+                </Text>
+              </Pressable>
+            )}
+          </>
+        ) : billing.invoices.length === 0 ? (
+          <Text style={{ ...TH.bodySteel, fontSize: 13, marginTop: 4, lineHeight: 19 }}>
+            {t('set.billingNone')}
+          </Text>
+        ) : (
+          <>
+            {/* SAY SO WHEN THE LIST IS SHORT BY OUR OWN ADMISSION. Half a billing
+                history rendered as the whole of it is the failure this screen cannot
+                have. */}
+            {billing.partial && (
+              <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 4,
+                color: C.caution }}>
+                {t('set.billingPartial')}
+              </Text>
+            )}
+            {billing.invoices.map((iv: Invoice) => {
+              const amount = invoiceAmount(iv);
+              const url = receiptUrlFor(iv);
+              const refunded = isRefunded(iv);
+              return (
+                <View key={iv.id} style={{ borderTopWidth: 1, borderTopColor: C.line,
+                  paddingVertical: 11 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink,
+                      flex: 1 }} numberOfLines={1}>
+                      {iv.product}
+                    </Text>
+                    {/* No amount = NO LINE, never "$0.00" — see invoiceAmount. */}
+                    {!!amount && (
+                      <Text style={{ fontFamily: F.dispSemi, fontSize: 16,
+                        color: refunded ? C.muted : C.ink,
+                        textDecorationLine: refunded ? 'line-through' : 'none' }}>
+                        {amount}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 2 }}>
+                    {[
+                      iv.atMs ? new Date(iv.atMs).toLocaleDateString() : null,
+                      t(iv.kind === 'subscription' ? 'set.billingSub' : 'set.billingPack'),
+                      refunded ? t('set.billingRefunded') : null,
+                    ].filter(Boolean).join(' · ')}
+                  </Text>
+                  {/* An App Store receipt is APPLE'S and lives in his Apple account. We
+                      cannot render or email it, so this is a destination, not a
+                      document. Web purchases already got a Stripe receipt by email. */}
+                  {!!url && (
+                    <Pressable onPress={() => void Linking.openURL(url).catch(() => {})}
+                      style={{ marginTop: 6 }}>
+                      <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.ink,
+                        textDecorationLine: 'underline' }}>
+                        {t('set.billingReceipt')}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              );
+            })}
+            <Pressable onPress={() => void loadBilling()} disabled={billingBusy}
+              style={{ marginTop: 12, minHeight: 40, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.steel }}>
+                {billingBusy ? t('set.billingLoading') : t('set.billingRefresh')}
+              </Text>
+            </Pressable>
+          </>
+        )}
       </View>
       )}
 

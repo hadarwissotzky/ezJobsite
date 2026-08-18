@@ -444,7 +444,50 @@ const EN: Record<string, string> = {
   'act.chipApproved': 'Approved',
   'act.chipCreated': 'Created',
   'act.chipDeclined': 'Declined',
+  // ── empty states (hadar, 2026-08-18) ──
+  // TITLE + BODY, not one sentence. The title names what is missing; the body says what
+  // will fill it, which is the half that turns "this is broken" into "not yet". Used only
+  // for TRUE empties — a filtered or searched list keeps its one quiet line, because a
+  // drawing saying "no extras yet" over a filtered list is a false statement.
   'act.empty': 'No extras here yet.',
+  'act.emptyTitle': 'No change orders yet',
+  'act.emptyBody': 'Everything you capture on this job shows up here, newest first.',
+  'feed.emptyTitle': 'Nothing on the board yet',
+  'feed.emptyBody': 'Change orders from every job land here as your crew captures them.',
+  // The in-app banner for a client message that arrives while the app is open on some
+  // other screen (hadar, 2026-08-18). iOS shows no banner of its own in the foreground,
+  // so without this the one event the product exists to surface arrives silently.
+  // Replaces the company-name input that used to sit under this toggle. It points
+  // rather than merely omitting: the name, logo, address and licence all live on one
+  // screen now, and that screen is where the client-facing letterhead is edited.
+  // ── billing (hadar, 2026-08-18) ──
+  // "Purchases" in the body copy, "Billing" as the heading: the heading is the word he
+  // went looking for, the body is what is actually in the list.
+  'set.billing': 'Billing',
+  'set.billingWhat': 'Every pack and subscription this company has paid for.',
+  'set.billingShow': 'Show purchases',
+  'set.billingRefresh': 'Refresh',
+  'set.billingRetry': 'Try again',
+  'set.billingLoading': 'Loading…',
+  // NOT "no invoices" — this is the answer only when the server actually said zero.
+  'set.billingNone': 'Nothing purchased yet. Packs and subscriptions you buy will be listed here.',
+  'set.billingOwnerOnly': 'Only the account owner can see billing.',
+  'set.billingNoCompany': 'This account isn’t part of a company yet.',
+  'set.billingUnavailable': 'Couldn’t load your purchases just now. This doesn’t mean you have none.',
+  'set.billingPartial': 'Some purchases couldn’t be loaded — this list may be incomplete.',
+  'set.billingSub': 'Subscription',
+  'set.billingPack': 'Pack',
+  'set.billingRefunded': 'Refunded',
+  'set.billingReceipt': 'View receipt in the App Store',
+  'set.companyLivesInCompany': 'Your company name, logo, address and licence are in Company — that’s what your clients see on every change order.',
+  'toast.asked': '{name} asked',
+  'toast.askedUnknown': 'Your client asked',
+  'toast.tapToReply': 'Tap to reply',
+  'toast.dismiss': 'Dismiss',
+  'r8.emptyTitle': 'You’re all caught up',
+  'r8.emptyBody': 'Approvals and questions from your clients land here.',
+  'home.emptyJobsTitle': 'No jobs yet',
+  'home.emptyJobsBody': 'Add your first job and everything you capture files itself under it.',
   // ── first-run Home (hadar's design, 2026-08-12) ──
   // Two lines, written as two: the break is typography, not word-wrap.
   'home.emptyHead1': 'No',
@@ -476,7 +519,10 @@ const EN: Record<string, string> = {
   'how.s3': 'Send it for approval',
   'how.s3sub': 'Your client gets a text, opens it on their phone and signs. You get told the moment they do.',
   'how.foot': 'Everything you record is saved on this phone first, so nothing is lost when the signal is not there.',
-  'home.emptyFilter': 'Nothing here right now. Tap the chip again to see everything.',
+  // Split for the empty state, and the instruction is dropped: the way out is a button
+  // now, not a sentence telling him to go press something else.
+  'home.emptyFilterTitle': 'Nothing here right now',
+  'home.emptyFilterBody': 'Your other change orders are still here — this filter just has none in it.',
   'home.noAddress': 'No address',
   'home.captures': '{n} captures',
   'home.notPinned': 'not pinned',
@@ -1014,6 +1060,15 @@ const EN: Record<string, string> = {
   'usage.yourPlan': 'Your plan',
   'usage.upgrade': 'Upgrade',
   'usage.seePlans': 'See plans',
+  // ── pay as you go (hadar, 2026-08-18) ──
+  // NOT a fourth tier. "Buy change orders" and not "buy credits": the unit a contractor
+  // counts is change orders, and a second word for the same thing is a second thing to
+  // explain to someone who does not think in software.
+  'paywall.payg.title': 'Pay as you go',
+  'paywall.payg.sub': 'Buy change orders when you need them. They never expire.',
+  'paywall.payg.each': '{each} each',
+  'paywall.payg.best': 'Best value',
+  'paywall.payg.buy': 'Buy change orders',
   'usage.nearingTitle': 'You’re almost at your limit',
   'usage.reachedTitle': 'You’ve used up your free plan',
   'usage.left.changeOrders': '{n} of {limit} change orders left',
@@ -2257,6 +2312,34 @@ const ES: Record<string, string> = {
   'act.chipCreated': 'Creado',
   'act.chipDeclined': 'Rechazado',
   'act.empty': 'Aún no hay extras aquí.',
+  'act.emptyTitle': 'Aún no hay órdenes de cambio',
+  'act.emptyBody': 'Todo lo que capture en este trabajo aparece aquí, lo más reciente primero.',
+  'feed.emptyTitle': 'Todavía no hay nada',
+  'feed.emptyBody': 'Las órdenes de cambio de todos sus trabajos aparecen aquí cuando su equipo las captura.',
+  'set.billing': 'Facturación',
+  'set.billingWhat': 'Cada paquete y suscripción que esta empresa ha pagado.',
+  'set.billingShow': 'Ver compras',
+  'set.billingRefresh': 'Actualizar',
+  'set.billingRetry': 'Reintentar',
+  'set.billingLoading': 'Cargando…',
+  'set.billingNone': 'Aún no hay compras. Los paquetes y suscripciones que compre aparecerán aquí.',
+  'set.billingOwnerOnly': 'Solo el dueño de la cuenta puede ver la facturación.',
+  'set.billingNoCompany': 'Esta cuenta todavía no pertenece a una empresa.',
+  'set.billingUnavailable': 'No se pudieron cargar sus compras ahora. Esto no significa que no tenga ninguna.',
+  'set.billingPartial': 'Algunas compras no se pudieron cargar — esta lista puede estar incompleta.',
+  'set.billingSub': 'Suscripción',
+  'set.billingPack': 'Paquete',
+  'set.billingRefunded': 'Reembolsado',
+  'set.billingReceipt': 'Ver recibo en el App Store',
+  'set.companyLivesInCompany': 'El nombre, logo, dirección y licencia de su empresa están en Empresa — eso es lo que ven sus clientes en cada orden de cambio.',
+  'toast.asked': '{name} preguntó',
+  'toast.askedUnknown': 'Su cliente preguntó',
+  'toast.tapToReply': 'Toque para responder',
+  'toast.dismiss': 'Descartar',
+  'r8.emptyTitle': 'Está al día',
+  'r8.emptyBody': 'Las aprobaciones y preguntas de sus clientes aparecen aquí.',
+  'home.emptyJobsTitle': 'Aún no hay trabajos',
+  'home.emptyJobsBody': 'Agregue su primer trabajo y todo lo que capture se archiva solo.',
   'home.emptyHead1': 'Sin',
   'home.emptyHead2': 'Extras aún',
   'home.emptyLede': 'Graba trabajo extra para crear tu primera orden de cambio.',
@@ -2283,7 +2366,8 @@ const ES: Record<string, string> = {
   'how.s3': 'Envíalo para aprobación',
   'how.s3sub': 'Tu cliente recibe un mensaje, lo abre en su teléfono y firma. Te avisamos en cuanto lo haga.',
   'how.foot': 'Todo lo que grabas se guarda primero en este teléfono, así no se pierde nada cuando no hay señal.',
-  'home.emptyFilter': 'Nada por aquí ahora. Toca el chip otra vez para ver todo.',
+  'home.emptyFilterTitle': 'Nada por aquí ahora',
+  'home.emptyFilterBody': 'Sus otras órdenes de cambio siguen aquí — este filtro no tiene ninguna.',
   'home.noAddress': 'Sin dirección',
   'home.captures': '{n} capturas',
   'home.notPinned': 'sin ubicación',
@@ -2738,6 +2822,11 @@ const ES: Record<string, string> = {
   'usage.yourPlan': 'Tu plan',
   'usage.upgrade': 'Mejorar plan',
   'usage.seePlans': 'Ver planes',
+  'paywall.payg.title': 'Pago por uso',
+  'paywall.payg.sub': 'Compre órdenes de cambio cuando las necesite. No vencen.',
+  'paywall.payg.each': '{each} cada una',
+  'paywall.payg.best': 'Mejor valor',
+  'paywall.payg.buy': 'Comprar órdenes de cambio',
   'usage.nearingTitle': 'Ya casi llegas a tu límite',
   'usage.reachedTitle': 'Ya usaste tu plan gratis',
   'usage.left.changeOrders': 'Te quedan {n} de {limit} órdenes de cambio',

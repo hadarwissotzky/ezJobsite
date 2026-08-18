@@ -37,6 +37,7 @@ export function Drawer({
   visible, onClose, onProfile, onCompanySettings, onPlans,
   planName, isFreePlan, isOwner, hasTeam,
   lang, onToggleLang, appVersion, confirmBase, onSignOut, onShowIntro, onSimulateFirstRun,
+  devTools,
   companies, activeCompanyId, onSwitchCompany, onCloseAccount,
   buildLabel, updateReady, onApplyUpdate, onCheckUpdates, usage,
   logoUri, companyName, canEditLogo, onLogoPress,
@@ -69,6 +70,15 @@ export function Drawer({
   confirmBase: string;
   onSignOut: () => Promise<void>;
   /** DEV ONLY: re-render the first-open intro over the current screen. */
+  /**
+   * Show the developer-only rows. `__DEV__` OR a user flagged in `developer_user` (417) —
+   * the caller ORs them, because a debug build keeps its tools whether or not anyone is
+   * signed in, and a flagged user keeps them in a release build.
+   *
+   * VISIBILITY ONLY. Everything behind it is something this user could already do to his
+   * own data; it must never gate access to anyone else's.
+   */
+  devTools?: boolean;
   onShowIntro?: () => void;
   /** DEV ONLY: clear the seen-flags and sign out, to replay the whole first-run path. */
   onSimulateFirstRun?: () => void;
@@ -301,8 +311,10 @@ export function Drawer({
             {/* DEV ONLY — replay the first-open intro. It lives HERE, not only on the
                 sign-in screen, because the sign-in screen is unreachable once you are
                 signed in: the pages and the door to them both vanished at the same
-                moment. `__DEV__` strips it from any release build. */}
-            {__DEV__ && onShowIntro && (
+                moment. Shown when `devTools` is on — a debug build, or a user flagged
+                in `developer_user` (417), which is the case that matters: replaying the
+                intro on TestFlight, where `__DEV__` is false. */}
+            {devTools && onShowIntro && (
               <Row label="Show intro (dev)" onPress={go(onShowIntro)} />
             )}
             {/* DEV ONLY — replay the guided first change order in place. It no longer
@@ -310,7 +322,7 @@ export function Drawer({
                 rate-limits those, so the tool produced the error it was used to reach.
                 The pre-login intro has its own row above; a genuinely logged-out run is
                 Sign out, three rows down. */}
-            {__DEV__ && onSimulateFirstRun && (
+            {devTools && onSimulateFirstRun && (
               <Row label="Replay first change order (dev)" accent
                 onPress={go(onSimulateFirstRun)} last />
             )}

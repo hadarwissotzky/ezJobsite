@@ -18,7 +18,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { PAID_TIERS, PLANS, type PlanId } from './plans.ts';
+import { PAID_TIERS, PLANS, offeredTiers, type PlanId } from './plans.ts';
 
 type Cycle = 'monthly' | 'annual';
 
@@ -192,4 +192,47 @@ test('a product this build does not sell is not reported', () => {
 
 test('free entitlement reports no product at all', () => {
   assert.equal(productForEntitlement('free', PLANS.core.productIdAnnual!), null);
+});
+
+// ── which tiers the pay page offers (hadar, 2026-08-18: "hide the crew package") ──
+
+test('Crew is not on sale', () => {
+  assert.ok(!offeredTiers('free').includes('crew'));
+  assert.deepEqual(offeredTiers('free'), ['core']);
+});
+
+test('but a Crew subscriber still sees Crew', () => {
+  // A card you cannot see is a subscription you cannot cancel — hostile, and an App
+  // Store guideline 3.1.2 problem. Hiding is merchandising; it must never strand
+  // somebody who is already paying.
+  assert.ok(offeredTiers('crew').includes('crew'));
+});
+
+test('hiding a tier does not retire it', () => {
+  // Crew is still a real entitlement: the webhook can still write it and planLimits
+  // still has to answer for it. Dropping it from PAID_TIERS would strand those accounts.
+  assert.ok(PAID_TIERS.includes('crew'));
+  assert.ok(Number.isFinite(PLANS.crew.priceMonthly ?? NaN));
+});
+
+test('the order survives a tier coming back', () => {
+  // Core before Crew, from PAID_TIERS — not append-at-the-end.
+  assert.deepEqual(offeredTiers('crew'), ['core', 'crew']);
+});
+
+test('the advertised annual saving is one a reader can actually buy', () => {
+  // `bestAnnualSavingPct` lives in the .tsx and cannot be imported here (React Native
+  // imports do not resolve under node --test), so the RULE is asserted against the same
+  // arithmetic this file already reproduces: the toggle's figure is the best across the
+  // OFFERED tiers, never across the hidden ones.
+  //
+  // It matters even though it changes nothing today: Core happens to carry the better
+  // rate (21% vs Crew's 17%), so a version computing over every tier would look correct
+  // right up until the hidden tier had the bigger discount — and then it would advertise
+  // a saving nothing on the screen could deliver (mandate #6).
+  const bestOffered = offeredTiers('free')
+    .reduce((b, p) => Math.max(b, annualSavingPct(p)), 0);
+  assert.equal(bestOffered, 21);
+  assert.ok(bestOffered !== annualSavingPct('crew'),
+    'this test is only meaningful while the two rates differ');
 });

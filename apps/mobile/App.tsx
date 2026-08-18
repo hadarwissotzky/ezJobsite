@@ -39,6 +39,16 @@ import { usageSummary, type UsageSummary } from './src/usage';
 import { UsageCard, UsageNudge } from './src/ui/usagecard';
 import { QuotaModal } from './src/ui/quotamodal';
 import { HeldSendModal } from './src/ui/heldsendmodal';
+// What an empty list says. TRUE empties only — a filtered or searched list keeps its one
+// quiet line, because a drawing reading "nothing yet" over a filtered list is false.
+import { EmptyState } from './src/ui/emptystate';
+// The developer flag (417). A build-time `__DEV__` cannot answer "who is holding the
+// phone", which is the case hadar has: replaying the intro on a release build.
+import { cachedDeveloper, refreshDeveloper } from './src/devflag';
+// The in-app banner for a client message. iOS shows no banner of its own while the app is
+// foreground, so this is the only surface that can carry a question arriving mid-session.
+import { MessageToast } from './src/ui/messagetoast';
+import { pendingNotifications } from './src/discussionstore';
 // THE APPROVAL CELEBRATION (hadar, 2026-08-18: "the most important event that everything
 // is leading to is approved … we should also celebrate it").
 import { ApprovedCelebration } from './src/ui/approvedcelebration';
@@ -148,7 +158,8 @@ import { ensureActivitySchema, activityFor, markRead,
 // jobs, and they are deliberately not one: `credits` asks the server what is available
 // and holds one, `sendgate` decides what the tap does, `sendhold` is the durable queue
 // that makes "it goes out on its own" true rather than a slogan.
-import { creditBalance, releaseCredit, reserveCredit } from './src/credits';
+import { refreshBalance, releaseCredit, reserveCredit,
+         type CreditBalance } from './src/credits';
 import { decideSend } from './src/sendgate';
 import { clearHold, ensureSendHoldSchema, heldSends, holdSend, holdsToDrain,
          noteHoldAttempt } from './src/sendhold';
@@ -433,6 +444,13 @@ let draining = false;
  */
 let celebratedHead: string | null = null;
 
+/**
+ * The last client message shown as a banner, so a tick that runs before the push path has
+ * stamped it does not raise the same banner twice. Module scope for the same reason
+ * `draining` is: it is read from a tick and must not join the hook order.
+ */
+let toastedMessageId: string | null = null;
+
 export default function App() {
   // The design language (prototype): condensed display for things you RECOGNISE,
   // humanist body for things you READ. Gated below so text never flashes unstyled.
@@ -507,7 +525,20 @@ export default function App() {
    * tail is counted in "2 more were approved too" so nothing is hidden.
    */
   const [celebrations, setCelebrations] = React.useState<Celebration[]>([]);
+  /** The client message currently banner-ing at the top of the screen, if any. */
+  const [msgToast, setMsgToast] = React.useState<
+    null | { id: string; changeOrderId: string; scope: string; body: string }>(null);
+  /**
+   * Developer tools visible? `__DEV__` OR the server flag, resolved together here so the
+   * DRAWER ROW AND ITS HANDLER CANNOT DISAGREE — they were gated separately on `__DEV__`,
+   * and moving only one would put a row on screen that does nothing when tapped.
+   */
+  const [devUser, setDevUser] = React.useState(false);
+  const devTools = __DEV__ || devUser;
   const [pricing, setPricing] = React.useState<PricingConfig | null>(null);
+  /** The server's answer to "what can this account send". Read at launch and after a
+   *  purchase return; `null` until then, and null is UNKNOWN and never rendered as 0. */
+  const [credits, setCredits] = React.useState<CreditBalance | null>(null);
   const [noCredits, setNoCredits] = React.useState<null | { changeOrderId: string }>(null);
   const [heldN, setHeldN] = React.useState(0);
   /**
@@ -542,9 +573,10 @@ export default function App() {
   // read the fix; the card renders nothing rather than guessing meanwhile.
   const [sendTo, setSendTo] = React.useState<SendToPrefill | null>(null);
   const [sendToId, setSendToId] = React.useState<string | null>(null);
-  // R8: the bell. `activity` is the list; `bell` is whether the sheet is open.
+  // R8: the bell. `activity` is the list; the bell now NAVIGATES to the notifications
+  // screen rather than opening a sheet — `activityOverlay` was a second, older
+  // rendering of this same list and was retired 2026-08-18.
   const [activity, setActivity] = React.useState<ActivityRow[]>([]);
-  const [bell, setBell] = React.useState(false);
   // The rough, live transcript shown WHILE recording. Never stored: the real
   // transcript comes from the file after the recording stops. This exists so the
   // contractor can see that something is happening.
@@ -760,7 +792,10 @@ export default function App() {
    *
    * This is a separate flag, checked before every other branch, so it works from any
    * screen and in any auth state. It changes nothing about when a real user sees the
-   * intro: `seenOnboarding` still governs that, and `__DEV__` strips this entirely.
+   * intro: `seenOnboarding` still governs that, and the branch that reads this flag is
+   * gated on `devTools` — a debug build, or a user flagged in `developer_user` (417).
+   * It was `__DEV__` alone until 2026-08-18, which meant the tool did not exist on the
+   * exact build hadar wanted it on.
    */
   const [forceIntro, setForceIntro] = React.useState(false);
   /**
@@ -2332,7 +2367,11 @@ const drainHolds = async () => {
     setHeldN(holds.length);
     if (!holds.length) return;
 
-    const bal = await creditBalance(connector.client);
+    // `refreshBalance`, not `creditBalance`: this runs on the return from paying, which
+    // is the exact moment "this account has bought credits" becomes true and the trial's
+    // photo and recording caps must retire.
+    const bal = await refreshBalance(db, connector.client);
+    setCredits(bal);
     // The gate's own vocabulary, so a queued send and a fresh tap cannot disagree about
     // what "may send" means. An unmetered plan drains everything it has.
     const gate = decideSend({
@@ -2402,6 +2441,44 @@ const checkCelebrations = async () => {
   }
   if (!head) celebratedHead = null;
   setCelebrations(list);
+};
+
+/**
+ * A CLIENT ASKED SOMETHING WHILE THE APP WAS OPEN.
+ *
+ * hadar, 2026-08-18: "if the specific CO is not currently open then display a top form
+ * notification (that disappears) with the message and a link to the CO."
+ *
+ * ─── IT READS THE SAME PENDING LIST THE PUSH DOES ───────────────────────────────
+ * `pendingNotifications` is the unnotified client messages, and `runNotifications`
+ * consumes and stamps them. So this runs FIRST on each tick and takes the same rows: one
+ * stamp, two surfaces, both fired at the moment the message lands — which is exactly what
+ * the OS does, showing a banner when backgrounded and nothing when not. A second stamp
+ * would let the two disagree about what is new.
+ *
+ * ─── NOT OVER THE THING IT IS ABOUT ─────────────────────────────────────────────
+ * Suppressed when that change order is already open. Its thread updates in place, so a
+ * banner announcing what he is currently reading is noise — and `recordIdRef` is the
+ * authority on what is open, because it survives the renders this runs between.
+ *
+ * NEWEST ONLY. Three questions arriving at once are three banners fighting for the same
+ * strip of screen; the bell and the thread carry the rest, and neither is consumed by
+ * this not being shown.
+ */
+const checkClientMessages = async () => {
+  try {
+    const pending = await pendingNotifications(db);
+    if (!pending.length) return;
+    const newest = pending[pending.length - 1];
+    if (newest.id === toastedMessageId) return;
+    // He is already looking at it.
+    if (recordIdRef.current === newest.changeOrderId) return;
+    toastedMessageId = newest.id;
+    setMsgToast({
+      id: newest.id, changeOrderId: newest.changeOrderId,
+      scope: newest.scope, body: newest.body,
+    });
+  } catch { /* a banner is the most droppable thing in this app */ }
 };
 
   /**
@@ -3354,7 +3431,16 @@ const checkCelebrations = async () => {
         // falls back to its cache and then to compiled-in numbers, so a paywall in a
         // basement shows last week's prices rather than nothing — the failure that makes
         // a contractor conclude the app is broken and not come back to find out.
+        // CACHED FIRST so the rows are there before the network answers, then the real
+        // answer — which can also REVOKE, unlike the sticky purchase flag next door.
+        setDevUser(await cachedDeveloper(db));
+        setDevUser(await refreshDeveloper(db, connector.client));
         setPricing(await loadPricing(db, connector.client));
+        // THE BALANCE, and the side effect that matters: `refreshBalance` records
+        // "this account has bought credits at some point", which is what retires the
+        // trial's photo and recording caps offline (entitlement.ts). Without this read
+        // a contractor who paid keeps a 30-photo limit until something else asks.
+        setCredits(await refreshBalance(db, connector.client));
         // Anything left waiting on a credit from a previous run goes NOW, before he has
         // to ask. This is the launch half of "it goes out on its own"; the foreground
         // listener below is the return-from-paying half.
@@ -3856,6 +3942,9 @@ const checkCelebrations = async () => {
           // handset (hadar, 2026-07-28: delete "doesn't delete the extra").
           const dx = await drainDiscardedExtras(db, connector.client);
           if (dx.attempted) console.log('drain discarded extras:', JSON.stringify(dx));
+          // BEFORE runNotifications, which STAMPS these rows as notified — after it the
+          // list is empty and the banner would never fire.
+          await checkClientMessages();
           const nt = await runNotifications(db, pid);
           if (nt.presented || nt.blocked) console.log('notify:', JSON.stringify(nt));
           // THE CELEBRATION, last of all and for the same reason the push is second-last:
@@ -4682,7 +4771,10 @@ const checkCelebrations = async () => {
     setShowCapture(true);
   };
 
-  if (__DEV__ && forceFirstExtra) {
+  // `devTools`, not `__DEV__`: the drawer row that sets `forceFirstExtra` is now visible
+  // to a flagged user on a release build, and a row that sets a flag nothing reads is a
+  // button that does nothing.
+  if (devTools && forceFirstExtra) {
     return guided === 'coach'
       ? <GuidedCoach onStart={enterGuided} onBack={() => setGuided('intro')} />
       : (
@@ -4694,7 +4786,7 @@ const checkCelebrations = async () => {
       );
   }
 
-  if (__DEV__ && forceIntro) {
+  if (devTools && forceIntro) {
     // Carries the intent like the real path does. Without this the dev override was the
     // ONE way in that ignored which button was pressed — so testing "Log in" through it
     // would always have landed on sign-up and looked like the routing was broken.
@@ -4999,6 +5091,29 @@ const checkCelebrations = async () => {
     );
   })() : null;
 
+  /**
+   * The client-message banner, over whatever screen he is on.
+   *
+   * Mounted alongside the modals for the same structural reason, but it is NOT a Modal —
+   * it is an absolutely-positioned layer, so it floats over the screen without taking the
+   * touch surface with it. A Modal here would block the app for six seconds.
+   */
+  const msgToastEl = msgToast ? (
+    <MessageToast
+      // The person, when the roster knows them. `who_directed` is who the extra was for,
+      // which is the client on the other end of this thread.
+      from={coRowsRef.current.find((c) => c.id === msgToast.changeOrderId)?.who_directed ?? null}
+      scope={msgToast.scope}
+      body={msgToast.body}
+      onOpen={() => {
+        setMsgToast(null);
+        // The record, wherever it lives. `openRecord` loads by id and is not scoped to
+        // the open job, so a question on another jobsite still lands on its own thread.
+        void openRecord(msgToast.changeOrderId);
+      }}
+      onDismiss={() => setMsgToast(null)} />
+  ) : null;
+
   const heldEl = noCredits ? (() => {
     const url = pricing ? purchaseUrl(pricing, co?.id ?? null) : null;
     return (
@@ -5019,6 +5134,23 @@ const checkCelebrations = async () => {
   const paywallEl = (
     <PaywallScreen visible={showPaywall} currentPlan={paywallPlan}
       currentProductId={paywallProduct}
+      /**
+       * PAY AS YOU GO. The prices come from `pricing_config` (server-set, no app release
+       * needed to change them) and the door is the RevenueCat web purchase link with
+       * `company.id` appended — 0% Apple commission against 15% through IAP, which is
+       * the whole reason this rail exists.
+       *
+       * Both are ABSENT rather than faked when unknown: no pricing yet means no section,
+       * and no checkout address means prices with no button. A buy button that opens a
+       * 404, or a checkout that attaches the purchase to an anonymous customer the app
+       * cannot read, costs more than a missing one.
+       */
+      packs={pricing?.packs ?? []}
+      creditsLeft={credits?.metered ? credits.available : null}
+      onBuyCredits={(() => {
+        const u = pricing ? purchaseUrl(pricing, co?.id ?? null) : null;
+        return u ? () => { void Linking.openURL(u); } : null;
+      })()}
       onClose={() => setShowPaywall(false)}
       // Re-read the plan after a purchase. company.plan is written by the RevenueCat
       // webhook and arrives via sync, so this may still read the old tier for a beat —
@@ -5317,7 +5449,7 @@ const checkCelebrations = async () => {
        */
       <KeyboardAvoidingView style={s.njScreen}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {quotaEl}{heldEl}{celebrateEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
       {jobCreatedEl}
         {discardSheet}
         {paywallEl}
@@ -5917,7 +6049,7 @@ const checkCelebrations = async () => {
     );
     return (
       <View style={s.jpC}>
-        {quotaEl}{heldEl}{celebrateEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
       {jobCreatedEl}
         {discardSheet}
         {paywallEl}
@@ -6867,10 +6999,32 @@ const checkCelebrations = async () => {
           closeRecord();
           void finishExtraById(record.id);
         }}
+        /**
+         * "CREATE ANOTHER EXTRA" IS NOW CAPTURE, NOT A BLANK ROW (hadar, 2026-08-18:
+         * it "should take the user to the home page, and invoke the record extra work
+         * button").
+         *
+         * It used to call `createFollowOnExtra`, which mints an origin-linked row
+         * (REQ-LC31/D6) and drops you into an EMPTY draft. That is the wrong shape for
+         * what a contractor is doing at this moment: he is standing in front of more
+         * work, and this product's whole claim is capture-first — say it or snap it, and
+         * the write-up follows. A blank form asks him to type.
+         *
+         * SAME FUNCTION AS THE ⊕ BUTTON, not a copy of it: the terms gate has to be
+         * checked before the camera opens, and a second call site that forgot it would
+         * open the shutter on someone who has never accepted the terms.
+         *
+         * WHAT THIS GIVES UP, stated: the new extra carries NO origin link back to this
+         * approved one. `createFollowOnExtra` is still there and still the only writer of
+         * that link — nothing about REQ-LC31 changed — but nothing calls it from here
+         * any more, so a follow-on captured this way is an independent extra. If the
+         * lineage matters more than the capture flow, this is the line to revisit.
+         */
         onCreateLinkedExtra={() => {
-          const c = recordLc?.co;
-          if (!c) { setFiled(T('erec.errStillLoading')); return; }
-          void createFollowOnExtra(record.id, c);
+          closeRecord();
+          setNav('home');
+          if (!terms) { openTerms(); return; }
+          setShowCapture(true);
         }}
         // Mandate #2: this writes a file and opens the OS share sheet. It does not
         // transmit anything to a client, and must never be changed to.
@@ -7187,6 +7341,7 @@ const checkCelebrations = async () => {
         await refresh();
       })()}
       onCloseAccount={() => setCloseAcct({ busy: false })}
+      devTools={devTools}
       onShowIntro={() => setForceIntro(true)}
       /**
        * REPLAY THE WALKTHROUGH — WITHOUT SIGNING OUT (hadar, 2026-08-13).
@@ -7297,7 +7452,10 @@ const checkCelebrations = async () => {
         {dashHeader(T('feed.title'))}
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}
           refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPullRefresh} tintColor={C.steel} />}>
-          {feedItems.length === 0 && <Text style={s.homeEmpty}>{T('feed.empty')}</Text>}
+          {feedItems.length === 0 && (
+            <EmptyState
+              title={T('feed.emptyTitle')} body={T('feed.emptyBody')} />
+          )}
           {(() => {
           /**
            * THE FEED ROW IS NOW THE HOME ROW (hadar, 2026-08-12: "the records should note
@@ -7386,7 +7544,7 @@ const checkCelebrations = async () => {
         {bottomNav('company', false)}
         {drawerEl}
         {/* Feed can open the drawer too, so it needs the modals the drawer opens. */}
-        {quotaEl}{heldEl}{celebrateEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
       {jobCreatedEl}
         {paywallEl}
       </View>
@@ -7533,49 +7691,6 @@ const checkCelebrations = async () => {
   // the one thing on the phone that can still be LOST (mandate #1). Defined once
   // and rendered in both the Home and Project trees — the early-return structure
   // rules out a single shared wrapper without a larger refactor.
-  const activityOverlay = bell ? (
-    <View style={s.card}>
-      <Text style={s.cardH}>{T('r8.activity')}</Text>
-      {notifyPerm && notifyPerm !== 'granted' && (
-        <View style={s.coSendRow}>
-          <Text style={s.cardNote}>{T('r8.pushWhy')}</Text>
-          {notifyPerm === 'denied'
-            ? <Text style={s.dmeta}>{T('r8.pushDenied')}</Text>
-            : <Pressable onPress={async () => setNotifyPerm(await requestNotifyPermission())}>
-                <Text style={s.coNudge}>{T('r8.pushAsk')}</Text>
-              </Pressable>}
-        </View>
-      )}
-      {!activity.length && <Text style={s.cardNote}>{T('r8.nothingYet')}</Text>}
-      {activity.slice(0, 40).map((a) => (
-        <Pressable key={a.id} style={s.coSendRow} onPress={async () => {
-          await markRead(db, [a.id]);
-          await openRecord(a.changeOrderId);
-          setBell(false);
-          await refresh();
-        }}>
-          <Text style={a.read ? s.dval : s.coNudge}>
-            {a.kind === 'question' ? '💬 ' : a.kind === 'unpriced' ? '⏱ ' :
-             a.kind === 'approved' ? '✅ ' : a.kind === 'declined' ? '✋ ' : '→ '}
-            {a.kind === 'unpriced' ? T('r3.unpricedRow') + ' — ' : ''}{a.scope}
-          </Text>
-          <Text style={s.dmeta}>
-            {a.jobName}{a.detail ? ` · ${a.detail}` : ''} · {createdLabel(a.atMs)}
-          </Text>
-        </Pressable>
-      ))}
-      {unreadIds(activity).length > 0 && (
-        <Pressable style={s.later} onPress={async () => {
-          await markRead(db, unreadIds(activity)); await refresh();
-        }}>
-          <Text style={s.laterT}>{T('r8.markAllRead')}</Text>
-        </Pressable>
-      )}
-      <Pressable style={s.later} onPress={() => setBell(false)}>
-        <Text style={s.laterT}>{T('common.close')}</Text>
-      </Pressable>
-    </View>
-  ) : null;
   const draftsOverlay = drafts.length > 0 ? (
     <DraftRecoveryCard
       drafts={drafts}
@@ -7664,8 +7779,6 @@ const checkCelebrations = async () => {
     const startCapture = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
     // Tapping a summary chip filters the list BELOW IT — no navigation. Tapping the
     // live chip again clears the filter.
-    const toggleFilter = (f: 'needs' | 'waiting' | 'approved') =>
-      setHomeFilter((cur) => (cur === f ? null : f));
     const disabled = !!gate || !!initError;
     /**
      * THE FIRST-RUN HOME (hadar's design, 2026-08-12: "in case no changes were added
@@ -7782,29 +7895,44 @@ const checkCelebrations = async () => {
               Tapping one filters the sections below IN PLACE; the live chip is ringed
               and tapping it again clears. Never navigates. */}
           {!homeEmpty && (<>
-          <View style={s.sumRow}>
-            {/* ONE LOUD CHIP, NEVER THREE. See `s.sumChip` for why. Each renders the
-                same way and differs only in its count badge's resting colour, so the
-                selected state is the only thing carrying emphasis. */}
+          {/* THE JOB SCREEN'S PILLS (hadar, 2026-08-18: "change the home change orders
+              filters to look like the ones in the job section").
+
+              THE SAME STYLES, NOT A COPY OF THEM. `s.jsPill*` is reused verbatim, so the
+              two screens cannot drift apart the next time either is touched — which is
+              the entire point of the request. A second set of near-identical chip styles
+              is how they diverged in the first place.
+
+              NO COUNTS AND NO "ALL" (hadar, 2026-08-18, after seeing it on the device).
+              Three labels, nothing else. The counts were already on screen in the
+              sections below, so the pills were repeating them in a smaller font; and the
+              job screen's "All" earns its place there because that screen is ONE FLAT
+              LIST that genuinely needs an unfiltered state, while Home is already three
+              labelled sections — "all" is just the sections, unfiltered.
+
+              SO THESE TOGGLE. With no All pill, tapping the live one is the way back to
+              everything, and it is the only way — which is exactly why it must stay a
+              toggle here even though the job screen's pills set. Same look, different
+              screen, different job. */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.homePills}>
             {([
-              ['needs',    T('act.chipNeeds'),    needs.length,       s.sumCountDark],
-              ['waiting',  T('act.chipWaiting'),  waitingList.length, s.sumCountWait],
-              ['approved', T('act.chipApproved'), approvedList.length, s.sumCountOk],
-            ] as const).map(([key, label, count, badge]) => {
-              const on = homeFilter === key;
+              { k: 'needs',    label: T('act.chipNeeds') },
+              { k: 'waiting',  label: T('act.chipWaiting') },
+              { k: 'approved', label: T('act.chipApproved') },
+            ] as const).map((f) => {
+              const on = homeFilter === f.k;
               return (
-                <Pressable key={key} style={[s.sumChip, on && s.sumChipOn]}
+                <Pressable key={f.k}
+                  style={[s.jsPill, on && s.jsPillOn]}
                   accessibilityRole="button"
                   accessibilityState={{ selected: on }}
-                  onPress={() => toggleFilter(key as 'needs' | 'waiting' | 'approved')}>
-                  <Text style={[s.sumChipT, on && s.sumChipTOn]}>{label}</Text>
-                  <View style={[s.sumCount, badge, on && s.sumCountOn]}>
-                    <Text style={s.sumCountT}>{count}</Text>
-                  </View>
+                  onPress={() => setHomeFilter((cur) => (cur === f.k ? null : f.k))}>
+                  <Text style={[s.jsPillT, on && s.jsPillTOn]}>{f.label}</Text>
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
 
           {/* Status sections in the mockup's order (waiting out first, then what needs
               you, the running win, and finally your own drafts). Header is an uppercase
@@ -7845,7 +7973,26 @@ const checkCelebrations = async () => {
               {bucket('home.needsResponse', 'needs', needs)}
               {bucket('home.approvedSec', 'approved', approvedList)}
               {homeFilter && shown[homeFilter].length === 0 && homeExtras.length > 0 && (
-                <Text style={s.homeEmpty}>{T('home.emptyFilter')}</Text>
+                // A FILTERED empty, so the copy must not claim the account is empty —
+                // there ARE change orders, just none in this bucket. The way out is a
+                // BUTTON rather than the old sentence telling him to tap the chip again:
+                // an instruction to go press something else is not a way out, it is
+                // homework, and this is a gloved thumb outdoors.
+                <EmptyState
+                  title={T('home.emptyFilterTitle')} body={T('home.emptyFilterBody')}
+                  action={
+                    <Pressable onPress={() => setHomeFilter(null)}
+                      accessibilityRole="button"
+                      style={({ pressed }) => [{
+                        minHeight: 46, paddingHorizontal: 22, borderRadius: 12,
+                        borderWidth: 1.5, borderColor: C.ink,
+                        alignItems: 'center', justifyContent: 'center' },
+                        pressed && { opacity: 0.7 }]}>
+                      <Text style={{ fontFamily: F.bodyBold, fontSize: 15.5, color: C.ink }}>
+                        {T('home.showAll')}
+                      </Text>
+                    </Pressable>
+                  } />
               )}
             </>);
           })()}
@@ -7857,13 +8004,13 @@ const checkCelebrations = async () => {
 
         {/* Overlays float ABOVE the fixed tab bar in a scrim — inline cards would
             render under the bar and be unreachable. Draft recovery shows itself
-            (mandate #1); the bell and the ☰ menu open on tap. */}
-        {(bell || drafts.length > 0) && (
+            (mandate #1). The BELL no longer appears here — it navigates to the
+            notifications screen now, so the scrim exists purely for draft recovery. */}
+        {drafts.length > 0 && (
           <View style={s.homeScrim}>
             <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}
               keyboardShouldPersistTaps="handled">
             {draftsOverlay}
-            {activityOverlay}
             </ScrollView>
           </View>
         )}
@@ -7882,7 +8029,7 @@ const checkCelebrations = async () => {
             be mounted on all three; jobs already had them, home and activity did not.
             AFTER {drawerEl} deliberately: a Modal declared before its sibling content
             does not present on iOS. */}
-        {quotaEl}{heldEl}{celebrateEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
       {jobCreatedEl}
         {/* AND THE SAME OMISSION BIT THE SWIPE-DELETE (hadar 2026-08-05: "the button
             is there but it doesn't delete once I confirm"). Home is the ONLY screen
@@ -7916,7 +8063,7 @@ const checkCelebrations = async () => {
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     return (
       <View style={s.homeC}>
-        {quotaEl}{heldEl}{celebrateEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
       {jobCreatedEl}
         {discardSheet}
         {paywallEl}
@@ -8080,19 +8227,26 @@ const checkCelebrations = async () => {
             );
           })}
           {!shown.length && (
-            <Text style={s.homeEmpty}>
-              {jobsArchived ? T('pm4.noArchived') : q ? T('home.noMatch') : T('home.noProjects')}
-            </Text>
+            // THE THREE CASES ARE NOT THE SAME EMPTY, and only one of them earns the
+            // illustration. "No jobs yet" is a fact about the account; "no jobs match
+            // that" is a fact about the search box, and a drawing over it would both
+            // overstate the situation and hide the fact that clearing the search brings
+            // everything back.
+            (jobsArchived || q)
+              ? <Text style={s.homeEmpty}>
+                  {jobsArchived ? T('pm4.noArchived') : T('home.noMatch')}
+                </Text>
+              : <EmptyState
+                  title={T('home.emptyJobsTitle')} body={T('home.emptyJobsBody')} />
           )}
         </ScrollView>
         {bottomNav('jobs', false)}
         {drawerEl}
-        {(bell || drafts.length > 0) && (
+        {drafts.length > 0 && (
           <View style={s.homeScrim}>
             <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}
               keyboardShouldPersistTaps="handled">
               {draftsOverlay}
-              {activityOverlay}
             </ScrollView>
           </View>
         )}
@@ -8167,7 +8321,7 @@ const checkCelebrations = async () => {
 
     return (
       <View style={s.homeC}>
-        {quotaEl}{heldEl}{celebrateEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
         {jobCreatedEl}
         <View style={s.dashHdr}>
           <Pressable style={s.hdrBtn} hitSlop={12} accessibilityLabel={T('common.back')}
@@ -8244,7 +8398,10 @@ const checkCelebrations = async () => {
             </View>
           ))}
 
-          {!rows.length && <Text style={s.homeEmpty}>{T('r8.nothingYet')}</Text>}
+          {!rows.length && (
+            <EmptyState
+              title={T('r8.emptyTitle')} body={T('r8.emptyBody')} />
+          )}
           {!!rows.length && (
             <View style={s.ntEnd}>
               <View style={s.ntEndRule} />
@@ -8341,21 +8498,21 @@ const checkCelebrations = async () => {
             return nodes;
           })()}
           {!list.length && (
-            <Text style={s.homeEmpty}>{T('act.empty')}</Text>
+            <EmptyState
+              title={T('act.emptyTitle')} body={T('act.emptyBody')} />
           )}
         </ScrollView>
         {bottomNav('activity', false)}
         {drawerEl}
         {/* Same reason as home — the drawer opens from here too. */}
-        {quotaEl}{heldEl}{celebrateEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
       {jobCreatedEl}
         {paywallEl}
-        {(bell || drafts.length > 0) && (
+        {drafts.length > 0 && (
           <View style={s.homeScrim}>
             <ScrollView contentContainerStyle={{ paddingTop: 56, paddingBottom: 40 }}
               keyboardShouldPersistTaps="handled">
               {draftsOverlay}
-              {activityOverlay}
             </ScrollView>
           </View>
         )}
@@ -8389,7 +8546,7 @@ const checkCelebrations = async () => {
   const startCaptureJob = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
   return (
     <View style={s.c}>
-      {quotaEl}{heldEl}{celebrateEl}
+      {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
       {jobCreatedEl}
         {discardSheet}
       {paywallEl}
@@ -8420,7 +8577,18 @@ const checkCelebrations = async () => {
             read by someone who does not already know them — the approval page. */}
         <Text style={s.jsHdrTitle} numberOfLines={1}>{T('job.title')}</Text>
         <Pressable style={s.jsHdrMail} hitSlop={10} accessibilityLabel={T('r8.activity')}
-          onPress={async () => { setBell(true); setNotifyPerm(await notifyPermissionStatus()); }}>
+          // THE BELL OPENS THE NOTIFICATIONS SCREEN (hadar, 2026-08-18: "why is the
+          // notification style still like this in some cases?").
+          //
+          // It used to open `activityOverlay`, a second notification surface that
+          // predated the design system: a mint-green `s.card`, emoji status icons, and
+          // "Mark all as read" / "Close" as 13px grey text links. The real screen was
+          // built later and this was never retired, so the same list existed twice in
+          // two different visual languages and only one of them ever got updated.
+          //
+          // Deleting the duplicate rather than restyling it: two surfaces that must be
+          // kept looking alike is the condition that produced this.
+          onPress={() => setNav('notifications')}>
           <Icon name="envelope" size={22} color="#2F5233" />
           {unreadCount(activity) > 0 && (
             <View style={s.hdrBadge}><Text style={s.hdrBadgeT}>{unreadCount(activity)}</Text></View>
@@ -9120,7 +9288,6 @@ const checkCelebrations = async () => {
       {/* R8 activity centre. Every row deep-links to the item's record (R6b) —
           the same destination the push would open, so an unanswered question is at
           most two taps from anywhere. */}
-      {activityOverlay}
       {/* R1: a walk this phone still holds and never filed. Offered BEFORE anything
           else on the screen, because it is the only thing here that can be lost —
           everything below it is already committed. */}
@@ -10048,7 +10215,14 @@ const s = StyleSheet.create({
   projName: { color: '#151A1E', fontSize: 18, fontWeight: '700' },
   projMeta: { color: '#57606a', fontSize: 13, marginTop: 3 },
   projStats: { color: '#8c959f', fontSize: 12, marginTop: 8 },
-  homeEmpty: { color: '#8c959f', fontSize: 14, textAlign: 'center', marginTop: 40, width: '100%' },
+  // hadar, 2026-08-18: "very faint color and text — needs to be legible in the outdoors."
+  // #8c959f on the cream paper measured about 3:1, below the 4.5:1 floor for body text,
+  // and this app is read in direct sun with a phone at arm's length. C.steel is ~7:1 and
+  // is the colour every other secondary line on these screens already uses; the size and
+  // weight go up for the same reason. This style now serves only the FILTERED/SEARCHED
+  // empties — true empties render <EmptyState>, which sets its own type.
+  homeEmpty: { color: C.steel, fontFamily: 'Barlow_600SemiBold', fontSize: 16,
+    lineHeight: 23, textAlign: 'center', marginTop: 40, width: '100%' },
   // Company-feed day header (Today / Yesterday / date). Small caps label, olive-tinted.
   feedDayHead: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, color: '#5E666E',
     textTransform: 'uppercase', letterSpacing: 1.4, marginTop: 20, marginBottom: 6 },
@@ -10162,7 +10336,6 @@ const s = StyleSheet.create({
   ctaTitle: { color: '#fff', fontFamily: 'Oswald_700Bold', fontSize: 20, textTransform: 'uppercase', letterSpacing: 0.4 },
   ctaSub: { color: '#c3bab2', fontFamily: 'Inter_400Regular', fontSize: 13.5, marginTop: 2 },  // ink-300
   // Summary chips — glance-and-jump into the filtered Activity tab.
-  sumRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 14 },
   /**
    * QUIET UNTIL CHOSEN (hadar, 2026-08-18: "rather than them being 3 colors we need a
    * better on-state design — the selected filter has the prominent color").
@@ -10184,23 +10357,11 @@ const s = StyleSheet.create({
    * "3 approved". On the selected chip it goes translucent white, since the fill is
    * already carrying the emphasis and a coloured dot on ink reads as a defect.
    */
-  sumChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
-    borderRadius: 12, borderWidth: 1, paddingVertical: 10,
-    backgroundColor: '#f4f1ec', borderColor: '#e2dbd4' },
-  sumChipOn: { backgroundColor: '#131110', borderColor: '#131110' },
   // The three per-filter styles are gone: an unselected chip no longer has a colour of
   // its own. Kept as no-ops would have been three names doing nothing, which is how a
   // style sheet starts lying about what it controls.
-  sumChipT: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#5f574f' },
-  sumChipTOn: { color: '#ffffff' },
-  sumCount: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  sumCountDark: { backgroundColor: '#131110' },
-  sumCountWait: { backgroundColor: '#c99a2e' },
-  sumCountOk: { backgroundColor: '#157a47' },
   // On the selected (ink) chip: the badge stops competing and becomes a hole in the
   // fill. A saturated dot on solid ink reads as something gone wrong.
-  sumCountOn: { backgroundColor: 'rgba(255,255,255,0.22)' },
-  sumCountT: { fontFamily: 'Inter_700Bold', fontSize: 11.5, color: '#fff' },
   secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 18,
     marginTop: 10, marginBottom: 10 },
   secLab: { fontFamily: 'Oswald_600SemiBold', fontSize: 15, color: '#6b625b', textTransform: 'uppercase', letterSpacing: 0.8 },
@@ -10631,6 +10792,26 @@ const s = StyleSheet.create({
   // Pills: unselected are TRANSPARENT with a hairline — the design has no white
   // chips on the cream. Selected is the dark green.
   jsPills: { flexDirection: 'row', gap: 7, paddingVertical: 10, paddingRight: 12 },
+  /**
+   * HOME'S COPY OF THE PILL ROW, and it exists for one reason: the two screens pad
+   * differently.
+   *
+   * The job screen's outer ScrollView carries `paddingHorizontal: 12`, so `jsPills`
+   * needs no left padding of its own and looks right. Home's outer ScrollView has NONE —
+   * every card there supplies its own `marginHorizontal: 16` — so the same style put the
+   * row flush against x=0 and clipped the rounded corner off the selected pill
+   * (hadar, 2026-08-18, screenshot).
+   *
+   * 16 to match `ctaCard`/`exList`, which is the card directly above and below it; that
+   * is the edge the eye actually checks alignment against.
+   *
+   * PADDING ON THE CONTENT, NOT THE SCROLLVIEW, deliberately: the row stays full-bleed so
+   * pills scroll out under the screen edge instead of being clipped inside a padded box.
+   * Adding `paddingHorizontal` to `jsPills` itself would have fixed Home and shifted the
+   * job screen by 12pt at the same time.
+   */
+  homePills: { flexDirection: 'row', gap: 7, paddingVertical: 10,
+    paddingLeft: 16, paddingRight: 16 },
   jsPill: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 15, borderRadius: 999,
     borderWidth: 1, borderColor: '#D6D2C7', backgroundColor: 'transparent' },
   jsPillOn: { backgroundColor: '#2F4F2A', borderColor: '#2F4F2A' },

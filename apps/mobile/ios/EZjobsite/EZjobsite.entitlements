@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-  <dict/>
+  <dict>
+    <!-- Without this, iOS refuses the APNs token with "no valid aps-environment
+         entitlement string found for application" — measured on device 2026-08-18, and
+         the reason public.push_token has never held a row. `development` is correct for
+         a dev/TestFlight build; a store build is re-signed to `production` by Apple. -->
+    <key>aps-environment</key>
+    <string>development</string>
+  </dict>
 </plist>

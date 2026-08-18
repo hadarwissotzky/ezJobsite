@@ -29,6 +29,11 @@
  * check is the wall a second device or a pre-sync count can't walk through.
  */
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
+// The one predicate for "which meter applies". Pure and separately tested — the rule it
+// encodes (paying anything retires the trial caps) is the reason this file no longer
+// refuses a customer who has bought credits.
+import { meterFor, trialCapsApply } from './entitlement.ts';
+import { purchasedEver } from './credits.ts';
 import { listProjects, INBOX_ID } from './projects.ts';
 import { planLimits, asPlanId, type PlanId } from './plans.ts';
 
@@ -319,7 +324,33 @@ export function recordingByteBudget(minutes: number): number {
  * not choices they made, and leading with those reads as punishment for using the app.
  */
 export async function checkSendQuota(db: AbstractPowerSyncDatabase): Promise<QuotaResult> {
-  for (const check of [checkChangeOrders, checkPhotos, checkRecording]) {
+  /**
+   * WHICH METER APPLIES (hadar, 2026-08-18). Before this, ALL THREE caps ran against
+   * every account, and the change-order one duplicated a count the server already keeps
+   * against the credit balance. A contractor who bought twenty credits would have been
+   * refused here and told his free plan includes two.
+   *
+   *   'unlimited' — a subscription. Every limit is already Infinity, so this is a fast
+   *                 path rather than a behaviour change.
+   *   'credits'   — he has paid. The BALANCE is the meter and it is the server's to
+   *                 enforce at reservation time; the trial's photo and recording caps
+   *                 retire with it, because a pack he cannot attach photographs to is a
+   *                 quantity he cannot spend.
+   *   'free'      — the trial. Unchanged, except that the change-order cap is no longer
+   *                 counted here: `free_allowance` in `pricing_config` is the same
+   *                 number, the server enforces it, and one act must have one meter.
+   */
+  const meter = meterFor({
+    plan: await currentPlan(db),
+    purchasedEver: await purchasedEver(db),
+  });
+  if (meter === 'unlimited') return { ok: true };
+  if (!trialCapsApply(meter)) return { ok: true };
+
+  // `checkChangeOrders` is deliberately NOT in this list — see localChangeOrderCapApplies.
+  // It is still exported and still used by the usage line, which reports where someone
+  // stands rather than refusing them.
+  for (const check of [checkPhotos, checkRecording]) {
     const r = await check(db);
     if (!r.ok) return r;
   }

@@ -502,7 +502,20 @@ function LongText({ text }: { text: string }) {
   const long = text.length > LONG_TEXT_CHARS;
   return (
     <>
-      <Text selectable style={T.body} numberOfLines={long && !open ? COLLAPSED_LINES : undefined}>
+      {/* NOT `selectable` (hadar, 2026-08-18: "when I get into an approved change order
+          I cannot scroll anymore in the page").
+
+          On iOS a selectable <Text> becomes a first responder and swallows the pan that
+          starts on it. On this screen that text IS the frozen scope of work — on a real
+          record here it runs to fourteen hundred characters — so it fills the viewport,
+          every drag begins on it, and the page simply stops scrolling. The draft and
+          negotiation screens were unaffected because neither renders the whole
+          instrument.
+
+          Copy-to-clipboard mattered on the one screen that settles disputes, so it is
+          not being dropped — it moves to the explicit button below, which is also the
+          better control for a gloved hand than a long-press-and-drag selection. */}
+      <Text style={T.body} numberOfLines={long && !open ? COLLAPSED_LINES : undefined}>
         {text}
       </Text>
       {long && (

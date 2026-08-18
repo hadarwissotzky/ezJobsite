@@ -18,6 +18,7 @@
  * server reserves on its own terms when the send actually goes; the worst case is a
  * queued send, which is the designed outcome anyway.
  */
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type CreditBalance = {
@@ -124,4 +125,60 @@ export function balanceLine(b: CreditBalance | null): { k: string; p: Record<str
   if (b.available <= 0) return { k: 'credits.none', p: {} };
   if (b.available === 1) return { k: 'credits.one', p: {} };
   return { k: 'credits.n', p: { n: String(b.available) } };
+}
+
+/* ─────────────────────────── has this account ever paid ─────────────────────── */
+
+/**
+ * STICKY, AND ONLY EVER SET TO TRUE.
+ *
+ * `entitlement.ts` needs to know whether this account has ever bought credits, and it
+ * needs to know OFFLINE — the send gate runs on a jobsite. `purchased` is a live balance
+ * and cannot answer the question: a contractor who buys twenty and spends all twenty
+ * reads as zero, and re-imposing a 30-photo trial cap on a customer who has paid us is
+ * exactly the failure this whole model exists to prevent.
+ *
+ * So the fact is recorded the first time we see evidence of it and never unset. It cannot
+ * grant anything on its own — the BALANCE is still the server's answer and still gates
+ * every send — it only decides whether the trial's photo and recording caps still apply.
+ * The worst a wrong `true` can do is stop counting photographs, which is not a thing
+ * anyone can spend.
+ *
+ * STATED BOUNDARY: it is device-local, so a reinstall forgets it. The next balance read
+ * that shows a purchased credit sets it again; an account that has spent every credit it
+ * ever bought would go back to the trial caps until it buys another. Recording it
+ * server-side is the real fix and is a migration, not a line.
+ */
+const PAID_KEY = 'credits_ever_purchased';
+
+export async function notePurchasedEver(db: AbstractPowerSyncDatabase): Promise<void> {
+  try {
+    await db.execute(
+      `INSERT INTO device_settings (k, v) VALUES (?, 'yes')
+       ON CONFLICT(k) DO UPDATE SET v = 'yes'`, [PAID_KEY]);
+  } catch { /* the balance still gates every send; this only lifts trial caps */ }
+}
+
+export async function purchasedEver(db: AbstractPowerSyncDatabase): Promise<boolean> {
+  try {
+    const r = (await db.getAll<{ v: string }>(
+      `SELECT v FROM device_settings WHERE k = ?`, [PAID_KEY]))[0];
+    return r?.v === 'yes';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read the balance and record what it implies. The one call the app should make.
+ *
+ * Separate from `creditBalance` so the pure network read stays testable and so the
+ * side-effect is visible at the call site rather than hidden inside a getter.
+ */
+export async function refreshBalance(
+  db: AbstractPowerSyncDatabase, supabase: SupabaseClient
+): Promise<CreditBalance | null> {
+  const b = await creditBalance(supabase);
+  if (b && (b.purchased ?? 0) > 0) await notePurchasedEver(db);
+  return b;
 }

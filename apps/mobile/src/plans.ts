@@ -106,8 +106,45 @@ export const PLANS: Record<PlanId, Plan> = {
   },
 };
 
-/** The tiers shown on the paywall, in order. Enterprise is "contact us", not IAP. */
+/** Every paid tier that EXISTS, in order. Enterprise is "contact us", not IAP.
+ *
+ *  This is the entitlement vocabulary: what the webhook may write to `company.plan`, what
+ *  `planLimits` answers for, and what a restore may return. It is NOT the list the
+ *  paywall sells — see `OFFERED_TIERS`. */
 export const PAID_TIERS: PlanId[] = ['core', 'crew'];
+
+/**
+ * The tiers currently OFFERED FOR SALE, which is a different question from which exist.
+ *
+ * hadar, 2026-08-18: "need to hide the crew package for now — from the pay page."
+ *
+ * WHY A SEPARATE LIST RATHER THAN DELETING THE TIER. Crew is still a real entitlement:
+ * the RevenueCat products exist, the webhook can still write `plan = 'crew'`, and
+ * `planLimits('crew')` still has to answer for anyone already on it. Removing it from
+ * `PAID_TIERS` would strand those accounts with no limits and no way to manage the
+ * subscription they are paying for. Hiding is a MERCHANDISING decision; the tier is
+ * untouched.
+ *
+ * THE PAYWALL STILL SHOWS A HIDDEN TIER YOU ARE ON. A card you cannot see is a
+ * subscription you cannot cancel, which is both hostile and an App Store guideline 3.1.2
+ * problem. `offeredTiers` takes the current plan for exactly that reason.
+ *
+ * "For now" — when Crew comes back, this list is the one line that changes. If it needs
+ * to change without an App Store review, it belongs in `pricing_config` beside the
+ * prices; it is here because a temporary hide does not justify a schema change.
+ */
+export const OFFERED_TIERS: PlanId[] = ['core'];
+
+/**
+ * What the paywall renders: everything on sale, plus whatever the account is already on.
+ *
+ * Order follows `PAID_TIERS` so a re-added tier lands where it belongs rather than at the
+ * end.
+ */
+export function offeredTiers(currentPlan: PlanId): PlanId[] {
+  return PAID_TIERS.filter(
+    (t) => OFFERED_TIERS.includes(t) || t === currentPlan);
+}
 
 export function asPlanId(plan: string | null | undefined): PlanId {
   return plan === 'core' || plan === 'crew' ? plan : 'free';
