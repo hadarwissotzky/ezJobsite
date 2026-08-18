@@ -9,6 +9,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { canRemind, reminderText, ONE_DAY_MS, type RemindState } from './remind.ts';
+// The encoding check below needs the segment counter that owns this arithmetic.
+import { smsSegments } from './clientsms.ts';
 
 const st = (o: Partial<RemindState> = {}): RemindState =>
   ({ count: 0, lastAtMs: null, inDiscussion: false, ...o });
@@ -92,4 +94,28 @@ test('the amount is passed through verbatim, never re-formatted', () => {
   });
   assert.ok(t.includes('$12,345.67'));
   assert.ok(!t.includes('12345.67'), 'must not have been re-derived');
+});
+
+/* ------------------------------------------------------------- SMS cost -- */
+
+test('the reminder is GSM-7, so it costs two segments and not five', () => {
+  /**
+   * THE EM DASH WAS 3 OF THE 5 SEGMENTS (fixed 2026-08-17).
+   *
+   * `—` is not in GSM-7, and one of them forces the WHOLE message into UCS-2 at 67
+   * characters per concatenated segment instead of 153. The reminder used to read
+   * "...for: {scope} — {amount}". Same words, same length, 2.5x the cost, and three
+   * extra pieces for a handset to reassemble out of order.
+   *
+   * This asserts the ENCODING, not the wording: any future edit is free to rewrite the
+   * sentence and will only fail here if it reintroduces a non-GSM-7 character.
+   */
+  const body = reminderText({
+    contractorName: 'Wissotzky Construction',
+    scope: 'Fireplace face replacement in living room',
+    amount: '$1,450.00',
+    url: 'https://approve.ezchangeorders.com/confirm.html?t=' + 'a'.repeat(40),
+  });
+  assert.equal(smsSegments(body), 2, `${smsSegments(body)} segments: ${body}`);
+  assert.ok(!/[—–]/.test(body), 'an em or en dash forces the message to UCS-2');
 });

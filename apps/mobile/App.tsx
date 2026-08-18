@@ -51,6 +51,7 @@ import { Drawer } from './src/ui/drawer';
 import appJson from './app.json';
 import { ensurePairSchema, linkPair } from './src/pair';
 import { ensureAugmentSchema, noteAugment, appendAugmentDesc } from './src/augmentlog';
+import { clientSmsBody, type ClientSmsKind } from './src/clientsms';
 import { reachable, remindTargets } from './src/remindrecipients';
 import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
@@ -237,7 +238,7 @@ export const db = new PowerSyncDatabase({
 // Build marker (2026-08-06). Proves WHICH JS the phone is running: Metro served a stale
 // graph twice in one day, and "it didn't update" was indistinguishable from "the fix is
 // wrong" until this could be read back off the device. One string, no data exposed.
-(globalThis as any).__EZ_BUILD__ = 'v215-homecard';
+(globalThis as any).__EZ_BUILD__ = 'v216-smscost';
 // DEV-ONLY read handle. Stripped from any release build by the __DEV__ guard, which
 // Metro constant-folds to false — so this cannot ship. It exists because three separate
 // bugs today were diagnosed in seconds by asking the DEVICE what it holds, and guessed
@@ -776,7 +777,11 @@ export default function App() {
      * client has not been told". The screen has to say that difference out loud, or
      * the contractor walks away believing a link went out that did not.
      */
-    failWhy?: string | null } | null>(null);
+    failWhy?: string | null;
+    /** The facts the SMS body needs, carried so the RETRY on this sheet sends the same
+     *  short message the first attempt did — not the seven-segment instrument. */
+    sms?: { kind: ClientSmsKind; companyName?: string | null; jobLabel?: string | null;
+            amountText?: string | null } } | null>(null);
   // First send is the natural moment to ask for notifications ("we'll tell you when
   // they respond") — onboarding never asked (audit gap 1c). iOS shows the OS dialog
   // once ever; after that this no-ops. If granted, mint the push token immediately.
@@ -1910,10 +1915,41 @@ const changeType = async (t: ExtraType | null) => {
  * A failed SMS falls through to (2) rather than stopping: the messaging service being
  * down must not be the reason a client never sees a change order.
  */
-const deliverLink = async (a: { url: string; shown: string; phone?: string | null }):
-  Promise<{ ok: true } | { ok: false; why: string }> => {
+const deliverLink = async (a: {
+  url: string; shown: string; phone?: string | null;
+  /** Facts for the SMS body. Each is used ONLY if it appears verbatim in `shown`
+   *  (REQ-LC40) — `clientSmsBody` does that checking, not this caller. */
+  sms?: { kind: ClientSmsKind; companyName?: string | null; jobLabel?: string | null;
+          amountText?: string | null };
+}): Promise<{ ok: true } | { ok: false; why: string }> => {
+  /**
+   * THE TEXT SAYS WHO, WHAT AND HOW MUCH — IT DOES NOT CARRY THE DOCUMENT.
+   *
+   * This used to send `${shown}\n\n${url}`: the ENTIRE frozen instrument as the
+   * message body. `clientsms.ts` was written to replace that and then never wired to
+   * anything — it had no non-test call site until now.
+   *
+   * Two costs, and the money is the smaller one. The 391 layout opens with an em dash,
+   * which is not in GSM-7, so the whole message encodes as UCS-2 at 67 chars per
+   * segment — SEVEN chargeable segments, asserted in `clientsms.test.ts`, growing with
+   * the scope and the NTE clause. And what arrives is a wall of contract text with the
+   * only actionable thing in it, the link, below the fold. The person this product is
+   * built for reads the first line, does not scroll, and never opens the approval —
+   * while the contractor believes he is being ignored.
+   *
+   * The document lives at the link, where it is rendered, where the photos and the
+   * discussion are, and where the signature is collected.
+   *
+   * FALLS BACK TO THE OLD BODY only when the caller supplies no facts, so no send path
+   * can lose its message by omitting an argument.
+   */
+  const body = a.sms
+    ? clientSmsBody({ kind: a.sms.kind, shownContent: a.shown, url: a.url,
+                      companyName: a.sms.companyName, jobLabel: a.sms.jobLabel,
+                      amountText: a.sms.amountText })
+    : `${a.shown}\n\n${a.url}`;
   if (a.phone) {
-    const r = await sendSms(connector.client, a.phone, `${a.shown}\n\n${a.url}`);
+    const r = await sendSms(connector.client, a.phone, body);
     if (r.ok) return { ok: true };
     // Logged, not shown. Twilio being unconfigured is a fact about the deployment,
     // not about this send — and it is not what stopped the link going out, because
@@ -1961,7 +1997,15 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
     // contractor onto the record for the seconds this takes; and closing it first
     // means asking iOS to present the share sheet while a modal dismissal is still
     // animating, which it can simply refuse.
-    const d0 = await deliverLink({ url: re.url, shown: re.shownContent, phone: to?.phone ?? null });
+    const d0 = await deliverLink({
+      url: re.url, shown: re.shownContent, phone: to?.phone ?? null,
+      // An EWA is a T&M authorization and carries NO price — `renderEwaCard` states the
+      // rate and cap inside the instrument, and `clientSmsBody` refuses the
+      // "nothing proceeds until you approve" closing here because on a capped
+      // authorization work proceeds precisely BECAUSE it was approved.
+      sms: { kind: 'ewa', companyName: prof0?.company || prof0?.name || null,
+             jobLabel: projects.find((p) => p.id === projectId)?.name ?? null },
+    });
     setSendPrep(null);
     // The chirp fires on DELIVERY, not on minting. It is the felt confirmation that
     // the commitment went out (gap #7); playing it over a failed hand-off would make
@@ -1974,7 +2018,9 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
       scope: c.scope, amount: undefined,
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
       sentTo: to?.name ?? c.who_directed ?? null, atMs: Date.now(), phone: to?.phone ?? null,
-      shared: d0.ok, failWhy: d0.ok ? null : d0.why });
+      shared: d0.ok, failWhy: d0.ok ? null : d0.why,
+      sms: { kind: 'ewa', companyName: prof0?.company || prof0?.name || null,
+             jobLabel: projects.find((p) => p.id === projectId)?.name ?? null } });
     await refresh();
     return;
   }
@@ -2079,14 +2125,25 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
                                name: to.name, role: to.role, atMs: sentAtMs });
     }
     // Closed AFTER the hand-off, not before — see the EWA path above for why.
-    const d = await deliverLink({ url: r.url, shown: r.shownContent, phone: to?.phone ?? null });
+    const d = await deliverLink({
+      url: r.url, shown: r.shownContent, phone: to?.phone ?? null,
+      // `c.amount` is already formatted by `money()` — the one formatter in this app.
+      // `clientSmsBody` drops any of these that is not verbatim in the frozen text, so
+      // an SMS can never name a figure the signed document does not contain (REQ-LC40).
+      sms: { kind: 'confirm', companyName: prof?.company || prof?.name || null,
+             jobLabel: projects.find((p) => p.id === projectId)?.name ?? null,
+             amountText: c.amount },
+    });
     setSendPrep(null);
     if (d.ok) void signalSaved();  // felt confirmation the commitment WENT OUT (gap #7)
     setSentLink({ url: r.url, shown: r.shownContent,
       scope: c.scope, amount: c.amount,
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
       sentTo: to?.name ?? c.who_directed ?? null, atMs: sentAtMs, phone: to?.phone ?? null,
-      shared: d.ok, failWhy: d.ok ? null : d.why });
+      shared: d.ok, failWhy: d.ok ? null : d.why,
+      sms: { kind: 'confirm', companyName: prof?.company || prof?.name || null,
+             jobLabel: projects.find((p) => p.id === projectId)?.name ?? null,
+             amountText: c.amount } });
     await refresh();
   } else setUi({ k: 'refused', why: r.reason });
 };
@@ -9204,7 +9261,8 @@ const sendPricedApproval = async (c: LedgerRow, to: RosterMember | null) => {
           {!sentLink.shared && (
             <Pressable style={s.confirmWide} onPress={async () => {
               const again = await deliverLink({
-                url: sentLink.url, shown: sentLink.shown, phone: sentLink.phone ?? null });
+                url: sentLink.url, shown: sentLink.shown, phone: sentLink.phone ?? null,
+                sms: sentLink.sms });
               if (again.ok) void signalSaved();
               setSentLink((sl) => sl && {
                 ...sl, shared: again.ok, failWhy: again.ok ? null : again.why });

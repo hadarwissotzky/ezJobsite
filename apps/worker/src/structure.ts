@@ -81,7 +81,63 @@ export type StructureResult = {
   tasks: StructureTask[];
 };
 
-export const STRUCTURE_MODEL = 'claude-opus-4-8';
+/**
+ * THE MODEL THAT WRITES THE DOCUMENT — configurable, because it is ~70% of what a
+ * change order costs to produce.
+ *
+ * hadar, 2026-08-17: unlimited subscriptions stay sellable only if COGS comes down.
+ * Measured before this change: ~$0.66 per signed change order, of which Opus with
+ * adaptive thinking was roughly two thirds. `docs/PRICING-STRATEGY.md` had assumed
+ * ~$0.01 on a cheap model, and every margin number in it was computed from that.
+ *
+ * WHY IT IS AN ENV VAR AND NOT SIMPLY A CHEAPER CONSTANT. CLAUDE.md mandate #4:
+ * "Transcription is a commodity; the structuring layer is the product." This is the
+ * one model in the system whose output a homeowner signs. Swapping it blind trades a
+ * cost problem for a quality problem that would surface as worse scopes of work —
+ * visible to clients, invisible in any test we run. So the model is a setting, the
+ * cheap one is the default, and `scripts/compare-structure.mjs` runs both over real
+ * transcripts so the choice is made on read output rather than on price alone.
+ *
+ * Override with STRUCTURE_MODEL to go back to Opus for a single job, a single
+ * deploy, or a comparison run.
+ */
+/**
+ * MEASURED, THEN KEPT (2026-08-17). `scripts/compare-structure.mjs` ran this prompt
+ * over ALL 19 usable real transcripts against `claude-sonnet-5`:
+ *
+ *   cost              Opus $1.7576   Sonnet $0.5165   — Sonnet 3.4x cheaper
+ *   same confidence   17/19
+ *   same task count   18/19
+ *   who_directed      Opus 9/19      Sonnet 3/19      ← the reason we did not switch
+ *
+ * Subjects and tasks were near-identical; on price alone Sonnet wins easily. But
+ * `who_directed` is WHO THE EXTRA IS FOR. It is copied into
+ * `confirmation_request.counterparty_label` at send and frozen into the instrument the
+ * client signs. Missing it puts the contractor back through "choose a client" by hand;
+ * getting it wrong puts the wrong name on a legal document.
+ *
+ * Three times the miss rate on that field is not a saving, it is a transfer of cost
+ * from us to the person on the ladder — and mandate #4 is explicit that the structuring
+ * layer is the product. So Opus stays, and the cost came out of PROMPT CACHING instead,
+ * which takes ~50% at volume and changes nothing the model sees.
+ *
+ * Revisit by re-running the comparison, not by reasoning about model tiers.
+ */
+export const STRUCTURE_MODEL =
+  process.env.STRUCTURE_MODEL?.trim() || 'claude-opus-4-8';
+
+/**
+ * Extended thinking is OFF by default, and that is a cost decision with a reason.
+ *
+ * `thinking: adaptive` bills its reasoning tokens as OUTPUT, so the bill is not
+ * bounded by `max_tokens` on the visible answer — the most expensive and least
+ * predictable part of the call. This step is CONSTRAINED EXTRACTION: `STRUCTURE_SCHEMA`
+ * dictates the shape, `SYSTEM` dictates the rules, and the input is a transcript. It is
+ * not a task where a model needs to reason its way to an approach.
+ *
+ * Set STRUCTURE_THINKING=1 to turn it back on for a comparison run.
+ */
+export const STRUCTURE_THINKING = process.env.STRUCTURE_THINKING === '1';
 
 /** Strict schema: the API guarantees the shape, parseStructure re-checks anyway
  *  (a network boundary is a network boundary). */
@@ -383,9 +439,28 @@ export async function structureTranscript(
   const params = {
     model: STRUCTURE_MODEL,
     max_tokens: 4096,
-    thinking: { type: 'adaptive' },
+    // Omitted entirely when off — sending `{ type: 'disabled' }` is not the same as
+    // not asking, and the default here is not asking.
+    ...(STRUCTURE_THINKING ? { thinking: { type: 'adaptive' } } : {}),
     output_config: { format: { type: 'json_schema', schema: STRUCTURE_SCHEMA } },
-    system: SYSTEM,
+    /**
+     * THE PROMPT IS CACHED, BECAUSE IT IS THE SAME EVERY TIME AND IT IS MOST OF THE BILL.
+     *
+     * Measured against real transcripts on 2026-08-17: input was 4,158 tokens for a
+     * SEVENTY-ONE CHARACTER transcript, and 4,413 for an 830-character one. The speech
+     * is a rounding error; what is being paid for on every single call is this system
+     * prompt and the schema beside it — re-sent in full, per capture, forever.
+     *
+     * `cache_control: ephemeral` makes that prefix a cache write once and a cache READ
+     * on every call after it (5-minute TTL, refreshed by each hit). Cache reads bill at
+     * a fraction of input rate, and the pipeline structures captures in bursts, which is
+     * exactly the shape that keeps a cache warm.
+     *
+     * ZERO QUALITY RISK, and that is why it is done here and unconditionally while the
+     * model choice is still being measured: the model receives byte-identical input
+     * either way. Nothing about the document changes.
+     */
+    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: transcript }],
   } as unknown as Anthropic.MessageCreateParamsNonStreaming;
   const resp = await client.messages.create(params);
@@ -395,3 +470,13 @@ export async function structureTranscript(
   if (!text || text.type !== 'text') return null;
   try { return parseStructure(JSON.parse(text.text)); } catch { return null; }
 }
+
+/**
+ * The system prompt and the schema, exported for `scripts/compare-structure.mjs`.
+ *
+ * Exported rather than copied into that script on purpose: a comparison run against a
+ * duplicated prompt would be comparing two things, neither of which is what ships. If
+ * the rules change here, the comparison changes with them.
+ */
+export const SYSTEM_FOR_TOOLS = SYSTEM;
+export const SCHEMA_FOR_TOOLS = STRUCTURE_SCHEMA;

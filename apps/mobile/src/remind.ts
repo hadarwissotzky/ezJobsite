@@ -81,8 +81,20 @@ export function reminderText(o: {
   amount: string;
   url: string;
 }): string {
+  /**
+   * NO EM DASH. IT IS NOT A TYPOGRAPHIC PREFERENCE — IT IS 3 OF THE 5 SEGMENTS.
+   *
+   * `—` does not exist in GSM-7, so a single one forces the ENTIRE message into UCS-2
+   * at 67 characters per concatenated segment instead of 153. Measured with
+   * `smsSegments` on a realistic reminder (291 characters): five segments with the em
+   * dash, TWO with a hyphen. Same words, same length, 60% of the cost and three fewer
+   * pieces for a handset to reassemble out of order.
+   *
+   * The same trap is why `clientsms.ts` exists — the 391 instrument layout opens with
+   * one, which is what made the old send body seven segments.
+   */
   return (
-    `${o.contractorName} is waiting on your approval for: ${o.scope} — ${o.amount}\n\n` +
+    `${o.contractorName} is waiting on your approval for: ${o.scope} - ${o.amount}\n\n` +
     `${o.url}\n\n` +
     `Same link as before. Nothing has changed.`
   );
