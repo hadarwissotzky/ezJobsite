@@ -24,6 +24,7 @@
  * so the first contractor to save an address would have erased his own logo. A writer
  * cannot lose a column it never mentions.
  */
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type Letterhead = {
@@ -109,4 +110,67 @@ export function letterheadLines(l: {
   const lic = (l.license ?? '').trim();
   if (lic) out.push(/^lic/i.test(lic) ? lic : `License ${lic}`);
   return out;
+}
+
+/* ───────────────────────────── the offline copy ─────────────────────────────── */
+
+/**
+ * WHY A CACHE EXISTS AT ALL, given everything above says "go to the server".
+ *
+ * Because the DOCUMENT cannot. `approvalrecordshare.ts` states the rule it is built on:
+ * "making an export depend on a fetch would mean a contractor standing in a basement
+ * cannot hand over the approval he is being asked about." A change order PDF that prints
+ * his letterhead only when he has signal is a PDF whose letterhead disappears exactly
+ * where this product claims to work.
+ *
+ * The local `company` table cannot serve this either — it is EMPTY on a real device (see
+ * the header) and carries no address or licence column even when it is not. So the read
+ * stays server-first for the SCREEN, where a stale address must never be typed over, and
+ * every successful read drops a copy here for the DOCUMENT, where a stale address beats a
+ * blank one. Same shape as `pricingconfig.ts`, and for the same reason.
+ *
+ * `device_settings`, not a new table: this is one row of five short strings, and it is
+ * exactly the "what does this handset know" store that file already is.
+ */
+const CACHE_KEY = 'company_letterhead_json';
+
+export async function cacheLetterhead(
+  db: AbstractPowerSyncDatabase, lh: Letterhead
+): Promise<void> {
+  try {
+    await db.execute(
+      `INSERT INTO device_settings (k, v) VALUES (?, ?)
+       ON CONFLICT(k) DO UPDATE SET v = excluded.v`,
+      [CACHE_KEY, JSON.stringify({
+        companyId: lh.companyId, name: lh.name, address: lh.address,
+        license: lh.license, logoKey: lh.logoKey,
+      })]);
+  } catch { /* a document with no letterhead is still a document */ }
+}
+
+/**
+ * The last letterhead this handset saw. Null when it has never seen one — which the
+ * caller must render as ABSENT, never as empty labels: a change order printing "License:"
+ * with nothing after it tells the reader a licence number exists.
+ */
+export async function cachedLetterhead(
+  db: AbstractPowerSyncDatabase
+): Promise<Omit<Letterhead, 'isOwner'> | null> {
+  try {
+    const r = (await db.getAll<{ v: string }>(
+      `SELECT v FROM device_settings WHERE k = ?`, [CACHE_KEY]))[0];
+    if (!r?.v) return null;
+    const d = JSON.parse(r.v) as Record<string, unknown>;
+    const name = typeof d.name === 'string' ? d.name.trim() : '';
+    if (!name) return null;   // a letterhead with no name is not a letterhead
+    return {
+      companyId: String(d.companyId ?? ''),
+      name,
+      address: str(d.address),
+      license: str(d.license),
+      logoKey: str(d.logoKey),
+    };
+  } catch {
+    return null;
+  }
 }

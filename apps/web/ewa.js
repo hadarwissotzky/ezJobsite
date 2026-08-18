@@ -71,7 +71,7 @@
   /**
    * @param d      confirmation_fetch payload (frozen: shown_content, company, job…)
    * @param terms  ewa_terms_fetch payload (proceed term, rate, cap, window)
-   * @param h      helpers from confirm.html: esc, usd, screen, initials, answer,
+   * @param h      helpers from confirm.html: esc, usd, screen, initials, logoTile, answer,
    *               askQuestion, declineFlow, photoStrip, threadHtml, notice. Passed in
    *               rather than re-implemented so there is ONE money formatter, ONE
    *               answer path and ONE thread renderer on this page.
@@ -129,7 +129,9 @@
 
     h.screen(
       '<div class="brand">' +
-        '<div class="logo">' + h.esc(h.initials(company)) + '</div>' +
+        // The real mark when this page has one; initials when it does not. `__logoUrl`
+        // is set by confirm.html before it dispatches here, and is null on any failure.
+        h.logoTile(company, d.__logoUrl) +
         '<div><div class="cn">' + h.esc(company) + '</div>' +
         '<div class="cs">' + h.esc(d.job_label || '') + '</div></div>' +
       '</div>' +

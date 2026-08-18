@@ -100,6 +100,32 @@ export type CoParty = {
   email?: string | null;
 };
 
+/**
+ * THE CONTRACTOR'S LETTERHEAD — the top-left of the page.
+ *
+ * hadar, 2026-08-18: he had added a logo and could not tell whether it was doing
+ * anything. It was saving; it was reaching nothing. This is half of the fix (the other
+ * half is the client's approval page).
+ *
+ * Every field is OPTIONAL and omitted when absent, which is this block's whole discipline:
+ * a change order printing "License:" with nothing after it tells the reader a licence
+ * number exists. `binding: false` like the rest of the CO face — a letterhead identifies
+ * who is making the offer, it does not add a term to it.
+ *
+ * ─── THE LOGO IS A data: URI, AND THAT IS A REQUIREMENT ─────────────────────────
+ * Not an http(s) URL, and never a signed Storage URL. This document is produced offline
+ * on purpose (see approvalrecordshare.ts), it is shared as a file, and it is EVIDENCE
+ * someone may open next year. A remote src turns it into a blank box the day the link
+ * expires — which for a signed Storage URL is one hour.
+ */
+export type CoLetterhead = {
+  /** A complete `data:image/...;base64,...` URI, or null. Never a remote URL. */
+  logoDataUri: string | null;
+  address: string | null;
+  /** "CSLB 1043210". Optional by hadar's decision, not by oversight. */
+  license: string | null;
+};
+
 export type CoLineItem = {
   description: string;
   qty: number;
@@ -116,6 +142,9 @@ export type ChangeOrderBlock = {
   /** Which revision this is. 1 = the original. */
   version: number;
   dateLabel: string | null;
+  /** The contractor's own letterhead. Null when this handset has never seen one — the
+   *  header then keeps its original shape rather than printing an empty band. */
+  letterhead?: CoLetterhead | null;
   contractor: CoParty | null;
   client: CoParty | null;
   projectName: string | null;
@@ -249,6 +278,8 @@ export type PdfLabels = {
     signClient: string;
     signDate: string;
     noPrice: string;
+    /** Prefixes the licence number. Required like every other label here. */
+    licenseLabel: string;
   };
 };
 
@@ -321,11 +352,33 @@ export function renderApprovalHtml(doc: ApprovalDoc, labels: PdfLabels): string 
       const L = labels.co;
       parts.push('<section class="co" data-binding="false">');
       parts.push('<div class="cohead">');
-      parts.push(`<div class="cotitle">${esc(L.docTitle)}</div><div class="cometa">`);
+      // THE LETTERHEAD, when this handset has one. Left column: the mark, the name, the
+      // address, the licence — each omitted when absent. With no letterhead at all the
+      // header keeps EXACTLY its previous shape (title left, meta right), so a contractor
+      // who never uploaded a logo sees no change and no empty band.
+      const lh = b.letterhead ?? null;
+      const hasLh = !!(lh && (lh.logoDataUri || lh.address || lh.license));
+      if (hasLh && lh) {
+        parts.push('<div class="lh">');
+        if (lh.logoDataUri) {
+          // alt is the company name so a reader whose viewer blocks images still learns
+          // whose document this is, rather than seeing a broken-image glyph.
+          parts.push(`<img class="lhlogo" src="${esc(lh.logoDataUri)}"`);
+          parts.push(` alt="${esc(b.contractor?.name ?? '')}">`);
+        }
+        if (b.contractor?.name) parts.push(`<div class="lhname">${esc(b.contractor.name)}</div>`);
+        if (lh.address) parts.push(`<div class="lhline">${esc(lh.address)}</div>`);
+        if (lh.license) {
+          parts.push(`<div class="lhline">${esc(L.licenseLabel)} ${esc(lh.license)}</div>`);
+        }
+        parts.push('</div>');
+      }
+      parts.push(`<div class="cotitleblock"><div class="cotitle">${esc(L.docTitle)}</div>`);
+      parts.push('<div class="cometa">');
       if (b.number) parts.push(`<div>${esc(L.numberLabel)} ${esc(b.number)}</div>`);
       parts.push(`<div>${esc(L.versionLabel)} ${esc(String(b.version))}</div>`);
       if (b.dateLabel) parts.push(`<div>${esc(L.dateLabel)} ${esc(b.dateLabel)}</div>`);
-      parts.push('</div></div>');
+      parts.push('</div></div></div>');
 
       // PARTIES + PROJECT — who is agreeing, and to what job. A change order with no
       // named parties is not enforceable against anyone.
@@ -435,6 +488,13 @@ const CSS = [
   '.cohead{display:flex;justify-content:space-between;align-items:flex-start;',
   'border-bottom:2px solid #1b1a17;padding:14px 16px;}',
   '.cotitle{font-size:22px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;}',
+  // The letterhead band. max-height rather than a fixed box: a wide logo and a tall one
+  // are both real, and squashing either is worse than letting the header breathe.
+  '.lh{max-width:58%;}',
+  '.lhlogo{max-height:52px;max-width:210px;display:block;margin-bottom:6px;}',
+  '.lhname{font-weight:800;font-size:14px;letter-spacing:.02em;}',
+  '.lhline{font-size:11px;color:#6b6459;line-height:1.45;}',
+  '.cotitleblock{text-align:right;}',
   '.cometa{font-size:11.5px;text-align:right;line-height:1.6;}',
   'table.parties{width:100%;border-collapse:collapse;}',
   'table.parties td{width:50%;vertical-align:top;padding:12px 16px;border-bottom:1px solid #e3ded4;}',

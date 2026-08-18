@@ -35,7 +35,7 @@ import {
   resolveMyCompany, listMembers, createInvite, acceptInvite, revokeMember,
   type MyCompany, type Member,
 } from '../company';
-import { readLetterhead, saveLetterhead, type Letterhead } from '../letterhead';
+import { cacheLetterhead, readLetterhead, saveLetterhead, type Letterhead } from '../letterhead';
 
 export function SettingsScreen(props: {
   db: AbstractPowerSyncDatabase;
@@ -110,6 +110,11 @@ export function SettingsScreen(props: {
           setLhName(r.letterhead.name);
           setLhAddress(r.letterhead.address ?? '');
           setLhLicense(r.letterhead.license ?? '');
+          // KEEP A COPY FOR THE DOCUMENT. The exported change order prints this
+          // letterhead and must do it with no signal — see `cachedLetterhead`. Cached on
+          // every successful read rather than only on save, so a letterhead set on
+          // another device reaches this one's PDFs the first time the screen is opened.
+          void cacheLetterhead(db, r.letterhead);
         } else {
           // Said out loud rather than shown as blank fields. A contractor who cannot
           // reach the server must not be invited to type over what he cannot see.
@@ -396,6 +401,10 @@ export function SettingsScreen(props: {
                   setLhName(back.letterhead.name);
                   setLhAddress(back.letterhead.address ?? '');
                   setLhLicense(back.letterhead.license ?? '');
+                  // What the SERVER holds, not what he typed — the same reason this
+                  // re-reads at all. Caching the echo would put a letterhead on his
+                  // documents that the server would disagree with.
+                  void cacheLetterhead(db, back.letterhead);
                 }
               }}
               style={saveBtn}>

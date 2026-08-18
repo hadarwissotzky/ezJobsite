@@ -1798,6 +1798,10 @@ const EN: Record<string, string> = {
   'co.doc.signClient': 'Client signature',
   'co.doc.signDate': 'Date',
   'co.doc.noPrice': 'No price given',
+  // Prefixes the contractor's licence on the document letterhead. "Lic." and not
+  // "License:" — every state's board calls the number something different, and the
+  // contractor types the qualifier himself ("CSLB 1043210").
+  'co.doc.license': 'Lic.',
   'approvaldoc.share': 'Share as PDF',
   'approvaldoc.notOnDevice': 'The signed document has not reached this phone yet.',
   'rec.sectionTitle': 'Original recordings',
@@ -3410,6 +3414,7 @@ const ES: Record<string, string> = {
   'co.doc.signClient': 'Firma del cliente',
   'co.doc.signDate': 'Fecha',
   'co.doc.noPrice': 'Sin precio indicado',
+  'co.doc.license': 'Lic.',
   'approvaldoc.share': 'Compartir como PDF',
   'approvaldoc.notOnDevice': 'El documento firmado todavía no llegó a este teléfono.',
   'rec.sectionTitle': 'Grabaciones originales',

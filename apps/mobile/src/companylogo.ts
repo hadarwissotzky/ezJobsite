@@ -97,7 +97,14 @@ export async function pickLogo(): Promise<PickedLogo | null> {
 }
 
 export type SaveLogoResult =
-  | { ok: true; localUri: string }
+  /**
+   * `logoKey` is RETURNED, not left for the caller to look up. It used to be re-read from
+   * the local `company` table, which is EMPTY on a real device (letterhead.ts's header
+   * explains the sync gap) — so after a successful upload the caller set its key to null,
+   * and the Remove button then had nothing to delete. The value is right here; handing it
+   * back is cheaper and cannot be wrong.
+   */
+  | { ok: true; localUri: string; logoKey: string }
   | { ok: false; reason: 'too_big' | 'read_failed' | 'upload_failed' | 'save_failed';
       /** The SERVER'S own words, when it had any. Carried rather than translated into
        *  our guess: "only the owner can change the logo" is the RIGHT message for a
@@ -187,7 +194,7 @@ export async function saveCompanyLogo(
   try {
     await FS.writeAsStringAsync(local, b64, { encoding: FS.EncodingType.Base64 });
   } catch { /* the key is saved; ensureLogoCached will fetch it on the next read */ }
-  return { ok: true, localUri: local };
+  return { ok: true, localUri: local, logoKey: key };
 }
 
 /**

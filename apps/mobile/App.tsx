@@ -42,6 +42,9 @@ import { HeldSendModal } from './src/ui/heldsendmodal';
 // THE APPROVAL CELEBRATION (hadar, 2026-08-18: "the most important event that everything
 // is leading to is approved … we should also celebrate it").
 import { ApprovedCelebration } from './src/ui/approvedcelebration';
+// The letterhead the EXPORTED document prints. Cached rather than fetched — a change
+// order handed over in a basement must still carry the contractor's own name.
+import { cacheLetterhead, cachedLetterhead } from './src/letterhead';
 import { celebrationDescription, celebrationLine, ensureCelebrateSchema, markCelebrated,
          pendingCelebrations, type Celebration } from './src/celebrate';
 import { SwipeRow } from './src/ui/swiperow';
@@ -5228,11 +5231,16 @@ const checkCelebrations = async () => {
           // source identity without changing the file.
           setLogoUri(`${r.localUri}?v=${Date.now()}`);
           // The path now carries the key, so the next refresh must not treat the new
-          // file as the old one's cache.
+          // file as the old one's cache. FROM THE SAVE RESULT, not from the local
+          // `company` table: that table is empty on this device, so the old read set the
+          // key to null every time and left Remove with nothing to delete.
+          setLogoKey(r.logoKey);
+          // The exported change order prints this mark, and it reads the cached
+          // letterhead rather than the network. Without this line a contractor's new logo
+          // would not reach his documents until he next opened Settings with signal.
           void (async () => {
-            const row = await db.getAll<{ logo_key: string | null }>(
-              `SELECT logo_key FROM company WHERE id = ?`, [co.id]).catch(() => []);
-            setLogoKey(row[0]?.logo_key ?? null);
+            const prev = await cachedLetterhead(db);
+            if (prev) await cacheLetterhead(db, { ...prev, logoKey: r.logoKey, isOwner: true });
           })();
           setLogoSheet(false);
           setAck({ kind: 'ok', title: T('logo.saved'), detail: co.name });

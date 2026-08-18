@@ -36,6 +36,8 @@ import { sha256 } from 'js-sha256';
 import { createdLabel, money } from './changeorder';
 import { versionNumber } from './ledgerstatus';
 import { listRoster } from './approvers';
+import { cachedLetterhead } from './letterhead';
+import { localLogoPath } from './companylogo';
 import { snapshotVerifies } from './eventtimeline';
 import { decisionSummaryFor } from './decisionsummarydata';
 import { threadFor } from './discussionstore';
@@ -108,6 +110,7 @@ function labels(signedName: string | null, traced: number): PdfLabels {
       signClient: t('co.doc.signClient'),
       signDate: t('co.doc.signDate'),
       noPrice: t('co.doc.noPrice'),
+      licenseLabel: t('co.doc.license'),
     },
     integrityOk: t('r6c.pdfHashOk'),
     integrityFailed: t('r6c.pdfHashBad'),
@@ -130,6 +133,48 @@ function labels(signedName: string | null, traced: number): PdfLabels {
  * being asked about. What is on the device is what goes in the document, and the
  * snapshot's integrity line says whether it still matches its frozen hash.
  */
+/**
+ * The cached logo file as a `data:` URI, or null.
+ *
+ * WHY EMBEDDED AND NOT LINKED. This document is written to disk, shared, and opened by
+ * people who are not us, possibly a year later, possibly with no network. A signed
+ * Storage URL expires in an hour; a bucket URL needs a session. Either turns the
+ * letterhead into a broken-image box on the one artifact that is supposed to be evidence.
+ * Base64 costs about a third more bytes than the file and buys a document that is
+ * genuinely self-contained.
+ *
+ * NEVER FETCHES. `ensureLogoCached` is the thing that downloads, and it runs when the
+ * drawer is opened with signal. If this handset has no cached copy the document prints
+ * the name and address without a mark, which is a normal-looking letterhead — not an
+ * error, and not a reason to fail an export.
+ */
+async function logoDataUri(
+  companyId: string, logoKey: string | null
+): Promise<string | null> {
+  if (!companyId || !logoKey) return null;
+  try {
+    const path = localLogoPath(companyId, logoKey);
+    const info = await FS.getInfoAsync(path);
+    // size > 0, not merely exists: an interrupted download leaves a 0-byte file, and an
+    // empty data URI renders as a broken image rather than as nothing.
+    if (!info.exists || !((info as any).size > 0)) return null;
+    const b64 = await FS.readAsStringAsync(path, { encoding: FS.EncodingType.Base64 });
+    if (!b64) return null;
+    // image/* without a subtype would be a guess. PNG and JPEG both begin with a
+    // signature that survives base64's fixed 3-byte grouping at offset 0, so the first
+    // characters identify the format without decoding the file.
+    const mime = b64.startsWith('/9j/') ? 'image/jpeg'
+      : b64.startsWith('iVBORw0KGgo') ? 'image/png'
+      : b64.startsWith('R0lGOD') ? 'image/gif'
+      : b64.startsWith('UklGR') ? 'image/webp'
+      : null;
+    if (!mime) return null;   // an unknown format is not worth a broken box
+    return `data:${mime};base64,${b64}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function buildApprovalDoc(
   db: AbstractPowerSyncDatabase, changeOrderId: string
 ): Promise<{ doc: ApprovalDoc; labels: PdfLabels } | null> {
@@ -157,16 +202,30 @@ export async function buildApprovalDoc(
     side: m.side, text: m.text, atLabel: createdLabel(m.atMs),
   }));
 
+  // ── the letterhead ──
+  // From the CACHE, not the local `company` table and not the network. The table is
+  // empty on a real device (letterhead.ts's header explains the sync gap) and a fetch
+  // here would mean the contractor's own name vanishes from his change order exactly
+  // when he is standing in a basement being asked for it.
+  const lh = await cachedLetterhead(db);
+
   // ── the parties ──
   // The contractor is the company on this device; the client is the roster row the
   // extra was directed to. Both are best-effort: a document that omits a phone number
   // it does not have is honest, one that prints an empty label is not.
-  let contractorParty: CoParty | null = null;
-  try {
-    const c = (await db.getAll<{ name: string }>(
-      `SELECT name FROM company LIMIT 1`))[0];
-    if (c?.name) contractorParty = { name: c.name };
-  } catch { /* no company row yet — the From block simply prints a dash */ }
+  //
+  // The CACHE IS PREFERRED over the local row, which reverses the old order for a
+  // measured reason: `SELECT name FROM company` returns nothing on this device today, so
+  // the From block on every exported change order has been printing a dash where the
+  // contractor's own name belongs.
+  let contractorParty: CoParty | null = lh?.name ? { name: lh.name } : null;
+  if (!contractorParty) {
+    try {
+      const c = (await db.getAll<{ name: string }>(
+        `SELECT name FROM company LIMIT 1`))[0];
+      if (c?.name) contractorParty = { name: c.name };
+    } catch { /* no company row either — the From block prints a dash, as before */ }
+  }
 
   let clientParty: CoParty | null = null;
   try {
@@ -212,6 +271,10 @@ export async function buildApprovalDoc(
       number: extraNo,
       version,
       dateLabel: createdLabel(co.created_at_ms),
+      letterhead: lh ? {
+        logoDataUri: await logoDataUri(lh.companyId, lh.logoKey),
+        address: lh.address, license: lh.license,
+      } : null,
       contractor: contractorParty,
       client,
       projectName: co.job_name,
