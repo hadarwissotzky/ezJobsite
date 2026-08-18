@@ -39,6 +39,11 @@ import { usageSummary, type UsageSummary } from './src/usage';
 import { UsageCard, UsageNudge } from './src/ui/usagecard';
 import { QuotaModal } from './src/ui/quotamodal';
 import { HeldSendModal } from './src/ui/heldsendmodal';
+// THE APPROVAL CELEBRATION (hadar, 2026-08-18: "the most important event that everything
+// is leading to is approved … we should also celebrate it").
+import { ApprovedCelebration } from './src/ui/approvedcelebration';
+import { celebrationDescription, celebrationLine, ensureCelebrateSchema, markCelebrated,
+         pendingCelebrations, type Celebration } from './src/celebrate';
 import { SwipeRow } from './src/ui/swiperow';
 import { PaywallScreen } from './src/ui/paywallscreen';
 import { PLANS, type PlanId } from './src/plans';
@@ -182,7 +187,7 @@ import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } f
 import { describeStamp, ensureLocationPermission, stampNow, type Stamp } from './src/stamp';
 import { addressFor } from './src/geocode';
 import { resolveJurisdiction } from './src/jurisdiction';
-import { initFeedback, signalArmed, signalFailed, signalSaved, signalReady } from './src/feedback';
+import { initFeedback, signalApproved, signalArmed, signalFailed, signalSaved, signalReady } from './src/feedback';
 import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
 import { addParty, assignBoundary, drainScopeOutbox, ensurePartySchema, listBoundaries,
          listParties, nameBoundary } from './src/parties';
@@ -417,6 +422,14 @@ function firstLine(text: string, max = 64): string {
 /** Guards `drainHolds` against two overlapping runs — see the comment there. */
 let draining = false;
 
+/**
+ * The approval whose celebration is currently on screen, so the tick does not re-fire the
+ * haptic every 15 seconds at a contractor who is already reading it. Module scope for the
+ * same reason `draining` is: it is checked from a tick and from a foreground listener,
+ * and it must not participate in the hook order.
+ */
+let celebratedHead: string | null = null;
+
 export default function App() {
   // The design language (prototype): condensed display for things you RECOGNISE,
   // humanist body for things you READ. Gated below so text never flashes unstyled.
@@ -483,6 +496,14 @@ export default function App() {
    * `heldN` is how many are waiting, so the app can say so out loud instead of only at
    * the moment of the tap.
    */
+  /**
+   * APPROVALS HE HAS NOT BEEN SHOWN YET, oldest first, shown one at a time.
+   *
+   * A QUEUE and not a single value: three can land while the app is closed, and stacking
+   * three modals or silently dropping two would both be wrong. The head is on screen, the
+   * tail is counted in "2 more were approved too" so nothing is hidden.
+   */
+  const [celebrations, setCelebrations] = React.useState<Celebration[]>([]);
   const [pricing, setPricing] = React.useState<PricingConfig | null>(null);
   const [noCredits, setNoCredits] = React.useState<null | { changeOrderId: string }>(null);
   const [heldN, setHeldN] = React.useState(0);
@@ -568,16 +589,26 @@ export default function App() {
     id: string; scope: string; amount_cents: number; status: string;
     project_id: string; pname: string; signed_by: string | null; created_at_ms: number }>>([]);
   const [recovered, setRecovered] = React.useState<{ cents: number; n: number }>({ cents: 0, n: 0 });
-  // The win: celebrate a fresh "yes" while the app is foreground (communication gap
-  // #1). `celebratedRef` is a watermark of extras already celebrated — null until the
-  // first refresh seeds it with history, so opening the app never replays old wins.
-  const [celebrate, setCelebrate] = React.useState<{ n: number; cents: number } | null>(null);
-  const celebratedRef = React.useRef<Set<string> | null>(null);
-  React.useEffect(() => {
-    if (!celebrate) return;
-    const tm = setTimeout(() => setCelebrate(null), 3800);  // auto-dismiss the win
-    return () => clearTimeout(tm);
-  }, [celebrate]);
+  /**
+   * THE WIN OVERLAY IS GONE — REPLACED, not deleted (hadar, 2026-08-18).
+   *
+   * What used to live here: a `celebrate` state, an in-MEMORY `celebratedRef` watermark,
+   * and a 3.8-second auto-dismissing card showing the summed dollar value of whatever had
+   * just been approved. It served communication gap #1 and it worked while the app was
+   * open.
+   *
+   * WHY IT COULD NOT STAY. Its watermark was a `useRef` seeded on the first refresh of
+   * each launch, so an approval that landed while the app was closed was recorded as
+   * already-celebrated the moment he opened it, and he was shown nothing. hadar's ask —
+   * "when the app is OPENED after a CO was approved, a popup should show up" — is
+   * precisely the case that overlay could never serve, because a watermark that lives in
+   * memory cannot remember across a launch.
+   *
+   * The replacement (`celebrate.ts` + `celebrateEl`) keeps the watermark in SQLite,
+   * celebrates one change order at a time rather than a summed batch, carries the signed
+   * description, and links to the record. Two celebrations racing each other would have
+   * been worse than either alone, so this one is retired rather than left beside it.
+   */
   // The Home dashboard's extras, ACROSS every job (hadar, 2026-07-23 mockup): the
   // sent extras waiting on a client, each with who directed it, its job, and whether
   // the client has asked a question. `questions` is the same open-question count the
@@ -2347,6 +2378,29 @@ const drainHolds = async () => {
   }
 };
 
+/**
+ * HAS ANYTHING BEEN APPROVED THAT HE HAS NOT SEEN?
+ *
+ * Cheap enough to run on every tick: one indexed read against local SQLite, and it returns
+ * an empty array the overwhelming majority of the time.
+ *
+ * The haptic fires ONCE PER APPROVAL, keyed on the head of the queue. Re-firing it every
+ * 15 seconds while he reads the popup would turn the app's one purely celebratory signal
+ * into a nag — the fastest way to make someone dismiss good news without reading it.
+ */
+const checkCelebrations = async () => {
+  const list = await pendingCelebrations(db);
+  const head = list[0]?.changeOrderId ?? null;
+  if (head && head !== celebratedHead) {
+    celebratedHead = head;
+    // Felt before it is read. He may be holding the phone at his side, or looking at a
+    // wall — this is the channel that reaches him first (feedback.ts's whole premise).
+    void signalApproved();
+  }
+  if (!head) celebratedHead = null;
+  setCelebrations(list);
+};
+
   /**
    * R5c — the send preview. Tapping "Send for approval" no longer sends; it opens
    * this. That is mandate #2 ("anything carrying a price or a commitment requires a
@@ -3029,24 +3083,10 @@ const drainHolds = async () => {
           `SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS n
              FROM change_order WHERE status = 'approved'`))[0];
         setRecovered(rec ?? { cents: 0, n: 0 });
-        // CELEBRATE THE YES (gap #1). Compare approved ids to what we've already
-        // celebrated; the first refresh only SEEDS the watermark (never announces
-        // history). A fresh approval fires the win overlay + the success haptic/chime.
-        {
-          const approvedNow = await db.getAll<{ id: string; amount_cents: number | null }>(
-            `SELECT id, amount_cents FROM change_order WHERE status = 'approved'`);
-          if (celebratedRef.current === null) {
-            celebratedRef.current = new Set(approvedNow.map((r) => r.id));
-          } else {
-            const fresh = approvedNow.filter((r) => !celebratedRef.current!.has(r.id));
-            if (fresh.length) {
-              fresh.forEach((r) => celebratedRef.current!.add(r.id));
-              const cents = fresh.reduce((n, r) => n + (r.amount_cents ?? 0), 0);
-              setCelebrate({ n: fresh.length, cents });
-              void signalSaved();  // the strongest success cue we have
-            }
-          }
-        }
+        // CELEBRATE THE YES (gap #1) now lives in `checkCelebrations`, against a durable
+        // watermark in `approval_celebrated` rather than a ref that forgot on every
+        // launch. Called from the tick and from the foreground listener — see above.
+        void checkCelebrations();
         // The Home dashboard: every LIVE extra across all jobs (superseded ones are
         // history), newest first, with its open-question count. Drafts belong here
         // too — they are the creator's unfinished work, private until sent (hadar,
@@ -3253,7 +3293,13 @@ const drainHolds = async () => {
   React.useEffect(() => {
     if (!ready) return;
     const sub = AppState.addEventListener('change', (st) => {
-      if (st === 'active') void drainHolds();
+      if (st !== 'active') return;
+      void drainHolds();
+      // "When the app is OPENED after a CO was approved" — hadar's words, and the tick
+      // alone would not honour them: its interval is suspended while backgrounded, so an
+      // approval that landed overnight would wait up to 15 seconds for the confetti. This
+      // is the one moment the popup was asked for; it should not be late to it.
+      void checkCelebrations();
     });
     return () => sub.remove();
   }, [ready]);
@@ -3466,6 +3512,11 @@ const drainHolds = async () => {
       await ensureNotifySchema(db);
       await ensureEventLogSchema(db);
       await ensureRemindSchema(db);
+      // AFTER ensureChangeOrderSchema for the same reason ensureNotifySchema is: it seeds
+      // its watermark by selecting the already-approved rows, so change_order has to
+      // exist. A SEPARATE stamp from notify_sent — see celebrate.ts for why the push and
+      // the popup cannot share one.
+      await ensureCelebrateSchema(db);
       // The sends waiting on a credit. BEFORE the auth gate like the rest of these,
       // because a hold written on the last run has to be readable on this one whether or
       // not the session came back — the promise it carries ("it goes out on its own") was
@@ -3804,6 +3855,12 @@ const drainHolds = async () => {
           if (dx.attempted) console.log('drain discarded extras:', JSON.stringify(dx));
           const nt = await runNotifications(db, pid);
           if (nt.presented || nt.blocked) console.log('notify:', JSON.stringify(nt));
+          // THE CELEBRATION, last of all and for the same reason the push is second-last:
+          // there is nothing to celebrate until the green light is actually local. It runs
+          // on the tick rather than only at launch because an approval that lands while he
+          // is looking at the app is the BEST case — he sees the confetti the moment the
+          // client signs, not the next time he opens it.
+          await checkCelebrations();
         } catch (e: any) {
           // Offline IS normal — but "offline" and "a bug five drains into the
           // tick" looked identical here, and that identity cost four diagnosis
@@ -4898,6 +4955,47 @@ const drainHolds = async () => {
    * the message about his change order is true either way, and a dead checkout is the one
    * failure that costs real money.
    */
+  /**
+   * "APPROVED!" — the popup, over whatever screen he is on.
+   *
+   * ONLY THE HEAD of the queue renders. Three approvals waiting produce three
+   * celebrations in sequence, not three stacked modals: each is a distinct piece of good
+   * news and deserves its own moment, and the count of what is still behind it is on the
+   * card so nothing is hidden.
+   *
+   * BOTH BUTTONS STAMP IT. Following the link is as much "he has seen it" as dismissing
+   * is — more so. Leaving the stamp to the dismiss button alone would re-throw confetti
+   * for a change order he is already reading.
+   */
+  const celebrateEl = celebrations.length ? (() => {
+    const c = celebrations[0];
+    const seen = async () => {
+      await markCelebrated(db, c.changeOrderId);
+      await checkCelebrations();
+    };
+    return (
+      <ApprovedCelebration
+        projectName={c.projectName}
+        description={celebrationDescription(c)}
+        // Built here, not in the component: the component holds no copy, and `money` is
+        // this app's ONE formatter (changeorder.ts). A second one would eventually
+        // disagree with the ledger about a figure on a signed record.
+        detail={T(celebrationLine(c, money) as any)}
+        more={celebrations.length - 1}
+        onOpen={() => {
+          void seen();
+          // The job FIRST, then the record — the same order the company feed uses, and
+          // the reason it is needed: an approval on another jobsite is still celebrated
+          // here, and `openRecord` alone would land him on a record beside the wrong
+          // job's ledger.
+          if (c.projectId !== projectId) setProjectId(c.projectId);
+          setNav('project');
+          void openRecord(c.changeOrderId);
+        }}
+        onClose={() => { void seen(); }} />
+    );
+  })() : null;
+
   const heldEl = noCredits ? (() => {
     const url = pricing ? purchaseUrl(pricing, co?.id ?? null) : null;
     return (
@@ -4978,22 +5076,6 @@ const drainHolds = async () => {
       onContact={() => Linking.openURL('mailto:support@ezchangeorders.com?subject=' + encodeURIComponent('EZChangeOrders — plans')).catch(() => {})} />
   );
 
-  // The win overlay (gap #1) — mounted in each early-return screen so it floats over
-  // whatever the user is looking at when a "yes" lands. Tap or wait to dismiss.
-  const celebrateEl = celebrate ? (
-    <Modal visible transparent animationType="fade" onRequestClose={() => setCelebrate(null)}>
-      <Pressable onPress={() => setCelebrate(null)}
-        style={{ flex: 1, backgroundColor: 'rgba(21,26,30,0.55)', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
-        <View style={{ width: '100%', maxWidth: 360, backgroundColor: '#FFFDFC', borderRadius: 22, padding: 28, alignItems: 'center' }}>
-          <Text style={{ fontFamily: 'Barlow_700Bold', fontSize: 24, color: '#151A1E', textAlign: 'center', letterSpacing: -0.2 }}>{T('celebrate.title')}</Text>
-          <Text style={{ fontFamily: 'Barlow_700Bold', fontSize: 40, color: '#4E6243', marginTop: 12, letterSpacing: -0.8 }}>{money(celebrate.cents)}</Text>
-          <Text style={{ fontFamily: 'Barlow_400Regular', fontSize: 15, color: '#5E666E', marginTop: 2 }}>
-            {celebrate.n > 1 ? `${T('home.approvedN')} · ${celebrate.n}` : T('home.approvedN')}
-          </Text>
-        </View>
-      </Pressable>
-    </Modal>
-  ) : null;
 
   /** Land on the job the sheet is about. Both of its buttons do this; the difference
    *  is only whether the camera opens after. */
@@ -5227,10 +5309,9 @@ const drainHolds = async () => {
        */
       <KeyboardAvoidingView style={s.njScreen}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {quotaEl}{heldEl}
+        {quotaEl}{heldEl}{celebrateEl}
       {jobCreatedEl}
         {discardSheet}
-        {celebrateEl}
         {paywallEl}
         <ScrollView
           style={{ flex: 1 }}
@@ -5828,10 +5909,9 @@ const drainHolds = async () => {
     );
     return (
       <View style={s.jpC}>
-        {quotaEl}{heldEl}
+        {quotaEl}{heldEl}{celebrateEl}
       {jobCreatedEl}
         {discardSheet}
-        {celebrateEl}
         {paywallEl}
         <ScrollView contentContainerStyle={{ padding: 18, paddingTop: 8, paddingBottom: 40 }}
           keyboardShouldPersistTaps="handled">
@@ -7298,7 +7378,7 @@ const drainHolds = async () => {
         {bottomNav('company', false)}
         {drawerEl}
         {/* Feed can open the drawer too, so it needs the modals the drawer opens. */}
-        {quotaEl}{heldEl}
+        {quotaEl}{heldEl}{celebrateEl}
       {jobCreatedEl}
         {paywallEl}
       </View>
@@ -7794,7 +7874,7 @@ const drainHolds = async () => {
             be mounted on all three; jobs already had them, home and activity did not.
             AFTER {drawerEl} deliberately: a Modal declared before its sibling content
             does not present on iOS. */}
-        {quotaEl}{heldEl}
+        {quotaEl}{heldEl}{celebrateEl}
       {jobCreatedEl}
         {/* AND THE SAME OMISSION BIT THE SWIPE-DELETE (hadar 2026-08-05: "the button
             is there but it doesn't delete once I confirm"). Home is the ONLY screen
@@ -7828,10 +7908,9 @@ const drainHolds = async () => {
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     return (
       <View style={s.homeC}>
-        {quotaEl}{heldEl}
+        {quotaEl}{heldEl}{celebrateEl}
       {jobCreatedEl}
         {discardSheet}
-        {celebrateEl}
         {paywallEl}
         {/* Header: title · new job (the ＋ opens the create-job screen, an early
             return, so it works from here). */}
@@ -8080,7 +8159,7 @@ const drainHolds = async () => {
 
     return (
       <View style={s.homeC}>
-        {quotaEl}{heldEl}
+        {quotaEl}{heldEl}{celebrateEl}
         {jobCreatedEl}
         <View style={s.dashHdr}>
           <Pressable style={s.hdrBtn} hitSlop={12} accessibilityLabel={T('common.back')}
@@ -8260,7 +8339,7 @@ const drainHolds = async () => {
         {bottomNav('activity', false)}
         {drawerEl}
         {/* Same reason as home — the drawer opens from here too. */}
-        {quotaEl}{heldEl}
+        {quotaEl}{heldEl}{celebrateEl}
       {jobCreatedEl}
         {paywallEl}
         {(bell || drafts.length > 0) && (
@@ -8302,10 +8381,9 @@ const drainHolds = async () => {
   const startCaptureJob = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
   return (
     <View style={s.c}>
-      {quotaEl}{heldEl}
+      {quotaEl}{heldEl}{celebrateEl}
       {jobCreatedEl}
         {discardSheet}
-      {celebrateEl}
       {paywallEl}
       {/* Header: back · Job · bell (mockup 2026-07-23). Fixed above the scroll. */}
       {/* ── THE LETTERHEAD HEADER (design, 2026-08-11) ─────────────────────────

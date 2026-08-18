@@ -395,8 +395,6 @@ const EN: Record<string, string> = {
   'home.stDraft': 'Draft — not sent',
   'home.recovered': 'Extras recovered',
   'home.recoveredInline': '{amount} recovered',
-  'home.approvedN': 'Approved',
-  'celebrate.title': 'You got the yes! 🎉',
   'celebrate.approved': '{amount} approved',
   'celebrate.approvedN': '{amount} approved · {n} extras',
   'home.capture': 'Capture',
@@ -989,6 +987,21 @@ const EN: Record<string, string> = {
   // The two buttons under it. "Add" and not "Buy": what he is short of is change orders
   // he can send, and that is the noun the rest of this app already uses for them.
   'gate.addCredits': 'Add change orders',
+  // ── the approval celebration (hadar, 2026-08-18) ──
+  // The one popup in this app that is pure good news. "Approved!" and not "Signed":
+  // approved is the word the rest of the product uses for this state, and the moment
+  // is not the place to introduce a synonym.
+  'cel.title': 'You got the yes!',
+  'cel.byFor': '{who} approved {amount}',
+  'cel.by': '{who} approved it',
+  'cel.for': 'Approved — {amount}',
+  // No name and no price on the record. Still worth celebrating, and still honest about
+  // what we know: a fabricated figure here would be over a signature.
+  'cel.plain': 'Your change order was approved',
+  'cel.view': 'See the change order',
+  'cel.dismiss': 'Nice',
+  'cel.moreOne': '1 more was approved too',
+  'cel.moreN': '{n} more were approved too',
   'gate.queuedOk': 'OK, got it',
   // The credit counter. Shown only to a metered plan, and only when the number is
   // actually known — see `credits.ts:balanceLine`.
@@ -2191,8 +2204,6 @@ const ES: Record<string, string> = {
   'home.stDraft': 'Borrador — sin enviar',
   'home.recovered': 'Extras recuperados',
   'home.recoveredInline': '{amount} recuperados',
-  'home.approvedN': 'Aprobados',
-  'celebrate.title': '¡Te dijeron que sí! 🎉',
   'celebrate.approved': '{amount} aprobado',
   'celebrate.approvedN': '{amount} aprobado · {n} extras',
   'home.capture': 'Capturar',
@@ -2702,6 +2713,15 @@ const ES: Record<string, string> = {
   'gate.queuedNoCredits': 'Se le acabaron las órdenes de cambio, así que esta está esperando para enviarse.',
   'gate.fixBuyCredits': 'Agregue más y sale sola — no tiene que volver.',
   'gate.addCredits': 'Agregar órdenes de cambio',
+  'cel.title': '¡Te dijeron que sí!',
+  'cel.byFor': '{who} aprobó {amount}',
+  'cel.by': '{who} la aprobó',
+  'cel.for': 'Aprobada — {amount}',
+  'cel.plain': 'Su orden de cambio fue aprobada',
+  'cel.view': 'Ver la orden de cambio',
+  'cel.dismiss': 'Qué bien',
+  'cel.moreOne': '1 más también fue aprobada',
+  'cel.moreN': '{n} más también fueron aprobadas',
   'gate.queuedOk': 'Entendido',
   'gate.queuedOne': '1 orden de cambio está esperando para enviarse.',
   'gate.queuedN': '{n} órdenes de cambio están esperando para enviarse.',

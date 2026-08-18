@@ -86,6 +86,30 @@ export async function signalArmed() {
 }
 
 /**
+ * THE SIGNATURE LANDED. The one felt cue in this app that is pure good news.
+ *
+ * hadar, 2026-08-18: "the most important event that everything is leading to is
+ * approved … we should also celebrate it."
+ *
+ * Deliberately the longest and most elaborate signal in this file, because it is the only
+ * one that is not functional. Every other signal here reports a state change he needs to
+ * act on; this one is the app being pleased for him. It must be unmistakable for `saved`
+ * (a single success notification) or `ready` (a light double tap), so it is a rising
+ * three-beat that no other event produces.
+ */
+export async function signalApproved() {
+  try {
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setTimeout(() => {
+      try { void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch { /* rule 4 */ }
+    }, 140);
+    setTimeout(() => {
+      try { void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); } catch { /* rule 4 */ }
+    }, 300);
+  } catch { /* rule 4 */ }
+}
+
+/**
  * Processing FINISHED — the extra is written up and ready to check. A felt "it's
  * ready" cue, deliberately distinct from the save chime (which fires at capture-
  * commit): a light double-impact, no sound, so a user who pocketed the phone during
