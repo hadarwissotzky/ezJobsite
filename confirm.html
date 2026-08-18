@@ -940,7 +940,11 @@ function renderDocument(d, notice) {
         'Please open the link again. Nothing here was recorded.');
       return;
     }
-    window.renderEwa(d, ewaTerms, { screen, done, esc, usd, initials, answer,
+    // `logoTile` rides in the helper bag beside `initials`, for the same stated reason
+    // the rest do: ONE tile renderer on this page. The EWA is a signable authorization
+    // with the same letterhead question as the priced document — a client asked to
+    // authorise T&M work should see who is asking, not two letters in a box.
+    window.renderEwa(d, ewaTerms, { screen, done, esc, usd, initials, logoTile, answer,
                                     askQuestion, declineFlow, photoStrip, threadHtml,
                                     notice: notice || null });
     return;
