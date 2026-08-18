@@ -70,6 +70,10 @@
     display: flex; align-items: center; justify-content: center;
     font-family: var(--disp); font-weight: 700; font-size: 18px; letter-spacing: .5px; flex: none;
   }
+  /* The real mark occupies the same slot as the initials tile. `contain`, not `cover`:
+     a logo cropped to fill a square is a logo with its name cut off, and `#fff` behind it
+     because most brand marks are drawn for white. */
+  .logoimg { object-fit: contain; background: #fff; border: 1px solid var(--line); }
   .cn { font-family: var(--disp); font-weight: 700; font-size: 20px; text-transform: uppercase; letter-spacing: .3px; line-height: 1.1; }
   .cs { font-size: 13.5px; color: var(--steel); margin-top: 2px; }
 
@@ -637,6 +641,34 @@ const usd = (cents) => {
 const initials = (name) => String(name || '')
   .split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '•';
 
+/**
+ * THE LOGO TILE — the real mark when we have one, initials when we do not.
+ *
+ * hadar, 2026-08-18: he had uploaded a logo and could not tell whether it was doing
+ * anything. It was saving; this page was drawing two letters in a grey box on the
+ * document a homeowner is asked to authorise money on.
+ *
+ * ONE HELPER, THREE CALLERS. The tile appears in the project bar, the desktop sidebar and
+ * the letterhead card, and before this they were three copies of the same expression. A
+ * fourth reader would have found two of them updated.
+ *
+ * `logoUrl` is minted per page load by the `letterhead` function (the object is private
+ * and this page is anon, so it cannot sign one itself). It is null whenever anything at
+ * all went wrong — no logo set, an expired token, a storage hiccup — and null always
+ * means INITIALS, never an empty box. A missing picture must never cost a homeowner the
+ * document.
+ *
+ * `onerror` is not belt-and-braces: the URL expires in an hour, and a page left open on a
+ * kitchen counter overnight would otherwise show a broken-image glyph where the
+ * contractor's identity belongs. It falls back to the same initials tile.
+ */
+const logoTile = (name, logoUrl) => {
+  const ini = esc(initials(name || '?'));
+  if (!logoUrl) return `<div class="logo">${ini}</div>`;
+  return `<img class="logo logoimg" src="${esc(logoUrl)}" alt="${esc(name || '')}"`
+    + ` onerror="this.outerHTML='&lt;div class=&quot;logo&quot;&gt;${ini}&lt;/div&gt;'">`;
+};
+
 function screen(html) { root.innerHTML = html; }
 function done(mark, title, sub) {
   screen(`<div class="done"><div class="mark">${mark}</div>
@@ -672,7 +704,7 @@ async function load() {
   // to "no sidebar, no identity line" and never to a blank page. That is the exact
   // failure this file already shipped once (an unpinned import took the whole page
   // down silently), so every new call is written to fail into a lesser page.
-  const [{ data, error }, { data: st }, ph, proj, hdr, chg, cmp] = await Promise.all([
+  const [{ data, error }, { data: st }, ph, proj, hdr, chg, cmp, lgo] = await Promise.all([
     supabase.rpc('confirmation_fetch', { p_token: token }),
     supabase.rpc('confirmation_state', { p_token: token }),
     supabase.rpc('confirmation_photos', { p_token: token }),
@@ -680,6 +712,16 @@ async function load() {
     supabase.rpc('confirmation_header_v1', { p_token: token }),
     supabase.rpc('confirmation_changes_v1', { p_token: token }),
     supabase.rpc('confirmation_company_v1', { p_token: token }),
+    // THE LETTERHEAD LOGO. A function and not an RPC because the object is private and
+    // this page is anon — Postgres cannot sign a Storage URL, so the key `company_v1`
+    // has returned since 402 was never renderable here.
+    //
+    // In the SAME Promise.all as everything else, deliberately: sequencing it after the
+    // document would add a round-trip to the 3-second budget for a picture. Its rejection
+    // is caught HERE rather than by the outer try, because every other call in this list
+    // is allowed to fail into a lesser page and a logo must not be the one exception that
+    // blanks it.
+    supabase.functions.invoke('letterhead', { body: { token } }).catch(() => null),
   ]);
   if (error) { done('⚠️', 'Could not load this', 'Check your connection and open the link again.'); return; }
 
@@ -772,6 +814,10 @@ async function load() {
   // product.
   data.__changes = (chg && chg.data && chg.data.revised) ? chg.data : null;
   data.__company = (cmp && cmp.data && cmp.data.company) ? cmp.data.company : null;
+  // Same tolerance as every optional call above: a function that is not deployed, a
+  // company with no logo, an expired signature and a network blip all collapse to null,
+  // and null renders the initials tile. `logoTile` is the only reader.
+  data.__logoUrl = (lgo && lgo.data && lgo.data.logoUrl) ? lgo.data.logoUrl : null;
   data.__contact = (cmp && cmp.data && cmp.data.contact) ? cmp.data.contact : null;
   applyDemo(data);
 
@@ -1117,7 +1163,7 @@ function projectHtml(d) {
 
   return `
     <div class="pbar">
-      <div class="logo">${esc(initials(company))}</div>
+      ${logoTile(company, d.__logoUrl)}
       <div class="pbn">${esc(company)}</div>
     </div>
     <div class="wrap">
@@ -1227,7 +1273,7 @@ function sidebarHtml(d) {
 
   return `<aside class="side">
     <div class="sbrand">
-      <div class="logo">${esc(initials(company))}</div>
+      ${logoTile(company, d.__logoUrl)}
       <div>
         <div class="sbc">${esc(company)}</div>
         ${d.__company && d.__company.tagline ? `<div class="sbt">${esc(d.__company.tagline)}</div>` : ''}
@@ -1678,7 +1724,7 @@ function letterheadHtml(d) {
 
   return `<div class="card lh">
     <div class="lhco">
-      <div class="logo">${esc(initials(name || '?'))}</div>
+      ${logoTile(name, d.__logoUrl)}
       <div>
         <div class="lhcn">${esc(name || '')}</div>
         ${c && c.tagline ? `<div class="lhtag">${esc(c.tagline)}</div>` : ''}
