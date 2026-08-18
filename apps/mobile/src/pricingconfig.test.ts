@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { money, perCredit, railsFor, type PricingConfig } from './pricingconfig.ts';
+import { money, perCredit, purchaseUrl, railsFor, type PricingConfig } from './pricingconfig.ts';
 
 const base: PricingConfig = {
   version: 2,
@@ -28,6 +28,7 @@ const base: PricingConfig = {
   ],
   linkoutEnabled: true,
   iapEnabled: true,
+  purchaseLinkToken: 'jzhrqgvkbhkbwqba',
   source: 'server',
 };
 
@@ -99,4 +100,34 @@ test('creditsPerMonth null means UNLIMITED, and is not the same as zero', () => 
 test('a metered tier is representable, so the model can change without a schema change', () => {
   const metered = { ...base.subs[0], creditsPerMonth: 25 };
   assert.equal(metered.creditsPerMonth, 25);
+});
+
+/* ------------------------------------------------------------- purchase URL -- */
+
+test('the app user id is appended, because a link without one 404s', () => {
+  // RevenueCat's rule, and the reason it matters here: the id is what makes the
+  // purchase land on the account the app reads. Without it the credits attach to an
+  // anonymous customer — the failure that already cost this project a real purchase.
+  assert.equal(
+    purchaseUrl(base, 'cmp-11c7660eda044ad99363cc727365322a'),
+    'https://pay.rev.cat/jzhrqgvkbhkbwqba/cmp-11c7660eda044ad99363cc727365322a');
+});
+
+test('no token means no URL — never a half-built one', () => {
+  assert.equal(purchaseUrl({ ...base, purchaseLinkToken: null }, 'cmp-1'), null);
+});
+
+test('no company means no URL', () => {
+  // An anonymous purchase is worse than no purchase: the money leaves and the credits
+  // land somewhere the app cannot see.
+  assert.equal(purchaseUrl(base, null), null);
+  assert.equal(purchaseUrl(base, ''), null);
+});
+
+test('a token with no address disables the web rail entirely', () => {
+  // `linkoutEnabled` alone is a configuration half-done. Rendering a buy button for it
+  // costs more trust than rendering none.
+  assert.equal(railsFor({ ...base, purchaseLinkToken: null }), 'iap');
+  assert.equal(
+    railsFor({ ...base, purchaseLinkToken: null, iapEnabled: false }), 'none');
 });

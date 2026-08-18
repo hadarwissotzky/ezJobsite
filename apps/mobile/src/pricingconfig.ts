@@ -66,6 +66,14 @@ export type PricingConfig = {
    *  law moves. */
   linkoutEnabled: boolean;
   iapEnabled: boolean;
+  /**
+   * The RevenueCat Web Purchase Link token, or null when the web rail has no address.
+   *
+   * Null DISABLES the web rail in the client whatever `linkoutEnabled` says — a rail
+   * with no address is not a rail, and a buy button that goes nowhere costs more trust
+   * than a missing one.
+   */
+  purchaseLinkToken: string | null;
   /** Where these numbers came from. The paywall says so unless it is 'server'. */
   source: 'server' | 'cache' | 'fallback';
 };
@@ -93,6 +101,10 @@ const FALLBACK: Omit<PricingConfig, 'source'> = {
   ],
   linkoutEnabled: true,
   iapEnabled: true,
+  // NO TOKEN IN THE FALLBACK, deliberately. A compiled-in checkout URL is the one value
+  // here that must never be stale: a regenerated token sends a paying contractor to a
+  // 404. Better no web button on a first launch with no network than a broken one.
+  purchaseLinkToken: null,
 };
 
 const CACHE_KEY = 'pricing_config_json';
@@ -170,6 +182,8 @@ function parseRow(r: Record<string, unknown>): Omit<PricingConfig, 'source'> {
     // way to pay, not showing one rail too many.
     linkoutEnabled: r.linkout_enabled !== false,
     iapEnabled: r.iap_enabled !== false,
+    purchaseLinkToken: typeof r.purchase_link_token === 'string' && r.purchase_link_token.trim()
+      ? r.purchase_link_token.trim() : null,
   };
 }
 
@@ -182,10 +196,31 @@ function parseRow(r: Record<string, unknown>): Omit<PricingConfig, 'source'> {
  * `billingStatus() === 'not_configured'` already does today.
  */
 export function railsFor(c: PricingConfig): 'both' | 'web' | 'iap' | 'none' {
-  if (c.linkoutEnabled && c.iapEnabled) return 'both';
-  if (c.linkoutEnabled) return 'web';
+  // A web rail needs BOTH the switch and an address. `linkoutEnabled` with no token is a
+  // configuration half-done, and the client must not render a button for it.
+  const web = c.linkoutEnabled && !!c.purchaseLinkToken;
+  if (web && c.iapEnabled) return 'both';
+  if (web) return 'web';
   if (c.iapEnabled) return 'iap';
   return 'none';
+}
+
+/**
+ * The URL that sells credits to THIS company.
+ *
+ * The app user id is appended because RevenueCat REQUIRES it — a link without one shows
+ * the customer a 404 — and because it is what makes the purchase land on the account the
+ * app reads. `companyId` is the same value `billing.ts` gives the SDK as `appUserID`.
+ *
+ * Getting this wrong has already cost money once on this project: a purchase attached to
+ * `$RCAnonymousID:…`, the webhook matched nothing, and the money bought nothing
+ * (`company.ts:billingTenantId`). A 404 is the better failure — it is at least visible.
+ *
+ * Null rather than a half-built URL when either half is missing.
+ */
+export function purchaseUrl(c: PricingConfig, companyId: string | null): string | null {
+  if (!c.purchaseLinkToken || !companyId) return null;
+  return `https://pay.rev.cat/${c.purchaseLinkToken}/${encodeURIComponent(companyId)}`;
 }
 
 /** "$79" / "$2.98" — whole dollars stay whole, because a price ending in .00 on a
