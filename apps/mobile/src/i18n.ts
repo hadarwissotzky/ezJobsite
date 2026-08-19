@@ -1777,6 +1777,15 @@ const EN: Record<string, string> = {
   // Offline is not a fault — status.ts: "no signal is the expected condition, so this is
   // not a problem, it is Tuesday". Title and row label both say WAITING, never FAILED.
   'stuck.offlineTitle': 'Saved — waiting for signal',
+  // The silent-recording sheet (hadar, 2026-08-19: the inline line "is too subtle").
+  // NEVER the word "failed": a recording with no speech in it is a legitimate thing to
+  // have made. It reports, then offers the two things that help.
+  'silent.title': 'Nothing was said in that recording',
+  'silent.photosOne': 'Your photo is saved and stamped — nothing was lost.',
+  'silent.photosN': 'Your {n} photos are saved and stamped — nothing was lost.',
+  'silent.body': 'We listened and there were no words to write down, so this change order still has no description. Add one and it’s ready to price and send.',
+  'silent.recordAgain': 'Say it now',
+  'silent.writeItMyself': 'Write it myself',
   'home.notProcessed': 'On this phone — not sent up yet',
   'stuck.analysisTitle': 'No write-up came back',
   'stuck.uploading': '{n} still going up. The scope gets written once they land.',
@@ -3439,6 +3448,12 @@ const ES: Record<string, string> = {
   'jobpick.tipBody': 'Siempre puede cambiar el trabajo antes de enviar el extra.',
   'stuck.filesTitle': 'Los archivos aún están subiendo',
   'stuck.offlineTitle': 'Guardado — esperando señal',
+  'silent.title': 'No se dijo nada en esa grabación',
+  'silent.photosOne': 'Su foto está guardada y sellada — no se perdió nada.',
+  'silent.photosN': 'Sus {n} fotos están guardadas y selladas — no se perdió nada.',
+  'silent.body': 'Escuchamos y no hubo palabras que anotar, así que esta orden de cambio todavía no tiene descripción. Agregue una y queda lista para ponerle precio y enviarla.',
+  'silent.recordAgain': 'Dígalo ahora',
+  'silent.writeItMyself': 'Yo la escribo',
   'home.notProcessed': 'En este teléfono — aún no se ha subido',
   'stuck.analysisTitle': 'No llegó ninguna redacción',
   'stuck.uploading': 'Faltan {n} por subir. El alcance se redacta en cuanto lleguen.',

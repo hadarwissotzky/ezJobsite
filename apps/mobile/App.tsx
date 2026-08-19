@@ -48,6 +48,10 @@ import { cachedDeveloper, refreshDeveloper } from './src/devflag';
 // The in-app banner for a client message. iOS shows no banner of its own while the app is
 // foreground, so this is the only surface that can carry a question arriving mid-session.
 import { MessageToast } from './src/ui/messagetoast';
+// The one unfinished state that cannot fix itself: processed, silent, and still empty.
+import { SilentNoticeSheet } from './src/ui/silentnoticesheet';
+import { ensureSilentNoticeSchema, markSilentNoticeShown, pendingSilentNotices,
+         type SilentNotice } from './src/silentnotice';
 import { pendingNotifications } from './src/discussionstore';
 // THE APPROVAL CELEBRATION (hadar, 2026-08-18: "the most important event that everything
 // is leading to is approved … we should also celebrate it").
@@ -528,6 +532,8 @@ export default function App() {
   /** The client message currently banner-ing at the top of the screen, if any. */
   const [msgToast, setMsgToast] = React.useState<
     null | { id: string; changeOrderId: string; scope: string; body: string }>(null);
+  /** The processed-but-silent extra currently being reported, if any. */
+  const [silent, setSilent] = React.useState<SilentNotice | null>(null);
   /**
    * Developer tools visible? `__DEV__` OR the server flag, resolved together here so the
    * DRAWER ROW AND ITS HANDLER CANNOT DISAGREE — they were gated separately on `__DEV__`,
@@ -2521,6 +2527,25 @@ const checkCelebrations = async () => {
  * strip of screen; the bell and the thread carry the rest, and neither is consumed by
  * this not being shown.
  */
+/**
+ * PROCESSED, SILENT, AND STILL EMPTY — the one state that never resolves itself.
+ *
+ * Every other unfinished thing on a draft is waiting on something: bytes upload, a
+ * transcript lands, a write-up appears. This one is finished and has produced nothing, so
+ * the extra sits looking almost-done until a person speaks or types. `pendingSilentNotices`
+ * owns every condition (and refuses to fire while anything is still queued, which is what
+ * keeps it honest offline).
+ *
+ * NEWEST ONLY, one at a time: three sheets stacked is three dismissals, and the rest are
+ * still there on the next tick.
+ */
+const checkSilentExtras = async () => {
+  try {
+    const list = await pendingSilentNotices(db);
+    if (list.length) setSilent((cur) => cur ?? list[0]);
+  } catch { /* a popup is the most droppable thing in this app */ }
+};
+
 const checkClientMessages = async () => {
   try {
     const pending = await pendingNotifications(db);
@@ -3686,6 +3711,9 @@ const checkClientMessages = async () => {
       // exist. A SEPARATE stamp from notify_sent — see celebrate.ts for why the push and
       // the popup cannot share one.
       await ensureCelebrateSchema(db);
+      // AFTER ensureChangeOrderSchema, same as the celebration's: it seeds its watermark
+      // by selecting existing change orders, so the table has to exist.
+      await ensureSilentNoticeSchema(db);
       // The sends waiting on a credit. BEFORE the auth gate like the rest of these,
       // because a hold written on the last run has to be readable on this one whether or
       // not the session came back — the promise it carries ("it goes out on its own") was
@@ -4033,6 +4061,9 @@ const checkClientMessages = async () => {
           // is looking at the app is the BEST case — he sees the confetti the moment the
           // client signs, not the next time he opens it.
           await checkCelebrations();
+          // AFTER the celebration: a signature is better news than an empty draft, and
+          // two sheets competing for the same moment should resolve in that order.
+          await checkSilentExtras();
         } catch (e: any) {
           // Offline IS normal — but "offline" and "a bug five drains into the
           // tick" looked identical here, and that identity cost four diagnosis
@@ -5178,6 +5209,39 @@ const checkClientMessages = async () => {
    * it is an absolutely-positioned layer, so it floats over the screen without taking the
    * touch surface with it. A Modal here would block the app for six seconds.
    */
+  /**
+   * "Nothing was said in that recording" — over whatever screen he is on.
+   *
+   * BOTH ACTIONS REUSE THE EXISTING ONES rather than reimplementing them: `augmentExtra`
+   * is the same function the FAB and the Add-photo tile use (it checks terms, cancels the
+   * feed return, and files the capture onto THIS extra), and the write path opens the
+   * same description editor as the record screen. A second copy of either would be a
+   * second place for the capture to land on the wrong extra.
+   *
+   * THE STAMP IS WRITTEN ON EVERY EXIT, including both actions — he has been told, and
+   * being told twice about a recording he has already decided to fix is the thing that
+   * makes people dismiss sheets unread.
+   */
+  const silentEl = silent ? (() => {
+    const seen = async () => {
+      await markSilentNoticeShown(db, silent.changeOrderId);
+      setSilent(null);
+    };
+    return (
+      <SilentNoticeSheet
+        scope={silent.scope}
+        photos={silent.photos}
+        onRecordAgain={() => { void seen(); augmentExtra(silent.changeOrderId); }}
+        onWriteItMyself={() => {
+          void seen();
+          if (silent.projectId !== projectId) setProjectId(silent.projectId);
+          void openRecord(silent.changeOrderId).then(() => setDetail((d) =>
+            d ?? { field: 'scope', scope: '', rewrite: { phase: 'idle' } } as any));
+        }}
+        onClose={() => { void seen(); }} />
+    );
+  })() : null;
+
   const msgToastEl = msgToast ? (
     <MessageToast
       // The person, when the roster knows them. `who_directed` is who the extra was for,
@@ -5529,7 +5593,7 @@ const checkClientMessages = async () => {
        */
       <KeyboardAvoidingView style={s.njScreen}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {discardSheet}
         {paywallEl}
@@ -6129,7 +6193,7 @@ const checkClientMessages = async () => {
     );
     return (
       <View style={s.jpC}>
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {discardSheet}
         {paywallEl}
@@ -7624,7 +7688,7 @@ const checkClientMessages = async () => {
         {bottomNav('company', false)}
         {drawerEl}
         {/* Feed can open the drawer too, so it needs the modals the drawer opens. */}
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {paywallEl}
       </View>
@@ -8111,7 +8175,7 @@ const checkClientMessages = async () => {
             be mounted on all three; jobs already had them, home and activity did not.
             AFTER {drawerEl} deliberately: a Modal declared before its sibling content
             does not present on iOS. */}
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {/* AND THE SAME OMISSION BIT THE SWIPE-DELETE (hadar 2026-08-05: "the button
             is there but it doesn't delete once I confirm"). Home is the ONLY screen
@@ -8145,7 +8209,7 @@ const checkClientMessages = async () => {
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     return (
       <View style={s.homeC}>
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {discardSheet}
         {paywallEl}
@@ -8403,7 +8467,7 @@ const checkClientMessages = async () => {
 
     return (
       <View style={s.homeC}>
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
         {jobCreatedEl}
         <View style={s.dashHdr}>
           <Pressable style={s.hdrBtn} hitSlop={12} accessibilityLabel={T('common.back')}
@@ -8587,7 +8651,7 @@ const checkClientMessages = async () => {
         {bottomNav('activity', false)}
         {drawerEl}
         {/* Same reason as home — the drawer opens from here too. */}
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
+        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {paywallEl}
         {drafts.length > 0 && (
@@ -8628,7 +8692,7 @@ const checkClientMessages = async () => {
   const startCaptureJob = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
   return (
     <View style={s.c}>
-      {quotaEl}{heldEl}{celebrateEl}{msgToastEl}
+      {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {discardSheet}
       {paywallEl}
