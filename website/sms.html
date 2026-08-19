@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EZChangeOrders — SMS program and consent</title>
+<!--
+  THE CALL-TO-ACTION PAGE FOR A2P 10DLC (Twilio/TCR), written 2026-08-19 after the
+  campaign was rejected on 30886 (invalid campaign description) and 30909 (could not
+  verify the Call to Action).
+
+  WHY A PAGE AT ALL. In this product the person who RECEIVES the message never visits a
+  website first: a contractor types their client's number into the app. There is no web
+  form for a reviewer to look at, and "there is no form" reads to TCR as "there is no
+  consent". This page is the verifiable artefact — it states exactly where the number
+  comes from, what the recipient is told, what the messages say, and how to stop them.
+
+  EVERY CLAIM HERE MUST STAY TRUE OF THE APP. If the consent checkbox described below is
+  ever removed from the send screen, this page becomes a false statement to a carrier
+  regulator. Change them together.
+-->
+<style>
+  :root { color-scheme: light; }
+  body {
+    margin: 0 auto; max-width: 720px; padding: 32px 20px 64px;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #161918; background: #F5F1E8;
+  }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 32px 0 8px; }
+  .updated { color: #555B57; font-size: 14px; margin: 0 0 28px; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  a { color: #4E6243; }
+  .sample {
+    background: #FBF8F1; border: 1px solid #D8D1C4; border-radius: 10px;
+    padding: 14px 16px; white-space: pre-wrap; font-size: 15px; margin: 10px 0 18px;
+  }
+  .consent {
+    background: #E7ECDD; border: 1px solid #B9C6AF; border-radius: 10px;
+    padding: 14px 16px; margin: 10px 0 18px;
+  }
+</style>
+</head>
+<body>
+
+<h1>SMS program and consent</h1>
+<p class="updated">EZChangeOrders, operated by Hi/Lo Ventures Group · Last updated 19 August 2026</p>
+
+<p>EZChangeOrders is used by construction contractors to send a change order — a priced
+description of extra work — to their own customer for approval. This page describes the
+text messages the service sends, who receives them, and how consent is obtained.</p>
+
+<h2>Who receives a message</h2>
+<p>Only one kind of person: <strong>the specific customer a contractor is already doing
+work for</strong>, at a number that customer gave the contractor directly in the course of
+that job. Nobody is messaged from a purchased list, an import, a scrape or a referral.
+There is no marketing, promotional or advertising content in any message.</p>
+
+<h2>How consent is obtained</h2>
+<p>Consent is collected <strong>offline, by the contractor, from their own customer</strong>,
+as part of agreeing to do the work. The contractor then enters that number in the app.</p>
+
+<p>Before the first message can be sent to a given person, the contractor must confirm the
+following statement on the send screen. The message cannot be sent until this box is
+ticked, and the confirmation is stored with a timestamp against that recipient:</p>
+
+<div class="consent">
+  <strong>“I have [recipient’s name]’s permission to text them about this job.
+  They can reply STOP at any time.”</strong><br>
+  Ticking this is required before the first message to that person and is recorded with
+  the date and time. Message and data rates may apply.
+</div>
+
+<p>The customer’s first message identifies the contractor by name, states what it is
+about, and includes opt-out instructions.</p>
+
+<h2>What the messages say</h2>
+<p>Every message is triggered by an action on a specific job — never by a schedule or a
+campaign. Sample messages, exactly as sent:</p>
+
+<div class="sample">Streamline Construction sent you a change order to approve - $1,850.00.
+Job: 1155 Stanyan St
+
+Open it here. No app or account needed:
+https://approve.ezchangeorders.com/confirm.html?t=8f41c02e
+
+Nothing proceeds until you approve. Reply STOP to opt out.</div>
+
+<div class="sample">Streamline Construction answered your question about 1155 Stanyan St.
+
+Open it here:
+https://approve.ezchangeorders.com/confirm.html?t=8f41c02e
+
+Reply STOP to opt out.</div>
+
+<h2>Message frequency</h2>
+<p>Event-driven and infrequent. A typical customer receives <strong>one to four messages
+over the life of a job</strong>: one when a change order is sent, one if the contractor
+sends a reminder, and one when the contractor answers a question they asked. There is no
+recurring or scheduled messaging.</p>
+
+<h2>Opting out</h2>
+<p>Reply <strong>STOP</strong> to any message to stop all further messages from this
+service. Reply <strong>HELP</strong> for help, or contact
+<a href="mailto:support@ezchangeorders.com">support@ezchangeorders.com</a>. Opt-out and
+help keywords are handled automatically by our messaging provider and are honoured
+immediately.</p>
+
+<h2>Costs</h2>
+<p><strong>Message and data rates may apply.</strong> EZChangeOrders does not charge the
+message recipient anything.</p>
+
+<h2>Privacy</h2>
+<p>Mobile phone numbers collected for SMS are <strong>never shared or sold to third
+parties</strong>, and are never shared with anyone for marketing purposes. Full detail is
+in our <a href="privacy.html">Privacy Policy</a> and
+<a href="terms.html">Terms of Service</a>.</p>
+
+<h2>Contact</h2>
+<p>Hi/Lo Ventures Group ·
+<a href="mailto:support@ezchangeorders.com">support@ezchangeorders.com</a></p>
+
+</body>
+</html>

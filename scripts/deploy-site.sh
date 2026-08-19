@@ -8,7 +8,10 @@
 # in someone's memory is a deploy that silently stops happening.
 #
 # WHAT IT DOES
-#   website/      → index.html, privacy.html, terms.html      (the public face)
+#   website/      → index.html, privacy.html, terms.html,
+#                   sms.html  (the A2P 10DLC call-to-action page — a carrier reviewer
+#                              must be able to load it, so a missing file here is a
+#                              rejected campaign, not a broken link)
 #   apps/web/     → confirm.html, ewa.js                      (the approval page)
 #   → committed to the ORPHAN branch `gh-pages` and pushed.
 #
@@ -33,7 +36,7 @@ cd "$ROOT"
 
 # REFUSE TO PUBLISH A HALF-SITE. A missing file here is a page that 404s for a carrier
 # reviewer or a homeowner, and the deploy would otherwise "succeed" quietly.
-for f in website/index.html website/privacy.html website/terms.html \
+for f in website/index.html website/privacy.html website/terms.html website/sms.html \
          apps/web/confirm.html apps/web/ewa.js; do
   [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }
 done
@@ -58,7 +61,7 @@ fi
 # Clear everything except .git, so a file deleted from source disappears from the site.
 find "$WORK" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
 
-cp website/index.html website/privacy.html website/terms.html "$WORK/"
+cp website/index.html website/privacy.html website/terms.html website/sms.html "$WORK/"
 cp apps/web/confirm.html apps/web/ewa.js "$WORK/"
 # Stops GitHub treating these as Jekyll sources, which silently drops any file whose
 # name begins with an underscore.

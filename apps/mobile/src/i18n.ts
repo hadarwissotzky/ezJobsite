@@ -1777,6 +1777,9 @@ const EN: Record<string, string> = {
   // Offline is not a fault — status.ts: "no signal is the expected condition, so this is
   // not a problem, it is Tuesday". Title and row label both say WAITING, never FAILED.
   'stuck.offlineTitle': 'Saved — waiting for signal',
+  // A2P 10DLC consent, ticked once per recipient before the first text goes to them.
+  // Names the person, because "this person" is vague at the moment it matters.
+  'sms.consent': 'I have {name}’s permission to text them about this job. They can reply STOP at any time.',
   // The silent-recording sheet (hadar, 2026-08-19: the inline line "is too subtle").
   // NEVER the word "failed": a recording with no speech in it is a legitimate thing to
   // have made. It reports, then offers the two things that help.
@@ -3448,6 +3451,7 @@ const ES: Record<string, string> = {
   'jobpick.tipBody': 'Siempre puede cambiar el trabajo antes de enviar el extra.',
   'stuck.filesTitle': 'Los archivos aún están subiendo',
   'stuck.offlineTitle': 'Guardado — esperando señal',
+  'sms.consent': 'Tengo permiso de {name} para enviarle mensajes sobre este trabajo. Puede responder STOP en cualquier momento.',
   'silent.title': 'No se dijo nada en esa grabación',
   'silent.photosOne': 'Su foto está guardada y sellada — no se perdió nada.',
   'silent.photosN': 'Sus {n} fotos están guardadas y selladas — no se perdió nada.',

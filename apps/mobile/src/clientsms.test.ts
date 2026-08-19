@@ -37,8 +37,16 @@ const PRICED = [
   'Nothing proceeds until you approve.',
 ].join('\n');
 
-const URL = 'https://abcdefghijklmnop.supabase.co/storage/v1/object/public/'
-  + 'public-web/confirm.html?t=35b00b9abeccfb35dc5ede9959ad215ee16a7889';
+// THE REAL SHAPE, and the length is the whole point of this constant.
+//
+// It used to be a 117-character Supabase storage URL from before the custom domain
+// existed. That is 27 characters longer than anything this app now sends, and it made the
+// two-segment test fail for a message that costs two segments in production — a fixture
+// asserting a cost nobody pays. Found 2026-08-19 when the A2P opt-out line was added.
+//
+// `EXPO_PUBLIC_CONFIRM_BASE` + the 40-hex token, exactly as `noteLinkSent` records it.
+const URL = 'https://approve.ezchangeorders.com/confirm.html'
+  + '?t=35b00b9abeccfb35dc5ede9959ad215ee16a7889';
 
 const priced = (over = {}) => clientSmsBody({
   kind: 'confirm', shownContent: PRICED, url: URL,
@@ -56,7 +64,8 @@ test('a priced change order: who, what, how much, which job, the link, the term'
     'Open it here. No app or account needed:\n' +
     URL + '\n' +
     '\n' +
-    'Nothing proceeds until you approve.');
+    'Nothing proceeds until you approve.\n' +
+    'Reply STOP to opt out.');
 });
 
 test('the document itself is never quoted into the message', () => {
@@ -102,7 +111,8 @@ test('null and blank facts are absent facts, never the string "null"', () => {
   assert.equal(body,
     'Your contractor sent you something to check and confirm.\n' +
     '\n' +
-    'Open it here. No app or account needed:\n' + URL);
+    'Open it here. No app or account needed:\n' + URL + '\n' +
+    'Reply STOP to opt out.');
 });
 
 test('a label sitting at a line break in the instrument still counts as present', () => {
@@ -154,7 +164,8 @@ test('an acknowledge is a directive to acknowledge, not something to approve', (
   assert.equal(body,
     'Your contractor asked you to acknowledge something on your job.\n' +
     '\n' +
-    'Open it here. No app or account needed:\n' + URL);
+    'Open it here. No app or account needed:\n' + URL + '\n' +
+    'Reply STOP to opt out.');
 });
 
 // ── the transport budget ────────────────────────────────────────────────────
@@ -226,4 +237,26 @@ test('the reply notice degrades to a role when there is no company name', () => 
   assert.ok(replyNoticeSmsBody({ url: URL }).startsWith('Your contractor replied'));
   assert.ok(replyNoticeSmsBody({ companyName: '   ', url: URL })
     .startsWith('Your contractor replied'));
+});
+
+// ── A2P 10DLC (campaign rejected 2026-08-19: 30886 + 30909) ─────────────────
+
+test('EVERY message a client can receive carries the opt-out', () => {
+  // A carrier reviewer samples messages; finding it on the priced one and not the
+  // acknowledgement is how a resubmission gets rejected a second time. There is no
+  // branch that may omit it.
+  const bodies = [
+    priced(),
+    priced({ amountText: null }),
+    clientSmsBody({ kind: 'ewa', shownContent: 'T&M capped at $2,000.', url: URL }),
+    clientSmsBody({ kind: 'acknowledge', shownContent: 'Please acknowledge.', url: URL }),
+  ];
+  for (const b of bodies) assert.ok(b.includes('Reply STOP to opt out.'), b);
+});
+
+test('the opt-out does not cost a third segment on a real message', () => {
+  // The whole reason the line is 24 characters and not a sentence. Two segments is the
+  // budget this module was built to hold; a compliance line that doubled the send cost
+  // would be a different kind of failure.
+  assert.ok(smsSegments(priced()) <= 2, `${smsSegments(priced())} segments`);
 });

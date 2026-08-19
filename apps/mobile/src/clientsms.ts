@@ -192,7 +192,23 @@ export function clientSmsBody(o: ClientSmsInput): string {
     ? ''
     : '\n\nNothing proceeds until you approve.';
 
-  return `${what}${job}${cta}${closing}`;
+  /**
+   * OPT-OUT, ON EVERY MESSAGE (A2P 10DLC, 2026-08-19).
+   *
+   * The campaign was rejected on 30909 — the reviewer could not verify the Call to
+   * Action. Carriers look for opt-out instructions in the message itself, not only in the
+   * program description, and a campaign that is registered but rejected sends NOTHING:
+   * this app's entire delivery path is dark until it passes.
+   *
+   * STOP is handled by the carrier and by Twilio automatically; the words are what a
+   * reviewer and a recipient can both see. GSM-7 only — no em dash, no curly quote —
+   * because a single non-GSM character re-encodes the whole body as UCS-2 and cuts the
+   * per-segment budget from 153 to 67 (see the header). Asserted in clientsms.test.ts,
+   * not assumed: this line must not push a real message past two segments.
+   */
+  const stop = '\nReply STOP to opt out.';
+
+  return `${what}${job}${cta}${closing}${stop}`;
 }
 
 /**

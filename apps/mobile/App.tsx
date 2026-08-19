@@ -234,7 +234,7 @@ import { renderCard, sendForConfirmation } from './src/confirmations';
 import { publishApprovalPhotos } from './src/approvalphotopublish';
 import {
   ensureApproverSchema, drainR5cOutbox, suggestFor, listRoster, listKnownPeople, addApprover,
-  markApproverUsed, setExtraType, reasonText, typeLabel, roleLabel, saveClientApprover,
+  markApproverUsed, setExtraType, reasonText, typeLabel, roleLabel, saveClientApprover, noteSmsConsent,
   retireApprover,
   type RosterMember,
 } from './src/approvers';
@@ -2051,6 +2051,26 @@ const removePerson = (approverId: string, name: string) => {
   );
 };
 
+/**
+ * The contractor states he has this person's permission to text them (A2P 10DLC).
+ *
+ * Write-once in the store, and the roster is RE-READ rather than patched in memory, so the
+ * tick and the send gate are looking at the same row — local optimism here would let a
+ * failed write look like consent, on the one record a carrier regulator may ask about.
+ */
+const grantSmsConsent = async (approverId: string) => {
+  try {
+    await noteSmsConsent(db, approverId);
+    const pid = recordLc?.co.project_id ?? projectId;
+    if (pid) {
+      const roster = await listRoster(db, pid);
+      setSendPrep((p) => (p ? { ...p, roster } : p));
+    }
+  } catch (e: any) {
+    setFiled(String(e?.message ?? e));
+  }
+};
+
 const saveClient = async (
   changeOrderId: string,
   v: { name: string; phone: string | null; clientType: ClientType },
@@ -2511,6 +2531,11 @@ const drainHolds = async () => {
         const to: RosterMember | null = live ?? (h.approverId && h.approverName ? {
           id: h.approverId, name: h.approverName, role: 'owner' as ApproverRole,
           lastUsedMs: 0, phone: h.approverPhone, email: null, chainSide: null,
+          // A HELD send was already gated on consent when it was queued — the checkbox
+          // is on the send button, and this row only exists because that button was
+          // pressed. Reconstructing it as null would re-block a send he already
+          // authorised, on a screen he is not looking at.
+          consentAtMs: h.heldAtMs,
         } : null);
         const out = await sendPricedApproval(row, to);
         // `sent: false` with `held: true` means it hit the gate again — the balance moved
@@ -9889,10 +9914,44 @@ const checkClientMessages = async () => {
               const memberRows = sp.memberIds
                 .map((id) => sp.members.find((m) => m.memberId === id))
                 .filter((m): m is Member => !!m);
+              /**
+               * A2P 10DLC CONSENT (campaign rejected 2026-08-19: error 30909, the
+               * reviewer could not verify the Call to Action).
+               *
+               * In this product the person who RECEIVES the text never visits a website
+               * first — the contractor types their number in. There is no web form for a
+               * carrier reviewer to inspect, and "there is no form" reads as "there is no
+               * consent". This is the artefact: the contractor states, on the record,
+               * that he has this person's permission, and the send is refused until he
+               * does.
+               *
+               * ASKED ONCE PER RECIPIENT, not per send. Consent is a fact about a person,
+               * not about a message; re-asking on every send would be a tick-box he
+               * learns to tap without reading, which is worse evidence than asking once
+               * and worse for a gloved thumb besides. `approver.consentAtMs` carries it.
+               *
+               * IT IS ONLY REQUIRED WHERE A TEXT WILL ACTUALLY GO. A review request to a
+               * colleague inside the company is not an A2P message to a consumer, so a
+               * `review`-only send is not gated.
+               */
+              const needsConsent = plan.kind === 'approval' && !!chosen && !chosen.consentAtMs;
+              const blocked = plan.kind === 'nothing' || sp.busy || needsConsent;
               return (
               <>
-                <Pressable style={[s.spSend, (plan.kind === 'nothing' || sp.busy) && s.spSendOff]}
-                  disabled={plan.kind === 'nothing' || sp.busy}
+                {needsConsent && (
+                  <Pressable
+                    onPress={() => { if (chosen) void grantSmsConsent(chosen.id); }}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: false }}
+                    style={s.spConsent}>
+                    <View style={s.spConsentBox} />
+                    <Text style={s.spConsentT}>
+                      {T({ k: 'sms.consent', p: { name: chosen?.name ?? '' } } as any)}
+                    </Text>
+                  </Pressable>
+                )}
+                <Pressable style={[s.spSend, blocked && s.spSendOff]}
+                  disabled={blocked}
                   onPress={async () => {
                     setSendPrep((p) => p && { ...p, busy: true });
                     // The client half FIRST: it is the one that changes the record's
@@ -11225,6 +11284,15 @@ const s = StyleSheet.create({
   spRowSub: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#6b625b', marginTop: 2 },
   spChev: { fontFamily: 'Inter_400Regular', fontSize: 24, color: '#3E4A33' },
   spChangeT: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#4E6243' },
+  // The A2P consent tick. A full-width row rather than a small box: it is a statement he
+  // is making on the record, and it has to be readable and tappable with gloves on.
+  spConsent: { flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    backgroundColor: '#FBF8F1', borderWidth: 1, borderColor: '#D8D1C4', borderRadius: 12,
+    padding: 14, marginBottom: 10, minHeight: 56 },
+  spConsentBox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2,
+    borderColor: '#4E6243', marginTop: 1 },
+  spConsentT: { flex: 1, fontFamily: 'Barlow_400Regular', fontSize: 14.5, lineHeight: 20,
+    color: '#161918' },
   spSend: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
     minHeight: 66, borderRadius: 12, backgroundColor: '#4E6243', marginTop: 18 },
   // Refused reads as refused. Paired with the `spHint` line below it, which names

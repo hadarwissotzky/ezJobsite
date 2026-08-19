@@ -68,6 +68,23 @@ export async function ensureApproverSchema(db: AbstractPowerSyncDatabase) {
   } catch (e: any) {
     if (!/duplicate column/i.test(String(e?.message ?? e))) throw e;
   }
+  /**
+   * WHEN THE CONTRACTOR STATED HE HAS THIS PERSON'S PERMISSION TO TEXT THEM.
+   *
+   * A2P 10DLC, 2026-08-19: the campaign was rejected on error 30909 — the carrier
+   * reviewer could not verify the Call to Action. In this product the recipient never
+   * visits a web form before the first message, so there is nothing for a reviewer to
+   * look at unless the app records the consent itself. This column is that record.
+   *
+   * A TIMESTAMP, NOT A BOOLEAN, for the same reason `numbers_confirmed_at_ms` is: the
+   * question a regulator asks is "when did they consent", and a `1` cannot answer it.
+   * NULL means never stated, which is the only value that blocks a send.
+   */
+  try {
+    await db.execute(`ALTER TABLE project_approver ADD COLUMN sms_consent_at_ms INTEGER`);
+  } catch (e: any) {
+    if (!/duplicate column/i.test(String(e?.message ?? e))) throw e;
+  }
   // extra_type on the change order. Added here rather than in CHANGE_ORDER_DDL
   // because that array is a CREATE TABLE list and this has to run against tables
   // that already exist on phones in the field. SQLite has no ADD COLUMN IF NOT
@@ -112,6 +129,9 @@ async function enqueue(
 export type RosterMember = Approver & {
   phone: string | null;
   email: string | null;
+  /** When the contractor stated he has permission to text this person (A2P 10DLC).
+   *  Null = never stated, and a client send is refused until it is. */
+  consentAtMs: number | null;
   /** Which side of me they stand on. null = never asked (a third state). */
   chainSide: ChainSide | null;
 };
@@ -148,8 +168,10 @@ export async function listKnownPeople(
     id: string; name: string; role: string;
     phone_e164: string | null; email: string | null; last_used_ms: number;
     can_bind_money: number | null; chain_side: string | null;
+      sms_consent_at_ms: number | null;
   }>(
-    `SELECT id, name, role, phone_e164, email, last_used_ms, can_bind_money, chain_side
+    `SELECT id, name, role, phone_e164, email, last_used_ms, can_bind_money, chain_side,
+            sms_consent_at_ms
        FROM project_approver
       WHERE status = 'active'
         AND (? IS NULL OR project_id <> ?)
@@ -169,6 +191,7 @@ export async function listKnownPeople(
       lastUsedMs: r.last_used_ms, phone: r.phone_e164, email: r.email,
       canBindMoney: r.can_bind_money == null ? undefined : r.can_bind_money === 1,
       chainSide: isChainSide(r.chain_side) ? r.chain_side : null,
+      consentAtMs: r.sms_consent_at_ms ?? null,
     });
     if (out.length >= limit) break;
   }
@@ -182,8 +205,10 @@ export async function listRoster(
     id: string; name: string; role: string;
     phone_e164: string | null; email: string | null; last_used_ms: number;
     can_bind_money: number | null; chain_side: string | null;
+      sms_consent_at_ms: number | null;
   }>(
-    `SELECT id, name, role, phone_e164, email, last_used_ms, can_bind_money, chain_side
+    `SELECT id, name, role, phone_e164, email, last_used_ms, can_bind_money, chain_side,
+            sms_consent_at_ms
        FROM project_approver
       WHERE project_id = ? AND status = 'active'
       ORDER BY last_used_ms DESC, name`,
@@ -202,6 +227,7 @@ export async function listRoster(
     // relabelling where someone sits in the chain is the same class of lie as
     // relabelling their authority (see the role filter above).
     chainSide: isChainSide(r.chain_side) ? r.chain_side : null,
+      consentAtMs: r.sms_consent_at_ms ?? null,
   }));
 }
 
@@ -491,4 +517,21 @@ export async function drainR5cOutbox(
     }
   }
   return r;
+}
+
+/**
+ * Record that the contractor stated he has this person's permission to text them.
+ *
+ * A2P 10DLC (2026-08-19). Write-once: the earliest statement is the one that matters, and
+ * re-ticking a box must not re-date a consent that already existed. Same COALESCE rule the
+ * lifecycle stamps use, and for the same reason — a second writer may never re-date a
+ * transition.
+ */
+export async function noteSmsConsent(
+  db: AbstractPowerSyncDatabase, approverId: string, atMs = Date.now()
+): Promise<void> {
+  await db.execute(
+    `UPDATE project_approver
+        SET sms_consent_at_ms = COALESCE(sms_consent_at_ms, ?)
+      WHERE id = ?`, [atMs, approverId]);
 }
