@@ -206,7 +206,10 @@ export function clientSmsBody(o: ClientSmsInput): string {
    * per-segment budget from 153 to 67 (see the header). Asserted in clientsms.test.ts,
    * not assumed: this line must not push a real message past two segments.
    */
-  const stop = '\nReply STOP to opt out.';
+  // STOP and HELP together: carriers check for both, and at 295 characters a real priced
+  // message is STILL two segments (measured against the 306 ceiling, not estimated).
+  // 11 characters of headroom left — anything further added here costs a third segment.
+  const stop = '\nReply STOP to opt out. HELP for help.';
 
   return `${what}${job}${cta}${closing}${stop}`;
 }

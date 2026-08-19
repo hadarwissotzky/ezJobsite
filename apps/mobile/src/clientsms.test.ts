@@ -65,7 +65,7 @@ test('a priced change order: who, what, how much, which job, the link, the term'
     URL + '\n' +
     '\n' +
     'Nothing proceeds until you approve.\n' +
-    'Reply STOP to opt out.');
+    'Reply STOP to opt out. HELP for help.');
 });
 
 test('the document itself is never quoted into the message', () => {
@@ -112,7 +112,7 @@ test('null and blank facts are absent facts, never the string "null"', () => {
     'Your contractor sent you something to check and confirm.\n' +
     '\n' +
     'Open it here. No app or account needed:\n' + URL + '\n' +
-    'Reply STOP to opt out.');
+    'Reply STOP to opt out. HELP for help.');
 });
 
 test('a label sitting at a line break in the instrument still counts as present', () => {
@@ -165,7 +165,7 @@ test('an acknowledge is a directive to acknowledge, not something to approve', (
     'Your contractor asked you to acknowledge something on your job.\n' +
     '\n' +
     'Open it here. No app or account needed:\n' + URL + '\n' +
-    'Reply STOP to opt out.');
+    'Reply STOP to opt out. HELP for help.');
 });
 
 // ── the transport budget ────────────────────────────────────────────────────
@@ -251,7 +251,7 @@ test('EVERY message a client can receive carries the opt-out', () => {
     clientSmsBody({ kind: 'ewa', shownContent: 'T&M capped at $2,000.', url: URL }),
     clientSmsBody({ kind: 'acknowledge', shownContent: 'Please acknowledge.', url: URL }),
   ];
-  for (const b of bodies) assert.ok(b.includes('Reply STOP to opt out.'), b);
+  for (const b of bodies) assert.ok(b.includes('Reply STOP to opt out. HELP for help.'), b);
 });
 
 test('the opt-out does not cost a third segment on a real message', () => {
