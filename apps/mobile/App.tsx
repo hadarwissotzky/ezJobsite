@@ -4218,6 +4218,28 @@ const checkClientMessages = async () => {
           captureId: r.captureId, projectId: res.projectId, ownerId: OWNER,
         }).then(async (x) => {
           if (!x.ok) { console.log('startExtra failed:', x.reason); return; }
+          /**
+           * WHO RAISED IT (hadar, 2026-08-19: "new CO created, in the record list the
+           * person created it doesn't show up — we should have the creator displayed").
+           *
+           * `CO_AUTHOR_JOIN` names the EARLIEST actor on the change order, and until now
+           * nothing wrote one at CREATION: the acts were written when an extra was
+           * PRICED and when it was SENT. So an extra born from a recording had no author
+           * row at all and every list showing a person left it blank — while one typed
+           * through the priced path got a name immediately, which is why the two looked
+           * inconsistent.
+           *
+           * 'captured' is already in the ActorAct vocabulary and is exactly this fact.
+           * Writing it here rather than inside `startExtraFromCapture` keeps that module
+           * free of the profile read, and matches where every other noteActorNow call
+           * lives — beside the act it records.
+           *
+           * NOT AWAITED BEFORE `refresh()` on purpose is NOT the rule here: the row must
+           * exist before the list re-reads, or the first paint is blank and only corrects
+           * on the next tick. It is inside the same `.then` as refresh and precedes it.
+           */
+          await noteActorNow(db, {
+            subjectKind: 'change_order', subjectId: x.changeOrderId, act: 'captured' });
           await refresh();
           // FLOW: the questions come next, unprompted. The extra is already
           // durable — this only opens the finishing card over it.
@@ -4360,6 +4382,9 @@ const checkClientMessages = async () => {
         captureId: anchorId, projectId: res.projectId, ownerId: OWNER,
       }).then(async (x) => {
         if (!x.ok) { console.log('startExtra (fused) failed:', x.reason); return; }
+        // Same fact, the fused path — see the voice path above for why it is here.
+        await noteActorNow(db, {
+          subjectKind: 'change_order', subjectId: x.changeOrderId, act: 'captured' });
         await refresh();
       }).catch(() => { /* capture is safe; the ledger row is not owed */ });
 
