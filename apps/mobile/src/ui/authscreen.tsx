@@ -36,7 +36,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 
 import type { SupabaseConnector } from '../connector';
-import { displayPhone, toE164 } from '../sendto';
+import { displayPhone, formatPhoneAsTyped, toE164 } from '../sendto';
 import { t as T } from '../i18n';
 import { Icon } from './icon';
 
@@ -320,7 +320,7 @@ export function AuthScreen({ connector, initialSignUp = false, onReplayIntro }: 
               keyboardType="email-address" inputMode="email" textContentType="emailAddress" />
             <View style={st.groupRule} />
             <TextInput style={st.groupInput} value={typed}
-              onChangeText={(v) => { setTyped(v); reset(); }}
+              onChangeText={(v) => { setTyped(formatPhoneAsTyped(v)); reset(); }}
               placeholder={T('auth.phone')} placeholderTextColor="#8c959f"
               keyboardType="phone-pad" inputMode="tel" textContentType="telephoneNumber" />
           </View>
@@ -376,7 +376,7 @@ export function AuthScreen({ connector, initialSignUp = false, onReplayIntro }: 
           <>
             <TextInput
               style={st.input} value={typed}
-              onChangeText={(v) => { setTyped(v); reset(); }}
+              onChangeText={(v) => { setTyped(formatPhoneAsTyped(v)); reset(); }}
               placeholder={T('auth.phone')} placeholderTextColor="#8c959f"
               keyboardType="phone-pad" inputMode="tel"
               textContentType="telephoneNumber" autoComplete="tel"

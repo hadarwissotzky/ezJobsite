@@ -23,7 +23,7 @@ import React from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 
 import { t } from '../i18n';
-import { canSend, displayPhone, type SendToPrefill, type SendToProject } from '../sendto';
+import { canSend, displayPhone, formatPhoneAsTyped, type SendToPrefill, type SendToProject } from '../sendto';
 import { C, F, T as TT, display, label } from './theme';
 
 function distanceLabel(m: number | null): string {
@@ -157,7 +157,7 @@ export function SendToCard({
                 style={{ borderWidth: 1, borderColor: C.line, borderRadius: 12, minHeight: 50,
                          paddingHorizontal: 12, fontFamily: F.body, fontSize: 16, color: C.ink }} />
               <TextInput
-                value={phone} onChangeText={(v) => { setPhone(v); setProblem(null); }}
+                value={phone} onChangeText={(v) => { setPhone(formatPhoneAsTyped(v)); setProblem(null); }}
                 placeholder={t('r1.quickadd.phonePh')} placeholderTextColor={C.steel}
                 keyboardType="phone-pad"
                 style={{ borderWidth: 1, borderColor: C.line, borderRadius: 12, minHeight: 50,

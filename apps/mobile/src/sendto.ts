@@ -211,3 +211,65 @@ export function displayPhone(phoneE164: string | null): string {
   const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(phoneE164);
   return m ? `+1 ${m[1]} ${m[2]} ${m[3]}` : phoneE164;
 }
+
+/**
+ * Group a number AS IT IS BEING TYPED: `4155550134` reads back `415 555 0134`.
+ *
+ * hadar, 2026-08-19. `displayPhone` above already does this, but only for a
+ * COMPLETE E.164 that has been normalised and stored — which is everywhere except
+ * the three places a person actually types a number. So the one moment the digits
+ * are most likely to be wrong is the one moment they were shown as an unbroken
+ * ten-digit run. Mandate #6 makes proof-reading a number a first-class job, and a
+ * human cannot proof-read `4155550134`; they can proof-read `415 555 0134`.
+ *
+ * ─── IT NEVER CHANGES THE DIGITS ────────────────────────────────────────────────
+ * Spaces in, spaces out, and nothing else. It does not add a country code, drop a
+ * leading zero, or complete a partial number. `toE164` still owns the one +1
+ * assumption we make, still makes it in one place, and still shows it back — this
+ * function is on the near side of that and knows nothing about country codes it
+ * has not been handed.
+ *
+ * ─── NO TRAILING SEPARATOR, AND THAT IS THE WHOLE BACKSPACE STORY ───────────────
+ * The classic bug in a live phone formatter is that backspace stops working: the
+ * field holds `415 `, the user deletes the space, the formatter helpfully puts it
+ * back, and the cursor has not moved. It reads as a frozen keyboard, which on a
+ * sign-in screen reads as the app being broken.
+ *
+ * The fix is a rule rather than a special case: a separator is only ever emitted
+ * BETWEEN two digits that both exist. `415` formats to `415`, never `415 `. So
+ * every backspace removes exactly one digit, and the group it was in closes up
+ * behind it.
+ *
+ * ─── WHAT IT REFUSES TO GUESS ───────────────────────────────────────────────────
+ * A leading `+` means the typist is telling us the country code, and we do not
+ * know the grouping convention for a number we cannot identify. Rather than
+ * imposing a North American 3-3-4 on a number that is not North American — which
+ * would be formatting used as a false claim about what the digits mean — it keeps
+ * the plus and the digits and stops there. Same for anything longer than a NANP
+ * number: unrecognised is returned ungrouped, not mangled into something that
+ * looks official. This is `displayPhone`'s rule, applied one screen earlier.
+ */
+export function formatPhoneAsTyped(raw: string): string {
+  const typed = raw ?? '';
+  const digits = typed.replace(/\D/g, '');
+  if (!digits) return typed.trimStart().startsWith('+') ? '+' : '';
+
+  // International: the typist owns the country code, so we group nothing.
+  if (typed.trimStart().startsWith('+')) return `+${digits}`;
+
+  // 11 digits starting with 1 is a NANP number with its country code typed out.
+  // The 1 is split off rather than swallowed: dropping a digit the user can see
+  // themselves type is exactly the invention mandate #6 forbids.
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `1 ${group10(digits.slice(1))}`;
+  }
+  if (digits.length > 10) return digits;   // not ours to group
+  return group10(digits);
+}
+
+/** 3-3-4, emitting a space only between digits that both exist. Up to 10 digits. */
+function group10(d: string): string {
+  if (d.length <= 3) return d;
+  if (d.length <= 6) return `${d.slice(0, 3)} ${d.slice(3)}`;
+  return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+}

@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sendToPrefill, checkQuickAdd, canSend, displayPhone, MAX_RECENTS, type SendToProject } from './sendto.ts';
+import { sendToPrefill, checkQuickAdd, canSend, displayPhone, formatPhoneAsTyped, toE164, MAX_RECENTS, type SendToProject } from './sendto.ts';
 
 const p = (id: string, name: string, distanceM: number | null, lastUsedMs = 0,
            phoneE164: string | null = '+15125550147'): SendToProject =>
@@ -130,4 +130,82 @@ test('a name-only destination is allowed but cannot be sent to', () => {
 test('displayPhone never mangles a number it does not recognise', () => {
   assert.equal(displayPhone('+525512345678'), '+525512345678');
   assert.equal(displayPhone(null), '');
+});
+
+/* ─────────────────────── formatPhoneAsTyped (hadar 2026-08-19) ──────────────── */
+
+test('a typed 10-digit number is grouped 3-3-4 for proof-reading', () => {
+  assert.equal(formatPhoneAsTyped('4155550134'), '415 555 0134');
+});
+
+test('grouping appears as the digits arrive, never ahead of them', () => {
+  // The partial states a typist actually sees, in order.
+  assert.equal(formatPhoneAsTyped('4'), '4');
+  assert.equal(formatPhoneAsTyped('415'), '415');
+  assert.equal(formatPhoneAsTyped('4155'), '415 5');
+  assert.equal(formatPhoneAsTyped('415555'), '415 555');
+  assert.equal(formatPhoneAsTyped('4155550'), '415 555 0');
+});
+
+test('NO TRAILING SEPARATOR — the rule that keeps backspace working', () => {
+  // A trailing space here is what makes a formatter re-add the character the user
+  // just deleted, so the field appears frozen. Asserted directly rather than left
+  // to the round-trip below, because this is the invariant, not the symptom.
+  assert.equal(formatPhoneAsTyped('415'), '415');
+  assert.equal(formatPhoneAsTyped('415555'), '415 555');
+});
+
+test('backspacing through a formatted number removes exactly one digit each time', () => {
+  // Simulates what RN hands us: the CURRENT formatted value with its last visible
+  // character chopped off. Every step must lose one digit and no more.
+  let v = formatPhoneAsTyped('4155550134');
+  const seen: string[] = [v];
+  while (v.length > 0) {
+    v = formatPhoneAsTyped(v.slice(0, -1));
+    seen.push(v);
+  }
+  const digitsOf = (s: string) => s.replace(/\D/g, '').length;
+  for (let i = 1; i < seen.length; i++) {
+    const lost = digitsOf(seen[i - 1]) - digitsOf(seen[i]);
+    assert.ok(lost === 1, `step ${i}: "${seen[i - 1]}" -> "${seen[i]}" lost ${lost} digits`);
+  }
+  assert.equal(seen[seen.length - 1], '');
+});
+
+test('it never invents, drops or reorders a digit', () => {
+  for (const raw of ['4155550134', '14155550134', '415', '4155', '0000000000',
+                     '+525512345678', '12345678901234']) {
+    assert.equal(formatPhoneAsTyped(raw).replace(/\D/g, ''), raw.replace(/\D/g, ''));
+  }
+});
+
+test('a country code the user typed is split off, not swallowed', () => {
+  assert.equal(formatPhoneAsTyped('14155550134'), '1 415 555 0134');
+});
+
+test('a + number keeps its digits and is NOT forced into North American grouping', () => {
+  // Imposing 3-3-4 on a number we cannot identify would be formatting used as a
+  // false claim about what the digits mean.
+  assert.equal(formatPhoneAsTyped('+525512345678'), '+525512345678');
+  assert.equal(formatPhoneAsTyped('+52 55 1234 5678'), '+525512345678');
+  assert.equal(formatPhoneAsTyped('+'), '+');
+});
+
+test('something too long to be NANP is returned ungrouped rather than mangled', () => {
+  assert.equal(formatPhoneAsTyped('12345678901234'), '12345678901234');
+});
+
+test('empty and junk input stay empty', () => {
+  assert.equal(formatPhoneAsTyped(''), '');
+  assert.equal(formatPhoneAsTyped('   '), '');
+  assert.equal(formatPhoneAsTyped('abc'), '');
+});
+
+test('the formatted string still parses to the same E.164 the raw one did', () => {
+  // The contract that lets every caller keep formatting in the field and pass the
+  // field straight to toE164: sign-in, quick-add and the send gate all do this.
+  for (const raw of ['4155550134', '14155550134', '+525512345678']) {
+    assert.equal(toE164(formatPhoneAsTyped(raw)), toE164(raw));
+  }
+  assert.equal(toE164(formatPhoneAsTyped('4155550134')), '+14155550134');
 });
