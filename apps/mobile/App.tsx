@@ -611,6 +611,15 @@ export default function App() {
   // The ☰ menu on Home: the jobs list + language now live behind it, because the
   // dashboard's front page is the money, not navigation (hadar, 2026-07-23 mockup).
   const [menuOpen, setMenuOpen] = React.useState(false);
+  /**
+   * Which door the current full-screen overlay (Settings or Plans) was opened through, so
+   * its back button returns there. The drawer closes itself before running any of its
+   * actions, so without this the menu is simply gone when you come back out.
+   *
+   * ONE variable for both, deliberately: only one of these is ever open at a time, and
+   * two flags that must agree about the same fact is how they end up disagreeing.
+   */
+  const [settingsFrom, setSettingsFrom] = React.useState<'drawer' | 'screen'>('drawer');
   // The Job screen's pill filter (hadar, 2026-07-23 mockup): null = all extras.
   const [jobFilter, setJobFilter] = React.useState<null | 'needs' | 'waiting' | 'approved'>(null);
   const [labelFilter, setLabelFilter] = React.useState<string | null>(null); // REQ-PM14 Jobs-list filter
@@ -1194,7 +1203,23 @@ const closeRecord = () => {
 // company screen (team roster, plan). Both reuse SettingsScreen; the mode picks which
 // sections render. Loads the profile and, for a company profile, promotes the stored
 // company NAME into a real tenant (idempotent) so the Team roster works.
-const openSettings = async (mode: 'profile' | 'company' = 'profile') => {
+/**
+ * WHERE BACK GOES (hadar, 2026-08-19: "in the drawer the company section back button
+ * closes the drawer while it should take back to the main menu").
+ *
+ * The drawer's own `go()` closes the drawer before running the action, so by the time
+ * Settings is up the menu is gone — and `onBack` only hid Settings, dropping the user on
+ * whatever screen was underneath. From the drawer that reads as being thrown out of the
+ * menu; the reader's model is a menu he stepped INTO, so back should step out to it.
+ *
+ * BUT SETTINGS HAS THREE DOORS, and the third is not the drawer: the notifications screen
+ * has a gear in its header. Reopening the drawer unconditionally would open a menu that
+ * reader never came from. So the origin is remembered and back returns to it.
+ */
+const openSettings = async (
+  mode: 'profile' | 'company' = 'profile', from: 'drawer' | 'screen' = 'drawer'
+) => {
+  setSettingsFrom(from);
   const p = (await getProfile(db)) ?? { name: '', isSolo: true, company: null, trade: null };
   if (!p.isSolo && (p.company ?? '').trim()) {
     try { await ensureOwnCompany(connector.client, (p.company as string).trim(), p.name); await refresh(); }
@@ -1206,7 +1231,8 @@ const openSettings = async (mode: 'profile' | 'company' = 'profile') => {
 };
 
 // Open the paywall, reading the company's current plan so it marks "Your plan".
-const openPaywall = async () => {
+const openPaywall = async (from: 'drawer' | 'screen' = 'drawer') => {
+  setSettingsFrom(from);
   setPaywallPlan(await currentPlan(db));
   /**
    * LOAD THE PRICES HERE, not only in the drawer effect (hadar, 2026-08-19, on the
@@ -5168,7 +5194,9 @@ const checkClientMessages = async () => {
   const quotaEl = quota ? (
     <QuotaModal kind={quota.kind} limit={quota.limit}
       onClose={() => setQuota(null)}
-      onSeePlans={() => { setQuota(null); void openPaywall(); }} />
+      // From a CAP he just hit, not from the menu — back belongs on the screen he was
+      // working on, not in a drawer he never opened.
+      onSeePlans={() => { setQuota(null); void openPaywall('screen'); }} />
   ) : null;
 
   /**
@@ -5321,7 +5349,10 @@ const checkClientMessages = async () => {
         const u = pricing ? purchaseUrl(pricing, co?.id ?? null) : null;
         return u ? () => { void Linking.openURL(u); } : null;
       })()}
-      onClose={() => setShowPaywall(false)}
+      onClose={() => {
+        setShowPaywall(false);
+        if (settingsFrom === 'drawer') setMenuOpen(true);
+      }}
       // Re-read the plan after a purchase. company.plan is written by the RevenueCat
       // webhook and arrives via sync, so this may still read the old tier for a beat —
       // refresh() runs again on the next sync tick and settles it.
@@ -7742,8 +7773,15 @@ const checkClientMessages = async () => {
         logoUri={logoUri} onLogoPress={() => setLogoSheet(true)}
         onSaveProfile={async (p) => { await saveProfile(connector, db, p); setSettingsProfile(p); await refresh(); }}
         onSetLang={async (l) => { setLang(l); setLangState(l); await saveLang(db, l); }}
-        onOpenPlans={() => { setShowSettings(false); void openPaywall(); }}
-        onBack={() => setShowSettings(false)}
+        // Settings -> Plans KEEPS the door Settings came through (no argument, so
+        // `settingsFrom` is left as it is): he is still inside that journey, and closing
+        // Plans should land where it began rather than inventing a new origin.
+        onOpenPlans={() => { setShowSettings(false); void openPaywall(settingsFrom); }}
+        onBack={() => {
+          setShowSettings(false);
+          // Back into the menu he stepped out of — but only when that is where he was.
+          if (settingsFrom === 'drawer') setMenuOpen(true);
+        }}
       />
       {/* THE OVERLAYS THIS SCREEN CAN OPEN HAVE TO BE RENDERED BY IT.
           This branch is an EARLY RETURN — nothing below it in the tree mounts — so the
@@ -8510,7 +8548,8 @@ const checkClientMessages = async () => {
           </Pressable>
           <Text style={s.hdrTitle}>{T('nt.title')}</Text>
           <Pressable style={s.hdrBtn} hitSlop={10} accessibilityLabel={T('drawer.profile')}
-            onPress={() => void openSettings('profile')}>
+            // FROM A SCREEN, not the drawer: back belongs on the notifications list.
+            onPress={() => void openSettings('profile', 'screen')}>
             <Icon name="gear" size={21} color="#2F5233" />
           </Pressable>
         </View>
