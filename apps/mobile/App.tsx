@@ -58,7 +58,7 @@ import { pendingNotifications } from './src/discussionstore';
 import { ApprovedCelebration } from './src/ui/approvedcelebration';
 // The letterhead the EXPORTED document prints. Cached rather than fetched — a change
 // order handed over in a basement must still carry the contractor's own name.
-import { cacheLetterhead, cachedLetterhead } from './src/letterhead';
+import { cacheLetterhead, cachedLetterhead, readLetterhead } from './src/letterhead';
 import { celebrationDescription, celebrationLine, ensureCelebrateSchema, markCelebrated,
          pendingCelebrations, type Celebration } from './src/celebrate';
 import { SwipeRow } from './src/ui/swiperow';
@@ -3574,13 +3574,39 @@ const checkClientMessages = async () => {
          */
         setHasTeam(!!co && !prof?.isSolo);
         setCo(co ? { id: co.id, name: co.name } : null);
-        // The logo rides this tick too. `logo_key` syncs down with the company row, so
-        // this is a local read on every pass after the first; the fetch inside
-        // ensureLogoCached only happens on a device that has never drawn it.
+        /**
+         * THE LOGO'S KEY, FROM SOMEWHERE THAT ACTUALLY HAS IT (hadar, 2026-08-19: "I
+         * added a logo, everything worked, the logo showed. But when I close the app and
+         * restart it the logo disappears").
+         *
+         * This read used to be `SELECT logo_key FROM company` alone, under a comment
+         * asserting that "logo_key syncs down with the company row". THAT PREMISE IS
+         * FALSE ON A REAL DEVICE — `company` is EMPTY locally (the PowerSync gap
+         * documented in letterhead.ts and company.ts, and the reason `resolveMyCompany`
+         * exists at all). So the key came back null on every launch, `ensureLogoCached`
+         * was handed null, and the logo vanished until the next upload put it back in
+         * memory. Uploading worked; REMEMBERING never did.
+         *
+         * Three sources, weakest network dependency first:
+         *   1. the local row — right when sync is working, free when it is not there;
+         *   2. the letterhead CACHE — written on every successful letterhead read and
+         *      after every upload, so this is the one that answers on a warm device;
+         *   3. the server — authoritative, and it repopulates the cache for next time.
+         *
+         * Offline with an empty cache the logo is simply absent for that launch, which is
+         * honest: the bytes may not be on this device at all.
+         */
         if (co) {
           const row = await db.getAll<{ logo_key: string | null }>(
             `SELECT logo_key FROM company WHERE id = ?`, [co.id]).catch(() => []);
-          const k = row[0]?.logo_key ?? null;
+          let k = row[0]?.logo_key ?? null;
+          if (!k) k = (await cachedLetterhead(db))?.logoKey ?? null;
+          if (!k) {
+            try {
+              const lh = await readLetterhead(connector.client, co.id);
+              if (lh.ok) { k = lh.letterhead.logoKey; await cacheLetterhead(db, lh.letterhead); }
+            } catch { /* offline: the cache above was the answer, and it had none */ }
+          }
           setLogoKey(k);
           setLogoUri(await ensureLogoCached(connector.client, { companyId: co.id, logoKey: k }));
         } else { setLogoUri(null); setLogoKey(null); }
@@ -5515,8 +5541,16 @@ const checkClientMessages = async () => {
           // letterhead rather than the network. Without this line a contractor's new logo
           // would not reach his documents until he next opened Settings with signal.
           void (async () => {
+            // WRITE IT EVEN WITH NO PRIOR CACHE. Guarding on `prev` meant a contractor who
+            // uploaded a logo before ever opening the Company screen cached nothing — and
+            // the cache is what the next launch reads. That is the same bug as the one
+            // above, one layer down.
             const prev = await cachedLetterhead(db);
-            if (prev) await cacheLetterhead(db, { ...prev, logoKey: r.logoKey, isOwner: true });
+            await cacheLetterhead(db, {
+              companyId: co.id, name: prev?.name ?? co.name,
+              address: prev?.address ?? null, license: prev?.license ?? null,
+              logoKey: r.logoKey, isOwner: true,
+            });
           })();
           setLogoSheet(false);
           setAck({ kind: 'ok', title: T('logo.saved'), detail: co.name });
