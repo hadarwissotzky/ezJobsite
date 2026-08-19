@@ -1109,6 +1109,9 @@ const EN: Record<string, string> = {
   'paywall.choose': 'Choose {plan}',
   'paywall.comingSoon': 'Coming soon',
   'paywall.notLive': 'Subscriptions aren’t live yet — Core and Crew open soon. Tap Enterprise below to talk to us.',
+  // Scoped to the tiers, shown when packs ARE on sale: the screen is not "not live" when
+  // half of it sells today, and saying so is what sent hadar hunting for pay-as-you-go.
+  'paywall.subsNotLive': 'Monthly plans aren’t live yet — Core opens soon. Change orders above are available now.',
   'paywall.failed': 'That didn’t go through. Please try again.',
   'paywall.cancelled': 'Purchase cancelled — nothing was charged.',
   // Never says "company": a freelancer has not got one and does not need one.
@@ -2863,6 +2866,7 @@ const ES: Record<string, string> = {
   'paywall.choose': 'Elegir {plan}',
   'paywall.comingSoon': 'Muy pronto',
   'paywall.notLive': 'Las suscripciones aún no están activas — Core y Crew llegan pronto. Toca Empresa abajo para hablar con nosotros.',
+  'paywall.subsNotLive': 'Los planes mensuales aún no están activos — Core llega pronto. Las órdenes de cambio de arriba ya están disponibles.',
   'paywall.failed': 'No se pudo completar. Inténtalo de nuevo.',
   'paywall.cancelled': 'Compra cancelada — no se cobró nada.',
   'paywall.needProfile': 'Todavía no podemos ligar un plan a esta cuenta. Abre el menú ☰ una vez e inténtalo otra vez; si sigue igual, tu cuenta aún se está sincronizando.',

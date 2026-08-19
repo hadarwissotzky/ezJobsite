@@ -334,7 +334,16 @@ export function PaywallScreen(props: {
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
           <Text style={{ fontFamily: F.body, fontSize: 15, color: C.steel, marginBottom: 16 }}>{t('paywall.sub')}</Text>
 
-          {!ready && (
+          {/* THE BANNER IS ABOUT SUBSCRIPTIONS, NOT ABOUT THIS SCREEN.
+              `ready` is `billingStatus() === 'ready'`, which is the STORE SDK — a release
+              build carrying a test key discards it deliberately (billing.ts), so on
+              TestFlight this is on. It has nothing to say about the packs below: those
+              are bought through a web link and need no SDK at all.
+
+              It sat at the top of the screen reading as "nothing here works", which is
+              what sent hadar looking for the pay-as-you-go section on 2026-08-19. Moved
+              under the packs and reworded to name what is actually unavailable. */}
+          {!ready && !props.packs?.length && (
             <View style={{ backgroundColor: C.brandSoft, borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <Text style={{ fontFamily: F.body, fontSize: 13.5, color: C.brandDark }}>{t('paywall.notLive')}</Text>
             </View>
@@ -445,6 +454,16 @@ export function PaywallScreen(props: {
             </View>
           )}
 
+          {/* Scoped to the tiers it describes. When packs ARE available the screen is not
+              "not live" — one half of it sells today. */}
+          {!ready && !!props.packs?.length && (
+            <View style={{ backgroundColor: C.brandSoft, borderRadius: 12, padding: 14,
+              marginBottom: 12 }}>
+              <Text style={{ fontFamily: F.body, fontSize: 13.5, color: C.brandDark }}>
+                {t('paywall.subsNotLive')}
+              </Text>
+            </View>
+          )}
           {offeredTiers(props.currentPlan).map(card)}
 
           {note && <Text style={{ fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 4 }}>{note}</Text>}

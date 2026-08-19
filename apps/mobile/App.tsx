@@ -1178,6 +1178,38 @@ const openSettings = async (mode: 'profile' | 'company' = 'profile') => {
 // Open the paywall, reading the company's current plan so it marks "Your plan".
 const openPaywall = async () => {
   setPaywallPlan(await currentPlan(db));
+  /**
+   * LOAD THE PRICES HERE, not only in the drawer effect (hadar, 2026-08-19, on the
+   * TestFlight build: "where is the pay as you go").
+   *
+   * The packs section renders only when `pricing` has arrived, and `pricing` was set in
+   * ONE place: the effect that also mints the billing tenant, re-keys RevenueCat and
+   * resolves the company. So a purchase screen depended on a drawer effect having
+   * completed — through several network calls that can be slow, refused, or (on a
+   * release build with no store key) skipped entirely. Whatever went wrong in that chain
+   * took the packs down with it, silently, and the paywall showed only the tiers.
+   *
+   * `loadPricing` cannot fail: server, then the device cache, then compiled-in
+   * fallbacks — all three carry packs. Calling it at the moment the screen opens makes
+   * the section's presence depend on nothing but opening the screen.
+   */
+  setPricing(await loadPricing(db, connector.client));
+  /**
+   * AND THE COMPANY, for the same reason. `purchaseUrl` needs `company.id` — RevenueCat
+   * REQUIRES the App User ID on a web purchase link or the customer sees a 404, and it is
+   * what makes the money land on the account this app reads. `co` was also set only by
+   * that drawer effect, so the failure mode was prices with no button: the exact
+   * half-configured state `purchaseUrl` returns null for on purpose.
+   *
+   * Only when it is missing. The resolver hits the network, and re-running it on every
+   * open of this screen would add a round-trip to a screen that already has its answer.
+   */
+  if (!co) {
+    try {
+      const mine = await resolveMyCompany(db, connector.client, OWNER);
+      if (mine) setCo({ id: mine.id, name: mine.name });
+    } catch { /* no company resolved -> no web button, prices still stand */ }
+  }
   setShowPaywall(true);
 };
 
