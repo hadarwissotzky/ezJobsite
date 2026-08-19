@@ -611,6 +611,10 @@ export default function App() {
   // The ☰ menu on Home: the jobs list + language now live behind it, because the
   // dashboard's front page is the money, not navigation (hadar, 2026-07-23 mockup).
   const [menuOpen, setMenuOpen] = React.useState(false);
+  /** A home-screen quick action arrived. Held until the app is `ready` — on a cold start
+   *  the deep link lands before the database is open, and a flag waits where a call is
+   *  lost. */
+  const [pendingCapture, setPendingCapture] = React.useState(false);
   /**
    * Which door the current full-screen overlay (Settings or Plans) was opened through, so
    * its back button returns there. The drawer closes itself before running any of its
@@ -865,12 +869,28 @@ export default function App() {
   React.useEffect(() => {
     const take = (url: string | null) => {
       if (!url) return;
+      /**
+       * THE HOME SCREEN QUICK ACTION lands here too (hadar, 2026-08-19: "a plugin on the
+       * phone desktop — one click create change order"). Long-pressing the app icon posts
+       * `ezjobsite://capture` through the same RCTLinkingManager path the sign-in link
+       * uses (AppDelegate.swift), so this listener gains one case rather than the app
+       * gaining a bridge.
+       *
+       * IT SETS A FLAG RATHER THAN OPENING THE CAMERA. Two reasons, and the second is the
+       * one that makes it work:
+       *   · the terms gate has to be honoured exactly as the ⊕ button honours it, and
+       *     this closure would otherwise read a STALE `terms` (the effect mounts once);
+       *   · on a cold start this URL can arrive before the app is `ready`, and a flag
+       *     waits where a function call would simply be lost.
+       */
+      if (url.startsWith('ezjobsite://capture')) { setPendingCapture(true); return; }
       connector.sessionFromUrl(url).catch(() => { /* not a sign-in link */ });
     };
     void Linking.getInitialURL().then(take);
     const sub = Linking.addEventListener('url', ({ url }) => take(url));
     return () => sub.remove();
   }, []);
+
   const [delivery, setDelivery] = React.useState<{pending:number;parked:number}>({pending:0,parked:0});
   const [decisions, setDecisions] = React.useState<DecisionRow[]>([]);
   // The ONE confirm surface (REQ-VAL6). Null = not confirming anything.
@@ -3031,6 +3051,21 @@ const checkClientMessages = async () => {
       setShowTerms((t) => (t ? { ...t, jur, detecting: false } : t));
     })();
   }, []);
+
+  /**
+   * Consume the quick action once the app can actually honour it.
+   *
+   * Waits for `ready` (the local database is open and the session applied), then goes
+   * through the SAME two steps the ⊕ button does — terms first, capture second. A second
+   * copy of that order is how one entry point ends up opening a camera on someone who has
+   * never accepted the terms.
+   */
+  React.useEffect(() => {
+    if (!pendingCapture || !ready) return;
+    setPendingCapture(false);
+    if (!terms) { openTerms(); return; }
+    setShowCapture(true);
+  }, [pendingCapture, ready, terms]);
 
   // REQ-SET1/EVID2. Null until the first job exists -- a new user has no jobs, and
   // pretending otherwise is what the hardcoded constant was doing.

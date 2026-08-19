@@ -64,6 +64,19 @@
 	<string>EZjobsite turns what you said into text on this phone, so your notes fill themselves in.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypeCapturePhoto</string>
+			<key>UIApplicationShortcutItemSubtitle</key>
+			<string>Snap it. Say it. Send it.</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Record extra work</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.hilo.ezjobsite.capture</string>
+		</dict>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>SplashScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>
