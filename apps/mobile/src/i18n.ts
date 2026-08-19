@@ -1774,6 +1774,10 @@ const EN: Record<string, string> = {
   'jobpick.tip': 'Tip',
   'jobpick.tipBody': 'You can always change the job later before sending the extra.',
   'stuck.filesTitle': 'Files still going up',
+  // Offline is not a fault — status.ts: "no signal is the expected condition, so this is
+  // not a problem, it is Tuesday". Title and row label both say WAITING, never FAILED.
+  'stuck.offlineTitle': 'Saved — waiting for signal',
+  'home.notProcessed': 'On this phone — not sent up yet',
   'stuck.analysisTitle': 'No write-up came back',
   'stuck.uploading': '{n} still going up. The scope gets written once they land.',
   'stuck.needsCell': 'Waiting for Wi-Fi. Nothing goes up over cell data unless you allow it.',
@@ -3434,6 +3438,8 @@ const ES: Record<string, string> = {
   'jobpick.tip': 'Consejo',
   'jobpick.tipBody': 'Siempre puede cambiar el trabajo antes de enviar el extra.',
   'stuck.filesTitle': 'Los archivos aún están subiendo',
+  'stuck.offlineTitle': 'Guardado — esperando señal',
+  'home.notProcessed': 'En este teléfono — aún no se ha subido',
   'stuck.analysisTitle': 'No llegó ninguna redacción',
   'stuck.uploading': 'Faltan {n} por subir. El alcance se redacta en cuanto lleguen.',
   'stuck.needsCell': 'Esperando Wi-Fi. Nada sube por datos móviles a menos que usted lo permita.',

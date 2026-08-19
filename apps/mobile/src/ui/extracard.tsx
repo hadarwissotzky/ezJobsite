@@ -29,6 +29,9 @@ import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Icon, type IconName } from './icon';
+// The waiting palette. `savedLocal` is the app's steel-blue for "on the phone, not yet
+// off it" — deliberately not the amber that means somebody must act.
+import { C } from './theme';
 
 /** Outline colours per state. `approved` is the one with a tint. */
 export type ExtraChip = { color: string; bg: string; line: string; label: string };
@@ -74,6 +77,16 @@ export type ExtraCardProps = {
    *  the client has asked something. Null/omitted hides the row — no placeholder. */
   conversation?: string | null;
   /**
+   * NOT YET OFF THIS PHONE (hadar, 2026-08-19: "when the change order is in the list it
+   * should indicate to the user in the record with colour that it is not yet processed").
+   *
+   * Already translated. Rendered in the app's WAITING colour — the steel-blue that
+   * `status.ts` assigns to `savedLocal`, not the amber that means somebody must act and
+   * not the red that means something broke. Mandate #7: no signal is the expected
+   * condition on a jobsite, so this line reports a state, it does not raise an alarm.
+   */
+  pending?: string | null;
+  /**
    * Already formatted and already whole ("$1,450").
    *
    * NO PRICING-TYPE LABEL UNDER IT (hadar 2026-08-13: "remove the payment type field
@@ -89,8 +102,8 @@ export type ExtraCardProps = {
 };
 
 export function ExtraCard({
-  kicker, chip, title, photoUri, meta, person, personRight, conversation, amount, onPress,
-  accessibilityLabel,
+  kicker, chip, title, photoUri, meta, person, personRight, conversation, pending, amount,
+  onPress, accessibilityLabel,
 }: ExtraCardProps) {
   const metaLines = meta.filter((m): m is string => !!m);
   return (
@@ -141,6 +154,14 @@ export function ExtraCard({
                 <Icon name={'updated' as IconName} size={15} />
                 <Text style={[st.schedT, { color: '#B26A00' }]} numberOfLines={1}>
                   {conversation}
+                </Text>
+              </View>
+            )}
+            {!!pending && (
+              <View style={st.sched}>
+                <Icon name={'savedLocal' as IconName} size={15} color={C.savedLocal} />
+                <Text style={[st.schedT, { color: C.savedLocal }]} numberOfLines={1}>
+                  {pending}
                 </Text>
               </View>
             )}

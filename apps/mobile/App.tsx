@@ -660,7 +660,10 @@ export default function App() {
     // The change-order number is the shared card's kicker (2026-08-13). `nte_cents` and
     // the schedule columns were added here in the same change and removed again when
     // the pricing-type and schedule lines came off the card — they had no other reader.
-    co_number: number | null }>>([]);
+    co_number: number | null;
+    /** 1 when any capture behind this extra is still in the outbox — the row then says
+     *  so in steel-blue. SQLite's EXISTS returns an integer, not a boolean. */
+    pending_upload: number }>>([]);
   // The funnel ABOVE change orders — a walkthrough IS an extra in the making, and the
   // Extras tab must show the whole pipeline, not only the signed paperwork at the end.
   const [captured, setCaptured] = React.useState<Array<{
@@ -3209,6 +3212,30 @@ const checkClientMessages = async () => {
                   co.signed_by, co.co_number,
                   ${CO_PHOTO_SUBQUERY} AS photo_relpath,
                   fa.name AS created_by,
+                  -- STILL ON THE PHONE? (hadar, 2026-08-19: "when the change order is in
+                  -- the list it should indicate to the user in the record with colour
+                  -- that it is not yet processed".)
+                  --
+                  -- One EXISTS over the outbox, matching captureStatesForExtra's own
+                  -- definition of queued: a row in capture_outbox IS the pending intent.
+                  -- Both halves of an extra count — the voice capture on decision_version,
+                  -- and the photos paired to it via capture_pair, which never appear
+                  -- there. Missing the photos would paint a row as delivered while its
+                  -- evidence sat in the queue, which is the exact overclaim
+                  -- extraprocstate.ts exists to prevent.
+                  -- (No backticks in this string: it is a JS template literal.)
+                  EXISTS (
+                    SELECT 1 FROM capture_outbox o
+                     WHERE o.capture_id IN (
+                       SELECT dv.capture_id FROM decision_version dv
+                        WHERE dv.decision_id = co.decision_id AND dv.capture_id IS NOT NULL
+                       UNION
+                       SELECT cp.capture_id FROM capture_pair cp
+                        WHERE cp.pair_id IN (
+                          SELECT cp2.pair_id FROM capture_pair cp2
+                           WHERE cp2.capture_id IN (
+                             SELECT dv2.capture_id FROM decision_version dv2
+                              WHERE dv2.decision_id = co.decision_id)))) AS pending_upload,
                   (SELECT COUNT(*) FROM co_question q WHERE q.change_order_id = co.id) AS questions
              FROM change_order co LEFT JOIN project p ON p.id = co.project_id
              -- The SAME join the company feed uses, imported rather than copied, so
@@ -7704,6 +7731,8 @@ const checkClientMessages = async () => {
         personRight={e.created_at_ms > 0 ? shortDate(e.created_at_ms) : null}
         meta={[e.pname || null]}
         conversation={(e.questions ?? 0) > 0 ? T('job.inConversation') : null}
+        // Still on the phone. Steel-blue, stated calmly — see ExtraCard's `pending`.
+        pending={e.pending_upload ? T('home.notProcessed') : null}
         amount={e.amount_cents != null ? `+${moneyWhole(e.amount_cents)}` : null}
         onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }} />
     );

@@ -84,6 +84,11 @@ const st = StyleSheet.create({
     backgroundColor: CAUTION.soft, borderWidth: 1, borderColor: CAUTION.line,
     borderRadius: 12, padding: 13,
   },
+  /** Offline: the same slab in a NEUTRAL palette. Amber is the app's "something needs
+   *  you" colour and nothing here does — it is waiting, which is the expected state on a
+   *  jobsite, not a warning. */
+  waitBanner: { backgroundColor: C.surfaceMuted, borderColor: C.line },
+  waitDisc: { backgroundColor: C.steel },
   draftHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   draftDisc: {
     width: 32, height: 32, borderRadius: 16, backgroundColor: CAUTION.ink,
@@ -655,7 +660,30 @@ function StuckBlock(p: ExtraDraftProps) {
     && p.rec.voices.length > 0
     && p.rec.voices.every((v) => !(v.transcript ?? '').trim());
 
-  const title = waitingToUpload ? t('stuck.filesTitle')
+  /**
+   * OFFLINE IS NOT A FAULT (hadar, 2026-08-19, testing with no signal: the app "is
+   * trying to back it up online … that is wrong. If we are offline it should recognise
+   * it and stop the process here, mark the change order waiting to process, place it in
+   * the queue and tell the user exactly what is going on").
+   *
+   * The transport already did the right thing — `uploader.ts` asks the radio BEFORE it
+   * attempts anything and returns `blocked` without touching the network. What was wrong
+   * was this block, which reported that correct behaviour as a problem: an amber
+   * caution slab, a ✗ disc, "Files still going up", and a primary button offering to
+   * "Try sending them now" — an upload, offered to a phone with no network, which can
+   * only fail.
+   *
+   * `status.ts` already had the right words for this and they are worth repeating here:
+   * "the normal offline case … mandate #7 says no signal is the expected condition, so
+   * this is not a problem, it is Tuesday."
+   *
+   * So offline gets its own calm state: it says what is true, it does not alarm, and it
+   * offers no button that cannot work. Everything else — parked rows, a refused cellular
+   * upload, a silent recording, a failed analysis — keeps the caution treatment, because
+   * each of those IS something a person can act on.
+   */
+  const title = offline ? t('stuck.offlineTitle')
+    : waitingToUpload ? t('stuck.filesTitle')
     : heardNothing ? t('stuck.silentTitle')
     : t('stuck.analysisTitle');
   const why = heardNothing ? t('stuck.silent')
@@ -666,10 +694,11 @@ function StuckBlock(p: ExtraDraftProps) {
     : t('stuck.noAnalysis');
 
   return (
-    <View style={st.draftBanner}>
+    <View style={[st.draftBanner, offline && st.waitBanner]}>
       <View style={st.draftHead}>
-        <View style={st.draftDisc}>
-          <Icon name="failed" size={17} color={C.card} />
+        <View style={[st.draftDisc, offline && st.waitDisc]}>
+          {/* A CLOCK, NOT A CROSS. The ✗ said something had gone wrong; nothing has. */}
+          <Icon name={offline ? 'offline' : 'failed'} size={17} color={C.card} />
         </View>
         <Text style={st.draftTitle}>{title}</Text>
       </View>
@@ -683,7 +712,11 @@ function StuckBlock(p: ExtraDraftProps) {
         {cellBlocked && p.onAllowCellular && (
           <Button label={t('stuck.allowCell')} icon="offline" onPress={p.onAllowCellular} />
         )}
-        {p.onGenerate && (
+        {/* NO RETRY BUTTON WHILE OFFLINE. "Try sending them now" over a dead radio is a
+            button whose only possible outcome is failure, and offering it is what makes a
+            man on a ladder tap it eleven times. The queue goes on its own; that is what
+            the sentence above promises and it is true. */}
+        {p.onGenerate && !offline && (
           <Button
             label={waitingToUpload ? t('stuck.uploadNow')
               : heardNothing ? t('stuck.recordAgain') : t('stuck.tryAgain')}
