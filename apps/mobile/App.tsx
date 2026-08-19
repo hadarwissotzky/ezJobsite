@@ -1076,8 +1076,29 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
   let known: RosterMember[] = [];
   try {
     roster = await listRoster(db, co.project_id);
-    const want = (co.who_directed ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-    if (want) {
+    /**
+     * THE SENTINEL MUST NOT MATCH A PERSON (hadar, 2026-08-19: created a change order
+     * offline and "it entered the person created it as the client by default").
+     *
+     * `who_directed` is NOT NULL and every extra born from a capture is seeded with the
+     * literal role word "Owner" (startextra.ts). This lookup matched that raw string
+     * against the roster — and the roster on a real device HAS a person named "Owner",
+     * and another named "hadar wissotzky", both left behind by an older build whose
+     * client sheet prefilled the sentinel into an editable name field. Verified in the
+     * live database, not inferred.
+     *
+     * So a brand-new extra silently adopted whoever happened to collide with the
+     * placeholder, and on his phone that was himself: the contractor became the client
+     * of his own change order. Offline made it visible rather than causing it — with no
+     * network there is no AI pass to extract a real name, so the seed survives to be
+     * matched.
+     *
+     * `isNamedClient` is the guard that already exists for exactly this word and it is
+     * used two lines below for `requestedBy`. It belongs here too: an unnamed extra has
+     * NO client, and "no client yet" is the state the draft screen is built to show.
+     */
+    if (isNamedClient(co.who_directed)) {
+      const want = (co.who_directed ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
       clientRow = roster.find(
         (m) => m.name.trim().toLowerCase().replace(/\s+/g, ' ') === want) ?? null;
     }

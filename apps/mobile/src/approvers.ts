@@ -31,6 +31,9 @@ import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 // The cross-job identity rule lives in its own leaf so it can be unit-tested
 // (this module imports ./i18n, which the node test runner cannot resolve).
 import { personKey } from './personkey.ts';
+// The ONE definition of "the seed word, not a person". Shared with the reader in
+// App.tsx so the writer and the lookup cannot disagree about what "Owner" means.
+import { isNamedClient } from './startextra.ts';
 export { personKey };
 // Same reason `personKey` is a leaf: the DDL is needed by tests that run under
 // `node --test`, which cannot resolve this module's own import graph. One definition,
@@ -265,6 +268,20 @@ export async function saveClientApprover(
 ): Promise<string> {
   const name = o.name.trim();
   if (!name) throw new Error('a client needs a name');
+  /**
+   * THE PLACEHOLDER IS NOT A PERSON (hadar, 2026-08-19).
+   *
+   * `who_directed` is seeded with the literal role word "Owner" on every extra born from
+   * a capture (startextra.ts), and an older client sheet prefilled that seed into an
+   * EDITABLE NAME FIELD. Saving it created a roster row genuinely named "Owner" — and
+   * from then on every new extra on that job matched the placeholder to that row and
+   * adopted it as the client. The live database has those rows; this is where they got
+   * in.
+   *
+   * Refused at the writer, so it cannot happen again by any route. `isNamedClient` is the
+   * one definition of "is this a real name or the seed", shared with the reader.
+   */
+  if (!isNamedClient(name)) throw new Error('that is the placeholder, not a client name');
   const key = name.toLowerCase().replace(/\s+/g, ' ');
 
   const existing = await db.getAll<{ id: string; name: string }>(
