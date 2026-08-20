@@ -5110,7 +5110,7 @@ const checkClientMessages = async () => {
           <View style={s.c}>
             <Text style={s.h}>EZChangeOrders</Text>
             <Dots />
-            <View style={s.card}>
+            <View style={s.frCard}>
               {/* LANGUAGE, folded in. Each option in its OWN name so choosing needs
                   no reading — but it is no longer a gate before the app explains
                   itself. Tapping switches the whole form live. */}
@@ -5126,25 +5126,39 @@ const checkClientMessages = async () => {
                 </Pressable>
               </View>
 
-              <Text style={s.cardH}>{T('fr.whoTitle')}</Text>
-              <Text style={s.cardNote}>{T('fr.whoWhy')}</Text>
-              <TextInput style={s.moneyInput} value={pName}
-                placeholder={T('fr.yourName')} placeholderTextColor="#8c959f"
+              <Text style={s.frLangLab}>{T('fr.whoTitle')}</Text>
+              <Text style={s.frNote}>{T('fr.whoWhy')}</Text>
+              {/* LEFT-ALIGNED, and not `moneyInput`. That style is centred because a
+                  dollar amount is read as one glyph; a NAME centred in a box reads as
+                  a label rather than something to type into, and the caret starting
+                  mid-field is the tell. Same reason it carries the body font: this is
+                  prose, not a figure. */}
+              <TextInput style={s.frInput} value={pName}
+                placeholder={T('fr.yourName')} placeholderTextColor={C.steel}
+                autoCapitalize="words" textContentType="name"
                 onChangeText={setPName} />
-              <Pressable style={[s.pickWide, pSolo === true && s.pickOn]} onPress={() => setPSolo(true)}>
-                <Text style={[s.pickT, pSolo === true && s.pickTOn]}>{T('fr.solo')}</Text>
+              {/* The ICON is the whole point of these two rows for a reader who does
+                  not read screens: one person, or a building. The word is the caption
+                  on the picture, not the other way round. */}
+              <Pressable style={[s.frPick, pSolo === true && s.frPickOn]} onPress={() => setPSolo(true)}
+                accessibilityRole="radio" accessibilityState={{ selected: pSolo === true }}>
+                <Icon name="person" size={22} color={pSolo === true ? C.brandDark : C.steel} />
+                <Text style={[s.frPickT, pSolo === true && s.frPickTOn]}>{T('fr.solo')}</Text>
               </Pressable>
-              <Pressable style={[s.pickWide, pSolo === false && s.pickOn]} onPress={() => setPSolo(false)}>
-                <Text style={[s.pickT, pSolo === false && s.pickTOn]}>{T('fr.company')}</Text>
+              <Pressable style={[s.frPick, pSolo === false && s.frPickOn]} onPress={() => setPSolo(false)}
+                accessibilityRole="radio" accessibilityState={{ selected: pSolo === false }}>
+                <Icon name="ntCompany" size={22} color={pSolo === false ? C.brandDark : C.steel} />
+                <Text style={[s.frPickT, pSolo === false && s.frPickTOn]}>{T('fr.company')}</Text>
               </Pressable>
               {pSolo === false && (
-                <TextInput style={s.moneyInput} value={pCompany}
-                  placeholder={T('fr.companyName')} placeholderTextColor="#8c959f"
+                <TextInput style={s.frInput} value={pCompany}
+                  placeholder={T('fr.companyName')} placeholderTextColor={C.steel}
+                  autoCapitalize="words" textContentType="organizationName"
                   onChangeText={setPCompany} />
               )}
-              <Pressable style={[s.confirmWide, !canGo && s.btnOff]} disabled={!canGo}
+              <Pressable style={[s.frCta, !canGo && s.frCtaOff]} disabled={!canGo}
                 onPress={() => setPSub('trade')}>
-                <Text style={s.confirmT}>{T('fr.continue')}</Text>
+                <Text style={s.frCtaT}>{T('fr.continue')}</Text>
               </Pressable>
             </View>
           </View>
@@ -5162,19 +5176,21 @@ const checkClientMessages = async () => {
         <View style={s.c}>
           <Text style={s.h}>EZChangeOrders</Text>
           <Dots />
-          <View style={s.card}>
-            <Text style={s.cardH}>{T('fr.tradeTitle')}</Text>
-            <Text style={s.cardNote}>{T('fr.tradeWhy')}</Text>
+          {/* Same card as the 'who' step. Two halves of one setup flow that did not
+              match each other was the other half of the complaint. */}
+          <View style={s.frCard}>
+            <Text style={s.frLangLab}>{T('fr.tradeTitle')}</Text>
+            <Text style={s.frNote}>{T('fr.tradeWhy')}</Text>
             <View style={s.tradeGrid}>
               {TRADES.map((tr) => (
-                <Pressable key={tr} style={[s.tradeCell, pTrade === tr && s.pickOn]}
+                <Pressable key={tr} style={[s.tradeCell, pTrade === tr && s.frPickOn]}
                   onPress={() => setPTrade(tr)}>
-                  <Text style={[s.tradeCellT, pTrade === tr && s.pickTOn]}>{T('trade.' + tr)}</Text>
+                  <Text style={[s.tradeCellT, pTrade === tr && s.frPickTOn]}>{T('trade.' + tr)}</Text>
                 </Pressable>
               ))}
             </View>
-            <Pressable style={s.confirmWide} onPress={() => finish(pTrade)}>
-              <Text style={s.confirmT}>{T('fr.continue')}</Text>
+            <Pressable style={s.frCta} onPress={() => finish(pTrade)}>
+              <Text style={s.frCtaT}>{T('fr.continue')}</Text>
             </Pressable>
             <Pressable style={s.later} onPress={() => finish(null)}>
               <Text style={s.laterT}>{T('fr.skip')}</Text>
@@ -10467,16 +10483,46 @@ const s = StyleSheet.create({
   frLangChipOn: { backgroundColor: '#151A1E', borderColor: '#151A1E' },
   frLangChipT: { color: '#151A1E', fontFamily: 'Barlow_700Bold', fontSize: 17 },
   frLangChipTOn: { color: '#ffffff' },
+  /* ── first-run profile card (restyled 2026-08-19) ────────────────────────────
+     hadar: "update the registration form with design that fits the app".
+     It did not. This screen was still on `s.card` — `#dafbe1` on a `#2da44e`
+     border, a bright GitHub-green from an early build — while every other
+     surface moved to the warm cream + olive theme in `src/ui/theme.ts`. The
+     first screen a new contractor ever sees was the one screen that looked like
+     a different product.
+     Written against the theme tokens rather than fresh hex so the next palette
+     change reaches this screen too, which is exactly what failed here. */
+  frCard: { backgroundColor: C.brandSoft, borderColor: C.brandLine, borderWidth: 1,
+    borderRadius: 18, padding: 18, marginBottom: 16 },
+  frNote: { color: C.steel, fontFamily: F.body, fontSize: 13.5, lineHeight: 19,
+    marginTop: 6, marginBottom: 12 },
+  frInput: { backgroundColor: C.raised, borderColor: C.line, borderWidth: 1, borderRadius: 12,
+    color: C.ink, fontFamily: F.body, fontSize: 17, paddingHorizontal: 14,
+    paddingVertical: 15, marginBottom: 10 },
+  // Row, not a centred block: the icon leads and the label sits beside it.
+  frPick: { flexDirection: 'row', alignItems: 'center', gap: 12, alignSelf: 'stretch',
+    backgroundColor: C.raised, borderColor: C.line, borderWidth: 1, borderRadius: 12,
+    paddingVertical: 16, paddingHorizontal: 14, marginBottom: 10 },
+  // Selected reads as brand-filled, not merely outlined — the state has to survive
+  // being glanced at in daylight (mandate: gloves, ladder, sun).
+  frPickOn: { borderColor: C.brand, borderWidth: 2, backgroundColor: C.brandSoft },
+  frPickT: { color: C.ink, fontFamily: F.bodyBold, fontSize: 17 },
+  frPickTOn: { color: C.brandDark },
+  frCta: { alignSelf: 'stretch', backgroundColor: C.brandDark, borderRadius: 12,
+    paddingVertical: 17, alignItems: 'center', marginTop: 4 },
+  frCtaT: { color: '#fff', fontFamily: F.bodyBold, fontSize: 18, letterSpacing: -0.2 },
+  // Muted, NOT the old blue-grey `btnOff` — a disabled control on a green card
+  // should read as "not yet", and a cool grey there reads as broken.
+  frCtaOff: { backgroundColor: '#C3C9C0' },
+
   // first-run progress dots
   frDots: { flexDirection: 'row', justifyContent: 'center', marginBottom: 8, marginTop: 2 },
   frDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D5D0C7', marginHorizontal: 4 },
   frDotOn: { backgroundColor: '#151A1E', width: 20 },
-  // profile pick buttons (solo/company) — big touch targets (research: 48dp+, gloves)
-  pickWide: { alignSelf: 'stretch', backgroundColor: '#ffffff', borderColor: '#D5D0C7',
-    borderWidth: 1, borderRadius: 12, paddingVertical: 18, alignItems: 'center', marginBottom: 10 },
-  pickOn: { borderColor: '#151A1E', backgroundColor: '#eafaf0', borderWidth: 2 },
-  pickT: { color: '#151A1E', fontSize: 18, fontWeight: '700' },
-  pickTOn: { color: '#536B49' },
+  // `pickWide`/`pickOn`/`pickT`/`pickTOn` lived here — the solo/company buttons.
+  // Replaced by `frPick*` above (2026-08-19) and removed rather than left behind:
+  // they were the last readers of the old off-theme palette on this screen, and a
+  // leftover style is how the next person restyles the wrong thing.
   // trade grid — 2-up big cells
   tradeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 6 },
   tradeCell: { width: '48%', backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
