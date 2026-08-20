@@ -15,6 +15,7 @@ import { REJECT_DDL, SupabaseConnector } from './src/connector';
 import { forgetSeenOnboarding, getSeenOnboarding, setSeenOnboarding } from './src/auth';
 import { buildLine, useOta } from './src/otaclient';
 import { Onboarding } from './src/ui/onboarding';
+import { SETUP_ART, StepHowItWorks, StepLanguage, StepProfile } from './src/ui/setupflow';
 import { FirstExtra } from './src/ui/firstextra';
 import { GuidedCoach } from './src/ui/guidedcoach';
 import { StepDone, StepGaps, StepReview, StepTranscript,
@@ -212,7 +213,7 @@ import { addParty, assignBoundary, drainScopeOutbox, ensurePartySchema, listBoun
 import { captureStatus, levelColor, screenStatus } from './src/status';
 import { FIRST_RUN_TAPS, firstExtraSeen, isFirstRun, markFirstExtraSeen, markFirstRunDone,
          nextStep, resetFirstRunFlags, savedLang, saveLang } from './src/firstrun';
-import { getProfile, hasProfile as hasProfileFn, saveProfile, TRADES } from './src/profile';
+import { getProfile, hasProfile as hasProfileFn, saveProfile } from './src/profile';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          playCapture, stopPlayback, type Note } from './src/annotate';
 import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
@@ -3230,14 +3231,15 @@ const checkClientMessages = async () => {
   // and reality drift apart the moment someone kills the app mid-setup.
   const [firstRun, setFirstRun] = React.useState<boolean | null>(null);
   // First-run profile ("who you are"). hasProfileState gates the step; the rest is
-  // the in-step form. `pSub` is the sub-screen: 'who' (name + solo/company) then
-  // 'trade' (skippable grid). Kept minimal on purpose — see src/profile.ts.
+  // the in-step form. `pSub` is the sub-screen — THREE now (hadar 2026-08-19, from
+  // the mockups): 'lang' (language) → 'who' (name + solo/company) → 'how' (what the
+  // app does, ending in "Create first change order"). The old 'trade' grid is gone
+  // from first run; `settingsscreen.tsx` still collects it. See ui/setupflow.tsx.
   const [hasProfileState, setHasProfile] = React.useState(false);
-  const [pSub, setPSub] = React.useState<'who' | 'trade'>('who');
+  const [pSub, setPSub] = React.useState<'lang' | 'who' | 'how'>('lang');
   const [pName, setPName] = React.useState('');
   const [pSolo, setPSolo] = React.useState<boolean | null>(null);
   const [pCompany, setPCompany] = React.useState('');
-  const [pTrade, setPTrade] = React.useState<string | null>(null);
   // Resolved from the session at startup. Nothing that syncs may be written with a
   // placeholder: the server's types are the contract, and a string that cannot be
   // a UUID is not a user.
@@ -5080,123 +5082,68 @@ const checkClientMessages = async () => {
   // (first_run_done already set) with no profile must still be asked who they are.
   if ((firstRun || !hasProfileState) && ready && !gate) {
     const step = nextStep({ hasProfile: hasProfileState });
-    // Progress spine across the two profile sub-screens (research: progress
-    // indicators lower onboarding anxiety). 'who' is 0, 'trade' is 1.
-    const stepIndex = pSub === 'who' ? 0 : 1;
-    const Dots = () => (
-      <View style={s.frDots}>
-        {[0, 1].map((d) => (
-          <View key={d} style={[s.frDot, d === stepIndex && s.frDotOn]} />
-        ))}
-      </View>
-    );
-
     if (step === 'done') {
       // No celebration screen. They came here to create an extra.
       void markFirstRunDone(db).then(() => setFirstRun(false));
       return <SplashScreen />;
     }
 
-    // THE PROFILE — the one setup screen (2026-07-20). Language folds in as a
-    // bilingual toggle at the top; NO job step follows — the user lands on the
-    // capture-first home and starts by creating an extra. name + solo/company,
-    // then trade (skippable); the minimum that personalises a proposal.
+    /**
+     * THE THREE SETUP SCREENS (hadar 2026-08-19, from the mockups) — language, then
+     * who you are, then what the app does. They live in `ui/setupflow.tsx`; this is
+     * only the wiring, because the state they edit (`pName`, `pSolo`, `pCompany`,
+     * `lang`) is owned here and threading it out is the whole job.
+     *
+     * The old two-step green form is gone, and with it the trade grid: asking a
+     * stranger to classify his business before he has seen the app do anything is a
+     * question posed at the worst possible moment. Settings still collects it.
+     */
     if (step === 'profile') {
-      if (pSub === 'who') {
-        // Company name is OPTIONAL (hadar 2026-07-20): picking Company but leaving
-        // the name blank must not block onboarding. Only name + solo/company gate.
-        const canGo = pName.trim().length > 0 && pSolo !== null;
-        return (
-          <View style={s.c}>
-            <Text style={s.h}>EZChangeOrders</Text>
-            <Dots />
-            <View style={s.frCard}>
-              {/* LANGUAGE, folded in. Each option in its OWN name so choosing needs
-                  no reading — but it is no longer a gate before the app explains
-                  itself. Tapping switches the whole form live. */}
-              <Text style={s.frLangLab}>Language · Idioma</Text>
-              <View style={s.frLangRow}>
-                <Pressable style={[s.frLangChip, lang === 'en' && s.frLangChipOn]}
-                  onPress={async () => { setLang('en'); setLangState('en'); await saveLang(db, 'en'); }}>
-                  <Text style={[s.frLangChipT, lang === 'en' && s.frLangChipTOn]}>English</Text>
-                </Pressable>
-                <Pressable style={[s.frLangChip, lang === 'es' && s.frLangChipOn]}
-                  onPress={async () => { setLang('es'); setLangState('es'); await saveLang(db, 'es'); }}>
-                  <Text style={[s.frLangChipT, lang === 'es' && s.frLangChipTOn]}>Español</Text>
-                </Pressable>
-              </View>
-
-              <Text style={s.frLangLab}>{T('fr.whoTitle')}</Text>
-              <Text style={s.frNote}>{T('fr.whoWhy')}</Text>
-              {/* LEFT-ALIGNED, and not `moneyInput`. That style is centred because a
-                  dollar amount is read as one glyph; a NAME centred in a box reads as
-                  a label rather than something to type into, and the caret starting
-                  mid-field is the tell. Same reason it carries the body font: this is
-                  prose, not a figure. */}
-              <TextInput style={s.frInput} value={pName}
-                placeholder={T('fr.yourName')} placeholderTextColor={C.steel}
-                autoCapitalize="words" textContentType="name"
-                onChangeText={setPName} />
-              {/* The ICON is the whole point of these two rows for a reader who does
-                  not read screens: one person, or a building. The word is the caption
-                  on the picture, not the other way round. */}
-              <Pressable style={[s.frPick, pSolo === true && s.frPickOn]} onPress={() => setPSolo(true)}
-                accessibilityRole="radio" accessibilityState={{ selected: pSolo === true }}>
-                <Icon name="person" size={22} color={pSolo === true ? C.brandDark : C.steel} />
-                <Text style={[s.frPickT, pSolo === true && s.frPickTOn]}>{T('fr.solo')}</Text>
-              </Pressable>
-              <Pressable style={[s.frPick, pSolo === false && s.frPickOn]} onPress={() => setPSolo(false)}
-                accessibilityRole="radio" accessibilityState={{ selected: pSolo === false }}>
-                <Icon name="ntCompany" size={22} color={pSolo === false ? C.brandDark : C.steel} />
-                <Text style={[s.frPickT, pSolo === false && s.frPickTOn]}>{T('fr.company')}</Text>
-              </Pressable>
-              {pSolo === false && (
-                <TextInput style={s.frInput} value={pCompany}
-                  placeholder={T('fr.companyName')} placeholderTextColor={C.steel}
-                  autoCapitalize="words" textContentType="organizationName"
-                  onChangeText={setPCompany} />
-              )}
-              <Pressable style={[s.frCta, !canGo && s.frCtaOff]} disabled={!canGo}
-                onPress={() => setPSub('trade')}>
-                <Text style={s.frCtaT}>{T('fr.continue')}</Text>
-              </Pressable>
-            </View>
-          </View>
-        );
-      }
-      // trade sub-screen — big-button grid, skippable
-      const finish = async (trade: string | null) => {
+      const saveAndGo = async () => {
         await saveProfile(connector, db, {
           name: pName, isSolo: pSolo === true,
-          company: pSolo === false ? pCompany : null, trade,
+          company: pSolo === false ? pCompany : null,
+          trade: null,   // asked later, in Settings — see setupflow.tsx header
         });
         setHasProfile(true);
       };
+
+      if (pSub === 'lang') {
+        return (
+          <StepLanguage lang={lang} art={SETUP_ART.lang}
+            onLang={async (l) => { setLang(l); setLangState(l); await saveLang(db, l); }}
+            onContinue={() => setPSub('who')} />
+        );
+      }
+
+      if (pSub === 'who') {
+        return (
+          <StepProfile art={SETUP_ART.setup}
+            name={pName} onName={setPName}
+            isSolo={pSolo} onSolo={setPSolo}
+            company={pCompany} onCompany={setPCompany}
+            onContinue={() => setPSub('how')} />
+        );
+      }
+
+      /**
+       * The two exits differ, and the difference is the point.
+       *
+       * "Create first change order" saves and stops there — which hands off to the
+       * `FirstExtra` screen below, the guided walkthrough that already exists for
+       * exactly this moment. Marking it seen here would SKIP the thing the button
+       * promises.
+       *
+       * "Maybe later" saves and marks that walkthrough seen, landing on the home
+       * screen. Someone who opened the app to look around gets to look around; a
+       * "later" that still forces you through a tutorial is not a later.
+       */
       return (
-        <View style={s.c}>
-          <Text style={s.h}>EZChangeOrders</Text>
-          <Dots />
-          {/* Same card as the 'who' step. Two halves of one setup flow that did not
-              match each other was the other half of the complaint. */}
-          <View style={s.frCard}>
-            <Text style={s.frLangLab}>{T('fr.tradeTitle')}</Text>
-            <Text style={s.frNote}>{T('fr.tradeWhy')}</Text>
-            <View style={s.tradeGrid}>
-              {TRADES.map((tr) => (
-                <Pressable key={tr} style={[s.tradeCell, pTrade === tr && s.frPickOn]}
-                  onPress={() => setPTrade(tr)}>
-                  <Text style={[s.tradeCellT, pTrade === tr && s.frPickTOn]}>{T('trade.' + tr)}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <Pressable style={s.frCta} onPress={() => finish(pTrade)}>
-              <Text style={s.frCtaT}>{T('fr.continue')}</Text>
-            </Pressable>
-            <Pressable style={s.later} onPress={() => finish(null)}>
-              <Text style={s.laterT}>{T('fr.skip')}</Text>
-            </Pressable>
-          </View>
-        </View>
+        <StepHowItWorks art={SETUP_ART.capture}
+          onCreateFirst={() => void saveAndGo()}
+          onLater={() => void saveAndGo().then(() => {
+            void markFirstExtraSeen(db); setFirstExtra(false);
+          })} />
       );
     }
 
@@ -10471,63 +10418,15 @@ const s = StyleSheet.create({
   oneStatus: { borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 },
   oneStatusT: { fontWeight: '700', fontSize: 14 },
   oneStatusD: { color: '#57606a', fontSize: 11, marginTop: 3 },
-  // Thumb-sized. This is the first thing a new user ever touches, and they may be
-  // wearing gloves when they do it.
-  // Language toggle inside the profile form (folded in 2026-07-20). Each option in
-  // its own name so it needs no reading; the selected one fills with ink.
-  frLangLab: { color: '#5E666E', fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 12.5,
-    textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 8 },
-  frLangRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
-  frLangChip: { flex: 1, backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
-    borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  frLangChipOn: { backgroundColor: '#151A1E', borderColor: '#151A1E' },
-  frLangChipT: { color: '#151A1E', fontFamily: 'Barlow_700Bold', fontSize: 17 },
-  frLangChipTOn: { color: '#ffffff' },
-  /* ── first-run profile card (restyled 2026-08-19) ────────────────────────────
-     hadar: "update the registration form with design that fits the app".
-     It did not. This screen was still on `s.card` — `#dafbe1` on a `#2da44e`
-     border, a bright GitHub-green from an early build — while every other
-     surface moved to the warm cream + olive theme in `src/ui/theme.ts`. The
-     first screen a new contractor ever sees was the one screen that looked like
-     a different product.
-     Written against the theme tokens rather than fresh hex so the next palette
-     change reaches this screen too, which is exactly what failed here. */
-  frCard: { backgroundColor: C.brandSoft, borderColor: C.brandLine, borderWidth: 1,
-    borderRadius: 18, padding: 18, marginBottom: 16 },
-  frNote: { color: C.steel, fontFamily: F.body, fontSize: 13.5, lineHeight: 19,
-    marginTop: 6, marginBottom: 12 },
-  frInput: { backgroundColor: C.raised, borderColor: C.line, borderWidth: 1, borderRadius: 12,
-    color: C.ink, fontFamily: F.body, fontSize: 17, paddingHorizontal: 14,
-    paddingVertical: 15, marginBottom: 10 },
-  // Row, not a centred block: the icon leads and the label sits beside it.
-  frPick: { flexDirection: 'row', alignItems: 'center', gap: 12, alignSelf: 'stretch',
-    backgroundColor: C.raised, borderColor: C.line, borderWidth: 1, borderRadius: 12,
-    paddingVertical: 16, paddingHorizontal: 14, marginBottom: 10 },
-  // Selected reads as brand-filled, not merely outlined — the state has to survive
-  // being glanced at in daylight (mandate: gloves, ladder, sun).
-  frPickOn: { borderColor: C.brand, borderWidth: 2, backgroundColor: C.brandSoft },
-  frPickT: { color: C.ink, fontFamily: F.bodyBold, fontSize: 17 },
-  frPickTOn: { color: C.brandDark },
-  frCta: { alignSelf: 'stretch', backgroundColor: C.brandDark, borderRadius: 12,
-    paddingVertical: 17, alignItems: 'center', marginTop: 4 },
-  frCtaT: { color: '#fff', fontFamily: F.bodyBold, fontSize: 18, letterSpacing: -0.2 },
-  // Muted, NOT the old blue-grey `btnOff` — a disabled control on a green card
-  // should read as "not yet", and a cool grey there reads as broken.
-  frCtaOff: { backgroundColor: '#C3C9C0' },
-
-  // first-run progress dots
-  frDots: { flexDirection: 'row', justifyContent: 'center', marginBottom: 8, marginTop: 2 },
-  frDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D5D0C7', marginHorizontal: 4 },
-  frDotOn: { backgroundColor: '#151A1E', width: 20 },
-  // `pickWide`/`pickOn`/`pickT`/`pickTOn` lived here — the solo/company buttons.
-  // Replaced by `frPick*` above (2026-08-19) and removed rather than left behind:
-  // they were the last readers of the old off-theme palette on this screen, and a
-  // leftover style is how the next person restyles the wrong thing.
-  // trade grid — 2-up big cells
-  tradeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 6 },
-  tradeCell: { width: '48%', backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
-    borderRadius: 12, paddingVertical: 20, alignItems: 'center', marginBottom: 10 },
-  tradeCellT: { color: '#151A1E', fontSize: 16, fontWeight: '700' },
+  // The first-run styles lived here: the folded-in language toggle (frLangLab,
+  // frLangRow, frLangChip and its on-states), the profile card (frCard, frNote,
+  // frInput, the frPick family, the frCta family — added and superseded on the same
+  // day), the two-step spine (frDots, frDot, frDotOn) and the trade picker
+  // (tradeGrid, tradeCell, tradeCellT). All removed 2026-08-19 when the three-screen
+  // flow replaced them; it carries its own styles in `ui/setupflow.tsx`. Verified 0
+  // remaining readers before deleting. TRADES itself survives in `src/profile.ts`,
+  // because `settingsscreen.tsx` still renders the chips — only the first-run copy
+  // of the picker is gone.
   jobBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
     borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
