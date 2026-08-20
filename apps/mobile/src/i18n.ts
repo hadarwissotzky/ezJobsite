@@ -1963,6 +1963,10 @@ const EN: Record<string, string> = {
   'det.totalLabel': 'Total approved',
 
   'common.close': 'Close',
+  'common.ok': 'OK',
+  // The one acknowledgement after a capture finishes processing (hadar 2026-08-20).
+  'proc.readyTitle': 'Your change order is ready',
+  'proc.readyBody': 'We wrote up what you said. Have a look before you send it.',
   'common.cancel': 'Cancel',
   'common.back': 'Back',
 };
@@ -3635,6 +3639,9 @@ const ES: Record<string, string> = {
   'det.totalLabel': 'Total aprobado',
 
   'common.close': 'Cerrar',
+  'common.ok': 'OK',
+  'proc.readyTitle': 'Tu orden de cambio está lista',
+  'proc.readyBody': 'Escribimos lo que dijiste. Revísala antes de enviarla.',
   'common.cancel': 'Cancelar',
   'common.back': 'Atrás',
 };

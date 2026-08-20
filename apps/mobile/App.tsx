@@ -2888,16 +2888,50 @@ const checkClientMessages = async () => {
           // A beat so the checkmarks are SEEN — a flash reads as a glitch.
           await new Promise((r) => setTimeout(r, 900));
           if (!alive) return;
+          /**
+           * HAND-OFF, decided OUTSIDE the state updater.
+           *
+           * React may invoke a `setState` updater twice, so dispatching from inside one
+           * risks running the hand-off twice — the same hazard `dismissAck` documents.
+           * The updater now only reads and clears; the dispatch happens after it.
+           *
+           * hadar, 2026-08-20: "once the CO is processed, we should navigate to the CO
+           * details page. we should just acknowledge the creation and processing of the
+           * CO with a popup — and by clicking ok taking them to the detail page."
+           *
+           * A NEW extra used to land in the priced composer (`finishExtraById`) — a
+           * form standing between a contractor and the thing he just made, asking for a
+           * price the AI has usually already extracted. The record screen shows the
+           * write-up, the photos and the price, and carries "Edit details" into that
+           * same composer for the cases where it IS wrong. Nothing is lost; the form
+           * stops being compulsory.
+           *
+           * Augment and generate are UNTOUCHED. They are not "a change order was just
+           * created" — one grows an existing record and the other is mid-edit — so
+           * neither wants this popup, and both already return where they came from.
+           */
+          let handoff: null | { kind: 'gen' | 'aug' | 'new'; coId: string; ids: string[] } = null;
           setTransition((t) => {
-            // New extra → open the priced composer; augment → grow the description
-            // from the added voice (same rules as a new extra), then reopen the record.
             if (t) {
-              if (t.isGenerate) void finishGenerateById(t.coId);
-              else if (t.isAugment) void finishAugmentById(t.coId, t.ids);
-              else void finishExtraById(t.coId);
+              handoff = { kind: t.isGenerate ? 'gen' : t.isAugment ? 'aug' : 'new',
+                          coId: t.coId, ids: t.ids };
             }
             return null;
           });
+          if (handoff) {
+            const h: { kind: 'gen' | 'aug' | 'new'; coId: string; ids: string[] } = handoff;
+            if (h.kind === 'gen') void finishGenerateById(h.coId);
+            else if (h.kind === 'aug') void finishAugmentById(h.coId, h.ids);
+            else {
+              setAck({
+                kind: 'ok',
+                title: T('proc.readyTitle'),
+                detail: T('proc.readyBody'),
+                okLabel: T('common.ok'),
+                then: () => { void openRecord(h.coId); },
+              });
+            }
+          }
           return;
         }
         await new Promise((r) => setTimeout(r, 1000));
@@ -3187,6 +3221,13 @@ const checkClientMessages = async () => {
    */
   const [ack, setAck] = React.useState<null | {
     kind: 'ok' | 'no'; title: string; detail?: string | null;
+    /**
+     * Label for a confirm button. Its presence also CANCELS the auto-dismiss timer:
+     * an ack that hands off somewhere else (2026-08-20 — the post-processing one that
+     * opens the change order) must not navigate on a 1.9s fuse while the phone is in
+     * a pocket. `kind: 'ok'` without this is unchanged: it still fades by itself.
+     */
+    okLabel?: string;
     /** Runs when this ack is dismissed, however it is dismissed — the timeout, the
      *  scrim, or the button. Added for the account close, where the sign-out has to
      *  wait until the confirmation has actually been SEEN: signing out immediately
@@ -3198,7 +3239,8 @@ const checkClientMessages = async () => {
   // state updater twice, and a double-invoked `then` here is a double sign-out.
   const dismissAck = React.useCallback(() => { ack?.then?.(); setAck(null); }, [ack]);
   React.useEffect(() => {
-    if (!ack || ack.kind !== 'ok') return;
+    // An ack with a button waits for the button. See `okLabel`.
+    if (!ack || ack.kind !== 'ok' || ack.okLabel) return;
     const t = setTimeout(dismissAck, 1900);
     return () => clearTimeout(t);
   }, [ack, dismissAck]);
@@ -5567,9 +5609,9 @@ const checkClientMessages = async () => {
         <Icon name={ack.kind === 'ok' ? 'ntCheck' : 'ntAttention'} size={46} />
         <Text style={s.ackTitle}>{ack.title}</Text>
         {!!ack.detail && <Text style={s.ackDetail}>{ack.detail}</Text>}
-        {ack.kind === 'no' && (
+        {(ack.kind === 'no' || !!ack.okLabel) && (
           <Pressable style={s.ackBtn} accessibilityRole="button" onPress={dismissAck}>
-            <Text style={s.ackBtnT}>{T('common.close')}</Text>
+            <Text style={s.ackBtnT}>{ack.okLabel ?? T('common.close')}</Text>
           </Pressable>
         )}
       </View>
