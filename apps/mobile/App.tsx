@@ -5127,23 +5127,17 @@ const checkClientMessages = async () => {
       }
 
       /**
-       * The two exits differ, and the difference is the point.
+       * ONE exit, deliberately. The updated mockups dropped the "Maybe later" this
+       * screen used to carry, and that is right: saving here hands off to the
+       * `FirstExtra` screen below, which ALREADY offers a later. Two escape hatches
+       * one tap apart is just a second chance to leave.
        *
-       * "Create first change order" saves and stops there — which hands off to the
-       * `FirstExtra` screen below, the guided walkthrough that already exists for
-       * exactly this moment. Marking it seen here would SKIP the thing the button
-       * promises.
-       *
-       * "Maybe later" saves and marks that walkthrough seen, landing on the home
-       * screen. Someone who opened the app to look around gets to look around; a
-       * "later" that still forces you through a tutorial is not a later.
+       * Note what this does NOT do — mark the walkthrough seen. That would skip the
+       * very thing the button promises.
        */
       return (
         <StepHowItWorks art={SETUP_ART.capture}
-          onCreateFirst={() => void saveAndGo()}
-          onLater={() => void saveAndGo().then(() => {
-            void markFirstExtraSeen(db); setFirstExtra(false);
-          })} />
+          onCreateFirst={() => void saveAndGo()} />
       );
     }
 
