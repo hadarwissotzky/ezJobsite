@@ -35,6 +35,11 @@ import { COACH_PROMPTS } from '../guidedflow';
 import { t as T } from '../i18n';
 
 const GOLD = '#D9A02B';
+/** The CTA is GREEN in the 2026-08-20 mockup, not gold. Gold on this screen now
+ *  belongs to the four prompt NUMBERS — it marks the things to say. A gold button
+ *  underneath them read as a fifth item in the same list rather than the action
+ *  that ends it. */
+const GREEN = '#506A45';
 const INK = '#131110';
 const CREAM = '#F7F5F0';
 const SAND = '#EFE7D9';
@@ -96,7 +101,10 @@ export function GuidedCoach({ onStart, onBack, onHearExample, playing }: {
         )}
 
         <Pressable style={st.cta} accessibilityRole="button" onPress={onStart}>
-          <Icon name="micLine" size={19} color="#141210" />
+          {/* White, because the button under it is now green. It was #141210 when the
+              button was gold — a dark glyph left on a dark green fill is the kind of
+              thing that survives a colour change unnoticed. */}
+          <Icon name="micLine" size={19} color="#fff" />
           <Text style={st.ctaT}>{T('fx.start')}</Text>
         </Pressable>
       </ScrollView>
@@ -138,6 +146,6 @@ const st = StyleSheet.create({
   hearT: { fontFamily: 'Inter_600SemiBold', fontSize: 14.5, color: INK },
 
   cta: { flexDirection: 'row', gap: 10, minHeight: 56, borderRadius: 10,
-    backgroundColor: GOLD, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
-  ctaT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#141210' },
+    backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  ctaT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#fff' },
 });

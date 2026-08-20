@@ -31,6 +31,12 @@ import { Icon, type IconName } from './icon';
 import { t as T } from '../i18n';
 
 const GOLD = '#D9A02B';
+/** The mockup (2026-08-20) puts this screen's headline, rule and emphasised words
+ *  in the brand green and leaves GOLD to the rail's live step alone. The two
+ *  colours are doing different jobs here: green is the product, gold is "you are
+ *  here". They were the same colour before, which is why the rail did not read as
+ *  a position marker. */
+const GREEN = '#506A45';
 const INK = '#131110';
 const CREAM = '#F7F5F0';
 /** The pale disc behind the body glyphs and the reassurance strip. */
@@ -82,7 +88,7 @@ export function FirstExtra({ onCoach, onStart, onLater }: {
         {/* CENTRED, unlike the onboarding's left-ranged headlines. This one is an
             invitation rather than a claim, and it sits over a centred body. */}
         <Text style={st.head}>{T('fx.h1')}</Text>
-        <Text style={[st.head, { color: GOLD }]}>{T('fx.h2')}</Text>
+        <Text style={[st.head, { color: GREEN }]}>{T('fx.h2')}</Text>
         <View style={st.rule} />
 
         <View style={st.rows}>
@@ -165,7 +171,7 @@ const st = StyleSheet.create({
 
   head: { fontFamily: 'Oswald_700Bold', fontSize: 33, lineHeight: 36, color: INK,
     textTransform: 'uppercase', textAlign: 'center', letterSpacing: -0.2 },
-  rule: { width: 52, height: 3, borderRadius: 2, backgroundColor: GOLD,
+  rule: { width: 52, height: 3, borderRadius: 2, backgroundColor: GREEN,
     marginTop: 14, marginBottom: 22 },
 
   // ── the three sentences ──
@@ -175,7 +181,7 @@ const st = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center' },
   rowT: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 15.5, lineHeight: 22,
     color: '#2C2A27' },
-  rowStrong: { fontFamily: 'Inter_700Bold', color: GOLD },
+  rowStrong: { fontFamily: 'Inter_700Bold', color: GREEN },
 
   // ── the promise ──
   promise: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: SAND,
@@ -207,10 +213,13 @@ const st = StyleSheet.create({
     textAlign: 'center' },
 
   // ── the two doors ──
+  // GREEN in the 2026-08-20 mockup. "Show me what to say" is the primary action of
+  // the whole guided flow, and green is what that flow uses for go-forward; gold on
+  // this screen is reserved for the rail's live step.
   cta: { alignSelf: 'stretch', flexDirection: 'row', gap: 12, minHeight: 56,
-    borderRadius: 10, backgroundColor: GOLD, alignItems: 'center', justifyContent: 'center' },
-  ctaT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#141210' },
-  ctaArrow: { fontSize: 18, color: '#141210', marginTop: -2 },
+    borderRadius: 10, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center' },
+  ctaT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#fff' },
+  ctaArrow: { fontSize: 18, color: '#fff', marginTop: -2 },
   later: { alignSelf: 'stretch', minHeight: 54, borderRadius: 10, borderWidth: 1.4,
     borderColor: '#D5CEC4', alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   laterT: { fontFamily: 'Inter_600SemiBold', fontSize: 16.5, color: '#2C2A27' },

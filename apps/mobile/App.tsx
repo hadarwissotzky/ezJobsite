@@ -15,6 +15,7 @@ import { REJECT_DDL, SupabaseConnector } from './src/connector';
 import { forgetSeenOnboarding, getSeenOnboarding, setSeenOnboarding } from './src/auth';
 import { buildLine, useOta } from './src/otaclient';
 import { Onboarding } from './src/ui/onboarding';
+import { RecordConsent } from './src/ui/recordconsent';
 import { SETUP_ART, StepHowItWorks, StepLanguage, StepProfile } from './src/ui/setupflow';
 import { FirstExtra } from './src/ui/firstextra';
 import { GuidedCoach } from './src/ui/guidedcoach';
@@ -5838,25 +5839,21 @@ const checkClientMessages = async () => {
       setTerms(true);
       setShowTerms(null);
     };
+    // Moved out of this file 2026-08-20 (hadar's design). It was the last screen in
+    // the guided flow still drawn on the old green `s.card`, sitting between two
+    // screens already in the Oswald-over-cream language — see ui/recordconsent.tsx.
+    // The English string that used to be hardcoded here ("Checking your location…")
+    // now lives in i18n as `terms.detecting`; it was the only untranslated sentence
+    // on the screen, which a Spanish-reading contractor would have hit at exactly the
+    // moment the app asks him to accept legal terms.
     return (
-      <View style={s.c}>
-        <Text style={s.h}>EZChangeOrders</Text>
-        <View style={s.card}>
-          <Text style={s.cardH}>{T('terms.title')}</Text>
-          <Text style={s.cardNote}>{T('terms.body')}</Text>
-          {showTerms.detecting ? (
-            <Text style={s.dmeta}>Checking your location…</Text>
-          ) : allParty && showTerms.jur ? (
-            <Text style={s.warn}>{T({ k: 'terms.reminder', p: { state: showTerms.jur } })}</Text>
-          ) : null}
-          <Pressable style={s.confirmWide} onPress={accept}>
-            <Text style={s.confirmT}>{T('terms.accept')}</Text>
-          </Pressable>
-          <Pressable style={s.later} onPress={() => setShowTerms(null)}>
-            <Text style={s.laterT}>{T('terms.later')}</Text>
-          </Pressable>
-        </View>
-      </View>
+      <RecordConsent
+        jurisdiction={showTerms.jur ?? null}
+        allParty={allParty}
+        detecting={!!showTerms.detecting}
+        onAccept={accept}
+        onLater={() => setShowTerms(null)}
+      />
     );
   }
 

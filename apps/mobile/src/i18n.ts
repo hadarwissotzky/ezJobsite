@@ -115,7 +115,9 @@ const EN: Record<string, string> = {
   'consent.notAdvice': 'This records what you chose. It is not legal advice — recording rules differ by state and by who is in the room.',
 
   // --- Terms acceptance (personal-use consent model, 2026-07-17) ---
-  'terms.title': 'One quick thing before you record',
+  'terms.h1': 'One quick thing',
+  'terms.h2': 'before you record',
+  'terms.detecting': 'Checking your location…',
   'terms.body': 'This app records the audio you capture on the job. By continuing you accept the Terms & Conditions, and confirm you are responsible for recording lawfully where you work. You only do this once.',
   'terms.reminder': 'You’re in {state}, where everyone in a conversation must be told they’re being recorded. Please let people know.',
   'terms.accept': 'I accept',
@@ -2051,7 +2053,9 @@ const ES: Record<string, string> = {
   'consent.notAdvice': 'Esto guarda lo que elegiste. No es asesoría legal — las reglas de grabación cambian según el estado y quién está presente.',
 
   // --- Terms acceptance (personal-use consent model, 2026-07-17) ---
-  'terms.title': 'Algo rápido antes de grabar',
+  'terms.h1': 'Algo rápido',
+  'terms.h2': 'antes de grabar',
+  'terms.detecting': 'Comprobando tu ubicación…',
   'terms.body': 'Esta app graba el audio que captures en el trabajo. Al continuar, aceptas los Términos y Condiciones y confirmas que eres responsable de grabar de forma legal donde trabajas. Solo lo haces una vez.',
   'terms.reminder': 'Estás en {state}, donde se debe avisar a todos en una conversación que están siendo grabados. Por favor avísales.',
   'terms.accept': 'Acepto',
