@@ -104,32 +104,74 @@ function Chrome(props: {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.paper }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={{ paddingTop: 24, paddingHorizontal: 20, paddingBottom: 40 }}
+      {/* paddingTop 64 clears the notch. There is no `react-native-safe-area-context`
+          in this project, so every top-level screen carries its inset by hand — see
+          `s.c` in App.tsx, which uses 72 for a screen whose first element is text.
+          This one leads with a small brand line, so it sits marginally tighter. */}
+      <ScrollView contentContainerStyle={{ paddingTop: 64, paddingHorizontal: 20, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled">
-        {/* THE PICTURE FIRST — before the marker, before the headline. See the
-            header: it tells someone what this screen is before they read a word. */}
-        {/* ASPECT RATIO, not a fixed height. The delivered art is 1448x1086 (4:3);
-            pinning the height to 220 would letterbox it into the middle of the screen
-            with dead margins either side, on the one element this design leads with.
-            Width-driven means it fills the column on every device and the height
-            follows — and if the art is ever re-exported at another size it still
-            lands correctly, because nothing here encodes the old one. */}
-        {props.art && (
-          <Image source={props.art} resizeMode="cover"
-            style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 16 }}
-            accessible={false} />
-        )}
+        {/*
+          THE HEADER BLOCK — brand, step, headline, rule — with the cutout bleeding
+          off the right edge behind it (hadar, fourth pass: "here are the cutouts").
 
-        <Steps step={props.step} />
+          WHY THIS BEATS THE BOXED VERSION, and it is not only taste: a framed image
+          across the top is a band the eye must cross before reaching anything it can
+          act on, which is what "the image is huge!! too big" was really about.
+          Layered to the right, the same artwork costs almost no vertical space — the
+          headline, the options and the button all sit above the fold on a 13 mini. It
+          decorates the screen instead of gating it.
 
-        <Text style={{ fontFamily: F.bodyBold, fontSize: 30, color: C.ink,
-          textAlign: 'center', marginTop: 16, letterSpacing: -0.5, lineHeight: 36 }}>
-          {props.title}
-        </Text>
-        <Text style={{ fontFamily: F.body, fontSize: 16.5, color: C.steel,
-          textAlign: 'center', marginTop: 6, lineHeight: 23 }}>
-          {props.sub}
-        </Text>
+          THE BLEED IS DELIBERATE: `right: -20` cancels the screen's own padding so the
+          cutout runs to the physical edge. A cutout that stops short with a margin
+          reads as a mistake rather than a composition.
+
+          TEXT IS WIDTH-CAPPED, NOT POSITIONED. The headline and subtitle carry
+          `maxWidth` instead of being pushed around, so on a narrow phone they wrap
+          away from the art rather than colliding with it.
+        */}
+        <View style={{ position: 'relative' }}>
+          {/* The wrapper carries `pointerEvents="none"`, not the Image — RN does not
+              accept that prop on Image. It matters either way: this sits ABOVE the
+              layout in z-order and must never swallow a tap meant for a control
+              beneath it. */}
+          {props.art && (
+            <View pointerEvents="none"
+              style={{ position: 'absolute', right: -20, top: 30, width: '66%', height: 252 }}>
+              <Image source={props.art} resizeMode="contain"
+                style={{ width: '100%', height: '100%' }} accessible={false} />
+            </View>
+          )}
+
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: ACCENT,
+            letterSpacing: -0.2 }}>
+            EZChangeOrders
+          </Text>
+
+          <Steps step={props.step} />
+
+          {/* CONDENSED, UPPERCASE, LEFT. `textTransform` rather than shouting in the
+              string itself: the Spanish copy has to uppercase correctly too, and a
+              string stored in caps is one a translator cannot case properly. */}
+          <Text style={{ fontFamily: F.disp, fontSize: 42, color: C.ink,
+            textTransform: 'uppercase', lineHeight: 44, letterSpacing: -0.5,
+            marginTop: 14, maxWidth: '62%' }}>
+            {props.title}
+          </Text>
+
+          {/* The short rule under the headline — the one flourish on the screen. */}
+          <View style={{ width: 46, height: 4, borderRadius: 2, backgroundColor: ACCENT,
+            marginTop: 16 }} />
+
+          <Text style={{ fontFamily: F.body, fontSize: 15.5, color: C.steel,
+            lineHeight: 21, marginTop: 14, maxWidth: '52%' }}>
+            {props.sub}
+          </Text>
+
+          {/* Reserves the height the absolutely-positioned art needs, so the controls
+              below start beneath it rather than under it. Without this the cutout
+              overlaps the first option row, which is a tap target. */}
+          <View style={{ height: 86 }} />
+        </View>
 
         {props.children}
       </ScrollView>
