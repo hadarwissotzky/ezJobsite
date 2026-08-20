@@ -33,6 +33,10 @@ import { readCapture,
   recoverySweep,
 } from './src/capture';
 import { RecordingPresets, readRecordingBytes, requestMic, useAudioRecorder } from './src/recorder';
+// Camera permission via expo-image-picker, matching `modality.ts:snapPhoto` — the
+// codebase's existing way of asking. expo-camera exposes only a hook here, and
+// on iOS both resolve to the same NSCameraUsageDescription grant anyway.
+import * as ImagePickerPerm from 'expo-image-picker';
 import { photoCapture, pickFromLibrary, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { publishReplyMedia } from './src/replymediapublish';
 import { checkJobs, checkMembers, checkSendQuota, currentPlan, currentProductId, rememberEntitledPlan,
@@ -3063,7 +3067,26 @@ const checkClientMessages = async () => {
     // and press the button.
   });
 
-  const openTerms = React.useCallback(() => {
+  /**
+   * WHAT THE USER WAS TRYING TO DO WHEN THE GATE FIRED.
+   *
+   * hadar, 2026-08-20: "when i click start recording it presented me with the geo
+   * location permissions and then the audio and when i said yes to both it took me to
+   * the first page in the series."
+   *
+   * That is this ref's absence. Ten call sites read `if (!terms) { openTerms(); return; }`
+   * and every one of them RETURNED — dropping the intent on the floor. Accepting the
+   * terms then set a flag and closed the screen, so the render tree fell back to
+   * whatever it would otherwise show, which from the guided flow is FirstExtra. The
+   * user had done everything right and landed at the start again.
+   *
+   * A ref rather than state: nothing renders from it, and it must survive the re-render
+   * that `setTerms(true)` causes without scheduling another one.
+   */
+  const afterTerms = React.useRef<null | (() => void)>(null);
+
+  const openTerms = React.useCallback((next?: () => void) => {
+    afterTerms.current = next ?? null;
     setShowTerms({ jur: null, detecting: true });
     (async () => {
       // Same best-effort fix the capture path uses (mandate #9), resolved to a state
@@ -3090,7 +3113,7 @@ const checkClientMessages = async () => {
   React.useEffect(() => {
     if (!pendingCapture || !ready) return;
     setPendingCapture(false);
-    if (!terms) { openTerms(); return; }
+    if (!terms) { openTerms(() => setShowCapture(true)); return; }
     setShowCapture(true);
   }, [pendingCapture, ready, terms]);
 
@@ -5018,7 +5041,7 @@ const checkClientMessages = async () => {
     // The SAME consent gate every capture button passes through. Deliberately does NOT
     // mark the walkthrough seen — backing out of the recorder lands here again, which is
     // the honest place to land when nothing was created.
-    if (!terms) { openTerms(); return; }
+    if (!terms) { openTerms(() => setShowCapture(true)); return; }
     setShowCapture(true);
   };
 
@@ -5501,7 +5524,7 @@ const checkClientMessages = async () => {
                 await openCreatedJob(id);
                 // The same gate the capture button everywhere else passes through:
                 // recording consent is asked once per job, before anything records.
-                if (!terms) { openTerms(); return; }
+                if (!terms) { openTerms(() => setShowCapture(true)); return; }
                 setShowCapture(true);
               })();
             }}>
@@ -5838,6 +5861,33 @@ const checkClientMessages = async () => {
       await setTermsAccepted(db);
       setTerms(true);
       setShowTerms(null);
+      // RESUME WHAT HE WAS DOING. Cleared before running so a continuation that opens
+      // this screen again cannot loop, and read into a local first because the callback
+      // may set state that re-renders before we get to null it.
+      /**
+       * ASK FOR EVERYTHING CAPTURE NEEDS, HERE, ONCE.
+       *
+       * hadar, 2026-08-20: "it presented me with the geo location permissions and then
+       * the audio ... now it['s] presenting me with the camera permissions — it should
+       * have done all of that the first time."
+       *
+       * He is right, and the piecemeal version was worse than untidy: the camera prompt
+       * arrived on his SECOND change order, long after onboarding, with no screen
+       * around it explaining why. Here there is one — this screen exists to say what
+       * the app records and why — so it is the honest place to ask for the rest.
+       * Location was already requested above while detecting the jurisdiction.
+       *
+       * AWAITED so the prompts queue instead of racing, and NON-BLOCKING on refusal:
+       * a declined camera must not stop a voice capture, and the capture screen still
+       * asks again in context if it genuinely needs one. Nothing here is treated as
+       * consent to record — that is the acceptance itself, above.
+       */
+      await requestMic().catch(() => false);
+      await ImagePickerPerm.requestCameraPermissionsAsync().catch(() => null);
+
+      const next = afterTerms.current;
+      afterTerms.current = null;
+      next?.();
     };
     // Moved out of this file 2026-08-20 (hadar's design). It was the last screen in
     // the guided flow still drawn on the old green `s.card`, sitting between two
@@ -6404,7 +6454,7 @@ const checkClientMessages = async () => {
    *  select a job but this is an augmentation to an existing extra"). One function
    *  so the FAB, the Add-photo tile and the Photos & proof subscreen cannot drift. */
   const augmentExtra = (changeOrderId: string) => {
-    if (!terms) { openTerms(); return; }
+    if (!terms) { openTerms(() => augmentExtra(changeOrderId)); return; }
     setAugmentCoId(changeOrderId);
     // THE FEED RETURN IS CANCELLED FIRST, and without this the camera never opens.
     // `closeRecord` sets `showFeed` when the record was opened from the company feed,
@@ -6840,7 +6890,7 @@ const checkClientMessages = async () => {
         onView={() => { setGStep(null); setGuidedOn(false); void markFirstExtraSeen(db); setNav('home'); }}
         onAnother={() => {
           setGStep(null); setGuidedOn(false); void markFirstExtraSeen(db);
-          if (!terms) { openTerms(); return; }
+          if (!terms) { openTerms(() => setShowCapture(true)); return; }
           setShowCapture(true);
         }}
       />
@@ -7271,7 +7321,7 @@ const checkClientMessages = async () => {
         onCreateLinkedExtra={() => {
           closeRecord();
           setNav('home');
-          if (!terms) { openTerms(); return; }
+          if (!terms) { openTerms(() => setShowCapture(true)); return; }
           setShowCapture(true);
         }}
         // Mandate #2: this writes a file and opens the OS share sheet. It does not
@@ -7426,7 +7476,7 @@ const checkClientMessages = async () => {
       <Pressable style={[s.fab, (!!gate || !!initError) && s.btnOff]}
         disabled={!!gate || !!initError} hitSlop={8}
         accessibilityLabel={T('home.recordExtra')}
-        onPress={() => { if (!terms) { openTerms(); return; } setShowCapture(true); }}>
+        onPress={() => { if (!terms) { openTerms(() => setShowCapture(true)); return; } setShowCapture(true); }}>
         {/* An OUTLINED ring with a thin +, as drawn — not a filled green disc. The
             capture entry belongs to the whole app; a solid green puck in the middle
             of the bar outranked the screen's own primary action every time. */}
@@ -8033,7 +8083,7 @@ const checkClientMessages = async () => {
     // left the phone, so it is NOT "waiting for approval" and must not inflate this.
     const outstanding = [...questioned, ...waitingList].reduce((sum, e) => sum + (e.amount_cents ?? 0), 0);
     const outstandingN = questioned.length + waitingList.length;
-    const startCapture = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
+    const startCapture = () => { if (!terms) { openTerms(() => setShowCapture(true)); return; } setShowCapture(true); };
     // Tapping a summary chip filters the list BELOW IT — no navigation. Tapping the
     // live chip again clears the filter.
     const disabled = !!gate || !!initError;
@@ -8801,7 +8851,7 @@ const checkClientMessages = async () => {
     ? (jobMaps[jobProj.id]
         ?? mapUrlFor(process.env.EXPO_PUBLIC_STATIC_MAP_URL, jobProj.lat, jobProj.lng))
     : null;
-  const startCaptureJob = () => { if (!terms) { openTerms(); return; } setShowCapture(true); };
+  const startCaptureJob = () => { if (!terms) { openTerms(() => setShowCapture(true)); return; } setShowCapture(true); };
   return (
     <View style={s.c}>
       {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
