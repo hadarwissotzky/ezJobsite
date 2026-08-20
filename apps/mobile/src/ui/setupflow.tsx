@@ -108,9 +108,15 @@ function Chrome(props: {
         keyboardShouldPersistTaps="handled">
         {/* THE PICTURE FIRST — before the marker, before the headline. See the
             header: it tells someone what this screen is before they read a word. */}
+        {/* ASPECT RATIO, not a fixed height. The delivered art is 1448x1086 (4:3);
+            pinning the height to 220 would letterbox it into the middle of the screen
+            with dead margins either side, on the one element this design leads with.
+            Width-driven means it fills the column on every device and the height
+            follows — and if the art is ever re-exported at another size it still
+            lands correctly, because nothing here encodes the old one. */}
         {props.art && (
-          <Image source={props.art} resizeMode="contain"
-            style={{ width: '100%', height: 220, borderRadius: 16 }}
+          <Image source={props.art} resizeMode="cover"
+            style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 16 }}
             accessible={false} />
         )}
 
