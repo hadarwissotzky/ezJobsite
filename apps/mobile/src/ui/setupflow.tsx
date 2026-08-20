@@ -1,49 +1,48 @@
 /**
  * FIRST RUN — the three screens a contractor sees before the app is his.
  *
- * hadar, 2026-08-19 then again 2026-08-20 with a second, simpler set of mockups:
- * "here are the updated forms". This file follows the SECOND set.
+ * hadar, third pass 2026-08-20 ("i have the 3 images"), which is the one this file
+ * follows. The earlier two passes are worth one line each because the differences are
+ * instructive: pass 1 was tan with bordered panels, pass 2 stripped the panels and
+ * gutted screen 3 to a single button, pass 3 puts the artwork on top, gives every
+ * option row a subtitle and a check, and brings screen 3's numbered list back with
+ * shorter copy.
  *
  * ─── WHAT THIS REPLACES ─────────────────────────────────────────────────────────
  * A two-step form living inline in `App.tsx`: language folded into the top of a
- * profile card, then a trade grid. It worked and it looked like a different product —
- * a bright #dafbe1 card on a #2da44e border, left over from an early build. Restyling
- * it fixed the colour and left the SHAPE wrong: one dense card asking for language,
- * name and working-arrangement at once, with no sense of how long it would take.
+ * profile card, then a trade grid. It worked and looked like a different product — a
+ * bright #dafbe1 card on a #2da44e border from an early build. Restyling fixed the
+ * colour and left the SHAPE wrong: one dense card asking for language, name and
+ * working-arrangement at once, with no sense of how long it would take.
  *
- * Three screens, each asking ONE thing, each saying where you are. For the person this
- * app exists to serve — someone for whom software is not second nature — a visible,
- * finite path is the difference between filling in a form and being led somewhere.
+ * ─── THE ARTWORK LEADS ──────────────────────────────────────────────────────────
+ * It sits above the progress marker, before any words. That ordering is the design's
+ * strongest idea and the reason it suits this audience: the picture says what the
+ * screen is about to someone who has not read a line of it yet, and for a reader in
+ * their second language it does the work the headline cannot.
  *
- * ─── WHAT CHANGED IN THE SECOND PASS, AND WHY IT IS BETTER ──────────────────────
- * The first mockups wrapped each screen's controls in a bordered panel and gave
- * screen 3 a numbered how-it-works list plus two reassurance boxes. The second set
- * strips all of it: no panels, options are full-width rows with an icon and a
- * chevron, and screen 3 is one illustration and one button.
+ * ─── EVERY CHOICE ROW SAYS WHAT IT MEANS ────────────────────────────────────────
+ * "I work solo / Just me" and "I have a company / 2 or more people". The subtitle is
+ * not decoration — "company" is a word people hesitate over (am I a company if it is
+ * me and my brother?), and "2 or more people" answers that without them having to
+ * ask. Same instinct as putting each language in its own language.
  *
- * That is the right call and worth stating so it is not "improved" back: screen 3 is
- * not a manual. It is the moment someone decides to start. A numbered list there asks
- * them to READ three paragraphs about a thing they have not done yet, and every line
- * is a chance to put the phone down. The illustration says snap-talk-send faster than
- * the words did.
- *
- * ─── THE PROGRESS SPINE IS NUMBERED, NOT DOTS ───────────────────────────────────
- * ①—②—③ with the current one filled. Dots say "there are three of these"; numbers say
- * "you are on the second of three", which is the question actually being asked. The
- * connector lines matter too — they make it one journey rather than three unrelated
- * markers.
+ * ─── SELECTION IS A TICK, NOT A BORDER ──────────────────────────────────────────
+ * Selected rows fill soft green AND show a filled check; unselected show an empty
+ * ring. The ring matters: it advertises that the row is selectable BEFORE anything is
+ * chosen. A border-only state is invisible in daylight through a gloved tap, which is
+ * the condition this app is designed for.
  *
  * ─── OLIVE, FROM TOKENS ─────────────────────────────────────────────────────────
- * hadar, 2026-08-20: "if they don't follow the rest of the design, adjust them to fit
- * the template — colour wise". Every accented surface reads `ACCENT`, and it resolves
- * to `C.brand`. It must stay a token: pasting a hex back in is exactly how this screen
- * drifted off-theme the first time.
+ * hadar, 2026-08-20: "adjust them to fit the template — colour wise". Every accented
+ * surface reads `ACCENT`, resolving to `C.brand`. It must stay a token: pasting a hex
+ * back in is exactly how this screen drifted off-theme the first time.
  *
  * ─── THE ART IS REQUIRED AT BUNDLE TIME, OPTIONAL AT RUNTIME ────────────────────
  * `require` resolves when the bundle is built, so a missing PNG is a build error, not
  * a crash — which is why placeholders exist for any not yet delivered. Each screen
  * still renders if `art` is null: the decorative layer is the most droppable thing in
- * the app, and it must never be why someone cannot finish setup.
+ * the app and must never be why someone cannot finish setup.
  */
 import React from 'react';
 import {
@@ -53,16 +52,13 @@ import { t } from '../i18n';
 import { Icon, type IconName } from './icon';
 import { C, F } from './theme';
 
-/**
- * The accent for all three screens — olive, from the token, never a hex.
- * See the header: this is the one line that answers "make them match".
- */
+/** Olive, from the token, never a hex. See the header. */
 const ACCENT = C.brand;
 const ACCENT_SOFT = C.brandSoft;
 
 /**
- * Illustrations, resolved once and named for their screen. Dropping a real PNG over
- * one of these filenames is the only step needed to finish the design — no code moves.
+ * Illustrations, named for their screen. Dropping a real PNG over one of these
+ * filenames is the only step needed to finish the design — no code moves.
  */
 export const SETUP_ART = {
   lang: require('../../assets/onboard/obLang.png'),
@@ -74,28 +70,26 @@ type ArtSource = number | null;
 
 /* ─────────────────────────────── shared chrome ──────────────────────────────── */
 
-/** ①—②—③. See the header for why this is numbers and not dots. */
+/**
+ * ●●○ plus "Step 2 of 3", on one line.
+ *
+ * The dots FILL CUMULATIVELY rather than marking only the current one: three lit dots
+ * on the last screen reads as progress completed, which is the feeling that screen is
+ * for. The words carry the precision; the dots carry the glance.
+ */
 function Steps({ step }: { step: 0 | 1 | 2 }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-      marginTop: 16 }}>
+      gap: 8, marginTop: 22 }}>
       {[0, 1, 2].map((d) => (
-        <React.Fragment key={d}>
-          {d > 0 && (
-            <View style={{ width: 34, height: 1.5, backgroundColor: C.line }} />
-          )}
-          <View style={{
-            width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center',
-            backgroundColor: d === step ? ACCENT : 'transparent',
-            borderColor: d === step ? ACCENT : C.line, borderWidth: 1.5,
-          }}>
-            <Text style={{ fontFamily: F.bodyBold, fontSize: 16,
-              color: d === step ? '#fff' : C.steel }}>
-              {d + 1}
-            </Text>
-          </View>
-        </React.Fragment>
+        <View key={d} style={{
+          width: 9, height: 9, borderRadius: 5,
+          backgroundColor: d <= step ? ACCENT : C.line,
+        }} />
       ))}
+      <Text style={{ fontFamily: F.body, fontSize: 15, color: C.steel, marginLeft: 6 }}>
+        {t({ k: 'su.stepOf', p: { n: String(step + 1) } } as any)}
+      </Text>
     </View>
   );
 }
@@ -110,29 +104,26 @@ function Chrome(props: {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.paper }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={{ paddingTop: 60, paddingHorizontal: 20, paddingBottom: 40 }}
+      <ScrollView contentContainerStyle={{ paddingTop: 24, paddingHorizontal: 20, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled">
-        <Text style={{ fontFamily: F.bodyBold, fontSize: 29, color: C.ink,
-          textAlign: 'center', letterSpacing: -0.4 }}>
-          EZChangeOrders
-        </Text>
+        {/* THE PICTURE FIRST — before the marker, before the headline. See the
+            header: it tells someone what this screen is before they read a word. */}
+        {props.art && (
+          <Image source={props.art} resizeMode="contain"
+            style={{ width: '100%', height: 220, borderRadius: 16 }}
+            accessible={false} />
+        )}
 
         <Steps step={props.step} />
 
-        <Text style={{ fontFamily: F.bodyBold, fontSize: 32, color: C.ink,
-          textAlign: 'center', marginTop: 26, letterSpacing: -0.6, lineHeight: 38 }}>
+        <Text style={{ fontFamily: F.bodyBold, fontSize: 30, color: C.ink,
+          textAlign: 'center', marginTop: 16, letterSpacing: -0.5, lineHeight: 36 }}>
           {props.title}
         </Text>
-        <Text style={{ fontFamily: F.body, fontSize: 17, color: C.steel,
-          textAlign: 'center', marginTop: 8, lineHeight: 24 }}>
+        <Text style={{ fontFamily: F.body, fontSize: 16.5, color: C.steel,
+          textAlign: 'center', marginTop: 6, lineHeight: 23 }}>
           {props.sub}
         </Text>
-
-        {props.art && (
-          <Image source={props.art} resizeMode="contain"
-            style={{ width: '100%', height: 240, marginTop: 18 }}
-            accessible={false} />
-        )}
 
         {props.children}
       </ScrollView>
@@ -141,63 +132,75 @@ function Chrome(props: {
 }
 
 /** The one full-width action at the bottom of every screen. */
-function Cta(props: { label: string; onPress: () => void; disabled?: boolean }) {
+function Cta(props: {
+  label: string; onPress: () => void; disabled?: boolean;
+  /** Screen 1's button is ink; the other two are brand. Straight from the mockups. */
+  tone: 'ink' | 'accent';
+}) {
+  const bg = props.disabled ? C.line : props.tone === 'ink' ? C.ink : ACCENT;
   return (
     <Pressable onPress={props.onPress} disabled={props.disabled}
       accessibilityRole="button" accessibilityState={{ disabled: !!props.disabled }}
       style={{
-        marginTop: 26, minHeight: 60, borderRadius: 14, alignItems: 'center',
-        justifyContent: 'center', backgroundColor: props.disabled ? C.line : ACCENT,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+        marginTop: 26, minHeight: 60, borderRadius: 14, backgroundColor: bg,
       }}>
       <Text style={{ fontFamily: F.bodyBold, fontSize: 19, color: '#fff' }}>{props.label}</Text>
+      <Icon name="arrowRight" size={20} color="#fff" />
     </Pressable>
   );
 }
 
+/** The tick on the right of a choice row — filled when chosen, an empty ring when not. */
+function Tick({ on }: { on: boolean }) {
+  return on ? (
+    <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: ACCENT,
+      alignItems: 'center', justifyContent: 'center' }}>
+      <Icon name="check" size={15} color="#fff" />
+    </View>
+  ) : (
+    <View style={{ width: 28, height: 28, borderRadius: 14, borderWidth: 1.5,
+      borderColor: C.line }} />
+  );
+}
+
 /**
- * A full-width choice: icon, label, chevron. The shape both option screens use.
+ * A full-width choice: icon badge, label (+ optional subtitle), tick.
  *
- * The CHEVRON is doing real work — it says this row is a thing you press, on a screen
- * where the other bordered rectangle is a text field you type into. Without it the two
- * look alike, and the first thing someone does is tap the name box expecting it to go
- * somewhere.
+ * The subtitle is load-bearing on the work screen — see the header. It is optional
+ * because the language rows do not need one: "Español" explains itself.
  */
 function ChoiceRow(props: {
   icon: IconName;
   label: string;
+  sub?: string;
   selected: boolean;
   onPress: () => void;
-  /** Filled-accent when chosen (the language rows) vs a soft icon badge (the work
-   *  rows). Two looks because one screen picks a setting and the other picks an
-   *  identity — and the language row must be legible to someone who cannot read the
-   *  word on it, so it commits the whole row to colour. */
-  fill: 'solid' | 'badge';
 }) {
   const on = props.selected;
-  const solid = props.fill === 'solid' && on;
   return (
     <Pressable onPress={props.onPress}
       accessibilityRole="radio" accessibilityState={{ selected: on }}
       style={{
-        flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 72,
-        paddingHorizontal: 16, borderRadius: 14, marginBottom: 12,
-        backgroundColor: solid ? ACCENT : C.raised,
-        borderColor: solid ? ACCENT : on ? ACCENT : C.line,
-        borderWidth: solid ? 1.5 : on ? 2 : 1,
+        flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 76,
+        paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, marginBottom: 12,
+        backgroundColor: on ? ACCENT_SOFT : C.raised,
+        borderColor: on ? ACCENT : C.line, borderWidth: on ? 1.5 : 1,
       }}>
-      {props.fill === 'badge' ? (
-        <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: ACCENT_SOFT,
-          alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name={props.icon} size={24} color={ACCENT} />
-        </View>
-      ) : (
-        <Icon name={props.icon} size={26} color={solid ? '#fff' : ACCENT} />
-      )}
-      <Text style={{ fontFamily: F.bodyBold, fontSize: 19, flex: 1,
-        color: solid ? '#fff' : C.ink }}>
-        {props.label}
-      </Text>
-      <Icon name="chevRight" size={20} color={solid ? '#fff' : C.steel} />
+      <View style={{ width: 46, height: 46, borderRadius: 23,
+        backgroundColor: on ? C.raised : ACCENT_SOFT,
+        alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name={props.icon} size={24} color={ACCENT} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: F.bodyBold, fontSize: 18, color: C.ink }}>{props.label}</Text>
+        {!!props.sub && (
+          <Text style={{ fontFamily: F.body, fontSize: 14.5, color: C.steel, marginTop: 2 }}>
+            {props.sub}
+          </Text>
+        )}
+      </View>
+      <Tick on={on} />
     </Pressable>
   );
 }
@@ -213,20 +216,20 @@ export function StepLanguage(props: {
   return (
     <Chrome step={0} art={props.art ?? null}
       title={t('su.langTitle')} sub={t('su.langSub')}>
-      <View style={{ marginTop: 24 }}>
-        {/* Each option in its OWN language. The one control in the whole app that has
-            to work for someone who cannot read the other line. */}
-        <ChoiceRow icon="globe" label="English" fill="solid"
+      <View style={{ marginTop: 22 }}>
+        {/* Each option in its OWN language. The one control in the app that has to
+            work for someone who cannot read the other line. */}
+        <ChoiceRow icon="globe" label="English"
           selected={props.lang === 'en'} onPress={() => props.onLang('en')} />
-        <ChoiceRow icon="globe" label="Español" fill="solid"
+        <ChoiceRow icon="globe" label="Español"
           selected={props.lang === 'es'} onPress={() => props.onLang('es')} />
       </View>
-      <Cta label={t('fr.continue')} onPress={props.onContinue} />
+      <Cta label={t('fr.continue')} tone="ink" onPress={props.onContinue} />
     </Chrome>
   );
 }
 
-/* ─────────────────────────────── 2. how you work ────────────────────────────── */
+/* ────────────────────────────── 2. tell us about you ────────────────────────── */
 
 export function StepProfile(props: {
   name: string;
@@ -245,30 +248,34 @@ export function StepProfile(props: {
   return (
     <Chrome step={1} art={props.art ?? null}
       title={t('su.setupTitle')} sub={t('su.setupSub')}>
-      <View style={{ marginTop: 24 }}>
-        {/* The icon sits INSIDE the field, as drawn. It is what tells you the box
-            wants a person's name before you have read the placeholder — and the
-            placeholder disappears the moment you start typing, which is exactly when
-            people forget what a field was for. */}
+      <View style={{ marginTop: 20 }}>
+        {/* A QUESTION, not a field label. "What should we call you?" is answerable;
+            "Your name" is a form. The difference is the whole tone of this screen. */}
+        <Text style={{ fontFamily: F.bodyBold, fontSize: 16.5, color: C.ink,
+          marginBottom: 8 }}>
+          {t('su.nameLabel')}
+        </Text>
+        {/* The icon sits INSIDE the field, as drawn. It still says what the box wants
+            after the placeholder disappears — which is exactly when people forget. */}
         <View style={{
-          flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.raised,
-          borderColor: C.line, borderWidth: 1, borderRadius: 14, minHeight: 64,
-          paddingHorizontal: 16, marginBottom: 12,
+          flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.raised,
+          borderColor: C.line, borderWidth: 1, borderRadius: 14, minHeight: 62,
+          paddingHorizontal: 14, marginBottom: 14,
         }}>
-          <Icon name="person" size={24} color={ACCENT} />
+          <Icon name="person" size={22} color={C.steel} />
           {/* Left-aligned, body font. The old form reused the centred money input,
-              and a name centred in a box reads as a label rather than something to
+              and a name centred in a box reads as a label rather than a thing to
               type into. */}
           <TextInput value={props.name} onChangeText={props.onName}
             placeholder={t('fr.yourName')} placeholderTextColor={C.steel}
             autoCapitalize="words" textContentType="name"
             style={{ flex: 1, fontFamily: F.body, fontSize: 18, color: C.ink,
-              paddingVertical: 14 }} />
+              paddingVertical: 13 }} />
         </View>
 
-        <ChoiceRow icon="person" label={t('fr.solo')} fill="badge"
+        <ChoiceRow icon="person" label={t('fr.solo')} sub={t('su.soloSub')}
           selected={props.isSolo === true} onPress={() => props.onSolo(true)} />
-        <ChoiceRow icon="people" label={t('fr.company')} fill="badge"
+        <ChoiceRow icon="people" label={t('fr.company')} sub={t('su.companySub')}
           selected={props.isSolo === false} onPress={() => props.onSolo(false)} />
 
         {props.isSolo === false && (
@@ -277,17 +284,23 @@ export function StepProfile(props: {
             autoCapitalize="words" textContentType="organizationName"
             style={{
               backgroundColor: C.raised, borderColor: C.line, borderWidth: 1,
-              borderRadius: 14, minHeight: 64, paddingHorizontal: 16,
+              borderRadius: 14, minHeight: 62, paddingHorizontal: 14,
               fontFamily: F.body, fontSize: 18, color: C.ink,
             }} />
         )}
       </View>
-      <Cta label={t('fr.continue')} disabled={!canGo} onPress={props.onContinue} />
+      <Cta label={t('fr.continue')} tone="accent" disabled={!canGo} onPress={props.onContinue} />
     </Chrome>
   );
 }
 
-/* ────────────────────────────── 3. snap. talk. send. ────────────────────────── */
+/* ───────────────────────────────── 3. you're all set ────────────────────────── */
+
+const HOW: Array<{ icon: IconName; title: string; body: string }> = [
+  { icon: 'microphone', title: 'su.h1t', body: 'su.h1b' },
+  { icon: 'checklist', title: 'su.h2t', body: 'su.h2b' },
+  { icon: 'send', title: 'su.h3t', body: 'su.h3b' },
+];
 
 export function StepHowItWorks(props: {
   onCreateFirst: () => void;
@@ -296,11 +309,38 @@ export function StepHowItWorks(props: {
   return (
     <Chrome step={2} art={props.art ?? null}
       title={t('su.captureTitle')} sub={t('su.captureSub')}>
-      {/* One button, nothing else. See the header: this screen is the moment someone
-          decides to start, not a manual. There is no "Maybe later" here because the
-          screen this hands off to — `FirstExtra` — already offers one, and two escape
-          hatches one tap apart is just a second chance to leave. */}
-      <Cta label={t('su.createFirst')} onPress={props.onCreateFirst} />
+      <View style={{ marginTop: 18 }}>
+        {HOW.map((h, i) => (
+          <View key={h.title} style={{
+            flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14,
+            borderBottomColor: C.line, borderBottomWidth: i === HOW.length - 1 ? 0 : 1,
+          }}>
+            <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: ACCENT,
+              alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name={h.icon} size={23} color="#fff" />
+            </View>
+            {/* The NUMBER is separate from the icon on purpose: the icon says WHAT the
+                step is, the number says it is the second of three. One glyph doing
+                both jobs does neither well. */}
+            <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: C.surfaceMuted,
+              alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: C.steel }}>{i + 1}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 18, color: C.ink }}>
+                {t(h.title as any)}
+              </Text>
+              <Text style={{ fontFamily: F.body, fontSize: 15, color: C.steel,
+                lineHeight: 20, marginTop: 1 }}>
+                {t(h.body as any)}
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+      {/* No "Maybe later" — `FirstExtra`, which this hands off to, already offers one,
+          and two escape hatches a tap apart is a second chance to leave. */}
+      <Cta label={t('su.createFirst')} tone="accent" onPress={props.onCreateFirst} />
     </Chrome>
   );
 }
