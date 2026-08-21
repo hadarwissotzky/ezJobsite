@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { LOCAL_MEDIA_DIRS, closeMyAccount, localOwnedTables, purgeRemoteMedia } from './closeaccount.ts';
+import { LOCAL_MEDIA_DIRS, closeMyAccount, localOwnedTables, purgeLocalData, purgeRemoteMedia } from './closeaccount.ts';
 import { DRAFT_MEDIA_ROOT } from './capturesession.ts';
 
 /* ----------------------------------------------------------------- fakes -- */
@@ -38,8 +38,12 @@ function fakeStorage(tree: Record<string, string[]>, opts: { failRemove?: boolea
 function fakeDb(tables: { name: string; type: string }[]) {
   const dropped: string[] = [];
   let cleared = false;
+  let deferred = false;
+  let orderMattered = false;
   return {
     dropped,
+    wasDeferred: () => deferred,
+    droppedBeforeDefer: () => orderMattered,
     wasCleared: () => cleared,
     db: {
       getAll: async (sql: string) => {
@@ -51,8 +55,9 @@ function fakeDb(tables: { name: string; type: string }[]) {
       },
       writeTransaction: async (fn: (tx: any) => Promise<void>) => {
         await fn({ execute: async (sql: string) => {
+          if (/PRAGMA defer_foreign_keys/i.test(sql)) { deferred = true; return; }
           const m = /DROP TABLE IF EXISTS "(.+)"/.exec(sql);
-          if (m) dropped.push(m[1]);
+          if (m) { dropped.push(m[1]); if (!deferred) orderMattered = true; }
         } });
       },
       disconnectAndClear: async () => { cleared = true; },
@@ -187,4 +192,26 @@ test('surviving media is surfaced on an otherwise successful close', async () =>
   // "Your account is closed" while a photo survives in a bucket is the same
   // dishonest acknowledgement mandate #1 forbids, pointed the other way.
   assert.equal(r.ok && r.mediaLeft, 1);
+});
+
+test('foreign keys are deferred BEFORE anything is dropped', async () => {
+  // hadar, 2026-08-21: a handover died on "[op-sqlite] statement execution error:
+  // FOREIGN KEY constraint failed", leaving the device wiped AND signed out.
+  //
+  // `localOwnedTables` returns sqlite_master order, and the local schema has real
+  // foreign keys (capture_outbox -> capture_commit, decision_version -> decision).
+  // Dropping a parent while a child still holds rows is refused mid-transaction — so
+  // this failed ONLY on devices that had something queued, which is precisely the case
+  // the handover is being careful about. An empty phone dropped cleanly and looked fine.
+  const { db, wasDeferred, droppedBeforeDefer } = fakeDb([
+    { name: 'capture_commit', type: 'table' },
+    { name: 'capture_outbox', type: 'table' },
+    { name: 'decision', type: 'table' },
+    { name: 'decision_version', type: 'table' },
+  ]);
+
+  await purgeLocalData(db);
+
+  assert.ok(wasDeferred(), 'defer_foreign_keys must be set inside the transaction');
+  assert.ok(!droppedBeforeDefer(), 'nothing may be dropped before enforcement is deferred');
 });

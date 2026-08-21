@@ -107,6 +107,29 @@ export async function localOwnedTables(db: AbstractPowerSyncDatabase): Promise<s
 export async function purgeLocalData(db: AbstractPowerSyncDatabase): Promise<void> {
   const tables = await localOwnedTables(db);
   await db.writeTransaction(async (tx) => {
+    /**
+     * DEFER THE FOREIGN KEYS, OR THE DROP ORDER DECIDES WHETHER THIS WORKS.
+     *
+     * hadar, 2026-08-21, after a handover left his device wiped AND signed out:
+     *   "[op-sqlite] statement execution error: FOREIGN KEY constraint failed"
+     *
+     * The local schema has real foreign keys — `capture_outbox.capture_id`
+     * REFERENCES `capture_commit(capture_id)`, `decision_version.decision_id`
+     * REFERENCES `decision(id)` — and `localOwnedTables` returns whatever order
+     * `sqlite_master` happens to hold. Drop a PARENT while a CHILD still has rows
+     * and SQLite refuses, mid-transaction, with exactly that message.
+     *
+     * WHICH MEANS IT FAILED ONLY FOR THE DEVICES THAT HAD SOMETHING TO LOSE. An
+     * empty phone drops cleanly in any order; a phone with a queued capture — the
+     * one case this whole path exists to handle carefully — hit the constraint and
+     * threw. That is why it looked intermittent.
+     *
+     * `defer_foreign_keys` postpones enforcement to COMMIT, by which point every
+     * table is gone and there is nothing left to violate. It is scoped to this
+     * transaction and resets itself, unlike `foreign_keys = OFF` which is a
+     * connection-level pragma and a no-op inside a transaction anyway.
+     */
+    await tx.execute(`PRAGMA defer_foreign_keys = ON`);
     for (const t of tables) await tx.execute(`DROP TABLE IF EXISTS "${t}"`);
   });
   // PowerSync's own copy of the mutable rows (project, company, membership).
