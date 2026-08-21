@@ -4284,9 +4284,9 @@ const checkClientMessages = async () => {
           // REFUSE LOUDLY. Continuing here means signing somebody in over another
           // person's data, which is the defect itself — so the session goes instead.
           console.warn('[handover] refused:', claim.reason);
-          setAck({ kind: 'no', title: T('handover.failedTitle'),
-                   detail: T('handover.failedBody') });
-          setAuthNotice({ title: T('handover.failedTitle'), detail: T('handover.failedBody') });
+          const detail = `${T('handover.failedBody')}\n\n(${String(claim.reason).slice(0, 200)})`;
+          setAck({ kind: 'no', title: T('handover.failedTitle'), detail });
+          setAuthNotice({ title: T('handover.failedTitle'), detail });
           // Set explicitly rather than left to the SIGNED_OUT event: `signOut()` can
           // throw on a dead network, and a `session` stuck at `undefined` leaves the
           // app on the splash with no way forward.
@@ -4324,10 +4324,25 @@ const checkClientMessages = async () => {
           // the incoming user in front of an app whose every query throws. Sign out;
           // the next launch runs `ensureLocalSchema` from the top and repairs it.
           setWiping(false);
-          console.warn('[handover] rebuild failed:', e?.message ?? e);
-          setAck({ kind: 'no', title: T('handover.failedTitle'),
-                   detail: T('handover.failedBody') });
-          setAuthNotice({ title: T('handover.failedTitle'), detail: T('handover.failedBody') });
+          const why = String(e?.message ?? e).slice(0, 200);
+          console.warn('[handover] rebuild failed:', why);
+          void logDiag(db, 'identity.switch', `rebuild failed: ${why}`);
+          /**
+           * THE REASON RIDES ALONG, and it is not decoration.
+           *
+           * This branch bounced hadar straight back to the sign-in screen with
+           * "Could not set up this phone" and nothing else (2026-08-21) — after a
+           * wipe that had already succeeded, so the device was empty AND he was
+           * logged out, with no way for either of us to learn what threw. On a
+           * Release build `diag_log` cannot be read off the device, so a generic
+           * sentence here is the end of the trail.
+           *
+           * Untranslated and truncated: it is an exception message, shown because
+           * the alternative is another build spent guessing.
+           */
+          const detail = `${T('handover.failedBody')}\n\n(${why})`;
+          setAck({ kind: 'no', title: T('handover.failedTitle'), detail });
+          setAuthNotice({ title: T('handover.failedTitle'), detail });
           setSession(null);
           await connector.signOut().catch(() => {});
           return false;
