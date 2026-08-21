@@ -61,7 +61,7 @@
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 
 import { purgeLocalData, purgeLocalMedia } from './closeaccount.ts';
-import { inFlight } from './ota.ts';
+import { OUTBOX_TABLES, inFlight } from './ota.ts';
 
 /** Device-level, not account-level: it outlives every session on this handset. */
 const OWNER_KEY = 'device_last_user_id';
@@ -93,6 +93,32 @@ export async function rememberDeviceUser(userId: string): Promise<void> {
   await storage().setItem(OWNER_KEY, userId);
 }
 
+/**
+ * A per-queue breakdown of what is blocking a handover: "capture_outbox 1,
+ * tag_outbox 3". Written for a human staring at a refusal, and for whoever has to
+ * work out why the phone will not switch accounts.
+ *
+ * Reads the SAME list the OTA gate uses (`OUTBOX_TABLES`), so a twelfth outbox added
+ * tomorrow appears here without anyone remembering to add it.
+ */
+export async function describePendingWork(db: AbstractPowerSyncDatabase): Promise<string> {
+  const parts: string[] = [];
+  for (const t of OUTBOX_TABLES) {
+    try {
+      const r = await db.getAll<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t}`);
+      if ((r[0]?.n ?? 0) > 0) parts.push(`${t} ${r[0].n}`);
+    } catch { /* table not in this build -> nothing queued in it */ }
+  }
+  try {
+    const r = await db.getAll<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM capture_draft dr
+        WHERE dr.state = 'open'
+          AND EXISTS (SELECT 1 FROM capture_draft_item i WHERE i.draft_id = dr.draft_id)`);
+    if ((r[0]?.n ?? 0) > 0) parts.push(`unfinished recording ${r[0].n}`);
+  } catch { /* no draft table yet */ }
+  return parts.join(', ');
+}
+
 export type Claim =
   /** Same person as last time, or the first person ever. Nothing was touched. */
   | { wiped: false }
@@ -103,7 +129,10 @@ export type Claim =
    * never reached the cloud. NOTHING WAS DELETED and the new user is not signed in.
    * The only way forward is the previous user signing back in and draining.
    */
-  | { refused: true; unsent: number; previousUser: string }
+  | { refused: true; unsent: number; previousUser: string;
+      /** WHICH queues hold it, e.g. "capture_outbox 1". Named because "1 item" is
+       *  not actionable — see `pendingWork`. */
+      where?: string }
   /** The handover could not be completed. The caller MUST NOT show any local data. */
   | { failed: true; reason: string };
 
@@ -146,6 +175,8 @@ export async function claimDevice(
     /** Rows queued across every owned outbox plus open capture drafts. Defaults to
      *  `inFlight` — the audited list, shared with the OTA gate. */
     pendingWork?: (d: AbstractPowerSyncDatabase) => Promise<number>;
+    /** Which queues hold the work, for the refusal message. */
+    describeWork?: (d: AbstractPowerSyncDatabase) => Promise<string>;
   } = {}
 ): Promise<Claim> {
   const lastUser = deps.lastUser ?? lastDeviceUser;
@@ -234,7 +265,22 @@ export async function claimDevice(
   } catch (e: any) {
     return { failed: true, reason: e?.message ?? 'could not count unsent work' };
   }
-  if (unsent > 0) return { refused: true, unsent, previousUser: previous };
+  if (unsent > 0) {
+    /**
+     * NAME WHAT IS HOLDING IT. "1 item(s) that never reached the cloud" is true and
+     * useless: hadar's phone refused on it twice with nothing on any screen saying
+     * which of eleven outboxes — or a capture draft — the row was in, and no way to
+     * act on it (2026-08-21). A refusal the user cannot resolve is a trap, and one
+     * neither of us can diagnose is worse.
+     *
+     * Best-effort and never fatal: a count that fails here costs a vaguer message,
+     * never the refusal itself, which has already been decided above.
+     */
+    let where: string | undefined;
+    try { where = (await deps.describeWork?.(db)) ?? await describePendingWork(db); }
+    catch { /* the message goes out without the detail */ }
+    return { refused: true, unsent, previousUser: previous, where };
+  }
 
   try {
     deps.onWipeStart?.();

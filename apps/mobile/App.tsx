@@ -4226,12 +4226,14 @@ const checkClientMessages = async () => {
           // BOTH surfaces: the ack for anyone already inside the app, and the notice
           // for the sign-in screen they are about to be returned to — which is where
           // this one is actually read, and where it was invisible.
-          setAck({ kind: 'no', title: T('handover.refusedTitle'),
-                   detail: T({ k: 'handover.refusedBody',
-                               p: { n: String(claim.unsent) } } as any) });
-          setAuthNotice({ title: T('handover.refusedTitle'),
-                          detail: T({ k: 'handover.refusedBody',
-                                      p: { n: String(claim.unsent) } } as any) });
+          // The per-queue breakdown rides on the end of the sentence. It is not
+          // translated and does not need to be: it is table names, and it exists so a
+          // refusal nobody can resolve becomes one somebody can act on.
+          const body = T({ k: 'handover.refusedBody',
+                           p: { n: String(claim.unsent) } } as any)
+            + (claim.where ? `\n\n(${claim.where})` : '');
+          setAck({ kind: 'no', title: T('handover.refusedTitle'), detail: body });
+          setAuthNotice({ title: T('handover.refusedTitle'), detail: body });
           await connector.signOut().catch(() => {});
           return false;
         }

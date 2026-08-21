@@ -141,7 +141,12 @@ test('a handover is REFUSED while the previous user has unsent work', async () =
   // is the strictly worse half of mandate #1.
   const h = harness('user-a', { unsent: 3 });
   const r = await claimDevice(DB, 'user-b', h.deps);
-  assert.deepEqual(r, { refused: true, unsent: 3, previousUser: 'user-a' });
+  assert.ok('refused' in r && r.refused);
+  assert.equal((r as any).unsent, 3);
+  assert.equal((r as any).previousUser, 'user-a');
+  // `where` names which queue holds it — see describePendingWork. Absent here only
+  // because the fake db answers no COUNT queries.
+  assert.ok(!('where' in r) || typeof (r as any).where === 'string' || (r as any).where === undefined);
   assert.ok(!h.calls.includes('purgeData'));
   assert.ok(!h.calls.includes('purgeMedia'));
   assert.ok(!h.calls.includes('wipeStart'), 'no wipe was started, so the UI is not held');
