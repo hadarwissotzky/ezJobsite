@@ -29,6 +29,7 @@ import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { DRAFT_MEDIA_ROOT } from './capturesession.ts';
+import { MIRROR_MEDIA_ROOT } from './evidencemirror.ts';
 
 const BUCKET = 'captures';
 
@@ -140,6 +141,10 @@ export const LOCAL_MEDIA_DIRS = [
   'capture-tmp/',          // in-flight scraps
   'capture-quarantine/',   // crash orphans recoverySweep deliberately kept
   DRAFT_MEDIA_ROOT,        // 'capture-draft/' — open sessions
+  MIRROR_MEDIA_ROOT,       // 'capture-remote/' — cached copies of the ACCOUNT's cloud
+                           //  captures. Not this device's evidence, but unmistakably
+                           //  this user's content, so a handover or an account close
+                           //  must take it too (evidencemirror.ts).
   'company/',              // cached letterhead logo
   'map-cache/',            // static map tiles of this account's job addresses
 ] as const;

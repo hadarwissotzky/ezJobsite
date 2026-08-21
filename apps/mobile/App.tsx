@@ -115,6 +115,7 @@ import { billingTenantId, createInvite, ensureBillingTenant, ensureOwnCompany,
 import { closeMyAccount } from './src/closeaccount';
 import { claimDevice } from './src/deviceowner';
 import { restoreAccountFlags } from './src/accountflags';
+import { cacheMirroredPhotos, ensureMirrorSchema, hydrateEvidence } from './src/evidencemirror';
 import { ensureLogoCached, pickLogo, removeCompanyLogo,
          saveCompanyLogo } from './src/companylogo';
 import { configureBilling, entitledPlanNow, entitledProductNow } from './src/billing';
@@ -543,6 +544,10 @@ async function ensureLocalSchema(
   // empty, flagged price field, never a blocked screen.
   await ensureVoiceCacheSchema(db);
   await ensureSttSchema(db);
+  // The account's captures as held in the cloud — what makes an extra's photos show
+  // up on a phone that did not take them. A CACHE beside `capture_commit`, never a
+  // replacement for it; see evidencemirror.ts for why that distinction is load-bearing.
+  await ensureMirrorSchema(db);
 }
 
 export default function App() {
@@ -4436,6 +4441,29 @@ const checkClientMessages = async () => {
           // applies a write-up the moment it exists, so there is nothing for the app to
           // catch up on except the hydrate below, which learns it.
           const hy = await hydrateChangeOrders(db, connector.client, pid, data.user.id);
+          /**
+           * THE EVIDENCE BEHIND THE EXTRAS (hadar, 2026-08-21: "images not displaying
+           * in the records" after signing in as another user).
+           *
+           * The extras synced; nothing behind them did. `decision`, `decision_version`
+           * and the captures they point at are all written by the capturing device and
+           * were never pulled back, so a second phone got the change orders and an
+           * empty evidence graph — no versions, no capture ids, no photos.
+           *
+           * AFTER the change-order hydrate, deliberately: this pulls by decision, and
+           * the extras are what say which decisions matter on this job.
+           */
+          const ev = await hydrateEvidence(db, connector.client, pid, data.user.id);
+          if (ev.decisions || ev.versions || ev.captures) {
+            console.log('hydrate evidence:', JSON.stringify(ev));
+          }
+          // Then the bytes, a bounded batch per tick — photos only, because photos are
+          // what the cards and the record screen draw. See cacheMirroredPhotos.
+          const mm = await cacheMirroredPhotos(db, connector.client, { projectId: pid });
+          if (mm.downloaded || mm.failed) {
+            console.log('mirror media:', JSON.stringify(mm));
+            if (mm.downloaded) await refresh();
+          }
           // MUST follow the hydrate. hydrateChangeOrders adopts the server's status for
           // any row with no change_order_outbox entry; a supersession queues in
           // co_supersession, a DIFFERENT table, so an un-uploaded revision would be

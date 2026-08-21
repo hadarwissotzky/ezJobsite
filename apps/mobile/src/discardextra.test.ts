@@ -78,6 +78,15 @@ function fresh() {
                    CO_LIVE_LINK_DDL, ...DISCARD_DDL]) {
     raw.exec(s);
   }
+  // COLUMNS THE SHIPPED SCHEMA ADDS BY ALTER, not by CREATE TABLE.
+  //
+  // `CHANGE_ORDER_DDL` is only the original table; `ensureChangeOrderSchema` then adds
+  // the later columns one ALTER at a time (`ensureFlowFields`). A test that runs the
+  // CREATE and skips the ALTERs is testing a schema no device has, and the failure is
+  // the quiet kind: `hydrateChangeOrders` catches a bad INSERT per row and SKIPS it, so
+  // the pull reports success and simply brings nothing back. That is exactly what
+  // happened when `co_number` joined the pull (2026-08-21).
+  raw.exec(`ALTER TABLE change_order ADD COLUMN co_number INTEGER`);
   return { raw, db: realDb(raw) };
 }
 

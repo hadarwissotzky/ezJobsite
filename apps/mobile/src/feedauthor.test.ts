@@ -21,6 +21,7 @@ import { EXTRA_ACTOR_DDL } from './recordactors.ts';
 import { APP_OWNED_DDL } from './captureddl.ts';
 import { DECISION_DDL } from './decisions.ts';
 import { PAIR_DDL } from './pair.ts';
+import { MIRROR_DDL } from './evidencemirror.ts';
 import { LEDGER_STATUS_DDL } from './ledgerstatus.ts';
 import { companyFeed } from './feed.ts';
 
@@ -40,12 +41,13 @@ const HOUR = 3_600_000;
  */
 async function freshDb() {
   const raw = new DatabaseSync(':memory:');
-  // `capture_commit` / `decision_version` / `capture_pair` are the tables the cover-photo
-  // subquery reads (2026-08-14). The SHIPPED DDL, not a hand-written stand-in: a
-  // stand-in is how a query passes its test and then fails on a phone against the real
+  // `capture_commit` / `decision_version` / `capture_pair` / `capture_mirror` are the
+  // tables the cover-photo subquery reads (2026-08-14; the mirror added 2026-08-21 so a
+  // second device shows the cover at all). The SHIPPED DDL, not a hand-written stand-in:
+  // a stand-in is how a query passes its test and then fails on a phone against the real
   // column names.
   for (const stmt of [...CHANGE_ORDER_DDL, ...EXTRA_ACTOR_DDL, ...LEDGER_STATUS_DDL,
-                      ...APP_OWNED_DDL, ...DECISION_DDL,
+                      ...APP_OWNED_DDL, ...DECISION_DDL, ...MIRROR_DDL,
                       ...(Array.isArray(PAIR_DDL) ? PAIR_DDL : [PAIR_DDL])]) raw.exec(stmt);
   // `project` is PowerSync-managed on the device (a view over ps_data), so it has no
   // DDL to import. The feed reads one column from it; this is that column.

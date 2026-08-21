@@ -254,22 +254,50 @@ export async function extraRecord(
 
   if (captureIds.length) {
     const marks = captureIds.map(() => '?').join(',');
+    /**
+     * THIS DEVICE'S OWN CAPTURES, THEN THE ACCOUNT'S (hadar, 2026-08-21: "images not
+     * displaying in the records" on a freshly signed-in phone).
+     *
+     * `capture_commit` holds only what THIS handset captured, so on a second phone, a
+     * reinstall, or after a device handover the whole record rendered with no photos —
+     * while they sat in Storage untouched. The second leg reads `capture_mirror`, the
+     * account's captures pulled by `hydrateEvidence`, restricted to rows whose bytes
+     * have actually been downloaded.
+     *
+     * `mirrored` rides along so the caller can tell the two apart. It matters for one
+     * specific honesty reason, below at `present`.
+     *
+     * The mirror leg has no `capture_pair` hop because `capture_pair` is device-local
+     * and has no server table at all — paired walkthrough siblings cannot be recovered
+     * yet. Named in evidencemirror.ts rather than hidden here.
+     */
     const caps = await db.getAll<{
       capture_id: string; modality: string | null; captured_at_ms: number; media_relpath: string;
-      gps_lat: number | null; gps_lng: number | null;
+      gps_lat: number | null; gps_lng: number | null; mirrored: number;
     }>(
-      `SELECT DISTINCT cc.capture_id, cc.modality, cc.captured_at_ms, cc.media_relpath,
-              cc.gps_lat, cc.gps_lng
-         FROM capture_commit cc
-        WHERE cc.capture_id IN (${marks})
-           OR cc.capture_id IN (
-                SELECT p2.capture_id FROM capture_pair p2
-                 WHERE p2.pair_id IN (
-                   SELECT p1.pair_id FROM capture_pair p1 WHERE p1.capture_id IN (${marks})
-                 )
-              )
-        ORDER BY cc.captured_at_ms`,
-      [...captureIds, ...captureIds]);
+      `SELECT capture_id, modality, captured_at_ms, media_relpath, gps_lat, gps_lng, mirrored
+         FROM (
+           SELECT DISTINCT cc.capture_id AS capture_id, cc.modality AS modality,
+                  cc.captured_at_ms AS captured_at_ms, cc.media_relpath AS media_relpath,
+                  cc.gps_lat AS gps_lat, cc.gps_lng AS gps_lng, 0 AS mirrored
+             FROM capture_commit cc
+            WHERE cc.capture_id IN (${marks})
+               OR cc.capture_id IN (
+                    SELECT p2.capture_id FROM capture_pair p2
+                     WHERE p2.pair_id IN (
+                       SELECT p1.pair_id FROM capture_pair p1 WHERE p1.capture_id IN (${marks})
+                     )
+                  )
+           UNION ALL
+           SELECT cm.capture_id, cm.modality, cm.captured_at_ms, cm.local_relpath,
+                  cm.gps_lat, cm.gps_lng, 1
+             FROM capture_mirror cm
+            WHERE cm.local_relpath IS NOT NULL
+              AND cm.capture_id IN (${marks})
+              AND cm.capture_id NOT IN (SELECT capture_id FROM capture_commit)
+         )
+        ORDER BY captured_at_ms`,
+      [...captureIds, ...captureIds, ...captureIds]);
 
     // The real capture moment — the earliest committed capture behind this extra.
     if (caps.length) {
@@ -286,6 +314,13 @@ export async function extraRecord(
         // Mandate #1: evidence that is gone must SAY it is gone. A blank tile is
         // silent loss. We check existence only (not the sha256) — integrity is
         // readCapture()'s job and reading every file here would stall the screen.
+        //
+        // A MIRRORED ROW IS ONLY EVER LISTED ONCE ITS BYTES ARE DOWNLOADED
+        // (`local_relpath IS NOT NULL`), so a missing file here means the same thing
+        // for both legs: it was on this phone and is not any more. That is why the
+        // mirror is a separate table rather than rows in `capture_commit` — a cloud
+        // capture this device has simply not fetched yet must NEVER be reported as
+        // lost evidence, and here it is not reported at all until it is real.
         let present = false;
         try {
           const info = await FS.getInfoAsync(uri);

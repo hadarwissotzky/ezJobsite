@@ -894,7 +894,24 @@ export const CO_AUTHOR_JOIN = `(
     FROM extra_actor WHERE subject_kind = 'change_order'
 )`;
 
-export const CO_PHOTO_SUBQUERY = `(
+/**
+ * THE COVER PHOTO — this device's own capture first, a cached cloud copy second.
+ *
+ * The second branch is the fix for hadar's 2026-08-21 report ("images not displaying
+ * in the records" on a freshly signed-in phone). `capture_commit` only ever holds
+ * captures THIS device took, so on a second handset, a reinstall, or after a device
+ * handover it is empty and every card fell back to the microphone placeholder — while
+ * the photos sat in Storage the whole time. `capture_mirror` is the account's captures
+ * as pulled by `hydrateEvidence`, with `local_relpath` non-null once the bytes have
+ * actually been downloaded (evidencemirror.ts).
+ *
+ * COALESCE, NOT UNION, and the order is deliberate: where both exist, the row backed
+ * by real committed bytes wins. The `local_relpath IS NOT NULL` guard is what stops a
+ * not-yet-downloaded capture returning a path to a file that is not there — the
+ * placeholder is the honest answer until the bytes land.
+ */
+export const CO_PHOTO_SUBQUERY = `COALESCE(
+ (
   SELECT cc.media_relpath FROM capture_commit cc
    WHERE cc.modality = 'photo' AND cc.capture_id IN (
      SELECT dv.capture_id FROM decision_version dv
@@ -909,6 +926,16 @@ export const CO_PHOTO_SUBQUERY = `(
       )
    )
    ORDER BY cc.captured_at_ms LIMIT 1
+ ),
+ (
+  SELECT cm.local_relpath FROM capture_mirror cm
+   WHERE cm.modality = 'photo' AND cm.local_relpath IS NOT NULL
+     AND cm.capture_id IN (
+       SELECT dv.capture_id FROM decision_version dv
+        WHERE dv.decision_id = co.decision_id AND dv.capture_id IS NOT NULL
+     )
+   ORDER BY cm.captured_at_ms LIMIT 1
+ )
 )`;
 
 /**
@@ -1359,7 +1386,7 @@ export async function hydrateChangeOrders(
 ) {
   const { data, error } = await supabase
     .from('change_order')
-    .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at, scope_of_work, scope_of_work_ai, price_heard, schedule_effect, schedule_days, billing_timing, exclusions, extra_type')
+    .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at, scope_of_work, scope_of_work_ai, price_heard, schedule_effect, schedule_days, billing_timing, exclusions, extra_type, co_number')
     .eq('project_id', projectId);
   if (error || !data) return { pulled: 0, statusUpdated: 0, skipped: 0, conflicts: 0 };
 
@@ -1438,8 +1465,8 @@ export async function hydrateChangeOrders(
          scope_of_work, line_items, amount_cents, nte_cents, is_mini, who_directed,
          ref_estimate, numbers_confirmed_at_ms, status, signed_by, created_at_ms,
          origin_change_order_id,
-         billing_timing, schedule_effect, schedule_days, exclusions)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         billing_timing, schedule_effect, schedule_days, exclusions, co_number)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [co.id, co.decision_id, co.project_id, ownerId, co.scope,
        // Falls back to the title for a row written before 391 existed.
        co.scope_of_work ?? co.scope,
@@ -1449,7 +1476,16 @@ export async function hydrateChangeOrders(
        signedBy.get(co.id) ?? null, new Date(co.created_at).getTime(),
        origins.get(co.id) ?? null,
        co.billing_timing ?? null, co.schedule_effect ?? null,
-       co.schedule_days ?? null, co.exclusions ?? null]
+       co.schedule_days ?? null, co.exclusions ?? null,
+       // THE NUMBER IS THE IDENTIFIER, and it was the one column this pull left
+       // behind. It is written locally by `nextCoNumber`, uploaded in the outbox
+       // payload, and stored on the server (sql/399) — but never selected back, so
+       // every extra on a second device or a reinstall rendered the fallback kicker
+       // ("Change order", no #) forever. `backfillCoNumbers` could not save it
+       // either: that runs once at launch, BEFORE this pull, and renumbering a row
+       // the server has already numbered would invent a second identity for one
+       // document. Adopt the server's number; never mint one here.
+       co.co_number ?? null]
       );
     } catch (e: any) {
       skipped++;
