@@ -1416,11 +1416,33 @@ export async function markLocalSent(
 export async function pushCoNumbers(
   db: AbstractPowerSyncDatabase, supabase: SupabaseClient, limit = 25
 ): Promise<{ pushed: number; failed: number }> {
+  /**
+   * ROWS THIS DEVICE HAS NOT PUSHED YET — not simply "rows that have a number".
+   *
+   * The predicate was `WHERE co_number IS NOT NULL`, which stays true forever after a
+   * successful push. Only the server-side `.is('co_number', null)` filtered anything,
+   * and reaching that filter costs a request: a device with 25+ numbered extras issued
+   * 25 no-op PATCHes EVERY FIFTEEN SECONDS, for the life of the app run. On a product
+   * whose seventh mandate assumes a weak metered link, that is ~100 pointless requests
+   * a minute (found in review, 2026-08-21).
+   *
+   * `co_number_pushed` is a local receipt, not evidence — it records only what this
+   * handset has already sent, so the queue drains to nothing and stays there.
+   */
+  try {
+    await db.execute(
+      `CREATE TABLE IF NOT EXISTS co_number_pushed (
+         change_order_id TEXT NOT NULL PRIMARY KEY,
+         at_ms           INTEGER NOT NULL
+       ) STRICT`);
+  } catch { /* the push still works, it just repeats — see below */ }
+
   let rows: Array<{ id: string; co_number: number }> = [];
   try {
     rows = await db.getAll(
       `SELECT id, co_number FROM change_order
         WHERE co_number IS NOT NULL
+          AND id NOT IN (SELECT change_order_id FROM co_number_pushed)
         ORDER BY created_at_ms DESC LIMIT ?`, [limit]);
   } catch {
     return { pushed: 0, failed: 0 };
@@ -1438,6 +1460,12 @@ export async function pushCoNumbers(
       // No rows matched = the server already has a number, or the row is not there
       // yet. Both are fine and neither is a failure.
       if (data?.length) pushed++;
+      // RECEIPTED EITHER WAY. A matched update means the server took ours; an
+      // unmatched one means it already had a number, and re-asking cannot change
+      // that. The only case worth retrying is `error`, which skips this line.
+      await db.execute(
+        `INSERT OR IGNORE INTO co_number_pushed (change_order_id, at_ms) VALUES (?,?)`,
+        [r.id, Date.now()]).catch(() => { /* it repeats; it does not break */ });
     } catch {
       failed++;   // offline is normal; the next tick tries again
     }

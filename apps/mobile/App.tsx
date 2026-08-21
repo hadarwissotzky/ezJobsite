@@ -3207,6 +3207,9 @@ const checkClientMessages = async () => {
   // is the GPS-detected state, used ONLY for a non-blocking all-party reminder -- the
   // app never asserts third-party consent on the user's behalf.
   const [terms, setTerms] = React.useState<boolean | null>(null);
+  /** The live value of `terms`, for continuations that outlive the render that made
+   *  them — see `augmentExtra`. Assigned every render, never read during one. */
+  const termsRef = React.useRef(false);
   const [showTerms, setShowTerms] = React.useState<
     null | { jur: string | null; detecting: boolean }
   >(null);
@@ -3250,6 +3253,8 @@ const checkClientMessages = async () => {
    * that `setTerms(true)` causes without scheduling another one.
    */
   const afterTerms = React.useRef<null | (() => void)>(null);
+
+  termsRef.current = !!terms;
 
   const openTerms = React.useCallback((next?: () => void) => {
     afterTerms.current = next ?? null;
@@ -4432,17 +4437,39 @@ const checkClientMessages = async () => {
 
       const applySessionNow = async (s: Session | null) => {
         if (s?.user?.id) {
+          /**
+           * A THROW BELOW MUST NOT STRAND THE APP ON THE SPLASH.
+           *
+           * `setSession` moved AFTER `claimFor`/`restoreFlags` so the auth gate cannot
+           * open on the outgoing user's data. The cost is that anything throwing in
+           * between leaves `session` at `undefined` — which renders `<SplashScreen/>`
+           * with no message and no way forward, because `applySession`'s catch only
+           * console.warns. The old ordering could not produce that; this one can.
+           *
+           * So the two guarded steps run inside a try that, on any unexpected failure,
+           * still admits the session. Signing somebody in to a device that may be
+           * mid-repair is bad; leaving them staring at a splash forever is worse, and
+           * the claim's OWN refusal paths (which return false) are unaffected — they
+           * sign out deliberately and say why.
+           */
           // THE CLAIM COMES BEFORE `setSession`, and that is the difference between
           // fixing this bug and merely shortening it: `setSession` is what opens the
           // auth gate, so setting it first would paint the whole app — the previous
           // user's jobs, extras and photos — for the frames before the wipe starts.
           // hadar saw exactly that: "at first it logged me in to the last known user".
-          if (!(await claimFor(s.user.id))) return;
-          // ALSO BEFORE `setSession`, and for the same reason: this decides whether
-          // the setup flow and the guided first-extra screen render at all, so it has
-          // to have answered before the auth gate opens. `session === undefined` (or
-          // the auth screen, mid-run) is already on screen while it works.
-          await restoreFlags(s.user);
+          try {
+            if (!(await claimFor(s.user.id))) return;
+            // ALSO BEFORE `setSession`, and for the same reason: this decides whether
+            // the setup flow and the guided first-extra screen render at all, so it
+            // has to have answered before the auth gate opens. `session === undefined`
+            // (or the auth screen, mid-run) is already on screen while it works.
+            await restoreFlags(s.user);
+          } catch (e: any) {
+            const why = String(e?.message ?? e).slice(0, 160);
+            console.warn('[session] claim/flags threw, signing in anyway:', why);
+            void logDiag(db, 'identity.switch', `unexpected: ${why}`);
+            setWiping(false);   // never leave the splash gate latched
+          }
           setSession(s);
           setOwner(s.user.id);
           // REQ-NOTIF1 — register this device for remote push, best-effort.
@@ -6409,6 +6436,9 @@ const checkClientMessages = async () => {
         return;
       }
       setTerms(true);
+      // BEFORE the continuation runs. `setTerms` does not change `termsRef` until the
+      // next render, and the continuation is invoked below in THIS tick.
+      termsRef.current = true;
       setShowTerms(null);
       // RESUME WHAT HE WAS DOING. Cleared before running so a continuation that opens
       // this screen again cannot loop, and read into a local first because the callback
@@ -7009,7 +7039,21 @@ const checkClientMessages = async () => {
    *  select a job but this is an augmentation to an existing extra"). One function
    *  so the FAB, the Add-photo tile and the Photos & proof subscreen cannot drift. */
   const augmentExtra = (changeOrderId: string) => {
-    if (!terms) { openTerms(() => augmentExtra(changeOrderId)); return; }
+    /**
+     * `termsRef`, NOT `terms` — and this is the bug hadar reported as "app gets stuck
+     * on this when I try to add photos" (2026-08-21).
+     *
+     * The continuation handed to `openTerms` is THIS closure, captured in the render
+     * where `terms` was false. `accept()` calls `setTerms(true)` and then invokes it
+     * immediately — before React has re-rendered — so the closure still sees the old
+     * `false`, calls `openTerms` again, and the consent screen reappears. Accept,
+     * reappear, accept, reappear, forever.
+     *
+     * The other ten call sites pass `() => setShowCapture(true)`, which reads nothing,
+     * which is why only the add-photos path looped. A ref is the fix because it is the
+     * one thing that is current at CALL time rather than at render time.
+     */
+    if (!termsRef.current) { openTerms(() => augmentExtra(changeOrderId)); return; }
     setAugmentCoId(changeOrderId);
     // THE FEED RETURN IS CANCELLED FIRST, and without this the camera never opens.
     // `closeRecord` sets `showFeed` when the record was opened from the company feed,

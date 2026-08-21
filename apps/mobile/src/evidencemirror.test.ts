@@ -207,3 +207,21 @@ test('the version pull happens after the decision pull', async () => {
 
   assert.ok(sb.asked.indexOf('decision') < sb.asked.indexOf('decision_version'));
 });
+
+test('a mirrored version is marked synced, so nothing re-uploads it', async () => {
+  // `backfillDecisionOutbox` runs every launch and queues any decision_version with
+  // no outbox row and no decision_synced row — exactly what hydrateEvidence writes.
+  // Without the marker a second phone queues an upload for every version it just
+  // DOWNLOADED, which inflates `inFlight` and makes `claimDevice` refuse every
+  // handover for work already in the cloud.
+  const { db, rowsFor } = fakeDb();
+  const sb = fakeSupabase({
+    decision: [DECISION], decision_version: [VERSION], capture: [CAPTURE], attachment: [],
+  });
+
+  await hydrateEvidence(db, sb.client, 'p-1', 'u-1');
+
+  const synced = rowsFor('decision_synced');
+  assert.equal(synced.length, 1, 'every mirrored version needs a synced marker');
+  assert.equal(synced[0].args[0], 'dv-1');
+});

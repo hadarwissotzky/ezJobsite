@@ -190,6 +190,30 @@ export async function hydrateEvidence(
         [v.id, v.decision_id, v.value, v.capture_id ?? null,
          v.directed_by ?? null, Number(v.created_at_ms)]);
       if (r.rowsAffected) versions++;
+
+      /**
+       * MARK IT SYNCED, OR THE APP WILL TRY TO UPLOAD WHAT IT JUST DOWNLOADED.
+       *
+       * `backfillDecisionOutbox` (decisions.ts) runs on EVERY launch and selects
+       * exactly "a decision_version with no outbox row and no decision_synced row" —
+       * which is precisely the shape of a row this function writes. Without this line
+       * a second phone that pulls forty versions queues forty uploads on its next
+       * launch, and then:
+       *   · the drawer warns "40 item(s) haven't reached the cloud" about work that
+       *     is already in the cloud,
+       *   · the OTA gate refuses to apply an update,
+       *   · and `claimDevice` REFUSES EVERY HANDOVER — the exact deadlock this build
+       *     spent a day chasing, rebuilt one layer up.
+       * It would also re-upload a colleague's decision stamped with THIS device's
+       * ownerId, which is a provenance lie on evidence rows.
+       *
+       * `decision_synced` is the right marker rather than a fake outbox row: it means
+       * "the server has this version", which for a row we just read off the server is
+       * true by construction.
+       */
+      await db.execute(
+        `INSERT OR IGNORE INTO decision_synced (version_id, synced_at_ms) VALUES (?,?)`,
+        [v.id, Date.now()]);
     } catch (e: any) {
       void logDiag(db, 'hydrate.evidence', `version ${v.id}: ${String(e?.message ?? e).slice(0, 100)}`);
     }

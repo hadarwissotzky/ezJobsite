@@ -71,16 +71,45 @@ export type Restored = {
  * device for every user before anything else happens, so counting it would make every
  * account look established and no one would ever see the guided start.
  */
+/**
+ * A HARD CEILING ON THE PROBE, because `setSession` is waiting on it.
+ *
+ * `restoreFlags` is awaited BEFORE `setSession`, so every millisecond here is a
+ * millisecond the user stares at the sign-in screen after typing a correct code —
+ * "I am entering the code but nothing happens", a sentence this project has already
+ * heard once. `localHasContent` keeps a warm device off this path entirely, but the
+ * case that DOES reach it is a fresh install, which is also the case most likely to
+ * be on a jobsite with one bar.
+ *
+ * Six seconds, then the answer is "could not ask" — already a first-class outcome
+ * here, costing only that the onboarding gates stay unreconciled until the next
+ * launch. Being wrong slowly is worse than being unsure quickly.
+ */
+const PROBE_TIMEOUT_MS = 6_000;
+
+function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), ms);
+    Promise.resolve(p).then(
+      (v) => { clearTimeout(t); resolve(v); },
+      () => { clearTimeout(t); resolve(null); },
+    );
+  });
+}
+
 async function accountHasContent(
   supabase: SupabaseClient
 ): Promise<{ any: boolean; asked: boolean }> {
   try {
-    const co = await supabase.from('change_order').select('id').limit(1);
-    if (co.error) return { any: false, asked: false };
+    // null = timed out, which is "could not ask", NEVER "no content".
+    const co = await withTimeout(
+      supabase.from('change_order').select('id').limit(1), PROBE_TIMEOUT_MS);
+    if (!co || co.error) return { any: false, asked: false };
     if (co.data?.length) return { any: true, asked: true };
 
-    const pj = await supabase.from('project').select('id').neq('id', INBOX_ID).limit(1);
-    if (pj.error) return { any: false, asked: false };
+    const pj = await withTimeout(
+      supabase.from('project').select('id').neq('id', INBOX_ID).limit(1), PROBE_TIMEOUT_MS);
+    if (!pj || pj.error) return { any: false, asked: false };
     return { any: !!pj.data?.length, asked: true };
   } catch {
     // Offline is the NORMAL case for this product, not an error.
