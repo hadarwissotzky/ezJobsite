@@ -619,7 +619,7 @@ live, not a correctness defect. No 376/381/382 signature conflict (382 replaces)
 
 ---
 
-## §6 — 2026-08-05: the local store is not partitioned by identity — FOUND, UNFIXED
+## §6 — 2026-08-05: the local store is not partitioned by identity — FOUND 2026-08-05, FIXED 2026-08-21
 
 **How it surfaced.** hadar: "it is still not deleting." Three sessions of misdiagnosis
 (a missing modal mount, then a wrong instruction to sign in by email) before reading the
@@ -733,6 +733,71 @@ durability disagree, and durability must win.
 **Status: unfixed.** Written up 2026-08-05 so it is not rediscovered by a user. The
 identity merge that unblocked this device is not a fix for this — it removed the second
 account, and the next second account will reproduce it exactly.
+
+### 2026-08-21 — it WAS rediscovered by a user, and is now fixed
+
+hadar, sixteen days later: *"I have logged out from one user, and logged in to another
+user phone number. At first it logged me in to the last known user on the phone
+content."* Then: *"I had to uninstall and reinstall the app to load the new user info. I
+think it's a problem of caching. We need to keep the last user info in cache, and when
+logging happens to compare it, if it is a different user to clear the cache and reload
+with new user info."*
+
+That is this finding, arriving from the user side, and it is the same fix §6 specified.
+The write-up above did its job — it named the branches before anyone had to guess under
+pressure — and its only failure was sitting unbuilt while a user hit it.
+
+**Built as specified**, in `apps/mobile/src/deviceowner.ts` (`claimDevice`), called from
+`applySession` in `App.tsx` **before `setSession`** — which is what makes the difference
+between fixing this and merely shortening it, since `setSession` is what opens the auth
+gate and paints the previous user's screen.
+
+| §6 branch | Built |
+|---|---|
+| (a) outbox non-empty → REFUSE | `{ refused, unsent, previousUser }`; nothing deleted, the incoming user is signed back out, the message names the count and the way out |
+| (b) outbox empty → PURGE then bind | media + `purgeLocalData()` + `disconnectAndClear()`, then `ensureLocalSchema()` rebuilds in-process and `refresh()` re-reads |
+| (c) store unclaimed → bind, no purge | first sign-in, and the first launch after this ships onto a phone already in use |
+| (3) log every branch | `logDiag(db, 'identity.switch', …)` — `bound` · `purged` · `refused: N unsent` · `failed: …` |
+
+**Two deviations from the 2026-08-05 spec, both deliberate:**
+
+1. **The marker lives in AsyncStorage, not `device_settings.bound_user_id`.** It has to
+   survive the purge it triggers, and `purgeLocalData` DROPs every app-owned table —
+   `device_settings` included. A marker inside the blast radius would be erased by the
+   wipe, and the next launch would read the device as never having had an owner.
+2. **An unclaimed store binds without consulting the outbox.** §6(c) implied an empty
+   store; in practice this branch also catches the first launch after this ships onto a
+   phone full of the user's own work. Refusing there would strand them, and wiping would
+   destroy their data to protect them from themselves.
+
+**Three further leaks found while making the wipe complete**, each of which would have
+left one user's content on another's phone:
+
+- **`purgeLocalMedia` pointed at a directory that does not exist.** It listed
+  `draft-media/`; the real root is `capture-draft/` (`DRAFT_MEDIA_ROOT`). With
+  `idempotent: true` a typo and a clean sweep are indistinguishable, so **every open
+  capture session's photos and audio survived every account close since that code
+  shipped** — an App Store 5.1.1(v) deletion claim that was false. It also never listed
+  `capture-quarantine/`, which holds real capture media that `recoverySweep` deliberately
+  preserves. Now derived from the constant, plus `capture-tmp/`, `company/` (letterhead
+  logo) and `map-cache/` (tiles of that account's job addresses), pinned by a test.
+- **`push_token` is `primary key (user_id, token)`.** Registering B on A's phone does not
+  replace A's row, and RLS means B can never remove it — so A's approvals, declines and
+  client questions kept arriving on a handset A no longer holds. `forgetPushToken` now
+  runs inside `signOut()` **before** `auth.signOut()`, the only moment A is still allowed
+  to delete it.
+- **`connected` latched true for the app's life**, so the `if (!connected)` guard written
+  to stop a token refresh stacking a second connection also stopped the *next sign-in*
+  from connecting at all — a second user on the same app run got no sync whatsoever.
+  Sign-out now resets it and calls `db.disconnect()`, which also stops PowerSync
+  streaming the departed user's buckets into a signed-out device.
+
+**Verification gate (§6's table), status:** rows 1–4 are covered by
+`src/deviceowner.test.ts` (12 tests) at the decision level, including the ordering that
+makes an interrupted wipe retry rather than be forgotten (the owner is recorded LAST).
+Row 5 — `capture_commit = 0`, `Documents/` media gone, `ps_*` cleared — is **on-device
+work and is not yet run**; the unit tests prove which branch is chosen, not that the
+device is empty afterwards.
 
 ---
 

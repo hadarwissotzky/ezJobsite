@@ -72,3 +72,43 @@ export async function registerPushToken(
     console.log('[push] registration failed:', e?.message ?? String(e));
   }
 }
+
+/**
+ * UNREGISTER THIS HANDSET, AT SIGN-OUT, WHILE THE SESSION IS STILL VALID.
+ *
+ * `push_token` is `primary key (user_id, token)` (379) with RLS scoped to
+ * `user_id = auth.uid()`. Two consequences, and both are why this has to exist:
+ *
+ *   1. Registering user B on a phone that user A used does not REPLACE A's row — the
+ *      key includes the user, so both rows live. The worker then posts A's approvals,
+ *      declines and client questions to a device A no longer holds. B reads A's
+ *      clients' business off the lock screen.
+ *   2. B cannot clean that up. The policy only ever lets a user touch their own row,
+ *      so the ONLY moment A's row can be removed is while A is still signed in —
+ *      which is here, immediately before `auth.signOut()`, and nowhere else.
+ *
+ * Best-effort by design (mandate #7: the network is opportunistic). Signing out must
+ * work in a basement, so a failure is logged and the sign-out proceeds; the residual
+ * case — A signs out offline and never comes back online on this phone — is a stale
+ * row that keeps delivering until A signs in somewhere and it is refreshed. Named
+ * here rather than pretended away.
+ */
+export async function forgetPushToken(supabase: SupabaseClient): Promise<void> {
+  const projectId = easProjectId();
+  if (!projectId) return;
+  try {
+    const N = await import('expo-notifications');
+    // Permission is READ, never requested. Asking for notification permission as
+    // somebody is leaving is the worst possible moment for that dialog.
+    if ((await N.getPermissionsAsync()).status !== 'granted') return;
+    const token = (await N.getExpoPushTokenAsync({ projectId }))?.data;
+    if (!token) return;
+    // No user_id filter: RLS already restricts this to the caller's own row, and
+    // naming the id here would only be a second way to get it wrong.
+    const { error } = await supabase.from('push_token').delete().eq('token', token);
+    if (error) console.log('[push] token delete refused:', error.message);
+    else console.log('[push] unregistered', token.slice(0, 24) + '…');
+  } catch (e: any) {
+    console.log('[push] unregister failed:', e?.message ?? String(e));
+  }
+}

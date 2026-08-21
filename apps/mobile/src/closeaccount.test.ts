@@ -11,7 +11,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { closeMyAccount, localOwnedTables, purgeRemoteMedia } from './closeaccount.ts';
+import { LOCAL_MEDIA_DIRS, closeMyAccount, localOwnedTables, purgeRemoteMedia } from './closeaccount.ts';
+import { DRAFT_MEDIA_ROOT } from './capturesession.ts';
 
 /* ----------------------------------------------------------------- fakes -- */
 
@@ -97,6 +98,21 @@ test('an account with no media is not an error', async () => {
   const { client, removed } = fakeStorage({});
   assert.equal(await purgeRemoteMedia(client, 'u1'), 0);
   assert.equal(removed.length, 0);
+});
+
+test('the media directory list names directories that actually exist', () => {
+  // This list said `draft-media/` for months. The real root is `capture-draft/`, so
+  // the delete pointed at nothing, `idempotent: true` swallowed the miss, and every
+  // open capture session's photos survived an account close that reported success.
+  // A typo and a clean sweep are indistinguishable at runtime — hence this test.
+  assert.ok(LOCAL_MEDIA_DIRS.includes(DRAFT_MEDIA_ROOT),
+    'draft media must be purged under the constant the writer uses');
+  assert.ok(LOCAL_MEDIA_DIRS.includes('capture-quarantine/'),
+    'quarantined crash orphans are real capture media and must not survive a purge');
+  for (const d of LOCAL_MEDIA_DIRS) {
+    assert.ok(d.endsWith('/'), `${d} must be a directory path`);
+  }
+  assert.equal(new Set(LOCAL_MEDIA_DIRS).size, LOCAL_MEDIA_DIRS.length);
 });
 
 /* ------------------------------------------------------------ the device -- */

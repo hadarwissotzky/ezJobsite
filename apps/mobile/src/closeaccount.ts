@@ -28,6 +28,8 @@
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { DRAFT_MEDIA_ROOT } from './capturesession.ts';
+
 const BUCKET = 'captures';
 
 export type CloseResult =
@@ -111,6 +113,38 @@ export async function purgeLocalData(db: AbstractPowerSyncDatabase): Promise<voi
 }
 
 /**
+ * EVERY DIRECTORY THIS APP WRITES USER CONTENT INTO.
+ *
+ * This list was `['capture-media/', 'draft-media/']` and it was wrong in both
+ * directions (found 2026-08-21 while making a device handover erase the outgoing
+ * user):
+ *
+ *   - `draft-media/` DOES NOT EXIST. The draft root is `capture-draft/`
+ *     (`DRAFT_MEDIA_ROOT`, capturesession.ts), so this line deleted nothing and every
+ *     unfinished capture session's photos and audio survived a purge that reported
+ *     success. `idempotent: true` is what made it silent — a missing directory is not
+ *     an error, so a typo and a clean sweep look identical.
+ *   - `capture-quarantine/` was never listed at all, and it holds REAL capture media:
+ *     `recoverySweep` moves crash orphans there precisely because they must not be
+ *     destroyed. Everything the sweep protected from a crash survived the deletion.
+ *   - `capture-tmp/`, `company/` (the letterhead logo) and `map-cache/` (tiles of the
+ *     user's own jobsite addresses) are all content belonging to one account.
+ *
+ * Imported from the constant where one exists, so the draft path cannot drift again.
+ * The rest are literals because their modules build the path with `expo-file-system`
+ * at module scope and importing them here would make this file unloadable under
+ * `node --test` — the trap the note below describes.
+ */
+export const LOCAL_MEDIA_DIRS = [
+  'capture-media/',        // the durable originals
+  'capture-tmp/',          // in-flight scraps
+  'capture-quarantine/',   // crash orphans recoverySweep deliberately kept
+  DRAFT_MEDIA_ROOT,        // 'capture-draft/' — open sessions
+  'company/',              // cached letterhead logo
+  'map-cache/',            // static map tiles of this account's job addresses
+] as const;
+
+/**
  * The durable originals. `idempotent: true` so a missing directory is not an error.
  *
  * `expo-file-system` is required INSIDE the function, not imported at the top. A
@@ -121,7 +155,7 @@ export async function purgeLocalData(db: AbstractPowerSyncDatabase): Promise<voi
 export async function purgeLocalMedia(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const FS = require('expo-file-system/legacy');
-  for (const dir of ['capture-media/', 'draft-media/']) {
+  for (const dir of LOCAL_MEDIA_DIRS) {
     try {
       await FS.deleteAsync(FS.documentDirectory + dir, { idempotent: true });
     } catch { /* a file we cannot remove must not strand the account close */ }

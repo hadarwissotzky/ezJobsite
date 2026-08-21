@@ -36,7 +36,7 @@ const SUPPORT_EMAIL = 'support@ezchangeorders.com';
 export function Drawer({
   visible, onClose, onProfile, onCompanySettings, onPlans,
   planName, isFreePlan, isOwner, hasTeam,
-  lang, onToggleLang, appVersion, confirmBase, onSignOut, onShowIntro, onSimulateFirstRun,
+  lang, onToggleLang, appVersion, confirmBase, onSignOut, unsent, onShowIntro, onSimulateFirstRun,
   devTools,
   companies, activeCompanyId, onSwitchCompany, onCloseAccount,
   buildLabel, updateReady, onApplyUpdate, onCheckUpdates, usage,
@@ -69,6 +69,9 @@ export function Drawer({
   onCheckUpdates?: () => Promise<'downloaded' | 'none' | 'error'>;
   confirmBase: string;
   onSignOut: () => Promise<void>;
+  /** Rows still queued in every owned outbox plus any open capture draft — what a
+   *  handover to another account would destroy. Null when it could not be counted. */
+  unsent?: number | null;
   /** DEV ONLY: re-render the first-open intro over the current screen. */
   /**
    * Show the developer-only rows. `__DEV__` OR a user flagged in `developer_user` (417) —
@@ -142,11 +145,24 @@ export function Drawer({
     Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}`).catch(() => {});
   const openLegal = (path: string) =>
     Linking.openURL(`https://${confirmBase || 'ezchangeorders.com'}/${path}`).catch(() => {});
+  /**
+   * THE COUNT IS PART OF THE QUESTION, not a footnote.
+   *
+   * Signing out does not itself destroy anything — but the next account to sign in on
+   * this phone wipes it (deviceowner.ts), and anything that never reached the cloud
+   * goes with it. This is the last moment the person who owns that work is standing
+   * in front of the app, so it is the only place the warning is worth anything.
+   */
   const confirmSignOut = () =>
-    Alert.alert(T('set.signOut'), T('set.signOutConfirm'), [
-      { text: T('set.cancel'), style: 'cancel' },
-      { text: T('set.signOut'), style: 'destructive', onPress: () => { onClose(); void onSignOut(); } },
-    ]);
+    Alert.alert(
+      T('set.signOut'),
+      unsent && unsent > 0
+        ? `${T('set.signOutConfirm')}\n\n${T({ k: 'set.signOutUnsent', p: { n: String(unsent) } } as any)}`
+        : T('set.signOutConfirm'),
+      [
+        { text: T('set.cancel'), style: 'cancel' },
+        { text: T('set.signOut'), style: 'destructive', onPress: () => { onClose(); void onSignOut(); } },
+      ]);
 
   const check = async () => {
     if (!onCheckUpdates || checking) return;

@@ -988,6 +988,16 @@ const EN: Record<string, string> = {
   'set.removeTitle': 'Remove teammate?',
   'set.removeConfirm': 'Remove {who} from your company? They’ll need a new invite to rejoin.',
   'set.signOutConfirm': 'Sign out of EZChangeOrders on this device?',
+  /**
+   * THE WARNING GOES WHERE THE PERSON WHO CAN STILL ACT IS STANDING.
+   *
+   * When a different account signs in on this phone, everything on it is erased
+   * (deviceowner.ts) — including anything that never reached the cloud. The incoming
+   * user cannot be shown that work and cannot upload it. So the one useful moment to
+   * say so is here, to the person leaving, while they can still find signal first.
+   * It is a warning, not a promise that nothing is lost.
+   */
+  'set.signOutUnsent': '{n} item(s) on this phone haven’t reached the cloud yet. They stay here for you, but if someone else signs in on this phone they’ll be erased. Get signal first if you can.',
   'set.prefs': 'Preferences',
   'set.notif': 'Notifications',
   'set.notifOn': 'On',
@@ -1037,6 +1047,37 @@ const EN: Record<string, string> = {
     'Everything was deleted except {n} file(s) we could not remove. Contact support and we will finish it.',
 
   'set.signOut': 'Sign out',
+
+  /**
+   * DEVICE HANDOVER — a different account signed in on a phone somebody else was
+   * using (deviceowner.ts).
+   *
+   * SAID PLAINLY, AND SAID AT ALL. An app that silently empties itself between two
+   * users looks broken to the second one, who has no way to know a wipe was the
+   * correct thing to have happened. And it is worth saying to whoever hands the phone
+   * over: the previous account's work is not hiding behind a login, it is gone.
+   */
+  'handover.wipedTitle': 'This phone is set up for you',
+  'handover.wipedBody':
+    'It was signed in to another account, so that account’s jobs and photos were removed from this phone. Yours will sync down.',
+  /**
+   * THE REFUSAL. A different account tried to sign in while the previous one still
+   * has work that never reached the cloud — so nothing was deleted and nobody was
+   * signed in (deviceowner.ts, IMPLEMENTATION_NOTES §6a).
+   *
+   * IT NAMES THE WAY OUT, because there is one and it is not obvious: the previous
+   * user signs back in — which touches none of their data — gets signal, and lets it
+   * finish. A refusal with no instruction reads as a dead app.
+   */
+  'handover.refusedTitle': 'Finish sending first',
+  'handover.refusedBody':
+    'The account already on this phone has {n} item(s) that never reached the cloud. Signing you in would erase them. Have that person sign in here with signal, wait for it to finish, then try again.',
+  'handover.failedTitle': 'Could not set up this phone',
+  // Refused, not fudged. The alternative to this message is signing somebody in on top
+  // of another person's jobsite data, which is the defect this whole path exists for.
+  'handover.failedBody':
+    'This phone was signed in to another account and we could not clear it, so we did not sign you in. Try again, or restart the app.',
+
   'quota.title': 'You’ve reached your plan limit',
   'quota.body.members': 'Your free plan includes up to {limit} team members. Upgrade to add more.',
   'quota.body.jobs': 'Your free plan includes up to {limit} jobs. Archive one you’re done with, or upgrade to add more.',
@@ -2814,6 +2855,7 @@ const ES: Record<string, string> = {
   'set.removeTitle': '¿Quitar al miembro?',
   'set.removeConfirm': '¿Quitar a {who} de tu empresa? Necesitará una nueva invitación para volver.',
   'set.signOutConfirm': '¿Cerrar sesión de EZChangeOrders en este dispositivo?',
+  'set.signOutUnsent': '{n} elemento(s) de este teléfono aún no llegaron a la nube. Se quedan aquí para ti, pero si otra persona inicia sesión en este teléfono se borrarán. Consigue señal antes, si puedes.',
   'set.prefs': 'Preferencias',
   'set.notif': 'Notificaciones',
   'set.notifOn': 'Activadas',
@@ -2857,6 +2899,17 @@ const ES: Record<string, string> = {
     'Se eliminó todo excepto {n} archivo(s) que no pudimos borrar. Contáctanos y lo terminamos.',
 
   'set.signOut': 'Cerrar sesión',
+
+  'handover.wipedTitle': 'Este teléfono está listo para ti',
+  'handover.wipedBody':
+    'Estaba con otra cuenta, así que los trabajos y las fotos de esa cuenta se borraron de este teléfono. Los tuyos se van a descargar.',
+  'handover.refusedTitle': 'Primero hay que terminar de enviar',
+  'handover.refusedBody':
+    'La cuenta que ya está en este teléfono tiene {n} elemento(s) que nunca llegaron a la nube. Si iniciamos tu sesión, se borrarían. Pídele a esa persona que inicie sesión aquí con señal, espera a que termine, y vuelve a intentarlo.',
+  'handover.failedTitle': 'No se pudo preparar este teléfono',
+  'handover.failedBody':
+    'Este teléfono estaba con otra cuenta y no pudimos borrarla, así que no iniciamos tu sesión. Inténtalo otra vez o reinicia la app.',
+
   'quota.title': 'Alcanzaste el límite de tu plan',
   'quota.body.members': 'Tu plan gratis incluye hasta {limit} miembros del equipo. Mejora tu plan para agregar más.',
   'quota.body.jobs': 'Tu plan gratis incluye hasta {limit} trabajos. Archiva uno que ya terminaste, o mejora tu plan para agregar más.',

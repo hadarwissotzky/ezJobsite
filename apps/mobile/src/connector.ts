@@ -6,6 +6,8 @@ import {
 import { createClient, SupabaseClient, type Session } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { forgetPushToken } from './push.ts';
+
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 const POWERSYNC_URL = process.env.EXPO_PUBLIC_POWERSYNC_URL!;
@@ -288,7 +290,20 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
     if (error) throw error;
   }
 
+  /**
+   * THE TOKEN GOES BEFORE THE SESSION DOES, and that order is the whole point:
+   * `push_token`'s RLS lets a user delete only their OWN row, so once `signOut()`
+   * has run there is no longer anybody who is allowed to remove this handset's
+   * registration. Doing it after would be doing it never — and the row left behind
+   * keeps delivering this user's approvals and client questions to a phone that has
+   * since been handed to somebody else. See `forgetPushToken` for the full argument.
+   *
+   * Awaited, not fired-and-forgotten, for the same reason: the session must still be
+   * alive when the DELETE reaches PostgREST. It is best-effort internally, so a
+   * basement sign-out is not blocked by it.
+   */
   async signOut() {
+    await forgetPushToken(this.client);
     await this.client.auth.signOut();
   }
 

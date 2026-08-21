@@ -2,7 +2,7 @@ import '@azure/core-asynciterator-polyfill';
 import 'react-native-get-random-values';
 
 import { OPSqliteOpenFactory } from '@powersync/op-sqlite';
-import { PowerSyncDatabase } from '@powersync/react-native';
+import { PowerSyncDatabase, type AbstractPowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import * as Contacts from 'expo-contacts';
 import React from 'react';
@@ -14,6 +14,10 @@ import { cachedMaps, mapUrlFor } from './src/mapcache';
 import { REJECT_DDL, SupabaseConnector } from './src/connector';
 import { forgetSeenOnboarding, getSeenOnboarding, setSeenOnboarding } from './src/auth';
 import { buildLine, useOta } from './src/otaclient';
+// The same "what is still unfinished" count the OTA gate uses. Reused deliberately:
+// two independent definitions of "unsent" would drift, and this one is the audited
+// list of every owned outbox.
+import { inFlight } from './src/ota';
 import { Onboarding } from './src/ui/onboarding';
 import { RecordConsent } from './src/ui/recordconsent';
 import { SETUP_ART, StepHowItWorks, StepLanguage, StepProfile } from './src/ui/setupflow';
@@ -109,6 +113,7 @@ import { billingTenantId, createInvite, ensureBillingTenant, ensureOwnCompany,
          listMembers, listMyCompanies, myCompany, resolveMyCompany, setActiveCompany,
          type Member } from './src/company';
 import { closeMyAccount } from './src/closeaccount';
+import { claimDevice } from './src/deviceowner';
 import { ensureLogoCached, pickLogo, removeCompanyLogo,
          saveCompanyLogo } from './src/companylogo';
 import { configureBilling, entitledPlanNow, entitledProductNow } from './src/billing';
@@ -460,6 +465,84 @@ let celebratedHead: string | null = null;
  * `draining` is: it is read from a tick and must not join the hook order.
  */
 let toastedMessageId: string | null = null;
+
+/**
+ * EVERY APP-OWNED LOCAL TABLE, built in the one order that works.
+ *
+ * Extracted from the launch effect (2026-08-21) because it now has a SECOND caller:
+ * a device handover (`claimDevice`) DROPs every one of these tables — that is what a
+ * wipe is — and the app has to keep running afterwards for the incoming user. Before
+ * this, the only thing that could recreate them was a cold start, so a purge mid-run
+ * left the app pointed at tables that no longer existed.
+ *
+ * DUPLICATING THE LIST WAS THE ALTERNATIVE AND IT WAS WORSE. Thirty `ensure*` calls
+ * written out twice drift the first time somebody adds the thirty-first, and the
+ * failure is silent: the new table simply does not come back after a handover, and
+ * the screen that reads it is empty for reasons nobody will connect to this.
+ *
+ * THE ORDERING COMMENTS ARE LOAD-BEARING and moved with the calls. Several of these
+ * ALTER `change_order`, so it has to exist first; two seed watermarks by selecting
+ * existing rows, so the rows have to be there.
+ */
+async function ensureLocalSchema(
+  db: AbstractPowerSyncDatabase, ownerId: string
+): Promise<void> {
+  await ensureAppOwnedSchema(db);
+  await ensureDecisionSchema(db);
+  await ensureChangeOrderSchema(db);
+  for (const s of REJECT_DDL) await db.execute(s);
+  await ensureProjectSchema(db, ownerId);
+  await ensureResolutionSchema(db);
+  await ensureAnnotationSchema(db);
+  await ensureTagSchema(db);
+  await ensurePartySchema(db);
+  // AFTER ensureChangeOrderSchema, and that order is load-bearing: this one
+  // ALTERs change_order to add extra_type (R5c), so the table has to exist first.
+  await ensureApproverSchema(db);
+  await ensureLedgerStatusSchema(db);
+  // AFTER ensureChangeOrderSchema for the same reason as the lines above: this
+  // ALTERs change_order to add superseded_by, the lineage the thread walks to
+  // carry a conversation across a revision (R5b AC2).
+  await ensureDiscussionSchema(db);
+  // AFTER ensureChangeOrderSchema for the same reason as the lines above: this
+  // ALTERs change_order to add parent_ewa_id, so the table has to exist first.
+  await ensureEwaSchema(db);
+  await ensureActivitySchema(db);
+  // AFTER ensureChangeOrderSchema: it seeds its watermark by selecting the
+  // already-approved rows, so change_order has to exist and be populated.
+  await ensureNotifySchema(db);
+  await ensureEventLogSchema(db);
+  await ensureRemindSchema(db);
+  // AFTER ensureChangeOrderSchema for the same reason ensureNotifySchema is: it seeds
+  // its watermark by selecting the already-approved rows, so change_order has to
+  // exist. A SEPARATE stamp from notify_sent — see celebrate.ts for why the push and
+  // the popup cannot share one.
+  await ensureCelebrateSchema(db);
+  // AFTER ensureChangeOrderSchema, same as the celebration's: it seeds its watermark
+  // by selecting existing change orders, so the table has to exist.
+  await ensureSilentNoticeSchema(db);
+  // The sends waiting on a credit. BEFORE the auth gate like the rest of these,
+  // because a hold written on the last run has to be readable on this one whether or
+  // not the session came back — the promise it carries ("it goes out on its own") was
+  // made to the person holding the phone, not to a session.
+  await ensureSendHoldSchema(db);
+  // R1: the draft session store. A SEPARATE directory from capture-tmp, which
+  // recoverySweep empties unconditionally — draft media must survive that sweep,
+  // so it never lives there.
+  await ensureDraftSchema(db);
+  await ensureDiscardSchema(db);
+  await ensureDiscardSyncSchema(db);
+  // R6b: who captured / priced / sent, and who it was addressed to.
+  await ensureExtraActorSchema(db);
+  await ensureConsentSchema(db);
+  await ensurePairSchema(db);
+  await ensureAugmentSchema(db);
+  // R2: the device's own copy of transcripts, so the price read-back keeps
+  // working in a basement (mandate #7). Fetching is opportunistic; a miss is an
+  // empty, flagged price field, never a blocked screen.
+  await ensureVoiceCacheSchema(db);
+  await ensureSttSchema(db);
+}
 
 export default function App() {
   // The design language (prototype): condensed display for things you RECOGNISE,
@@ -3219,6 +3302,16 @@ const checkClientMessages = async () => {
    * waits to be dismissed, because it carries the reason the write did not happen and
    * a message that vanishes on its own is a message nobody read.
    */
+  /**
+   * A different account is taking over this handset and the previous user's data is
+   * being removed. True only for the seconds `claimDevice` is running; it holds the
+   * whole UI on the splash so nothing reads a table that is momentarily gone.
+   */
+  const [wiping, setWiping] = React.useState(false);
+  /** Rows queued in every owned outbox + open drafts, refreshed when the drawer opens.
+   *  Null = not counted. What the sign-out confirmation warns about. NOT `unsent`,
+   *  which is already taken by the Extras tab's list of undelivered decisions. */
+  const [unsentWork, setUnsentWork] = React.useState<number | null>(null);
   const [ack, setAck] = React.useState<null | {
     kind: 'ok' | 'no'; title: string; detail?: string | null;
     /**
@@ -3769,7 +3862,14 @@ const checkClientMessages = async () => {
         // a drawer ends up displaying free-tier lines beside a paid plan name for a
         // frame. `quota` (the blocking decision) is deliberately not touched here.
         setUsage(await usageSummary(db, co?.id ?? null));
-      } catch { setPlanId('free'); setIsOwner(false); setUsage(null); }
+        // What a handover to another account would destroy — see the sign-out
+        // confirmation in drawer.tsx. Read on the same trigger as the drawer's other
+        // numbers so it is current every time the drawer is opened, and never counted
+        // on a tick nobody is looking at. `inFlight` reports -1 when it could not
+        // count, which must not be shown as a quantity.
+        const f = await inFlight(db);
+        setUnsentWork(f.queued < 0 ? null : f.queued + f.openDrafts);
+      } catch { setPlanId('free'); setIsOwner(false); setUsage(null); setUnsentWork(null); }
     })();
   }, [ready, OWNER, menuOpen, db, quota]);
 
@@ -3857,52 +3957,12 @@ const checkClientMessages = async () => {
       // one, and supabase-js refreshes the token before any request uses it. A device
       // with nothing stored gets null and falls through to the network path unchanged.
       const stored = await connector.storedSession();
-      await ensureAppOwnedSchema(db);
-      await ensureDecisionSchema(db);
-      await ensureChangeOrderSchema(db);
+      // Every app-owned table, in the one order that works — see ensureLocalSchema.
+      // A device handover calls it again after the wipe.
+      await ensureLocalSchema(db, OWNER);
       // Number the extras that predate the column, oldest first per job. A no-op on
       // every launch after the first.
       await backfillCoNumbers(db);
-      for (const s of REJECT_DDL) await db.execute(s);
-      await ensureProjectSchema(db, OWNER);
-      await ensureResolutionSchema(db);
-      await ensureAnnotationSchema(db);
-      await ensureTagSchema(db);
-      await ensurePartySchema(db);
-      // AFTER ensureChangeOrderSchema, and that order is load-bearing: this one
-      // ALTERs change_order to add extra_type (R5c), so the table has to exist first.
-      await ensureApproverSchema(db);
-      await ensureLedgerStatusSchema(db);
-      // AFTER ensureChangeOrderSchema for the same reason as the lines above: this
-      // ALTERs change_order to add superseded_by, the lineage the thread walks to
-      // carry a conversation across a revision (R5b AC2).
-      await ensureDiscussionSchema(db);
-      // AFTER ensureChangeOrderSchema for the same reason as the lines above: this
-      // ALTERs change_order to add parent_ewa_id, so the table has to exist first.
-      await ensureEwaSchema(db);
-      await ensureActivitySchema(db);
-      // AFTER ensureChangeOrderSchema: it seeds its watermark by selecting the
-      // already-approved rows, so change_order has to exist and be populated.
-      await ensureNotifySchema(db);
-      await ensureEventLogSchema(db);
-      await ensureRemindSchema(db);
-      // AFTER ensureChangeOrderSchema for the same reason ensureNotifySchema is: it seeds
-      // its watermark by selecting the already-approved rows, so change_order has to
-      // exist. A SEPARATE stamp from notify_sent — see celebrate.ts for why the push and
-      // the popup cannot share one.
-      await ensureCelebrateSchema(db);
-      // AFTER ensureChangeOrderSchema, same as the celebration's: it seeds its watermark
-      // by selecting existing change orders, so the table has to exist.
-      await ensureSilentNoticeSchema(db);
-      // The sends waiting on a credit. BEFORE the auth gate like the rest of these,
-      // because a hold written on the last run has to be readable on this one whether or
-      // not the session came back — the promise it carries ("it goes out on its own") was
-      // made to the person holding the phone, not to a session.
-      await ensureSendHoldSchema(db);
-      // R1: the draft session store. A SEPARATE directory from capture-tmp, which
-      // recoverySweep empties unconditionally — draft media must survive that sweep,
-      // so it never lives there.
-      await ensureDraftSchema(db);
       // A SEPARATE sweep over a SEPARATE directory. recoverySweep empties capture-tmp
       // unconditionally, so draft media never lives there. Everything this sweep does
       // is in the direction of KEEPING bytes: adopt a file with no row, adopt a
@@ -3943,8 +4003,6 @@ const checkClientMessages = async () => {
       // asks "can a capture be lost", this one asks "do the pieces I wired actually
       // reach each other". Unit tests cannot answer the second — they prove the
       // decisions, not the plumbing, and plumbing is what broke eight times here.
-      await ensureDiscardSchema(db);
-      await ensureDiscardSyncSchema(db);
       // One-time repairs for verdicts issued under an older world:
       //  - extras parked on 23502 while the server still demanded a price (370
       //    dropped that) get their upload retried;
@@ -3997,16 +4055,6 @@ const checkClientMessages = async () => {
           console.log('[LOOPCHECK] threw:', String(e?.message ?? e));
         }
       }
-      // R6b: who captured / priced / sent, and who it was addressed to.
-      await ensureExtraActorSchema(db);
-      await ensureConsentSchema(db);
-      await ensurePairSchema(db);
-      await ensureAugmentSchema(db);
-      // R2: the device's own copy of transcripts, so the price read-back keeps
-      // working in a basement (mandate #7). Fetching is opportunistic; a miss is an
-      // empty, flagged price field, never a blocked screen.
-      await ensureVoiceCacheSchema(db);
-      await ensureSttSchema(db);
       // BEFORE the first refresh(): listCaptures now excludes discarded captures
       // by subquery, and a missing table there would fail the whole gallery.
       const sl = await savedLang(db);
@@ -4054,9 +4102,110 @@ const checkClientMessages = async () => {
       // is shown once, so load that flag before deciding what to draw.
       setSeen(await getSeenOnboarding());
       let connected = false;
-      const applySession = (s: Session | null) => {
-        setSession(s);
+
+      /**
+       * WHOSE DEVICE IS THIS (hadar, 2026-08-21: signed out of one account, signed in
+       * with another phone number, "at first it logged me in to the last known user on
+       * the phone content").
+       *
+       * `signOut()` ends a session; it never emptied the device, and almost no local
+       * read is owner-scoped — they filter by PROJECT, because a device having one user
+       * was an assumption nothing enforced. So the second user got the first user's
+       * jobs, photos, prices and clients. `claimDevice` is the enforcement: same user
+       * back → untouched, different user → wiped before their first frame. The full
+       * argument, including the loss this deliberately accepts, is in deviceowner.ts.
+       *
+       * IT RUNS BEFORE ANY OTHER SIGN-IN WORK, and that is the point — `setOwner`,
+       * push registration, billing and `db.connect` all happen after the device is
+       * known to be theirs, never beside it.
+       */
+      const claimFor = async (userId: string): Promise<boolean> => {
+        // `onWipeStart` fires only when a wipe is actually about to happen, so the
+        // ordinary sign-in never touches this and never flashes the splash. Cleared in
+        // every branch below, including the refusal.
+        const claim = await claimDevice(db, userId, { onWipeStart: () => setWiping(true) });
+
+        /**
+         * EVERY BRANCH IS LOGGED (§6(3)). That finding cost three sessions of
+         * misdiagnosis precisely because the refusal reason was legible only to
+         * somebody who thought to look at the device's own trail. The next identity
+         * question should be answerable from the flight recorder alone.
+         */
+        const branch = 'failed' in claim ? `failed: ${claim.reason}`
+          : 'refused' in claim ? `refused: ${claim.unsent} unsent`
+          : claim.wiped ? 'purged' : 'bound';
+        void logDiag(db, 'identity.switch', `${branch} → ${userId}`);
+
+        if ('refused' in claim) {
+          // DURABILITY WINS — nothing was deleted. See deviceowner.ts.
+          setWiping(false);
+          setSession(null);
+          setAck({ kind: 'no', title: T('handover.refusedTitle'),
+                   detail: T({ k: 'handover.refusedBody',
+                               p: { n: String(claim.unsent) } } as any) });
+          await connector.signOut().catch(() => {});
+          return false;
+        }
+        if ('failed' in claim) {
+          setWiping(false);
+          // REFUSE LOUDLY. Continuing here means signing somebody in over another
+          // person's data, which is the defect itself — so the session goes instead.
+          console.warn('[handover] refused:', claim.reason);
+          setAck({ kind: 'no', title: T('handover.failedTitle'),
+                   detail: T('handover.failedBody') });
+          // Set explicitly rather than left to the SIGNED_OUT event: `signOut()` can
+          // throw on a dead network, and a `session` stuck at `undefined` leaves the
+          // app on the splash with no way forward.
+          setSession(null);
+          await connector.signOut().catch(() => {});
+          return false;
+        }
+        if (!claim.wiped) return true;
+        console.log('[handover] device wiped, previous user', claim.previousUser);
+        try {
+          // The tables were DROPped by the purge. Nothing may read them until they are
+          // back, so this is awaited before a single query runs.
+          await ensureLocalSchema(db, userId);
+          // PowerSync's own store was cleared too; let the connect below happen again.
+          connected = false;
+          // Re-read every list from the now-empty database rather than resetting ~20
+          // pieces of state by hand: a hand-written reset list is one `useState` away
+          // from leaving the previous user's row on screen, which is the bug.
+          setDrafts([]);
+          setLogoUri(null); setLogoKey(null);
+          setProjectId(INBOX_ID);
+          await refresh();
+          setFirstRun(await isFirstRun(db));
+          setFirstExtra(!(await firstExtraSeen(db)));
+          setHasProfile(await hasProfileFn(db));
+        } catch (e: any) {
+          // The wipe SUCCEEDED and the rebuild did not, so this device is now empty
+          // and has no schema. It cannot be used, and pretending otherwise would put
+          // the incoming user in front of an app whose every query throws. Sign out;
+          // the next launch runs `ensureLocalSchema` from the top and repairs it.
+          setWiping(false);
+          console.warn('[handover] rebuild failed:', e?.message ?? e);
+          setAck({ kind: 'no', title: T('handover.failedTitle'),
+                   detail: T('handover.failedBody') });
+          setSession(null);
+          await connector.signOut().catch(() => {});
+          return false;
+        }
+        setWiping(false);
+        setAck({ kind: 'ok', title: T('handover.wipedTitle'),
+                 detail: T('handover.wipedBody') });
+        return true;
+      };
+
+      const applySessionNow = async (s: Session | null) => {
         if (s?.user?.id) {
+          // THE CLAIM COMES BEFORE `setSession`, and that is the difference between
+          // fixing this bug and merely shortening it: `setSession` is what opens the
+          // auth gate, so setting it first would paint the whole app — the previous
+          // user's jobs, extras and photos — for the frames before the wipe starts.
+          // hadar saw exactly that: "at first it logged me in to the last known user".
+          if (!(await claimFor(s.user.id))) return;
+          setSession(s);
           setOwner(s.user.id);
           // REQ-NOTIF1 — register this device for remote push, best-effort.
           void registerPushToken(connector.client, s.user.id);
@@ -4081,7 +4230,39 @@ const checkClientMessages = async () => {
             db.connect(connector).catch((e) =>
               console.log('sync will connect when there is signal', e?.message ?? e));
           }
+        } else {
+          setSession(s);
+          /**
+           * SIGNED OUT. Two things that used to survive it, and both were wrong.
+           *
+           * `connected` latched true for the life of the app run, so the `if
+           * (!connected)` above — written to stop a token REFRESH stacking a second
+           * connection — also stopped the next sign-in from connecting at all. A
+           * second user on the same app run got no sync, which reads as "nothing ever
+           * uploads" and is invisible until somebody looks at the server.
+           *
+           * And PowerSync itself stayed connected, streaming the departed user's
+           * buckets into a device nobody is signed in to.
+           */
+          connected = false;
+          db.disconnect().catch((e) =>
+            console.log('disconnect on sign-out failed', e?.message ?? e));
         }
+      };
+
+      /**
+       * SERIALISED, because these can overlap and the handover must not run twice.
+       * The stored-session path fires `applySession(stored)` and then, when the token
+       * refresh lands, `applySession(fresh)` — two async claims that could both read
+       * "the last user was A" before either records B. Chaining makes the second see
+       * what the first wrote, which is the whole basis of `claimDevice`'s decision.
+       */
+      let sessionWork: Promise<void> = Promise.resolve();
+      const applySession = (s: Session | null): Promise<void> => {
+        sessionWork = sessionWork
+          .then(() => applySessionNow(s))
+          .catch((e) => console.warn('session apply failed', e?.message ?? e));
+        return sessionWork;
       };
       // THE SESSION MUST NOT GATE FIRST PAINT (hadar 2026-08-04: 30s cold start while
       // already logged in).
@@ -4099,10 +4280,12 @@ const checkClientMessages = async () => {
       // genuinely has nothing to show and flashing sign-in at a returning user is the
       // failure this gate was built to prevent.
       if (stored) {
-        applySession(stored);
-        void sessionPromise.then((fresh) => { if (fresh) applySession(fresh); });
+        // NOT awaited, deliberately — that is what keeps first paint off the network.
+        // The handover inside it is; see `applySession`'s chain.
+        void applySession(stored);
+        void sessionPromise.then((fresh) => { if (fresh) void applySession(fresh); });
       } else {
-        applySession(await sessionPromise);
+        await applySession(await sessionPromise);
       }
       // Keep session + sync in step on later sign-in / sign-out. Skip INITIAL_SESSION:
       // getSession above already applied the startup state.
@@ -5113,6 +5296,18 @@ const checkClientMessages = async () => {
       }} />
     );
   }
+
+  /**
+   * MID-HANDOVER. `claimDevice` DROPs every app-owned table, and for the moment
+   * between the drop and `ensureLocalSchema` putting them back there is nothing to
+   * query — so nothing may try. Every render below reads the database, and letting
+   * them run against dropped tables would paint the outgoing user's screen full of
+   * caught errors on the way to emptying it.
+   *
+   * BEFORE the `session === undefined` gate, because by this point the incoming user
+   * has a perfectly good session; what they do not yet have is a device.
+   */
+  if (wiping) return <SplashScreen />;
 
   if (ready && !initError) {
     if (session === undefined) return <SplashScreen />;
@@ -7662,6 +7857,7 @@ const checkClientMessages = async () => {
       onCheckUpdates={ota.checkNow}
       confirmBase={CONFIRM_BASE}
       onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
+      unsent={unsentWork}
       companies={companies}
       activeCompanyId={co?.id ?? null}
       /**

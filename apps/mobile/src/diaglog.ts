@@ -36,5 +36,14 @@ export async function logDiag(
     await db.execute(
       `DELETE FROM diag_log WHERE rowid NOT IN
          (SELECT rowid FROM diag_log ORDER BY at_ms DESC LIMIT 500)`);
-  } catch { /* never let the trail break the trip */ }
+  } catch {
+    // NEVER LET THE TRAIL BREAK THE TRIP — but do not let it go permanently dark
+    // either. `ready` is a latch, and a device handover DROPs every app-owned table
+    // (deviceowner.ts) including this one; without dropping the latch, every later
+    // call would insert into a table that no longer exists, fail, and be swallowed —
+    // so the flight recorder would be silent for the rest of the app run, starting at
+    // exactly the moment something interesting happened. Re-arming means the next
+    // call recreates it.
+    ready = false;
+  }
 }
