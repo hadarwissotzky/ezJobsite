@@ -260,3 +260,26 @@ test('the opt-out does not cost a third segment on a real message', () => {
   // would be a different kind of failure.
   assert.ok(smsSegments(priced()) <= 2, `${smsSegments(priced())} segments`);
 });
+
+test('a long company name and address cannot buy a third segment', () => {
+  // The budget used to be a comment ("11 characters of headroom") verified against one
+  // fixture. Anything longer silently cost 50% more per send, invisibly, on every
+  // client message — the kind of thing found on an invoice rather than in a test.
+  const company = 'Wissotzky Brothers General Contracting and Restoration LLC';
+  const job = '1155 Stanyan Street, Apartment 4B, San Francisco, California 94117';
+  const amountText = '$128,450.00';
+  const long = clientSmsBody({
+    kind: 'confirm',
+    companyName: company,
+    jobLabel: job,
+    amountText,
+    url: 'https://ezchangeorders.com/c/abcdefghijklmnop',
+    // The instrument must contain each one, or the builder omits it by design.
+    shownContent: `${company}\n${job}\n${amountText}`,
+  } as any);
+
+  assert.ok(smsSegments(long) <= 2,
+    `a real message must never exceed two segments, got ${smsSegments(long)}`);
+  assert.match(long, /Open it here/, 'the link survives the trim');
+  assert.match(long, /Reply STOP/, 'the opt-out survives the trim — the campaign depends on it');
+});

@@ -211,7 +211,35 @@ export function clientSmsBody(o: ClientSmsInput): string {
   // 11 characters of headroom left — anything further added here costs a third segment.
   const stop = '\nReply STOP to opt out. HELP for help.';
 
-  return `${what}${job}${cta}${closing}${stop}`;
+  /**
+   * THE BUDGET IS ENFORCED, NOT HOPED FOR.
+   *
+   * `who` (company name), `jobLabel` (job address) and `amountText` are all
+   * caller-supplied and unbounded, while the only guard was a unit test against ONE
+   * fixture at 295 of 306 characters. A company name a dozen characters longer than
+   * the fixture silently cost a third segment on every client message — 50% more per
+   * send, invisibly, and discovered on an invoice (review, 2026-08-21).
+   *
+   * The JOB LINE is what gives, and that choice is deliberate. Everything else is
+   * load-bearing: the sender's name is who the client trusts, the amount is the thing
+   * being approved, the URL is the whole point, and the opt-out is what keeps the A2P
+   * campaign alive. The job is context the page repeats in full a tap away, so it is
+   * the one line that can lose its tail without costing the reader anything.
+   */
+  const body = `${what}${job}${cta}${closing}${stop}`;
+  if (smsSegments(body) <= 2 || !job) return body;
+
+  // Trim the job line until it fits, ellipsis included so nothing looks truncated by
+  // accident. Bounded by construction: `job` only ever shrinks.
+  let label = (o.jobLabel as string).trim();
+  while (label.length > 8) {
+    label = label.slice(0, -6);
+    const shorter = `${what}
+Job: ${label}…${cta}${closing}${stop}`;
+    if (smsSegments(shorter) <= 2) return shorter;
+  }
+  // Nothing left to give: drop the job line entirely rather than send three segments.
+  return `${what}${cta}${closing}${stop}`;
 }
 
 /**

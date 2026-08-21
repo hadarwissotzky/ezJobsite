@@ -1473,13 +1473,32 @@ export async function pushCoNumbers(
   return { pushed, failed };
 }
 
+/**
+ * `projectId: null` MEANS THE WHOLE ACCOUNT, and that is the correct default now.
+ *
+ * This was project-scoped, and two things went wrong with it (review, 2026-08-21):
+ *
+ *   1. `synced` — the flag that lets Home say "NO EXTRAS YET" — was set from this
+ *      function's `ok`. On a fresh device `projectIdRef` is the INBOX (real projects
+ *      arrive later via PowerSync), so it asked "does the inbox have extras?", got a
+ *      truthful no, and Home announced the ACCOUNT was empty. Home's own query has no
+ *      project filter, so the two were never asking the same question.
+ *   2. Extras belonging to any project the user was not currently looking at never
+ *      hydrated at all — so a second device only ever received the extras of whichever
+ *      job happened to be open.
+ *
+ * RLS scopes the pull to the caller either way (`co_own`, plus 376's company-wide
+ * read), so dropping the filter widens it to exactly what this account may see and no
+ * further.
+ */
 export async function hydrateChangeOrders(
-  db: AbstractPowerSyncDatabase, supabase: SupabaseClient, projectId: string, ownerId: string
+  db: AbstractPowerSyncDatabase, supabase: SupabaseClient,
+  projectId: string | null, ownerId: string
 ) {
-  const { data, error } = await supabase
+  const q = supabase
     .from('change_order')
-    .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at, scope_of_work, scope_of_work_ai, price_heard, schedule_effect, schedule_days, billing_timing, exclusions, extra_type, co_number')
-    .eq('project_id', projectId);
+    .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at, scope_of_work, scope_of_work_ai, price_heard, schedule_effect, schedule_days, billing_timing, exclusions, extra_type, co_number');
+  const { data, error } = await (projectId ? q.eq('project_id', projectId) : q);
   // `ok` SEPARATES "THIS ACCOUNT HAS NO EXTRAS" FROM "I COULD NOT ASK".
   //
   // Both used to return the same all-zero shape, so the caller had no way to tell them
@@ -1507,8 +1526,8 @@ export async function hydrateChangeOrders(
   // simply yields no lineage and the extras keep landing.
   let origins = new Map<string, string | null>();
   {
-    const { data: ol, error: oe } = await supabase
-      .from('change_order').select('id, origin_change_order_id').eq('project_id', projectId);
+    const oq = supabase.from('change_order').select('id, origin_change_order_id');
+    const { data: ol, error: oe } = await (projectId ? oq.eq('project_id', projectId) : oq);
     if (oe) void logDiag(db, 'hydrate.origin', String(oe.message ?? oe).slice(0, 160));
     else origins = new Map((ol ?? []).map((r: any) => [r.id, r.origin_change_order_id ?? null]));
   }

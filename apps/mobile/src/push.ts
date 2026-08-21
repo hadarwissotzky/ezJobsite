@@ -66,7 +66,7 @@ export async function registerPushToken(
     // remote-push pipeline dark in exactly the way this file just spent three years
     // being dark — silently, with everything upstream of it appearing to work.
     if (error) console.log('[push] token upsert refused:', error.message);
-    else console.log('[push] registered', token.slice(0, 24) + '…');
+    else { lastToken = token; console.log('[push] registered', token.slice(0, 24) + '…'); }
   } catch (e: any) {
     // Observable, not a silent swallow — a dead push pipeline should be visible.
     console.log('[push] registration failed:', e?.message ?? String(e));
@@ -93,6 +93,15 @@ export async function registerPushToken(
  * row that keeps delivering until A signs in somewhere and it is refreshed. Named
  * here rather than pretended away.
  */
+/** The last token this run registered. `getExpoPushTokenAsync` contacts Expo's
+ *  servers, and sign-out must not wait on a jobsite network for something it already
+ *  knows — see `forgetPushToken`. */
+let lastToken: string | null = null;
+
+/** Sign-out is a foreground act with a person waiting on it. Six seconds is already
+ *  generous for a call that only exists to tidy up. */
+const TOKEN_TIMEOUT_MS = 6_000;
+
 export async function forgetPushToken(supabase: SupabaseClient): Promise<void> {
   const projectId = easProjectId();
   if (!projectId) return;
@@ -101,13 +110,29 @@ export async function forgetPushToken(supabase: SupabaseClient): Promise<void> {
     // Permission is READ, never requested. Asking for notification permission as
     // somebody is leaving is the worst possible moment for that dialog.
     if ((await N.getPermissionsAsync()).status !== 'granted') return;
-    const token = (await N.getExpoPushTokenAsync({ projectId }))?.data;
+    /**
+     * THE SIGN-OUT BUTTON MUST NOT HANG ON EXPO'S SERVERS.
+     *
+     * `signOut()` awaits this so the DELETE lands while the session is still valid,
+     * which is right. But `getExpoPushTokenAsync` is a NETWORK call, so on a phone
+     * with no signal the button sat dead for the whole fetch timeout with nothing on
+     * screen (review, 2026-08-21).
+     *
+     * The token this run registered is remembered, so the common path costs nothing;
+     * otherwise the fetch is time-boxed. Failing to unregister leaves a stale row that
+     * the next successful registration replaces — a bounded, already-stated residual
+     * cost, and far better than a sign-out that appears broken.
+     */
+    const token = lastToken ?? await Promise.race([
+      N.getExpoPushTokenAsync({ projectId }).then((t) => t?.data ?? null),
+      new Promise<null>((r) => setTimeout(() => r(null), TOKEN_TIMEOUT_MS)),
+    ]).catch(() => null);
     if (!token) return;
     // No user_id filter: RLS already restricts this to the caller's own row, and
     // naming the id here would only be a second way to get it wrong.
     const { error } = await supabase.from('push_token').delete().eq('token', token);
     if (error) console.log('[push] token delete refused:', error.message);
-    else console.log('[push] unregistered', token.slice(0, 24) + '…');
+    else { lastToken = null; console.log('[push] unregistered', token.slice(0, 24) + '…'); }
   } catch (e: any) {
     console.log('[push] unregister failed:', e?.message ?? String(e));
   }

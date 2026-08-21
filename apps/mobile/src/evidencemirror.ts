@@ -106,6 +106,24 @@ export function mirrorRelpath(captureId: string, objectKey: string, sha: string)
   return `${MIRROR_MEDIA_ROOT}${captureId}/${sha}.${extOf(objectKey)}`;
 }
 
+/**
+ * `.in(...)` GOES INTO A GET QUERY STRING, so the list has a length limit that is not
+ * ours to set. A job with a few hundred decisions builds a multi-kilobyte URL,
+ * PostgREST or nginx rejects it, the error branch returns zeros — and the record
+ * screen shows no photos AT ALL, permanently, on precisely the biggest jobs (review,
+ * 2026-08-21). The failure scales with how much evidence there is to lose.
+ *
+ * 100 per request: comfortably inside every proxy's limit and few enough round trips
+ * to be invisible on the 15-second tick.
+ */
+const IN_CHUNK = 100;
+
+function chunk<T>(xs: readonly T[], n = IN_CHUNK): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
+  return out;
+}
+
 export type HydrateEvidenceResult = {
   decisions: number;
   versions: number;
@@ -171,13 +189,17 @@ export async function hydrateEvidence(
   if (!ids.length) return { decisions, versions: 0, captures: 0, offline: false };
 
   // ── the version chain ────────────────────────────────────────────────────────
-  const { data: vers, error: ve } = await supabase
-    .from('decision_version')
-    .select('id, decision_id, value, capture_id, directed_by, created_at_ms')
-    .in('decision_id', ids);
-  if (ve || !vers) {
-    void logDiag(db, 'hydrate.evidence', `version: ${String(ve?.message ?? 'no data').slice(0, 120)}`);
-    return { decisions, versions: 0, captures: 0, offline: false };
+  const vers: any[] = [];
+  for (const batch of chunk(ids)) {
+    const { data, error } = await supabase
+      .from('decision_version')
+      .select('id, decision_id, value, capture_id, directed_by, created_at_ms')
+      .in('decision_id', batch);
+    if (error || !data) {
+      void logDiag(db, 'hydrate.evidence', `version: ${String(error?.message ?? 'no data').slice(0, 120)}`);
+      return { decisions, versions: 0, captures: 0, offline: false };
+    }
+    vers.push(...data);
   }
 
   let versions = 0;
@@ -228,22 +250,28 @@ export async function hydrateEvidence(
   // the column names are historical (see sql/060) and renaming them is a separate,
   // deliberate change. Reading them under the wrong name is how this file's first
   // draft would have failed silently.
-  const { data: caps, error: ce } = await supabase
-    .from('capture')
-    .select('id, project_id, owner_id, payload, payload_sha256, modality, client_created_at, gps_lat, gps_lng')
-    .in('id', capIds);
-  if (ce || !caps) {
-    void logDiag(db, 'hydrate.evidence', `capture: ${String(ce?.message ?? 'no data').slice(0, 120)}`);
-    return { decisions, versions, captures: 0, offline: false };
+  const caps: any[] = [];
+  for (const batch of chunk(capIds)) {
+    const { data, error } = await supabase
+      .from('capture')
+      .select('id, project_id, owner_id, payload, payload_sha256, modality, client_created_at, gps_lat, gps_lng')
+      .in('id', batch);
+    if (error || !data) {
+      void logDiag(db, 'hydrate.evidence', `capture: ${String(error?.message ?? 'no data').slice(0, 120)}`);
+      return { decisions, versions, captures: 0, offline: false };
+    }
+    caps.push(...data);
   }
 
   // Byte length lives on the attachment, not the capture. Best-effort: a missing
   // attachment row costs a null `media_bytes`, never the capture.
   let bytes = new Map<string, number>();
   {
-    const { data: att } = await supabase
-      .from('attachment').select('capture_id, ciphertext_len').in('capture_id', capIds);
-    bytes = new Map((att ?? []).map((a: any) => [a.capture_id, Number(a.ciphertext_len)]));
+    for (const batch of chunk(capIds)) {
+      const { data: att } = await supabase
+        .from('attachment').select('capture_id, ciphertext_len').in('capture_id', batch);
+      for (const a of (att ?? []) as any[]) bytes.set(a.capture_id, Number(a.ciphertext_len));
+    }
   }
 
   // Captures this device took itself. `capture_commit` holds the real bytes and is

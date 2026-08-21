@@ -346,7 +346,12 @@ export function StepProfile(props: {
 
 const HOW: Array<{ icon: IconName; title: string; body: string }> = [
   { icon: 'microphone', title: 'su.h1t', body: 'su.h1b' },
-  { icon: 'checklist', title: 'su.h2t', body: 'su.h2b' },
+  // `docLine`, NOT `checklist`: the latter is pre-coloured artwork listed in
+  // icon.tsx's NEVER_TINT, so `color="#fff"` is ignored and it rendered sage-on-olive
+  // inside the solid accent disc while its two neighbours rendered white (review,
+  // 2026-08-21). A tintable glyph is the fix; recolouring the artwork is not, because
+  // NEVER_TINT exists to stop exactly that.
+  { icon: 'docLine', title: 'su.h2t', body: 'su.h2b' },
   { icon: 'send', title: 'su.h3t', body: 'su.h3b' },
 ];
 

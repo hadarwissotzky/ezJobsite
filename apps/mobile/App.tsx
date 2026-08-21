@@ -2199,7 +2199,22 @@ const removePerson = (approverId: string, name: string) => {
 const grantSmsConsent = async (approverId: string) => {
   try {
     await noteSmsConsent(db, approverId);
-    const pid = recordLc?.co.project_id ?? projectId;
+    /**
+     * THE SHEET'S OWN PROJECT, not the screen's.
+     *
+     * This read `recordLc?.co.project_id ?? projectId`, but the roster it is replacing
+     * was built from `sendPrep.co.project_id` (see where the sheet is prepared). Open
+     * the sheet from a surface where `recordLc` is null — a Home or Activity card —
+     * while `projectId` points at a different job, and the fallback reloads THE WRONG
+     * PROJECT'S roster. `chosen` is found by id inside that list, so it becomes null,
+     * the recipient disappears from a sheet the user is mid-send on, and the button
+     * drops to "nothing to send" moments after they granted consent (review,
+     * 2026-08-21).
+     *
+     * Reading it off `sendPrep` means the list can only ever be replaced by another
+     * list of the same job's people.
+     */
+    const pid = sendPrepRef.current?.co.project_id ?? recordLc?.co.project_id ?? projectId;
     if (pid) {
       const roster = await listRoster(db, pid);
       setSendPrep((p) => (p ? { ...p, roster } : p));
@@ -2778,6 +2793,9 @@ const checkClientMessages = async () => {
    * the only place the routing suggestion can be shown before it is acted on. A
    * pre-filled recipient nobody read is an inference carrying a price.
    */
+  /** The send sheet's own row, for handlers that must not fall back to whatever
+   *  project the SCREEN is showing — see `grantSmsConsent`. Assigned every render. */
+  const sendPrepRef = React.useRef<any>(null);
   const [sendPrep, setSendPrep] = React.useState<{
     co: LedgerRow;
     type: ExtraType | null;
@@ -2826,6 +2844,7 @@ const checkClientMessages = async () => {
     scheduleDaysText: string;
     exclusions: string;
   }>(null);
+  sendPrepRef.current = sendPrep;
   // FLOW step 3: the Review & Send screen over the details card. Holds the
   // company name so the preview renders the same header the owner will read.
   const [reviewSend, setReviewSend] = React.useState<null | { company: string | null }>(null);
@@ -2835,6 +2854,9 @@ const checkClientMessages = async () => {
   // stages (each tracks a real signal, never a timer) and then opens the details
   // for the already-filed change order `coId`. On weak/no connection, a message +
   // Done that parks at home (the extra stays a filed draft, finished later).
+  /** The live `transition`, for the poll below — see where it is read for why an
+   *  updater cannot be trusted to run eagerly. Assigned every render. */
+  const transitionRef = React.useRef<any>(null);
   const [transition, setTransition] = React.useState<null | {
     ids: string[]; anchorCaptureId: string | null; coId: string;
     uploaded: boolean; transcribed: boolean; analyzed: boolean; offline: boolean;
@@ -2863,6 +2885,9 @@ const checkClientMessages = async () => {
      */
     isGenerate?: boolean;
   }>(null);
+  // Kept current for the 90-second poll, which cannot rely on a setState updater
+  // running eagerly. Assigned every render, never read during one.
+  transitionRef.current = transition;
 
   // The transition's watcher. Polls the real signals: capture_outbox emptying
   // (uploaded), voice_transcript_cache (written down — works OFFLINE, it is
@@ -3042,14 +3067,29 @@ const checkClientMessages = async () => {
            * created" — one grows an existing record and the other is mid-edit — so
            * neither wants this popup, and both already return where they came from.
            */
-          let handoff: null | { kind: 'gen' | 'aug' | 'new'; coId: string; ids: string[] } = null;
-          setTransition((t) => {
-            if (t) {
-              handoff = { kind: t.isGenerate ? 'gen' : t.isAugment ? 'aug' : 'new',
-                          coId: t.coId, ids: t.ids };
-            }
-            return null;
-          });
+          /**
+           * READ FROM THE REF, NOT OUT OF A setState UPDATER.
+           *
+           * `handoff` was assigned inside `setTransition(t => …)` and read on the next
+           * line — which only works if React evaluates the updater eagerly at dispatch,
+           * and it only does that when the fiber has no pending lanes. Inside this
+           * 90-second poll, running alongside `refresh()` and its several setStates,
+           * that is not a promise React makes.
+           *
+           * When it is not eager, `handoff` is still null: processing finishes and
+           * NOTHING happens — no write-up applied, no "your change order is ready", no
+           * navigation. Silently, and only sometimes, which is the worst shape of all
+           * (review, 2026-08-21).
+           *
+           * The ref is current at read time by construction, and the updater keeps its
+           * one real job: clearing the state.
+           */
+          const t = transitionRef.current;
+          const handoff: null | { kind: 'gen' | 'aug' | 'new'; coId: string; ids: string[] } =
+            t ? { kind: t.isGenerate ? 'gen' : t.isAugment ? 'aug' : 'new',
+                  coId: t.coId, ids: t.ids }
+              : null;
+          setTransition(null);
           if (handoff) {
             const h: { kind: 'gen' | 'aug' | 'new'; coId: string; ids: string[] } = handoff;
             if (h.kind === 'gen') void finishGenerateById(h.coId);
@@ -4656,7 +4696,11 @@ const checkClientMessages = async () => {
           // happened to hadar (20 server rows, 0 numbers, 2026-08-21).
           const cn = await pushCoNumbers(db, connector.client);
           if (cn.pushed || cn.failed) console.log('co numbers:', JSON.stringify(cn));
-          const hy = await hydrateChangeOrders(db, connector.client, pid, data.user.id);
+          // ACCOUNT-WIDE (null), not `pid`. Home reads change orders with no project
+          // filter, so a project-scoped pull made `synced` answer a different question
+          // from the one the screen asks — and left every other job's extras
+          // unhydrated on a second device. See hydrateChangeOrders.
+          const hy = await hydrateChangeOrders(db, connector.client, null, data.user.id);
           /**
            * THE EVIDENCE BEHIND THE EXTRAS (hadar, 2026-08-21: "images not displaying
            * in the records" after signing in as another user).
