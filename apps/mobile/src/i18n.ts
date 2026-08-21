@@ -1063,6 +1063,9 @@ const EN: Record<string, string> = {
   'set.closedPartial':
     'Everything was deleted except {n} file(s) we could not remove. Contact support and we will finish it.',
 
+  // Not "Account" — the question it answers is "is this me?", and the answer is only
+  // useful next to the act that changes it.
+  'set.signedInAs': 'Signed in as',
   'set.signOut': 'Sign out',
 
   /**
@@ -2921,6 +2924,7 @@ const ES: Record<string, string> = {
   'set.closedPartial':
     'Se eliminó todo excepto {n} archivo(s) que no pudimos borrar. Contáctanos y lo terminamos.',
 
+  'set.signedInAs': 'Sesión iniciada como',
   'set.signOut': 'Cerrar sesión',
 
   'handover.wipedTitle': 'Este teléfono está listo para ti',

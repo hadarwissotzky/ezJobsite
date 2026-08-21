@@ -36,7 +36,8 @@ const SUPPORT_EMAIL = 'support@ezchangeorders.com';
 export function Drawer({
   visible, onClose, onProfile, onCompanySettings, onPlans,
   planName, isFreePlan, isOwner, hasTeam,
-  lang, onToggleLang, appVersion, confirmBase, onSignOut, unsent, onShowIntro, onSimulateFirstRun,
+  lang, onToggleLang, appVersion, confirmBase, onSignOut, unsent, account,
+  onShowIntro, onSimulateFirstRun,
   devTools,
   companies, activeCompanyId, onSwitchCompany, onCloseAccount,
   buildLabel, updateReady, onApplyUpdate, onCheckUpdates, usage,
@@ -72,6 +73,9 @@ export function Drawer({
   /** Rows still queued in every owned outbox plus any open capture draft — what a
    *  handover to another account would destroy. Null when it could not be counted. */
   unsent?: number | null;
+  /** The signed-in identity, already formatted — a grouped phone number or an email.
+   *  Null only before the session lands. See the note where it renders. */
+  account?: string | null;
   /** DEV ONLY: re-render the first-open intro over the current screen. */
   /**
    * Show the developer-only rows. `__DEV__` OR a user flagged in `developer_user` (417) —
@@ -357,6 +361,30 @@ export function Drawer({
             <Row label={T('set.closeAccount')} onPress={go(() => onCloseAccount?.())} last />
           </Group>
 
+          {/**
+            * WHICH ACCOUNT AM I SIGNED IN AS.
+            *
+            * hadar, 2026-08-21: "I am loading 4254979641 user and this is what comes up
+            * and it is wrong." The database said otherwise — the session on that phone
+            * was 415 497 9641, and every row on screen belonged to it, correctly. But
+            * NOTHING IN THIS APP SAID SO. There was no phone number, no email, no
+            * account line anywhere: not here, not in Profile, not in Settings.
+            *
+            * That is the whole reason a day went into chasing sync bugs. When the app
+            * cannot answer "who am I?", every screen becomes evidence of the wrong
+            * thing, and a correct render of account A is indistinguishable from a
+            * leak of account B. Identity has to be checkable in one tap, or nobody —
+            * user or developer — can tell a data bug from a login they did not notice.
+            *
+            * Directly above Sign out, deliberately: this is the fact that makes that
+            * button's consequence legible.
+            */}
+          {!!account && (
+            <Text style={st.account} numberOfLines={1}>
+              {T('set.signedInAs')} {account}
+            </Text>
+          )}
+
           <Pressable style={st.signOut} onPress={confirmSignOut} accessibilityRole="button">
             <Text style={st.signOutT}>{T('set.signOut')}</Text>
           </Pressable>
@@ -485,6 +513,10 @@ const st = StyleSheet.create({
 
   // An outline pill, not a red block: signing out is routine and reversible, and
   // dressing it as destructive teaches the wrong thing about the one action that is.
+  // Quiet: this is a fact to check, not a control. It must be READABLE though —
+  // a number nobody can proof-read answers nothing.
+  account: { fontFamily: F.body, fontSize: 13, color: C.steel,
+    textAlign: 'center', marginTop: 18, marginBottom: 8 },
   signOut: { minHeight: 50, borderRadius: radii.pill, borderWidth: 1, borderColor: C.line,
     backgroundColor: C.card, alignItems: 'center', justifyContent: 'center', marginTop: 22 },
   signOutT: { fontFamily: F.bodySemi, fontSize: 15.5, color: C.ink },

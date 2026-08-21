@@ -166,6 +166,7 @@ import { VoicePriceCard } from './src/ui/voicepricecard';
 import { SendToCard } from './src/ui/sendtocard';
 import { prepareSendTo, quickAddDestination } from './src/sendtoprep';
 import type { SendToPrefill, SendToProject } from './src/sendto';
+import { displayPhone } from './src/sendto';
 // R8 in-app activity centre. The push half needs a provider; this half needs
 // nothing but the rows already on the device, and without it there is no path at
 // all from "a client asked something" to the contractor noticing.
@@ -8026,6 +8027,17 @@ const checkClientMessages = async () => {
       confirmBase={CONFIRM_BASE}
       onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
       unsent={unsentWork}
+      /**
+       * THE ANSWER TO "WHO AM I SIGNED IN AS" — and until 2026-08-21 the app had none.
+       *
+       * Supabase stores the phone WITHOUT its leading '+', so it is put back before
+       * `displayPhone` groups it; an ungrouped 11-digit run is not proof-readable, and
+       * proof-reading is the entire job of this line. Email is the fallback for an
+       * account that signed in that way; null shows nothing rather than "unknown".
+       */
+      account={session?.user?.phone
+        ? displayPhone(`+${String(session.user.phone).replace(/\D/g, '')}`)
+        : (session?.user?.email ?? null)}
       companies={companies}
       activeCompanyId={co?.id ?? null}
       /**
