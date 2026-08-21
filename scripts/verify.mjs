@@ -399,6 +399,199 @@ console.log('\nverifying…\n');
         ' — wire it, revoke it, or add it to KNOWN_UNCALLED with the reason');
 }
 
+// ── 4e2. Does every RPC the CLIENT CALLS actually EXIST in a migration? ──────
+//
+// THE OTHER DIRECTION OF 4e, AND THE ONE THAT BITES A USER. 4e asks "is this
+// granted function called?" — a dead-code question. This asks "does the function
+// this code calls exist?" — a broken-feature question, and the failure is silent
+// in the worst way: PostgREST answers PGRST202, the client's catch treats it as a
+// transient error, and the row retries on the device forever while the screen says
+// nothing.
+//
+// FOUND BY RUNNING IT (2026-08-21): `ingest_tag_v1` is called by tags.ts and does
+// not exist on the live database. `sql/180_tags.sql` declares it and was never
+// applied, so EVERY TAG a contractor has ever written has gone nowhere. Nobody
+// noticed because a queue that retries forever looks exactly like a queue that is
+// simply waiting for signal.
+//
+// This reads the MIGRATIONS, not the database — it must run in CI and on a laptop
+// with no credentials. A function declared in sql/ but never applied still passes
+// here; check 4e3 is what catches that.
+{
+  const dir = join(MOBILE, 'sql');
+  const files = run('ls', [dir], ROOT).out.split('\n').map((x) => x.trim()).filter((f) => f.endsWith('.sql'));
+  let allSql = '';
+  for (const f of files) {
+    try { allSql += readFileSync(join(dir, f), 'utf8'); } catch { /* */ }
+  }
+  const declared = new Set(
+    [...allSql.matchAll(/create\s+(?:or\s+replace\s+)?function\s+public\.(\w+)/gi)].map((m) => m[1]));
+
+  let client = '';
+  const paths = run('sh', ['-c',
+    `find "${join(MOBILE, 'src')}" -name '*.ts' -o -name '*.tsx'; echo "${MOBILE}/App.tsx"; ` +
+    `find "${join(ROOT, 'apps/worker/src')}" -name '*.ts'; find "${join(ROOT, 'apps/web')}" -type f`],
+    ROOT).out.split('\n').map((x) => x.trim()).filter(Boolean);
+  for (const f of paths) {
+    if (/\.test\.[jt]sx?$/.test(f)) continue;   // a test may mock a name on purpose
+    try { client += readFileSync(f, 'utf8'); } catch { /* */ }
+  }
+  const called = new Set([...client.matchAll(/\.rpc\(\s*['"](\w+)['"]/g)].map((m) => m[1]));
+  // Supabase's own built-ins are not ours to declare.
+  const BUILTIN = new Set(['pgrst_watch']);
+  const missing = [...called].filter((fn) => !declared.has(fn) && !BUILTIN.has(fn)).sort();
+
+  if (called.size === 0) {
+    record('rpc definitions', 'inconclusive', 'found 0 .rpc() calls — the scan is wrong');
+  } else {
+    record('rpc definitions', missing.length === 0 ? 'pass' : 'fail',
+      missing.length === 0
+        ? `${called.size} RPC(s) called, every one declared in sql/`
+        : `${missing.length} RPC(s) called but NEVER DECLARED: ${missing.join(', ')}` +
+          ' — write the migration or stop calling it; the client fails silently either way');
+  }
+}
+
+// ── 4e3. Is every table the migrations declare actually IN the database? ─────
+//
+// A migration that was written and never applied is invisible to every other check
+// in this file: the SQL is present, the client compiles, the tests pass, and the
+// table does not exist. `capture_tag` sat in that state long enough that tags have
+// never once reached the server (2026-08-21).
+//
+// The existing schema check (5, check-schema-agreement.mjs) cannot see it — that
+// one compares COLUMNS of tables present on BOTH sides, so a table missing entirely
+// drops out of its join and is silently skipped.
+//
+// NEEDS CREDENTIALS, so it reports INCONCLUSIVE rather than passing when it cannot
+// reach the database. A check that inspected nothing is never a pass — this file's
+// own opening rule.
+{
+  const envPath = join(ROOT, '.env');
+  const envget = (k) => {
+    try {
+      const m = new RegExp(`^${k}=(.*)$`, 'm').exec(readFileSync(envPath, 'utf8'));
+      return m ? m[1].trim().replace(/^['"]|['"]$/g, '') : '';
+    } catch { return ''; }
+  };
+  const host = envget('SUPABASE_DB_HOST');
+  let user = envget('SUPABASE_DB_USER');
+  const ref = envget('EXPO_PUBLIC_SUPABASE_URL').replace(/^https:\/\//, '').replace(/\.supabase\.co.*/, '');
+  // The pooler multiplexes projects on one host and reads the project ref out of the
+  // username; a bare `postgres` fails with (ENOIDENTIFIER). Same rule apply-migration.sh uses.
+  if (user && !user.includes('.') && ref) user = `${user}.${ref}`;
+
+  const dir = join(MOBILE, 'sql');
+  const files = run('ls', [dir], ROOT).out.split('\n').map((x) => x.trim()).filter((f) => f.endsWith('.sql'));
+  let allSql = '';
+  for (const f of files) {
+    try { allSql += readFileSync(join(dir, f), 'utf8').replace(/--[^\n]*/g, ''); } catch { /* */ }
+  }
+  const declared = [...new Set(
+    [...allSql.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?public\.(\w+)/gi)].map((m) => m[1]))].sort();
+
+  if (!host || !user || declared.length === 0) {
+    record('migrations applied', 'inconclusive',
+      declared.length === 0 ? 'parsed 0 CREATE TABLE statements — the scan is wrong'
+        : 'no database credentials in .env — cannot check what is deployed');
+  } else {
+    const q = `select tablename from pg_tables where schemaname='public';`;
+    const r = run('sh', ['-c',
+      `PGPASSWORD='${envget('SUPABASE_DB_PASSWORD')}' psql -h '${host}' -p '${envget('SUPABASE_DB_PORT') || 5432}' ` +
+      `-U '${user}' -d '${envget('SUPABASE_DB_NAME') || 'postgres'}' --no-psqlrc -At -c "${q}"`], ROOT);
+    const live = new Set(r.out.split('\n').map((x) => x.trim()).filter(Boolean));
+    if (!r.ok || live.size === 0) {
+      record('migrations applied', 'inconclusive', 'could not read the database — nothing was checked');
+    } else {
+      const missing = declared.filter((t) => !live.has(t));
+      record('migrations applied', missing.length === 0 ? 'pass' : 'fail',
+        missing.length === 0
+          ? `${declared.length} declared table(s), all present on the server`
+          : `${missing.length} table(s) declared in sql/ but NOT ON THE SERVER: ${missing.join(', ')}` +
+            ' — apply the migration, or the feature that writes it is dead');
+    }
+  }
+}
+
+// ── 4e4. Can a button fail silently? ─────────────────────────────────────────
+//
+// hadar, 2026-08-21: "app gets stuck on this when I try to add photos." The
+// recording-consent screen's accept handler was an async function whose FIRST
+// statement was an un-guarded database write. When it threw, the rejection was
+// unhandled, the screen never dismissed, and the button did nothing on every press
+// — no error, no log, indistinguishable from a frozen app.
+//
+// An async function passed straight to onPress/onAccept/onConfirm has no caller to
+// catch it. React does not surface the rejection, so the ONLY way the user learns
+// is that nothing happened.
+//
+// THE RULE: an async handler must contain a `try` or a `.catch`. This is a shape
+// check, not a proof — a try/catch that swallows silently still passes, and that is
+// a judgement no grep can make. It catches the one shape that CANNOT report.
+{
+  const paths = run('sh', ['-c', `find "${join(MOBILE, 'src/ui')}" "${MOBILE}" -maxdepth 2 -name '*.tsx'`], ROOT)
+    .out.split('\n').map((x) => x.trim()).filter(Boolean);
+  const offenders = [];
+  let scanned = 0;
+  for (const f of paths) {
+    if (/\.test\.tsx?$/.test(f)) continue;
+    let body;
+    try { body = readFileSync(f, 'utf8'); } catch { continue; }
+    scanned++;
+    // `onPress={async () => { … }}` and friends, brace-matched so the whole body is
+    // examined rather than the first line of it.
+    for (const m of body.matchAll(/on[A-Z]\w*=\{\s*async\s*\([^)]*\)\s*=>\s*\{/g)) {
+      let i = m.index + m[0].length, depth = 1;
+      while (i < body.length && depth > 0) {
+        const c = body[i];
+        if (c === '{') depth++;
+        else if (c === '}') depth--;
+        i++;
+      }
+      const fnBody = body.slice(m.index, i);
+      if (!/\btry\b/.test(fnBody) && !/\.catch\s*\(/.test(fnBody) && /\bawait\b/.test(fnBody)) {
+        offenders.push(`${f.replace(ROOT + '/', '')}:${body.slice(0, m.index).split('\n').length}`);
+      }
+    }
+  }
+  /**
+   * A RATCHET, NOT A WALL, AND THE REASON IS IN THIS FILE'S OWN OUTPUT.
+   *
+   * The first run found 40. Shipping that as a hard failure would make this the
+   * SIXTH permanently-red check here — and the five already red (sql ownership,
+   * i18n coverage, module reachability, rpc callers, feature claims) have stayed red
+   * for this entire session with nobody acting on any of them. A red light that is
+   * always red is not a gate, it is decoration, and adding another one would make
+   * the whole file easier to ignore.
+   *
+   * So the baseline is the debt as it stood on 2026-08-21, and the check fails the
+   * moment it GROWS. New silent handlers cannot land; the existing 40 get worked
+   * down, and every time one is fixed this number comes with it.
+   *
+   * LOWER IT WHEN YOU FIX ONE. A baseline that never moves is the same decoration
+   * by a slower route.
+   *
+   * What is behind the number, sampled: `settingsscreen.tsx` sets `busy` true and
+   * awaits with no `finally`, so a throw leaves the button permanently disabled;
+   * `kit.tsx`'s voice-clip play swallows a failure into nothing happening. Both are
+   * the shape hadar hit on the consent screen.
+   */
+  const HANDLER_BASELINE = 40;
+  if (scanned === 0) {
+    record('handlers report failure', 'inconclusive', 'scanned 0 files — the scan is wrong');
+  } else if (offenders.length > HANDLER_BASELINE) {
+    record('handlers report failure', 'fail',
+      `${offenders.length} async handler(s) await with no try/catch — ABOVE the ${HANDLER_BASELINE} baseline. ` +
+      `New: ${offenders.slice(-3).join(', ')} — a rejection here is invisible to the user and to us`);
+  } else {
+    record('handlers report failure', 'pass',
+      offenders.length === 0
+        ? `${scanned} screen file(s); every async handler with an await can report a failure`
+        : `${offenders.length}/${HANDLER_BASELINE} silent handler(s) — at or under baseline. ` +
+          'Lower HANDLER_BASELINE whenever you fix one');
+  }
+}
+
 // ── 4f. Does each feature I claimed is BUILT still have a live entry point? ──
 // Reachability (4c) proves a module can be imported. This proves the specific
 // function that makes a feature work is actually CALLED from the app.
