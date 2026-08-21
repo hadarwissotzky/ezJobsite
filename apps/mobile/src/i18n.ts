@@ -121,6 +121,10 @@ const EN: Record<string, string> = {
   'terms.body': 'This app records the audio you capture on the job. By continuing you accept the Terms & Conditions, and confirm you are responsible for recording lawfully where you work. You only do this once.',
   'terms.reminder': 'You’re in {state}, where everyone in a conversation must be told they’re being recorded. Please let people know.',
   'terms.accept': 'I accept',
+  // The screen could not record the acceptance. Said out loud rather than left as a
+  // button that does nothing — see the accept handler in App.tsx.
+  'terms.failedTitle': 'Couldn’t save that',
+  'terms.failedBody': 'We couldn’t record your acceptance on this phone, so nothing has changed. Try again, and if it keeps happening restart the app.',
   'terms.later': 'Not now',
 
   // --- onboarding slideshow (pre-login intro) ---
@@ -2124,6 +2128,8 @@ const ES: Record<string, string> = {
   'terms.body': 'Esta app graba el audio que captures en el trabajo. Al continuar, aceptas los Términos y Condiciones y confirmas que eres responsable de grabar de forma legal donde trabajas. Solo lo haces una vez.',
   'terms.reminder': 'Estás en {state}, donde se debe avisar a todos en una conversación que están siendo grabados. Por favor avísales.',
   'terms.accept': 'Acepto',
+  'terms.failedTitle': 'No se pudo guardar',
+  'terms.failedBody': 'No pudimos registrar tu aceptación en este teléfono, así que nada cambió. Inténtalo otra vez y, si sigue pasando, reinicia la app.',
   'terms.later': 'Ahora no',
 
   // --- onboarding slideshow (pre-login intro) ---

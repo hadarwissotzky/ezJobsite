@@ -6264,7 +6264,36 @@ const checkClientMessages = async () => {
   if (showTerms) {
     const allParty = showTerms.jur ? defaultConsentFor(showTerms.jur) === 'all_party' : false;
     const accept = async () => {
-      await setTermsAccepted(db);
+      /**
+       * A DEAD BUTTON IS THE ONE THING THIS SCREEN MAY NOT BE (hadar, 2026-08-21:
+       * "app gets stuck on this when I try to add photos").
+       *
+       * Every statement below used to run unguarded, and the FIRST of them is a
+       * database write. If `setTermsAccepted` throws — a missing `device_settings`
+       * after a handover wipe, a locked database, anything — the rejection was
+       * unhandled, `setShowTerms(null)` never ran, and the screen simply stayed with
+       * the button doing nothing each time it was pressed. Silent, un-loggable, and
+       * indistinguishable from a frozen app.
+       *
+       * THE WRITE IS ALSO READ BACK. `setTerms(true)` used to be asserted from the
+       * fact that the write did not throw; but the effect in `refresh()` re-reads
+       * `getTermsAccepted` on the next tick, so a write that lands nowhere flips the
+       * gate back to false and the screen returns on the next tap. That is a loop the
+       * user cannot escape and cannot see the cause of. Confirming the stored value
+       * turns it into one honest refusal instead.
+       */
+      try {
+        await setTermsAccepted(db);
+        if (!(await getTermsAccepted(db))) {
+          throw new Error('terms acceptance did not persist');
+        }
+      } catch (e: any) {
+        const why = String(e?.message ?? e).slice(0, 160);
+        void logDiag(db, 'terms.accept', why);
+        console.warn('[terms] accept failed:', why);
+        setAck({ kind: 'no', title: T('terms.failedTitle'), detail: T('terms.failedBody') });
+        return;
+      }
       setTerms(true);
       setShowTerms(null);
       // RESUME WHAT HE WAS DOING. Cleared before running so a continuation that opens
@@ -6293,6 +6322,12 @@ const checkClientMessages = async () => {
 
       const next = afterTerms.current;
       afterTerms.current = null;
+      // RECORDED EVEN WHEN THERE IS NOTHING TO RESUME. `openTerms()` is called from
+      // eleven places and one of them (the record button) deliberately passes no
+      // continuation — so "accepted, then nothing visibly happened" is a REAL outcome
+      // for that path and an unexplained freeze for every other. The trail is what
+      // tells the two apart afterwards.
+      void logDiag(db, 'terms.accept', next ? 'accepted, resuming' : 'accepted, no continuation');
       next?.();
     };
     // Moved out of this file 2026-08-20 (hadar's design). It was the last screen in
