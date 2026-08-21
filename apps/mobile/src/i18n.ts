@@ -924,7 +924,14 @@ const EN: Record<string, string> = {
   'cap.transStalled': 'This is taking longer than usual to get ready. Your extra is saved and still finishing \u2014 we\u2019ll have it ready shortly. Tap Done to keep going; it\u2019ll be ready on your home screen.',
   'cap.transRetry': 'Trouble reaching the internet right now. Your extra is saved on this phone \u2014 it will back itself up on its own once you have a steady connection. Tap Done to keep going.',
   'cap.transBlocked': 'This will back up on Wi-Fi. You\u2019re on cellular and cellular backup is off. Connect to Wi-Fi, or turn on cellular upload in Settings. Your extra is safe on this phone. Tap Done to keep going.',
+  // Kept: other callers may still use it, and removing a key is a separate act.
   'cap.transUploadProg': '{done} of {total} backed up (photos + audio)',
+  // The upload sub-bar (hadar, 2026-08-21). The percentage is the glance — "is this
+  // moving" — and the two counts under it are the detail, which is what a man watching
+  // four photos crawl up a jobsite connection is actually asking.
+  'cap.transUploadPct': '{pct}% backed up',
+  'cap.transUploadPhotos': '{done} of {total} photos',
+  'cap.transUploadVoice': '{done} of {total} recordings',
   'cap.transDone': 'Done',
   // The transition screen, themed to the design system (hadar mockup, 2026-07-27).
   // The ring + "working on it" is the calm face of the screen; the step rows,
@@ -2811,6 +2818,9 @@ const ES: Record<string, string> = {
   'cap.transRetry': 'Hay problemas para conectarse a internet ahora. Tu extra está guardado en este teléfono — se respaldará solo cuando la conexión sea estable. Toca Listo para continuar.',
   'cap.transBlocked': 'Esto se respaldará con Wi-Fi. Estás en datos móviles y el respaldo por datos está desactivado. Conéctate a Wi-Fi o activa la subida por datos en Ajustes. Tu extra está a salvo en este teléfono. Toca Listo para continuar.',
   'cap.transUploadProg': '{done} de {total} respaldados (fotos + audio)',
+  'cap.transUploadPct': '{pct}% respaldado',
+  'cap.transUploadPhotos': '{done} de {total} fotos',
+  'cap.transUploadVoice': '{done} de {total} grabaciones',
   'cap.transDone': 'Listo',
   // Pantalla de transición rediseñada (2026-07-27). Español escrito por Claude —
   // revisar antes de campo.

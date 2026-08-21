@@ -1862,6 +1862,7 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
       ids: a.ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
       uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
       stalled: false, uploadDone: 0, uploadTotal: a.ids.length, lastError: null,
+        photoDone: 0, photoTotal: 0, voiceDone: 0, voiceTotal: 0,
       blocked: false, isAugment: false,
     });
   }
@@ -2867,6 +2868,18 @@ const checkClientMessages = async () => {
     uploaded: boolean; transcribed: boolean; analyzed: boolean; offline: boolean;
     stalled: boolean; uploadDone: number; uploadTotal: number;
     lastError: string | null; blocked: boolean;
+    /**
+     * PER-KIND UPLOAD PROGRESS (hadar, 2026-08-21: "1 out of 4 photos are uploaded,
+     * 30% complete").
+     *
+     * The bar already existed and said "{done} of {total} backed up (photos + audio)",
+     * which is true and hard to act on: a contractor watching four photos crawl up a
+     * jobsite connection cannot tell whether the thing that is stuck is the recording
+     * or the pictures, and one lumped number hides which. Counting them apart is what
+     * turns a spinner into information.
+     */
+    photoDone: number; photoTotal: number;
+    voiceDone: number; voiceTotal: number;
     // Augment mode: this transition is backing up ADDED evidence on an existing
     // extra, not a new one. Like a new extra it waits for the added voice to upload,
     // transcribe and be analysed, then grows the record's Description from what was
@@ -3008,6 +3021,33 @@ const checkClientMessages = async () => {
         // is what was queued when we started, done is how many have drained.
         const uploadTotal = firstCount < 0 ? 0 : firstCount;
         const uploadDone = firstCount < 0 ? 0 : Math.max(0, firstCount - n);
+
+        /**
+         * THE SAME ARITHMETIC, SPLIT BY WHAT THE FILE IS.
+         *
+         * `capture_commit` is the authority on modality — it is the row that records
+         * what was captured — and `capture_outbox` is the authority on what is still
+         * waiting. Totals come from the commit side so they are stable for the whole
+         * transition; done is total-minus-remaining, exactly as the overall figure is
+         * derived, so the two can never disagree.
+         *
+         * Best-effort: a failure here costs the sub-line, never the bar above it or
+         * the gate below it.
+         */
+        let photoTotal = 0, voiceTotal = 0, photoDone = 0, voiceDone = 0;
+        try {
+          const tot = await db.getAll<{ modality: string; n: number }>(
+            `SELECT modality, COUNT(*) AS n FROM capture_commit
+              WHERE capture_id IN (${marks}) GROUP BY modality`, transition.ids);
+          const left = await db.getAll<{ modality: string; n: number }>(
+            `SELECT cc.modality, COUNT(*) AS n
+               FROM capture_outbox o JOIN capture_commit cc ON cc.capture_id = o.capture_id
+              WHERE o.capture_id IN (${marks}) GROUP BY cc.modality`, transition.ids);
+          const at = (rows: typeof tot, m: string) => rows.find((r) => r.modality === m)?.n ?? 0;
+          photoTotal = at(tot, 'photo'); voiceTotal = at(tot, 'voice');
+          photoDone = Math.max(0, photoTotal - at(left, 'photo'));
+          voiceDone = Math.max(0, voiceTotal - at(left, 'voice'));
+        } catch { /* the sub-line is omitted; the bar above is unaffected */ }
         // The outbox records WHY a push failed (park() / backoff() store it so it
         // is "surfaced in the UI, never silently dropped"). Only read it once the
         // upload has had a beat to try and hasn't finished (review #3: don't run
@@ -3038,6 +3078,7 @@ const checkClientMessages = async () => {
         setTransition((t) => t && { ...t, uploaded: up, transcribed: tr,
                                     analyzed: analyzedSeen, offline,
                                     uploadDone, uploadTotal, lastError,
+                                    photoDone, photoTotal, voiceDone, voiceTotal,
                                     blocked: blockedSeen });
 
         // THE gate: uploaded + words down + AI has written title/tag/price (or, when
@@ -5228,6 +5269,7 @@ const checkClientMessages = async () => {
         ids: newIds, anchorCaptureId: augAnchor, coId,
         uploaded: false, transcribed: augAnchor === null, analyzed: false, offline: false,
         stalled: false, uploadDone: 0, uploadTotal: newIds.length, lastError: null,
+        photoDone: 0, photoTotal: 0, voiceDone: 0, voiceTotal: 0,
         blocked: false, isAugment: true,
       });
     } catch (e: any) {
@@ -6849,6 +6891,22 @@ const checkClientMessages = async () => {
               ))}
             </View>
 
+            {/**
+              * THE UPLOAD SUB-BAR (hadar, 2026-08-21: "1 out of 4 photos are uploaded,
+              * 30% complete").
+              *
+              * The ring above tracks the WHOLE job — saved, backed up, written down,
+              * details sorted. This tracks the one step that can take minutes on a
+              * jobsite connection and is the only one whose duration depends on
+              * something the contractor can see: how many files he took.
+              *
+              * A PERCENTAGE AND A COUNT, not one or the other. The percentage answers
+              * "is this moving"; the count answers "how much is left", and on four
+              * photos over a weak link the second question is the one being asked. The
+              * old line gave neither — it said "2 of 5 backed up (photos + audio)",
+              * which lumps a 20-second recording in with four photos and hides which
+              * of them is the thing that is stuck.
+              */}
             {!t.uploaded && t.uploadTotal > 0 && (
               <View style={s.trProgWrap}>
                 <View style={s.trProgTrack}>
@@ -6856,8 +6914,26 @@ const checkClientMessages = async () => {
                     { width: `${Math.round((t.uploadDone / Math.max(1, t.uploadTotal)) * 100)}%` }]} />
                 </View>
                 <Text style={s.trProgT}>
-                  {T({ k: 'cap.transUploadProg', p: { done: t.uploadDone, total: t.uploadTotal } } as any)}
+                  {T({ k: 'cap.transUploadPct',
+                       p: { pct: String(Math.round((t.uploadDone / Math.max(1, t.uploadTotal)) * 100)) } } as any)}
                 </Text>
+                {/* PER KIND, and only for a kind that exists. A voice-only capture must
+                    not read "0 of 0 photos" — an absent fact is omitted, never shown as
+                    a zero, which is record.ts's rule applied to a progress line. */}
+                <View style={s.trProgKinds}>
+                  {t.photoTotal > 0 && (
+                    <Text style={s.trProgKindT}>
+                      {T({ k: 'cap.transUploadPhotos',
+                           p: { done: String(t.photoDone), total: String(t.photoTotal) } } as any)}
+                    </Text>
+                  )}
+                  {t.voiceTotal > 0 && (
+                    <Text style={s.trProgKindT}>
+                      {T({ k: 'cap.transUploadVoice',
+                           p: { done: String(t.voiceDone), total: String(t.voiceTotal) } } as any)}
+                    </Text>
+                  )}
+                </View>
               </View>
             )}
 
@@ -7786,6 +7862,7 @@ const checkClientMessages = async () => {
             ids, anchorCaptureId: r.voices[0]?.captureId ?? null, coId,
             uploaded: false, transcribed: r.voices.length === 0, analyzed: false,
             offline: false, stalled: false, uploadDone: 0, uploadTotal: ids.length,
+        photoDone: 0, photoTotal: 0, voiceDone: 0, voiceTotal: 0,
             lastError: null, blocked: false, isAugment: false, isGenerate: true,
           });
         }}
@@ -10967,7 +11044,11 @@ const s = StyleSheet.create({
   trProgWrap: { alignSelf: 'stretch', marginTop: 14 },
   trProgTrack: { height: 6, borderRadius: 3, backgroundColor: C.surfaceMuted, overflow: 'hidden' },
   trProgFill: { height: 6, borderRadius: 3, backgroundColor: C.brand },
-  trProgT: { fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 6 },
+  trProgT: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.ink, marginTop: 6 },
+  // The per-kind counts, quieter than the percentage above them: the percentage is
+  // the glance, these are the detail somebody reads when the glance says "slow".
+  trProgKinds: { flexDirection: 'row', gap: 14, marginTop: 3 },
+  trProgKindT: { fontFamily: F.body, fontSize: 12.5, color: C.steel },
 
   trWarn: { alignSelf: 'stretch', backgroundColor: C.brandSoft, borderWidth: 1,
     borderColor: C.caution, borderRadius: radii.lg, padding: 16, marginTop: 18 },
