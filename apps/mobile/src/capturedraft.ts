@@ -37,6 +37,7 @@
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
 import { Buffer } from 'buffer';
+import { sha256 } from 'js-sha256';
 
 import type { Stamp, StampStatus } from './stamp';
 import {
@@ -404,6 +405,52 @@ export async function readDraftArtifacts(
   }
   out.durationSecs = Math.round(recordedMs / 1000);
   return out;
+}
+
+/**
+ * HAS THIS DRAFT ALREADY BEEN COMMITTED?
+ *
+ * hadar, 2026-08-21: the app opened saying a change order had not finished before
+ * it closed, he tapped Keep, and ended up with TWO change orders numbered #1.
+ *
+ * THE WINDOW IS REAL AND NARROW. `onFusedCapture` commits every capture and creates
+ * the extra, and only then does `commit()` mark the draft closed. Kill the app in
+ * between — which is exactly what "didn't complete before the app closed" describes —
+ * and the draft stays `open` with its media intact while its captures are already
+ * committed. Recovery then re-commits the same bytes as NEW captures and mints a
+ * SECOND extra from one walk.
+ *
+ * It was unreachable until today only because the recovery prompt itself never fired
+ * (it asked for drafts belonging to 'owner-local'). Fixing that exposed this.
+ *
+ * THE DIGEST IS THE ANSWER, and it is already there: `capture_commit.media_sha256` is
+ * the hash of the very bytes this draft holds, written by `performCapture` from the
+ * same buffer. Same bytes, same hash — so "have these already been committed" is a
+ * lookup, not a guess. No timestamps, no filename matching, no heuristics.
+ *
+ * Returns the ids of items already committed. A PARTIAL match matters as much as a
+ * full one: a crash mid-loop can leave two of three photos committed, and re-running
+ * the whole draft would duplicate those two.
+ */
+export async function alreadyCommittedItems(
+  db: AbstractPowerSyncDatabase, draftId: string
+): Promise<{ committed: string[]; total: number }> {
+  const items = await draftItems(db, draftId);
+  const committed: string[] = [];
+  for (const it of items) {
+    try {
+      const b64 = await FS.readAsStringAsync(absFor(it.relpath), { encoding: FS.EncodingType.Base64 });
+      const hex = sha256(new Uint8Array(Buffer.from(b64, 'base64')));
+      const hit = (await db.getAll<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM capture_commit WHERE media_sha256 = ?`, [hex]))[0]?.n ?? 0;
+      if (hit > 0) committed.push(it.itemId);
+    } catch {
+      // Unreadable bytes cannot be matched. Treated as NOT committed, which errs
+      // toward offering the recovery — mandate #1's direction: a duplicate is
+      // recoverable, a walk nobody was offered is not.
+    }
+  }
+  return { committed, total: items.length };
 }
 
 /** Audio already banked, in ms. What `capState()` is fed; never wall clock. */

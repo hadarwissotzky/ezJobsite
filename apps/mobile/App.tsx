@@ -195,7 +195,8 @@ import { ensureNotifySchema, notifyPermissionStatus, requestNotifyPermission,
 // the client's messages; a reminder must go via the SAME link (R8) or the nudge
 // breaks the thing it is nudging about.
 import { canRemind, reminderText } from './src/remind';
-import { ensureDraftSchema, sweepDrafts, recoverableDrafts, readDraftArtifacts,
+import { alreadyCommittedItems,
+         ensureDraftSchema, sweepDrafts, recoverableDrafts, readDraftArtifacts,
          closeDraft } from './src/capturedraft';
 // REQ-PROC4's acceptance test. Behind a flag because it writes 100 captures; see
 // the block in init for why it is wired here and not behind a button.
@@ -8777,6 +8778,29 @@ const checkClientMessages = async () => {
       onKeep={async (d) => {
         setDraftBusy(d.draftId);
         try {
+          /**
+           * DID THIS WALK ALREADY BECOME AN EXTRA? (hadar, 2026-08-21: "now I have 2
+           * change order #1 in my app as drafts".)
+           *
+           * `onFusedCapture` commits the captures and creates the extra, and only
+           * THEN is the draft marked closed. Kill the app in between — precisely what
+           * "didn't complete before the app closed" means — and the draft survives as
+           * `open` while its captures are already committed. Re-running it here mints
+           * a SECOND extra from one walk, which is what he is looking at.
+           *
+           * `alreadyCommittedItems` answers it by digest: `capture_commit.media_sha256`
+           * is the hash of these very bytes. All of them present means the walk landed
+           * and the draft is simply stale — so close it and say so, rather than filing
+           * the same photographs twice.
+           */
+          const seen = await alreadyCommittedItems(db, d.draftId);
+          if (seen.total > 0 && seen.committed.length === seen.total) {
+            await closeDraft(db, d.draftId, 'committed');
+            void logDiag(db, 'draft.recover', `${d.draftId}: already committed, closed`);
+            setAck({ kind: 'ok', title: T('r1.draft.alreadyTitle'),
+                     detail: T('r1.draft.alreadyBody') });
+            return;
+          }
           const a = await readDraftArtifacts(db, d.draftId);
           await onFusedCapture({
             photos: a.photos, audioSegments: a.audioSegments, stamp: a.stamp,

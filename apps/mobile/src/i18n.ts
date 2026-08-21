@@ -1402,6 +1402,11 @@ const EN: Record<string, string> = {
   'r1.draft.justNow': 'just now',
   'r1.draft.keep': 'Keep it — build the extra',
   'r1.draft.keepInstead': 'Keep',
+  // The recovered walk turns out to have landed already — the app was killed between
+  // committing the captures and closing the draft. Said out loud, because "I tapped
+  // Keep and nothing appeared" is indistinguishable from a failure.
+  'r1.draft.alreadyTitle': 'Already saved',
+  'r1.draft.alreadyBody': 'This recording had already been added to a change order before the app closed. Nothing was lost and nothing was duplicated.',
   'r1.draft.keeping': 'Saving…',
   'r1.draft.minsAgo': '{n} min ago',
   'r1.draft.photos': '{n} photos',
@@ -3209,6 +3214,8 @@ const ES: Record<string, string> = {
   'r1.draft.justNow': 'ahora mismo',
   'r1.draft.keep': 'Guardarlo — crear el extra',
   'r1.draft.keepInstead': 'Conservar',
+  'r1.draft.alreadyTitle': 'Ya estaba guardado',
+  'r1.draft.alreadyBody': 'Esta grabación ya se había agregado a una orden de cambio antes de que se cerrara la app. No se perdió nada y no se duplicó nada.',
   'r1.draft.keeping': 'Guardando…',
   'r1.draft.minsAgo': 'hace {n} min',
   'r1.draft.photos': '{n} fotos',
