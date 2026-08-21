@@ -156,7 +156,38 @@ export async function claimDevice(
     const f = await inFlight(d);
     // -1 means the count itself failed. Treat "I do not know whether there is unsent
     // evidence" as "there is": the alternative is deleting on a guess.
-    return f.queued < 0 || f.openDrafts < 0 ? 1 : f.queued + f.openDrafts;
+    if (f.queued < 0) return 1;
+
+    /**
+     * DRAFTS THAT HOLD SOMETHING — not merely drafts that are open.
+     *
+     * `inFlight.openDrafts` counts `capture_draft WHERE state = 'open'`, which is the
+     * right question for the OTA gate (reloading the runtime under an armed recorder
+     * is disruptive whether or not it has banked a byte yet). It is the WRONG question
+     * here, and the difference deadlocked hadar's phone on 2026-08-21:
+     *
+     * An EMPTY open draft — camera opened, nothing recorded, app backgrounded — never
+     * drains, because nothing drains a draft; it is committed or discarded by a human.
+     * And it is never offered for recovery either, because `recoverable` deliberately
+     * requires real content ("a recovery prompt for nothing teaches people to dismiss
+     * recovery prompts"). So it sits there, invisible and unresolvable, refusing every
+     * handover for the life of the install. His refusal said "1 item(s)" and no amount
+     * of signal could ever clear it.
+     *
+     * The refusal exists to protect work a human would be upset to lose. An empty
+     * draft is not that, and blocking on it protects nothing while costing the device
+     * its only route to a second account.
+     */
+    let drafts = 0;
+    try {
+      const r = await d.getAll<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM capture_draft dr
+          WHERE dr.state = 'open'
+            AND EXISTS (SELECT 1 FROM capture_draft_item i WHERE i.draft_id = dr.draft_id)`);
+      drafts = r[0]?.n ?? 0;
+    } catch { /* no draft table yet -> nothing is held in one */ }
+
+    return f.queued + drafts;
   });
 
   let previous: string | null;

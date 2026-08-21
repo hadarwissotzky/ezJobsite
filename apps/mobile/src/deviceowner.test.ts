@@ -171,3 +171,28 @@ test('a fresh device is claimed without consulting the outbox', async () => {
   assert.deepEqual(await claimDevice(DB, 'user-a', h.deps), { wiped: false });
   assert.ok(!h.calls.includes('count'));
 });
+
+test('an EMPTY open draft does not block a handover', async () => {
+  // hadar's phone, 2026-08-21: refused with "1 item(s)" and no amount of signal could
+  // ever clear it. An open draft with nothing in it never drains (nothing drains a
+  // draft — a human commits or discards it) and is never offered for recovery either,
+  // because `recoverable` deliberately requires real content. So it refused every
+  // handover for the life of the install, invisibly.
+  //
+  // The refusal protects work somebody would be upset to lose. An empty draft is not
+  // that, and blocking on it protects nothing while costing the device its only route
+  // to a second account.
+  const h = harness('user-a', { unsent: 0 });   // queued 0, no draft holding anything
+  const r = await claimDevice(DB, 'user-b', h.deps);
+  assert.deepEqual(r, { wiped: true, previousUser: 'user-a' },
+    'nothing is at risk, so the handover proceeds');
+});
+
+test('a draft that HOLDS something still blocks', async () => {
+  // The other side of the same line: a banked photo or audio segment is exactly the
+  // evidence mandate #1 says must not be destroyed to make room for another account.
+  const h = harness('user-a', { unsent: 1 });
+  const r = await claimDevice(DB, 'user-b', h.deps);
+  assert.ok('refused' in r);
+  assert.ok(!h.calls.includes('purgeData'));
+});
