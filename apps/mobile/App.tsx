@@ -4297,27 +4297,31 @@ const checkClientMessages = async () => {
         setAuthNotice(null);   // a claim that got this far succeeded
         if (!claim.wiped) return true;
         console.log('[handover] device wiped, previous user', claim.previousUser);
+        /**
+         * ONLY THE SCHEMA REBUILD MAY ABORT A HANDOVER.
+         *
+         * Everything here used to sit in one try, so ANY throw — including a
+         * cosmetic one from `refresh()` — signed the incoming user out. And
+         * `refresh()` is the likeliest thing to throw at this exact moment:
+         * `purgeLocalData` ends with `disconnectAndClear()`, PowerSync has not
+         * reconnected yet (that happens a few lines later, once `connected` is
+         * false), and `refresh()` reads `project` — a PowerSync-managed VIEW, not
+         * one of the tables `ensureLocalSchema` rebuilds.
+         *
+         * The result was the worst state this path can reach and the one hadar hit
+         * twice: the wipe SUCCEEDED, the device is empty, the new owner is already
+         * recorded — and then he is bounced to the sign-in screen as though nothing
+         * had happened (2026-08-21).
+         *
+         * So the split is by consequence. The schema is load-bearing: without it
+         * every later query fails and signing out is right. Repainting is not — a
+         * failed refresh costs a stale screen for one tick, and the next drain fixes
+         * it. It must never cost a completed handover.
+         */
         try {
           // The tables were DROPped by the purge. Nothing may read them until they are
           // back, so this is awaited before a single query runs.
           await ensureLocalSchema(db, userId);
-          // PowerSync's own store was cleared too; let the connect below happen again.
-          connected = false;
-          // The flags went with the wipe. The incoming user's must be rebuilt from
-          // THEIR account — a handover inside one app run must not inherit the
-          // outgoing user's "already onboarded".
-          flagsRestored = false;
-          setSynced('unknown');
-          // Re-read every list from the now-empty database rather than resetting ~20
-          // pieces of state by hand: a hand-written reset list is one `useState` away
-          // from leaving the previous user's row on screen, which is the bug.
-          setDrafts([]);
-          setLogoUri(null); setLogoKey(null);
-          setProjectId(INBOX_ID);
-          await refresh();
-          setFirstRun(await isFirstRun(db));
-          setFirstExtra(!(await firstExtraSeen(db)));
-          setHasProfile(await hasProfileFn(db));
         } catch (e: any) {
           // The wipe SUCCEEDED and the rebuild did not, so this device is now empty
           // and has no schema. It cannot be used, and pretending otherwise would put
@@ -4347,6 +4351,36 @@ const checkClientMessages = async () => {
           await connector.signOut().catch(() => {});
           return false;
         }
+
+        // THE HANDOVER IS DONE. Everything below is repainting, and every line of it
+        // is best-effort: a failure here leaves a stale screen that the next drain
+        // corrects, never a user locked out of a device that is already theirs.
+        // PowerSync's own store was cleared too; let the connect below happen again.
+        connected = false;
+        // The flags went with the wipe. The incoming user's must be rebuilt from
+        // THEIR account — a handover inside one app run must not inherit the
+        // outgoing user's "already onboarded".
+        flagsRestored = false;
+        setSynced('unknown');
+        // Re-read every list from the now-empty database rather than resetting ~20
+        // pieces of state by hand: a hand-written reset list is one `useState` away
+        // from leaving the previous user's row on screen, which is the bug.
+        setDrafts([]);
+        setLogoUri(null); setLogoKey(null);
+        setProjectId(INBOX_ID);
+        try {
+          await refresh();
+          setFirstRun(await isFirstRun(db));
+          setFirstExtra(!(await firstExtraSeen(db)));
+          setHasProfile(await hasProfileFn(db));
+        } catch (e: any) {
+          // Reported, never fatal, and never swallowed silently — this is the branch
+          // that used to sign people out.
+          const why = String(e?.message ?? e).slice(0, 160);
+          console.warn('[handover] repaint failed:', why);
+          void logDiag(db, 'identity.switch', `repaint failed: ${why}`);
+        }
+
         setWiping(false);
         setAck({ kind: 'ok', title: T('handover.wipedTitle'),
                  detail: T('handover.wipedBody') });
