@@ -1381,6 +1381,70 @@ export async function markLocalSent(
  * bitten by before. `reassertSupersessions` runs right after this on the same tick
  * and covers the specific pending-supersession case (see its header).
  */
+/**
+ * SEND THE NUMBER THE DEVICE MINTED. The half that never existed.
+ *
+ * sql/399 (2026-08-10) added `co_number` to the server and said so in as many words:
+ * *"IT WILL BE NULL FOR NOW … nothing uploads it yet — `ingest_change_order_v1` has no
+ * parameter for it … WIRING THE DEVICE TO SEND IT IS OWED"*. It stayed owed, and it is
+ * why the client's own portal page says "CHANGE ORDER" where the design says
+ * "CHANGE ORDER #4" — verified against the live database on 2026-08-21: **twenty rows,
+ * zero numbers.**
+ *
+ * It is also why adding `co_number` to `hydrateChangeOrders` fixed nothing on hadar's
+ * phone. That change adopts the server's number, and the server had none to give. Both
+ * halves are needed and only one was built.
+ *
+ * A DIRECT UPDATE, NOT A NEW RPC, and that is checked rather than convenient:
+ * `authenticated` holds a column-level UPDATE grant on `co_number` (Q2's server-owned
+ * column list does not include it), the `co_own` policy scopes the write to
+ * `owner_id = auth.uid()`, and NEITHER server trigger guards it — `change_order_guard`
+ * freezes scope, amount, nte, billing, schedule and exclusions on a sent row, and
+ * `change_order_transition_guard` is `BEFORE UPDATE OF status`. So a number can be
+ * filed against a signed instrument, which it must be: the number is how a signed
+ * document is referred to.
+ *
+ * `.is('co_number', null)` MAKES IT AN ADOPTION, NEVER AN OVERWRITE. Two devices can
+ * mint the same number for one job offline (nextCoNumber says so), and the first write
+ * to reach the server wins for everybody — the loser's local value is corrected by the
+ * next hydrate. Without this predicate the last tick to run would win instead, which is
+ * an identifier that changes under a document that has already been sent.
+ *
+ * Bounded per call: this runs on the same 15-second tick as every drain and there is no
+ * urgency to it whatsoever.
+ */
+export async function pushCoNumbers(
+  db: AbstractPowerSyncDatabase, supabase: SupabaseClient, limit = 25
+): Promise<{ pushed: number; failed: number }> {
+  let rows: Array<{ id: string; co_number: number }> = [];
+  try {
+    rows = await db.getAll(
+      `SELECT id, co_number FROM change_order
+        WHERE co_number IS NOT NULL
+        ORDER BY created_at_ms DESC LIMIT ?`, [limit]);
+  } catch {
+    return { pushed: 0, failed: 0 };
+  }
+
+  let pushed = 0, failed = 0;
+  for (const r of rows) {
+    try {
+      const { data, error } = await supabase.from('change_order')
+        .update({ co_number: r.co_number })
+        .eq('id', r.id)
+        .is('co_number', null)
+        .select('id');
+      if (error) { failed++; continue; }
+      // No rows matched = the server already has a number, or the row is not there
+      // yet. Both are fine and neither is a failure.
+      if (data?.length) pushed++;
+    } catch {
+      failed++;   // offline is normal; the next tick tries again
+    }
+  }
+  return { pushed, failed };
+}
+
 export async function hydrateChangeOrders(
   db: AbstractPowerSyncDatabase, supabase: SupabaseClient, projectId: string, ownerId: string
 ) {

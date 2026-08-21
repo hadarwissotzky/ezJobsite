@@ -122,7 +122,8 @@ import { configureBilling, entitledPlanNow, entitledProductNow } from './src/bil
 import { LABELS, labelHex } from './src/labels';
 import { companyFeed, type FeedItem } from './src/feed';
 import { ExtraCard } from './src/ui/extracard';
-import { setDraftClient } from './src/changeorder';
+import { setDraftClient, pushCoNumbers,
+} from './src/changeorder';
 import { requestExtraReview } from './src/reviewrequest';
 import { sendPlan, toggleMember } from './src/sendplan';
 import { registerPushToken } from './src/push';
@@ -4508,6 +4509,12 @@ const checkClientMessages = async () => {
           // The late-proposal sweep that used to live here is gone (394): the server
           // applies a write-up the moment it exists, so there is nothing for the app to
           // catch up on except the hydrate below, which learns it.
+          // BEFORE the hydrate, deliberately: the hydrate ADOPTS the server's number,
+          // so a number this device minted has to reach the server first or the adopt
+          // finds nothing and the extra stays unnumbered — which is exactly what
+          // happened to hadar (20 server rows, 0 numbers, 2026-08-21).
+          const cn = await pushCoNumbers(db, connector.client);
+          if (cn.pushed || cn.failed) console.log('co numbers:', JSON.stringify(cn));
           const hy = await hydrateChangeOrders(db, connector.client, pid, data.user.id);
           /**
            * THE EVIDENCE BEHIND THE EXTRAS (hadar, 2026-08-21: "images not displaying
