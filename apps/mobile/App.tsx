@@ -308,6 +308,10 @@ const LAST_PROJECT_KEY = 'last_project_id';
 // reaching the cloud, silently, with the app still saying "saved ✓".
 const OWNER_FALLBACK = 'owner-local';
 
+/** How long the splash may cover a first sync before the Home takes over and says
+ *  what it actually knows. See `holdExpired` for why a bound is mandatory. */
+const FIRST_SYNC_SPLASH_MS = 8_000;
+
 /**
  * SPEC-extra-lifecycle-v1 — what `openRecord`'s stage layer holds.
  *
@@ -666,6 +670,27 @@ export default function App() {
    * Sticky once 'yes': a later offline tick does not un-know what we learned.
    */
   const [synced, setSynced] = React.useState<'unknown' | 'yes' | 'unreachable'>('unknown');
+  /**
+   * HOLD THE SPLASH FOR THE FIRST SYNC — BUT NOT FOREVER (hadar, 2026-08-21: "if it
+   * takes time to load the first time we need to display the splash screen until it
+   * loads no?").
+   *
+   * He is right, and only for the FIRST load. Once anything is local this app is
+   * local-first and paints instantly from SQLite; the gap is the one moment a device
+   * has an account and no rows yet, where the alternative to a splash is a half-built
+   * Home that fills in under the reader.
+   *
+   * THE BOUND IS NOT OPTIONAL, and it is his own finding: on 2026-08-04 he reported a
+   * 30-second cold start and the fix was that the session must never gate first paint,
+   * because on a jobsite the network is the slow thing and an unbounded splash is
+   * indistinguishable from a hang. Mandate #7 says the same: the network is
+   * opportunistic, never a precondition. So the hold expires, and what is behind it is
+   * a Home that says honestly which of "getting", "none" or "can't reach" it is in.
+   *
+   * Eight seconds: long enough to cover a normal first pull, short enough that a dead
+   * connection is admitted rather than sat on.
+   */
+  const [holdExpired, setHoldExpired] = React.useState(false);
   const [logoSheet, setLogoSheet] = React.useState(false);
   const [logoBusy, setLogoBusy] = React.useState(false);
   // When set, the capture screen AUGMENTS this existing extra (adds photos/voice as
@@ -3474,6 +3499,15 @@ const checkClientMessages = async () => {
   // spike had one project, load-bearing the moment there are two.)
   const projectIdRef = React.useRef(projectId);
   projectIdRef.current = projectId;
+
+  /** Arms the first-sync splash bound, and re-arms it for the next account after a
+   *  sign-out or a handover (both reset `synced` to 'unknown'). */
+  React.useEffect(() => {
+    if (synced !== 'unknown') return;
+    setHoldExpired(false);
+    const t = setTimeout(() => setHoldExpired(true), FIRST_SYNC_SPLASH_MS);
+    return () => clearTimeout(t);
+  }, [synced]);
 
 
   const refresh = React.useCallback(async () => {
@@ -8419,6 +8453,26 @@ const checkClientMessages = async () => {
    * NOT gated on `nav`, so it cannot be swiped past from the tab bar — but it is not a
    * trap either: "Do this later" marks it seen and never asks again.
    */
+  /**
+   * THE FIRST SYNC, BEHIND THE SPLASH (hadar, 2026-08-21).
+   *
+   * Only when there is genuinely nothing to draw: an account is signed in, the first
+   * refresh has run, it found no extras, and no hydrate has answered yet. A device
+   * with local rows never reaches here — it paints them, which is the whole point of
+   * being local-first.
+   *
+   * AFTER the setup gate above, deliberately: a brand-new user belongs in setup, not
+   * behind a splash waiting on a sync that will correctly find nothing.
+   *
+   * `holdExpired` is the escape hatch and it is load-bearing — see its declaration.
+   * When it fires, the Home behind this says "Getting your work" or "Can't reach your
+   * work" rather than pretending to be finished.
+   */
+  if (ready && session && loadedOnce && synced === 'unknown' && !holdExpired
+      && !homeExtras.length) {
+    return <SplashScreen />;
+  }
+
   if (firstExtra === true && loadedOnce && !homeExtras.length
       && !projects.filter((p) => p.id !== INBOX_ID).length) {
     return (
