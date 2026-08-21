@@ -3019,8 +3019,24 @@ const checkClientMessages = async () => {
         }
         // Per-file upload progress (audio + each photo is one outbox row): total
         // is what was queued when we started, done is how many have drained.
-        const uploadTotal = firstCount < 0 ? 0 : firstCount;
-        const uploadDone = firstCount < 0 ? 0 : Math.max(0, firstCount - n);
+        /**
+         * THE TOTAL IS HOW MANY FILES THERE ARE, not how many were still queued the
+         * first time we looked (hadar, 2026-08-21: "I just created a new change order,
+         * I didn't see the secondary progress bar").
+         *
+         * `firstCount` is the outbox count at the FIRST poll. On wifi the captures can
+         * drain before that tick ever runs, so `firstCount` is 0 — which made
+         * `uploadTotal` 0, and the render is gated on `uploadTotal > 0`, so the bar
+         * never appeared at all. The one case where the upload is fast is the case
+         * where the bar silently did not exist.
+         *
+         * `transition.ids` is the set of captures this transition committed. It is
+         * known before the first poll, never changes, and is the honest denominator:
+         * four photos and a recording is five files whether they take a second or a
+         * minute.
+         */
+        const uploadTotal = transition.ids.length;
+        const uploadDone = Math.max(0, uploadTotal - n);
 
         /**
          * THE SAME ARITHMETIC, SPLIT BY WHAT THE FILE IS.
@@ -6918,7 +6934,12 @@ const checkClientMessages = async () => {
               * which lumps a 20-second recording in with four photos and hides which
               * of them is the thing that is stuck.
               */}
-            {!t.uploaded && t.uploadTotal > 0 && (
+            {/* NOT gated on `!t.uploaded` any more. Hiding the bar the instant the
+                last file lands means a fast upload shows nothing, and "nothing
+                happened" is exactly what a progress bar exists to prevent. It stays,
+                reaches 100%, and the reader sees the step complete rather than
+                inferring it from an absence. */}
+            {t.uploadTotal > 0 && (
               <View style={s.trProgWrap}>
                 <View style={s.trProgTrack}>
                   <View style={[s.trProgFill,
