@@ -3513,6 +3513,32 @@ const checkClientMessages = async () => {
   const projectIdRef = React.useRef(projectId);
   projectIdRef.current = projectId;
 
+  /**
+   * UNFINISHED CAPTURES, ASKED FOR AS THE RIGHT USER.
+   *
+   * Keyed on OWNER and guarded against the placeholder, because that is the whole
+   * defect this replaces: the sweep used to run at init when OWNER was still
+   * 'owner-local', so it swept nothing and offered nothing, for everyone, always.
+   *
+   * Runs again on a handover for free — `setOwner` fires for the incoming user, and
+   * their drafts (of which there are none on a freshly wiped device) are the ones
+   * asked about.
+   */
+  React.useEffect(() => {
+    if (!ready || OWNER === OWNER_FALLBACK) return;
+    let live = true;
+    (async () => {
+      try {
+        await sweepDrafts(db, OWNER);
+        const ds = await recoverableDrafts(db, OWNER);
+        if (live) setDrafts(ds);
+      } catch (e) {
+        console.log('[draft] sweep skipped:', String(e));
+      }
+    })();
+    return () => { live = false; };
+  }, [ready, OWNER, db]);
+
   /** Arms the first-sync splash bound, and re-arms it for the next account after a
    *  sign-out or a handover (both reset `synced` to 'unknown'). */
   React.useEffect(() => {
@@ -4036,10 +4062,26 @@ const checkClientMessages = async () => {
       // unconditionally, so draft media never lives there. Everything this sweep does
       // is in the direction of KEEPING bytes: adopt a file with no row, adopt a
       // directory with no draft.
-      try {
-        await sweepDrafts(db, OWNER);
-        setDrafts(await recoverableDrafts(db, OWNER));
-      } catch (e) { console.log('[draft] sweep skipped:', String(e)); }
+      /**
+       * NOT HERE ANY MORE — see the effect keyed on [ready, OWNER] below.
+       *
+       * This ran at init with `OWNER` still `OWNER_FALLBACK` ('owner-local'), because
+       * `setOwner(s.user.id)` happens inside `applySessionNow`, ~300 lines further
+       * down. `recoverableDrafts` filters `owner_id = ?`, so it asked for drafts
+       * belonging to a placeholder and got none — every time, for every user.
+       *
+       * THE RECOVERY PROMPT HAS THEREFORE NEVER FIRED FOR A REAL DRAFT, which is a
+       * capture-durability defect on its own: R1 exists so an interrupted walk is
+       * offered back, and it was silently asking the wrong question. It surfaced only
+       * because the handover refusal started counting the same drafts and hadar's
+       * phone reported "unfinished recording 1" for something no screen would show him
+       * (2026-08-21).
+       *
+       * `sweepDrafts` moved with it and that half matters more: it ADOPTS orphaned
+       * media into draft rows owned by the id it is given, so running it with
+       * 'owner-local' could mint drafts belonging to a user that does not exist —
+       * unreachable by recovery and permanently blocking a handover.
+       */
 
       // REQ-PROC4: "100 offline/online cycles incl. a mid-sync kill -> NO LOSS/DUP."
       //
