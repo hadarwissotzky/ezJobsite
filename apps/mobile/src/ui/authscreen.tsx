@@ -62,8 +62,25 @@ function classify(e: any, phase: 'send' | 'verify' | 'oauth'): Fail {
 
 const emailLooksReal = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
 
-export function AuthScreen({ connector, initialSignUp = false, onReplayIntro }: {
+export function AuthScreen({ connector, initialSignUp = false, notice, onReplayIntro }: {
   connector: SupabaseConnector;
+  /**
+   * A REFUSAL THAT HAPPENED AFTER THE CODE WAS ACCEPTED — shown here because there
+   * is nowhere else it can be seen.
+   *
+   * hadar, 2026-08-21: "I am entering the 123456 code but nothing happens." The code
+   * verified fine; `claimDevice` then refused the handover (the previous account had
+   * unsent work), signed the new user straight back out, and set an ack. But App.tsx
+   * RETURNS this screen at line ~5494 and only renders `ackEl` from ~7221, so on the
+   * logged-out branch that message is never drawn. The user sees the code accepted
+   * and the same form again, with no reason given — the exact dead-end this file
+   * spends its error handling avoiding, arriving from outside the file.
+   *
+   * Already translated by the caller. Rendered with the same weight as a send/verify
+   * failure, because to the person typing it is the same event: the sign-in did not
+   * take, and here is why.
+   */
+  notice?: { title: string; detail?: string | null } | null;
   /**
    * Which form to open on. The landing page has two buttons — "Get started" and
    * "Log in" — and before this prop existed they were two labels for one destination:
@@ -181,6 +198,9 @@ export function AuthScreen({ connector, initialSignUp = false, onReplayIntro }: 
    * The wording follows the method actually in use rather than the phase that failed:
    * that is what the reader is looking at.
    */
+  // The caller's refusal outranks a stale local error: it is the reason this screen
+  // is still on screen, and it arrived later than anything `fail` holds.
+  const noticeText = notice ? [notice.title, notice.detail].filter(Boolean).join(' — ') : null;
   const failText = !fail ? null
     : fail.kind === 'other' ? fail.text
     : T(fail.kind === 'net' ? 'auth.errNoSignal'
@@ -204,6 +224,7 @@ export function AuthScreen({ connector, initialSignUp = false, onReplayIntro }: 
           <Text style={st.sub}>{T('auth.linkSentBody')}</Text>
           <Text style={st.bigEmail}>{email.trim()}</Text>
 
+          {noticeText && <Text style={st.err}>{noticeText}</Text>}
           {failText && <Text style={st.err}>{failText}</Text>}
 
           <Text style={st.didNot}>{T('auth.didNotReceive')}</Text>
@@ -243,6 +264,7 @@ export function AuthScreen({ connector, initialSignUp = false, onReplayIntro }: 
             maxLength={CODE_LEN} autoFocus editable={!busy}
             accessibilityLabel={T('auth.codeTitle')}
           />
+          {noticeText && <Text style={st.err}>{noticeText}</Text>}
           {failText && <Text style={st.err}>{failText}</Text>}
           {busy && <ActivityIndicator color="#4E6243" style={{ marginBottom: 10 }} />}
           <Pressable style={st.link} disabled={left > 0 || busy}
@@ -325,6 +347,7 @@ export function AuthScreen({ connector, initialSignUp = false, onReplayIntro }: 
               keyboardType="phone-pad" inputMode="tel" textContentType="telephoneNumber" />
           </View>
 
+          {noticeText && <Text style={st.err}>{noticeText}</Text>}
           {failText && <Text style={st.err}>{failText}</Text>}
 
           <Pressable style={[st.btn, (!signUpOk || busy) && st.btnOff]}
@@ -416,6 +439,7 @@ export function AuthScreen({ connector, initialSignUp = false, onReplayIntro }: 
           </>
         )}
 
+        {noticeText && <Text style={st.err}>{noticeText}</Text>}
         {failText && <Text style={st.err}>{failText}</Text>}
         <Social />
 

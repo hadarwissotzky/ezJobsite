@@ -3357,6 +3357,17 @@ const checkClientMessages = async () => {
    * whole UI on the splash so nothing reads a table that is momentarily gone.
    */
   const [wiping, setWiping] = React.useState(false);
+  /**
+   * WHY THE SIGN-IN DID NOT TAKE, shown on the sign-in screen itself.
+   *
+   * `setAck` cannot carry this: App returns `<AuthScreen>` early on the logged-out
+   * branch and `ackEl` is only rendered further down the tree, so an ack raised while
+   * signed out is never drawn. hadar hit exactly that — "I am entering the 123456 code
+   * but nothing happens" — where the code HAD verified and `claimDevice` then refused
+   * the handover and signed him back out, silently.
+   */
+  const [authNotice, setAuthNotice] = React.useState<
+    null | { title: string; detail?: string | null }>(null);
   /** Rows queued in every owned outbox + open drafts, refreshed when the drawer opens.
    *  Null = not counted. What the sign-out confirmation warns about. NOT `unsent`,
    *  which is already taken by the Extras tab's list of undelivered decisions. */
@@ -4212,9 +4223,15 @@ const checkClientMessages = async () => {
           // DURABILITY WINS — nothing was deleted. See deviceowner.ts.
           setWiping(false);
           setSession(null);
+          // BOTH surfaces: the ack for anyone already inside the app, and the notice
+          // for the sign-in screen they are about to be returned to — which is where
+          // this one is actually read, and where it was invisible.
           setAck({ kind: 'no', title: T('handover.refusedTitle'),
                    detail: T({ k: 'handover.refusedBody',
                                p: { n: String(claim.unsent) } } as any) });
+          setAuthNotice({ title: T('handover.refusedTitle'),
+                          detail: T({ k: 'handover.refusedBody',
+                                      p: { n: String(claim.unsent) } } as any) });
           await connector.signOut().catch(() => {});
           return false;
         }
@@ -4225,6 +4242,7 @@ const checkClientMessages = async () => {
           console.warn('[handover] refused:', claim.reason);
           setAck({ kind: 'no', title: T('handover.failedTitle'),
                    detail: T('handover.failedBody') });
+          setAuthNotice({ title: T('handover.failedTitle'), detail: T('handover.failedBody') });
           // Set explicitly rather than left to the SIGNED_OUT event: `signOut()` can
           // throw on a dead network, and a `session` stuck at `undefined` leaves the
           // app on the splash with no way forward.
@@ -4232,6 +4250,7 @@ const checkClientMessages = async () => {
           await connector.signOut().catch(() => {});
           return false;
         }
+        setAuthNotice(null);   // a claim that got this far succeeded
         if (!claim.wiped) return true;
         console.log('[handover] device wiped, previous user', claim.previousUser);
         try {
@@ -4264,6 +4283,7 @@ const checkClientMessages = async () => {
           console.warn('[handover] rebuild failed:', e?.message ?? e);
           setAck({ kind: 'no', title: T('handover.failedTitle'),
                    detail: T('handover.failedBody') });
+          setAuthNotice({ title: T('handover.failedTitle'), detail: T('handover.failedBody') });
           setSession(null);
           await connector.signOut().catch(() => {});
           return false;
@@ -5493,6 +5513,7 @@ const checkClientMessages = async () => {
       return (
         <AuthScreen
           connector={connector}
+          notice={authNotice}
           initialSignUp={authIntent !== 'login'}
           onReplayIntro={() => { void forgetSeenOnboarding(); setSeen(false); }}
         />
