@@ -650,6 +650,22 @@ export default function App() {
    */
   const loadedRef = React.useRef(false);
   const [loadedOnce, setLoadedOnce] = React.useState(false);
+  /**
+   * HAS ANYBODY ACTUALLY ASKED THE SERVER YET (hadar, 2026-08-21: "this is what I see
+   * when I first login" — a full-screen "NO EXTRAS YET" at an account with three).
+   *
+   * `loadedOnce` means "refresh() has run", which on a freshly signed-in phone is true
+   * and useless: it read an empty local table and returned honestly empty. An empty
+   * local table is NOT evidence of an empty account until the server has been asked.
+   *
+   *   'unknown'     — no hydrate has completed this session. Say nothing definite.
+   *   'yes'         — the server answered. Zero rows now MEANS zero.
+   *   'unreachable' — the server was asked and could not be reached. Zero rows still
+   *                   means nothing, and the screen must not pretend otherwise.
+   *
+   * Sticky once 'yes': a later offline tick does not un-know what we learned.
+   */
+  const [synced, setSynced] = React.useState<'unknown' | 'yes' | 'unreachable'>('unknown');
   const [logoSheet, setLogoSheet] = React.useState(false);
   const [logoBusy, setLogoBusy] = React.useState(false);
   // When set, the capture screen AUGMENTS this existing extra (adds photos/voice as
@@ -4110,6 +4126,18 @@ const checkClientMessages = async () => {
       let connected = false;
       /** Guards `restoreFlags` to once per app run — see it for why. */
       let flagsRestored = false;
+      /**
+       * ASK THE SERVER THE MOMENT SOMEBODY SIGNS IN, not on the next quarter-minute.
+       *
+       * `drain` is created below and fired immediately — but that immediate call
+       * happens at APP INIT, when a mid-run sign-in has not occurred yet and
+       * `getUser()` returns nobody, so it does nothing and the interval takes over. A
+       * user signing in after launch therefore waited up to 15 seconds for their first
+       * hydrate, staring at a Home with nothing on it. Filled in after `drain` is
+       * defined, because a direct reference from here would be a temporal-dead-zone
+       * error at init time.
+       */
+      let kickSync: (() => void) | null = null;
 
       /**
        * WHOSE DEVICE IS THIS (hadar, 2026-08-21: signed out of one account, signed in
@@ -4180,6 +4208,7 @@ const checkClientMessages = async () => {
           // THEIR account — a handover inside one app run must not inherit the
           // outgoing user's "already onboarded".
           flagsRestored = false;
+          setSynced('unknown');
           // Re-read every list from the now-empty database rather than resetting ~20
           // pieces of state by hand: a hand-written reset list is one `useState` away
           // from leaving the previous user's row on screen, which is the bug.
@@ -4290,6 +4319,9 @@ const checkClientMessages = async () => {
             db.connect(connector).catch((e) =>
               console.log('sync will connect when there is signal', e?.message ?? e));
           }
+          // Their extras, now — not in fifteen seconds. Home shows "Getting your work"
+          // until this answers, so the wait is visible and every second of it counts.
+          kickSync?.();
         } else {
           setSession(s);
           /**
@@ -4309,6 +4341,8 @@ const checkClientMessages = async () => {
           // otherwise, and their onboarding flags have to be reconciled against THEIR
           // content — not skipped because the departing user's already were.
           flagsRestored = false;
+          // Nothing is known about the next account's extras until its own hydrate runs.
+          setSynced('unknown');
           db.disconnect().catch((e) =>
             console.log('disconnect on sign-out failed', e?.message ?? e));
         }
@@ -4453,6 +4487,8 @@ const checkClientMessages = async () => {
            * AFTER the change-order hydrate, deliberately: this pulls by decision, and
            * the extras are what say which decisions matter on this job.
            */
+          // The server answered, or it did not. Either way Home stops guessing.
+          setSynced((prev) => (hy.ok ? 'yes' : prev === 'yes' ? 'yes' : 'unreachable'));
           const ev = await hydrateEvidence(db, connector.client, pid, data.user.id);
           if (ev.decisions || ev.versions || ev.captures) {
             console.log('hydrate evidence:', JSON.stringify(ev));
@@ -4524,6 +4560,8 @@ const checkClientMessages = async () => {
           void logDiag(db, 'tick.error', String(e?.message ?? e).slice(0, 200));
         }
       };
+      // Wired now that `drain` exists — see `kickSync` above.
+      kickSync = () => { void drain(); };
       drain();
       const iv = setInterval(drain, 15_000);
       cleanups.push(() => clearInterval(iv));
@@ -8434,7 +8472,27 @@ const checkClientMessages = async () => {
      * The house art stays exactly where it is. It is this screen's identity in both
      * states, and moving it would make the first screen a different app from the second.
      */
-    const homeEmpty = homeExtras.length === 0;
+    /**
+     * "NO EXTRAS YET" IS A CLAIM, AND IT NEEDS EVIDENCE (hadar, 2026-08-21).
+     *
+     * This was `homeExtras.length === 0` alone — a local row count, asserted as a fact
+     * about the account one second after sign-in, when the local table is empty for the
+     * only uninteresting reason there is: nothing has synced yet. A contractor with
+     * three change orders was told he had none, in the largest type on the screen.
+     *
+     * Three states, and only one of them may make the claim:
+     *   have rows        → show them
+     *   none, not asked  → say we are fetching. Never "none".
+     *   none, asked+told → "NO EXTRAS YET" is now true, and it is safe to say
+     *   none, unreachable→ say we could not check. Zero is not the answer, it is the
+     *                      absence of one — the same honesty `set.billingUnavailable`
+     *                      already uses for purchases.
+     */
+    const homeEmpty = homeExtras.length === 0 && synced === 'yes';
+    const homeUnknown = homeExtras.length === 0 && synced === 'unknown';
+    const homeUnreachable = homeExtras.length === 0 && synced === 'unreachable';
+    /** Everything that is not a populated hero shares the empty hero's layout. */
+    const heroQuiet = homeEmpty || homeUnknown || homeUnreachable;
     return (
       <View style={s.homeC}>
         {discardSheet}
@@ -8445,18 +8503,29 @@ const checkClientMessages = async () => {
           {/* Hero — the money outstanding on the client, across every job. Design
               system: Oswald caps label, huge Oswald figure, Inter sub. The house
               illustration (assets/house-hero.png) sits top-right. */}
-          <View style={[s.heroWrap, homeEmpty && s.heroWrapEmpty]}>
+          <View style={[s.heroWrap, heroQuiet && s.heroWrapEmpty]}>
             <Image source={require('./assets/house-hero.png')}
-              style={[s.houseArt, homeEmpty && s.houseArtEmpty]}
+              style={[s.houseArt, heroQuiet && s.houseArtEmpty]}
               resizeMode="contain" />
-            {homeEmpty ? (
+            {heroQuiet ? (
               <>
                 {/* Two deliberate lines, written as two: "NO EXTRAS YET" wrapped by the
                     box would break wherever the house left room, and this headline is
-                    typography — the break belongs to the design, not to the layout. */}
-                <Text style={s.emptyHead}>{T('home.emptyHead1')}</Text>
-                <Text style={s.emptyHead}>{T('home.emptyHead2')}</Text>
-                <Text style={s.emptyLede}>{T('home.emptyLede')}</Text>
+                    typography — the break belongs to the design, not to the layout.
+                    The other two states borrow the same shape so the screen does not
+                    jump when the answer arrives. */}
+                <Text style={s.emptyHead}>
+                  {homeUnknown ? T('home.loadingHead1')
+                    : homeUnreachable ? T('home.offlineHead1') : T('home.emptyHead1')}
+                </Text>
+                <Text style={s.emptyHead}>
+                  {homeUnknown ? T('home.loadingHead2')
+                    : homeUnreachable ? T('home.offlineHead2') : T('home.emptyHead2')}
+                </Text>
+                <Text style={s.emptyLede}>
+                  {homeUnknown ? T('home.loadingLede')
+                    : homeUnreachable ? T('home.offlineLede') : T('home.emptyLede')}
+                </Text>
               </>
             ) : (
               <>

@@ -513,6 +513,23 @@ const EN: Record<string, string> = {
   'home.emptyHead1': 'No',
   'home.emptyHead2': 'Extras yet',
   'home.emptyLede': 'Record extra work to create your first change order.',
+  /**
+   * THE TWO STATES THAT ARE NOT "EMPTY", and the reason they exist: an empty local
+   * table one second after sign-in is not an empty account, and saying so in the
+   * largest type on the screen tells a contractor with three change orders that his
+   * work is gone (hadar, 2026-08-21).
+   *
+   * Same two-line shape as the empty headline so the hero does not jump when the real
+   * answer lands.
+   */
+  'home.loadingHead1': 'Getting',
+  'home.loadingHead2': 'your work',
+  'home.loadingLede': 'Fetching your change orders from your account. This only takes a moment.',
+  // NOT "no extras" — this is the answer when we could not ask, and the difference
+  // matters. Same honesty as `set.billingUnavailable`.
+  'home.offlineHead1': 'Can’t reach',
+  'home.offlineHead2': 'your work',
+  'home.offlineLede': 'No signal right now, so we couldn’t check your change orders. This doesn’t mean you have none — you can still record.',
   'home.emptyWaitTitle': 'Nothing waiting for approval',
   'home.emptyWaitSub': 'When you record extra work, it will appear here.',
   'home.emptyLearn': 'Learn how it works',
@@ -2447,6 +2464,12 @@ const ES: Record<string, string> = {
   'home.emptyHead1': 'Sin',
   'home.emptyHead2': 'Extras aún',
   'home.emptyLede': 'Graba trabajo extra para crear tu primera orden de cambio.',
+  'home.loadingHead1': 'Buscando',
+  'home.loadingHead2': 'tu trabajo',
+  'home.loadingLede': 'Estamos trayendo tus órdenes de cambio. Solo toma un momento.',
+  'home.offlineHead1': 'Sin acceso',
+  'home.offlineHead2': 'a tu trabajo',
+  'home.offlineLede': 'No hay señal ahora, así que no pudimos revisar tus órdenes de cambio. Esto no significa que no tengas — igual puedes grabar.',
   'home.emptyWaitTitle': 'Nada esperando aprobación',
   'home.emptyWaitSub': 'Cuando grabes trabajo extra, aparecerá aquí.',
   'home.emptyLearn': 'Cómo funciona',

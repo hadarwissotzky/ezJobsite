@@ -1388,7 +1388,16 @@ export async function hydrateChangeOrders(
     .from('change_order')
     .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at, scope_of_work, scope_of_work_ai, price_heard, schedule_effect, schedule_days, billing_timing, exclusions, extra_type, co_number')
     .eq('project_id', projectId);
-  if (error || !data) return { pulled: 0, statusUpdated: 0, skipped: 0, conflicts: 0 };
+  // `ok` SEPARATES "THIS ACCOUNT HAS NO EXTRAS" FROM "I COULD NOT ASK".
+  //
+  // Both used to return the same all-zero shape, so the caller had no way to tell them
+  // apart — and Home read zero rows as a fact and printed "NO EXTRAS YET" at a
+  // contractor with three change orders, one second after he signed in (hadar,
+  // 2026-08-21). An empty local table is not evidence of an empty account until
+  // somebody has actually asked the server and been told so.
+  if (error || !data) {
+    return { ok: false, pulled: 0, statusUpdated: 0, skipped: 0, conflicts: 0 };
+  }
 
   // D6's lineage, in a SEPARATE best-effort query and deliberately not a column on
   // the select above. It is pulled at all because the origin link is authored on ONE
@@ -1494,6 +1503,37 @@ export async function hydrateChangeOrders(
     }
     if (res.rowsAffected) { pulled++; continue; }
 
+    /**
+     * A ROW THIS DEVICE ALREADY HAS — adopt the number if it is missing one.
+     *
+     * `INSERT OR IGNORE` above does nothing when the row exists, so adding
+     * `co_number` to the insert fixed only extras pulled for the FIRST time.
+     * Every extra already sitting on a phone kept its NULL forever and went on
+     * rendering "Change order" with no number — which is exactly what hadar was
+     * still looking at after installing the build that "fixed" it (2026-08-21).
+     *
+     * SAFE ON A SENT OR SIGNED EXTRA, checked rather than assumed: `co_number` is
+     * not among the columns `change_order_frozen` guards (scope, amount, nte,
+     * billing_timing, schedule_effect, schedule_days, exclusions, scope_of_work),
+     * so this UPDATE is permitted on a frozen instrument. It has to be — the
+     * number is how a signed document is referred to, and a signed extra is
+     * precisely the one you cannot afford to leave unidentified.
+     *
+     * `WHERE co_number IS NULL` is what keeps it an adoption rather than an
+     * overwrite: a number this device minted and has not yet uploaded is never
+     * replaced by the server's guess at one.
+     */
+    if (co.co_number != null) {
+      try {
+        await db.execute(
+          `UPDATE change_order SET co_number = ? WHERE id = ? AND co_number IS NULL`,
+          [co.co_number, co.id]);
+      } catch (e: any) {
+        // Never let a cosmetic backfill cost the status adoption below.
+        void logDiag(db, 'hydrate.conumber', `${co.id}: ${String(e?.message ?? e).slice(0, 100)}`);
+      }
+    }
+
     // Existing row: status only, and only if we are not holding an unsent intent.
     const local = (await db.getAll<{ status: string }>(
       `SELECT status FROM change_order WHERE id = ?`, [co.id]))[0];
@@ -1591,7 +1631,7 @@ export async function hydrateChangeOrders(
   }
   if (scopesLearned) console.log('hydrate learned %d server-written scope(s)', scopesLearned);
 
-  return { pulled, statusUpdated, skipped, conflicts };
+  return { ok: true, pulled, statusUpdated, skipped, conflicts };
 }
 
 
