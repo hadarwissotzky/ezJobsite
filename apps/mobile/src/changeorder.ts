@@ -492,6 +492,18 @@ const BORN_AS: StoredStatus = 'draft';
  * number. A future server-side reconcile can renumber the loser without breaking a
  * reference.
  */
+/**
+ * RETIRED FROM THE CREATE PATH 2026-08-21 — the SERVER assigns the number (sql/419).
+ *
+ * hadar: "it cannot have a number until it reached the server and the server gave it
+ * one." He is right, and this was the thing doing it wrong: `MAX+1` over the LOCAL
+ * rows of a project is only correct on a phone that has seen every extra on that job,
+ * so two devices offline both mint the same number and both show it.
+ *
+ * Kept only because `backfillCoNumbers` below reads the same column and the two are
+ * easier to reason about together. Do not wire it back into a create: an identifier a
+ * device guesses is one a client's signed page can contradict.
+ */
 export async function nextCoNumber(
   db: AbstractPowerSyncDatabase, projectId: string
 ): Promise<number> {
@@ -565,7 +577,14 @@ export async function createChangeOrder(
   const now = Date.now();
   // Allocated BEFORE the transaction: it is a read, and doing it inside would hold the
   // write lock across a query for no reason.
-  const coNumber = o.coNumber ?? await nextCoNumber(db, o.projectId);
+  /**
+   * NO LOCAL NUMBER unless the caller supplies one (a revision carries its
+   * predecessor's). sql/419's trigger assigns it on insert, per project, under an
+   * advisory lock — the only place that can see every extra on a job. Until the
+   * hydrate brings the server's answer back the extra shows no number, which is the
+   * honest state: it does not have one yet.
+   */
+  const coNumber: number | null = o.coNumber ?? null;
   const confirmedMs = o.numbersConfirmedAt.getTime();
   const mutationId = `cm-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const lineItems = o.lineItems ?? [];
@@ -1382,96 +1401,15 @@ export async function markLocalSent(
  * and covers the specific pending-supersession case (see its header).
  */
 /**
- * SEND THE NUMBER THE DEVICE MINTED. The half that never existed.
+ * REMOVED 2026-08-21 — see sql/419.
  *
- * sql/399 (2026-08-10) added `co_number` to the server and said so in as many words:
- * *"IT WILL BE NULL FOR NOW … nothing uploads it yet — `ingest_change_order_v1` has no
- * parameter for it … WIRING THE DEVICE TO SEND IT IS OWED"*. It stayed owed, and it is
- * why the client's own portal page says "CHANGE ORDER" where the design says
- * "CHANGE ORDER #4" — verified against the live database on 2026-08-21: **twenty rows,
- * zero numbers.**
+ * This uploaded the number the DEVICE minted. It fixed the symptom hadar reported
+ * that morning (20 server rows, 0 numbers) by entrenching the cause: a phone that
+ * cannot see every extra on a job was still deciding the identifier. Once the server
+ * assigns on insert, sending a local guess would race the trigger and could win.
  *
- * It is also why adding `co_number` to `hydrateChangeOrders` fixed nothing on hadar's
- * phone. That change adopts the server's number, and the server had none to give. Both
- * halves are needed and only one was built.
- *
- * A DIRECT UPDATE, NOT A NEW RPC, and that is checked rather than convenient:
- * `authenticated` holds a column-level UPDATE grant on `co_number` (Q2's server-owned
- * column list does not include it), the `co_own` policy scopes the write to
- * `owner_id = auth.uid()`, and NEITHER server trigger guards it — `change_order_guard`
- * freezes scope, amount, nte, billing, schedule and exclusions on a sent row, and
- * `change_order_transition_guard` is `BEFORE UPDATE OF status`. So a number can be
- * filed against a signed instrument, which it must be: the number is how a signed
- * document is referred to.
- *
- * `.is('co_number', null)` MAKES IT AN ADOPTION, NEVER AN OVERWRITE. Two devices can
- * mint the same number for one job offline (nextCoNumber says so), and the first write
- * to reach the server wins for everybody — the loser's local value is corrected by the
- * next hydrate. Without this predicate the last tick to run would win instead, which is
- * an identifier that changes under a document that has already been sent.
- *
- * Bounded per call: this runs on the same 15-second tick as every drain and there is no
- * urgency to it whatsoever.
+ * The direction is one-way now: numbers come DOWN in the hydrate, never up.
  */
-export async function pushCoNumbers(
-  db: AbstractPowerSyncDatabase, supabase: SupabaseClient, limit = 25
-): Promise<{ pushed: number; failed: number }> {
-  /**
-   * ROWS THIS DEVICE HAS NOT PUSHED YET — not simply "rows that have a number".
-   *
-   * The predicate was `WHERE co_number IS NOT NULL`, which stays true forever after a
-   * successful push. Only the server-side `.is('co_number', null)` filtered anything,
-   * and reaching that filter costs a request: a device with 25+ numbered extras issued
-   * 25 no-op PATCHes EVERY FIFTEEN SECONDS, for the life of the app run. On a product
-   * whose seventh mandate assumes a weak metered link, that is ~100 pointless requests
-   * a minute (found in review, 2026-08-21).
-   *
-   * `co_number_pushed` is a local receipt, not evidence — it records only what this
-   * handset has already sent, so the queue drains to nothing and stays there.
-   */
-  try {
-    await db.execute(
-      `CREATE TABLE IF NOT EXISTS co_number_pushed (
-         change_order_id TEXT NOT NULL PRIMARY KEY,
-         at_ms           INTEGER NOT NULL
-       ) STRICT`);
-  } catch { /* the push still works, it just repeats — see below */ }
-
-  let rows: Array<{ id: string; co_number: number }> = [];
-  try {
-    rows = await db.getAll(
-      `SELECT id, co_number FROM change_order
-        WHERE co_number IS NOT NULL
-          AND id NOT IN (SELECT change_order_id FROM co_number_pushed)
-        ORDER BY created_at_ms DESC LIMIT ?`, [limit]);
-  } catch {
-    return { pushed: 0, failed: 0 };
-  }
-
-  let pushed = 0, failed = 0;
-  for (const r of rows) {
-    try {
-      const { data, error } = await supabase.from('change_order')
-        .update({ co_number: r.co_number })
-        .eq('id', r.id)
-        .is('co_number', null)
-        .select('id');
-      if (error) { failed++; continue; }
-      // No rows matched = the server already has a number, or the row is not there
-      // yet. Both are fine and neither is a failure.
-      if (data?.length) pushed++;
-      // RECEIPTED EITHER WAY. A matched update means the server took ours; an
-      // unmatched one means it already had a number, and re-asking cannot change
-      // that. The only case worth retrying is `error`, which skips this line.
-      await db.execute(
-        `INSERT OR IGNORE INTO co_number_pushed (change_order_id, at_ms) VALUES (?,?)`,
-        [r.id, Date.now()]).catch(() => { /* it repeats; it does not break */ });
-    } catch {
-      failed++;   // offline is normal; the next tick tries again
-    }
-  }
-  return { pushed, failed };
-}
 
 /**
  * `projectId: null` MEANS THE WHOLE ACCOUNT, and that is the correct default now.
@@ -1636,9 +1574,15 @@ export async function hydrateChangeOrders(
      */
     if (co.co_number != null) {
       try {
+        // NO `AND co_number IS NULL` ANY MORE. That predicate was right while the
+        // device minted numbers and the server merely stored them — it stopped a
+        // remote value overwriting a local one. Since sql/419 the server is the only
+        // thing that assigns, so its answer is not a competing opinion, it is THE
+        // number; a local value that disagrees is a leftover from before and gets
+        // corrected rather than defended.
         await db.execute(
-          `UPDATE change_order SET co_number = ? WHERE id = ? AND co_number IS NULL`,
-          [co.co_number, co.id]);
+          `UPDATE change_order SET co_number = ? WHERE id = ? AND co_number IS NOT ?`,
+          [co.co_number, co.id, co.co_number]);
       } catch (e: any) {
         // Never let a cosmetic backfill cost the status adoption below.
         void logDiag(db, 'hydrate.conumber', `${co.id}: ${String(e?.message ?? e).slice(0, 100)}`);

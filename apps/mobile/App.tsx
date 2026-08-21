@@ -124,7 +124,7 @@ import { configureBilling, entitledPlanNow, entitledProductNow } from './src/bil
 import { LABELS, labelHex } from './src/labels';
 import { companyFeed, type FeedItem } from './src/feed';
 import { ExtraCard } from './src/ui/extracard';
-import { setDraftClient, pushCoNumbers,
+import { setDraftClient,
 } from './src/changeorder';
 import { requestExtraReview } from './src/reviewrequest';
 import { sendPlan, toggleMember } from './src/sendplan';
@@ -269,7 +269,6 @@ import { applyLocalApproval, centsFromInput, createChangeOrder, createLinkedExtr
          createdLabel, markLocalSent, money, moneyWhole, parseMoney, validateLines,
          CO_AUTHOR_JOIN, CO_PHOTO_SUBQUERY,
          type LineItem, type LedgerRow, priceDraftExtra, setDraftFlowFields, rehomeDraftExtra,
-         backfillCoNumbers,
          shortDate,
          type BillingTiming, type ScheduleEffect,
 } from './src/changeorder';
@@ -4147,9 +4146,16 @@ const checkClientMessages = async () => {
       // Every app-owned table, in the one order that works — see ensureLocalSchema.
       // A device handover calls it again after the wipe.
       await ensureLocalSchema(db, OWNER);
-      // Number the extras that predate the column, oldest first per job. A no-op on
-      // every launch after the first.
-      await backfillCoNumbers(db);
+      /**
+       * NO LOCAL BACKFILL ANY MORE (sql/419). This numbered rows the device had not
+       * uploaded, using the same `MAX+1` over local rows that made two offline phones
+       * agree on "#4". The server's trigger numbers everything on insert and 419
+       * numbered the existing rows in one pass; the hydrate brings those down.
+       *
+       * A row that has not reached the server yet therefore shows NO number, which is
+       * what hadar asked for: "it cannot have a number until it reached the server and
+       * the server gave it one."
+       */
       // A SEPARATE sweep over a SEPARATE directory. recoverySweep empties capture-tmp
       // unconditionally, so draft media never lives there. Everything this sweep does
       // is in the direction of KEEPING bytes: adopt a file with no row, adopt a
@@ -4746,12 +4752,16 @@ const checkClientMessages = async () => {
           // The late-proposal sweep that used to live here is gone (394): the server
           // applies a write-up the moment it exists, so there is nothing for the app to
           // catch up on except the hydrate below, which learns it.
-          // BEFORE the hydrate, deliberately: the hydrate ADOPTS the server's number,
-          // so a number this device minted has to reach the server first or the adopt
-          // finds nothing and the extra stays unnumbered — which is exactly what
-          // happened to hadar (20 server rows, 0 numbers, 2026-08-21).
-          const cn = await pushCoNumbers(db, connector.client);
-          if (cn.pushed || cn.failed) console.log('co numbers:', JSON.stringify(cn));
+          /**
+           * `pushCoNumbers` IS GONE, and it was mine from this morning.
+           *
+           * It uploaded the number the DEVICE minted, which fixed the symptom hadar
+           * reported (20 server rows, 0 numbers) by entrenching the cause: a phone
+           * that cannot see every extra on a job was still the thing deciding the
+           * identifier. sql/419 moved assignment to the server, so pushing a local
+           * guess is now actively wrong — it would race the trigger and could win.
+           * The hydrate brings the number DOWN; nothing sends one up.
+           */
           // ACCOUNT-WIDE (null), not `pid`. Home reads change orders with no project
           // filter, so a project-scoped pull made `synced` answer a different question
           // from the one the screen asks — and left every other job's extras
