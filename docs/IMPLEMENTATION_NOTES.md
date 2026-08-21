@@ -799,6 +799,72 @@ Row 5 — `capture_commit = 0`, `Documents/` media gone, `ps_*` cleared — is *
 work and is not yet run**; the unit tests prove which branch is chosen, not that the
 device is empty afterwards.
 
+### 2026-08-21b — the same class, second instance: the ONBOARDING flags
+
+Immediately after the fix above, hadar: *"when I logged in with an existing user after
+I had to remove the app and reinstall, it took me through the onboarding sequence again
+(first time CO) although I have many COs. It's a cache issue again — check the local
+flags, need to set some of them based on user content."*
+
+Same defect class, different flags. §6 was about **evidence** surviving a sign-out;
+this is about **"have I seen this before"** not surviving a reinstall. Three keys decide
+whether somebody is new — `profile_done`, `first_run_done`, `first_extra_seen` — and all
+three live in `device_settings`, so a reinstall (or §6's own handover wipe) takes them
+with it and a contractor with sixty extras is greeted as a first-timer.
+
+**Why the existing content-based gate did not save it.** The guided start already tests
+`!homeExtras.length && !projects.length`, so in principle it self-clears. In practice
+sync is exactly what has not happened yet at the moment those screens render: on a fresh
+install the local database is *genuinely* empty for the first seconds, and "no local
+rows" is indistinguishable from "new user" unless something asks.
+
+**Fixed in `apps/mobile/src/accountflags.ts` (`restoreAccountFlags`)**, called from
+`applySession` beside the device claim, once per app run:
+
+1. **The profile comes back from `user_metadata`** — free, instant, works offline,
+   because the token is already in hand. `saveProfile` has mirrored the profile to the
+   auth user since it was written, under a comment saying it does so "so it follows the
+   account across devices". **Nothing ever read it back.** That was the entire setup-flow
+   half of the bug: the data was there the whole time.
+2. **The first-run gates come back from content** — local first (free, and it settles
+   the warm case), then one `limit(1)` existence probe per table against the server when
+   the device looks empty.
+
+**The rule it must never break:** never set a flag from an ABSENCE. "No change orders
+came back" is the same shape from a new account and from a dead network, and marking
+someone onboarded on a failed query would skip setup for a genuinely new user, leaving
+them with no profile and no idea what the app is. Only positive evidence moves anything;
+`Restored.offline` exists so the caller can tell "no" from "could not ask".
+
+**The mandate-#7 guard is load-bearing.** This reconciliation runs *in front of*
+`setSession`, because `setSession` opens the auth gate and the setup flow paints
+immediately after. A network round-trip in that position is precisely the invisible HTTP
+call that made a cold start a 30-second splash on 2026-08-04. So the local check answers
+first and the probe only runs on a device that looks empty — a fresh install or a
+post-handover wipe.
+
+**Also carried now:** the display language. It was device-local only, so a
+Spanish-speaking contractor reinstalled into an English app and had to find the toggle in
+a language he does not read. `saveProfile` takes an optional `lang` and writes it to the
+account; `restoreProfileFromAccount` hands it back for `saveLang` to store.
+
+**Two import fixes it forced, both worth knowing about:** `firstrun.ts` imported
+`getLang` (never used) and `AbstractPowerSyncDatabase` as VALUES. Either one drags React
+Native into the `node --test` loader — where it does not parse — for every file that
+transitively reaches it, which is why `accountflags.test.ts` would not load. Both are now
+`import type`, which is erased. **The general rule for this repo: a module you want
+covered by `node --test` may not have a value import of `@powersync/react-native`,
+`react-native`, `expo-*` or `i18n.ts` anywhere in its transitive graph.**
+
+**Covered by `src/accountflags.test.ts` (11 tests)**, including the two failure
+directions and the no-probe-on-a-warm-device guarantee. **Not yet verified on device.**
+
+**Left alone deliberately:** the 4-slide pre-login intro (`onboarding_seen_v1`,
+AsyncStorage). It renders before anyone has signed in, so there is no account to ask —
+a returning user reinstalling will see it once, and that is unavoidable rather than a
+bug. Terms acceptance (`terms_accepted_version`) also stays device-local; re-accepting
+on a new device is the defensible reading, and nothing currently gates on it.
+
 ---
 
 ## §7 — 2026-08-13: closing the account, and what "delete my data" costs in an append-only schema

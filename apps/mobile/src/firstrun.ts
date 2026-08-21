@@ -54,8 +54,15 @@
  *     REQ-SET2 says "shortest path to permissions". The shortest path is the one
  *     that does not burn them.
  */
-import { AbstractPowerSyncDatabase } from '@powersync/react-native';
-import { getLang, type Lang } from './i18n';
+// TYPE-ONLY for the same reason as the line below: a VALUE import of
+// `@powersync/react-native` loads React Native itself, which `node --test` cannot
+// parse. Only the type is ever used here.
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
+// TYPE-ONLY, deliberately. `getLang` was imported here and never called, and a value
+// import of `i18n` drags that module into the `node --test` loader — where it does not
+// parse — for every file that transitively reaches this one. A type import is erased,
+// so `accountflags.ts` (which needs `saveLang`) stays testable.
+import type { Lang } from './i18n';
 
 const DONE_KEY = 'first_run_done';
 

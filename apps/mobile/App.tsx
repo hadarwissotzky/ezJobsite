@@ -114,6 +114,7 @@ import { billingTenantId, createInvite, ensureBillingTenant, ensureOwnCompany,
          type Member } from './src/company';
 import { closeMyAccount } from './src/closeaccount';
 import { claimDevice } from './src/deviceowner';
+import { restoreAccountFlags } from './src/accountflags';
 import { ensureLogoCached, pickLogo, removeCompanyLogo,
          saveCompanyLogo } from './src/companylogo';
 import { configureBilling, entitledPlanNow, entitledProductNow } from './src/billing';
@@ -4102,6 +4103,8 @@ const checkClientMessages = async () => {
       // is shown once, so load that flag before deciding what to draw.
       setSeen(await getSeenOnboarding());
       let connected = false;
+      /** Guards `restoreFlags` to once per app run — see it for why. */
+      let flagsRestored = false;
 
       /**
        * WHOSE DEVICE IS THIS (hadar, 2026-08-21: signed out of one account, signed in
@@ -4168,6 +4171,10 @@ const checkClientMessages = async () => {
           await ensureLocalSchema(db, userId);
           // PowerSync's own store was cleared too; let the connect below happen again.
           connected = false;
+          // The flags went with the wipe. The incoming user's must be rebuilt from
+          // THEIR account — a handover inside one app run must not inherit the
+          // outgoing user's "already onboarded".
+          flagsRestored = false;
           // Re-read every list from the now-empty database rather than resetting ~20
           // pieces of state by hand: a hand-written reset list is one `useState` away
           // from leaving the previous user's row on screen, which is the bug.
@@ -4197,6 +4204,49 @@ const checkClientMessages = async () => {
         return true;
       };
 
+      /**
+       * "AM I A NEW USER?" IS A QUESTION ABOUT THE ACCOUNT, NOT ABOUT THIS PHONE.
+       *
+       * hadar, 2026-08-21: reinstalled, signed in as an existing user, and was walked
+       * through setup and the guided first change order "although I have many CO".
+       *
+       * `profile_done`, `first_run_done` and `first_extra_seen` all live in
+       * `device_settings`, so a reinstall — or the handover wipe above — takes them
+       * with it, and a contractor with sixty extras is greeted as somebody who has
+       * never made one. `restoreAccountFlags` rebuilds them from the account: the
+       * profile out of `user_metadata` (free, offline, already in the token), and the
+       * first-run gates out of whether the account demonstrably owns anything.
+       *
+       * ONCE PER APP RUN, via the same latch pattern as `connected`. A token refresh
+       * re-enters this function, and re-running it would re-ask the server — and
+       * worse, could interrupt somebody standing in the middle of the setup form.
+       */
+      const restoreFlags = async (u: NonNullable<Session['user']>) => {
+        if (flagsRestored) return;
+        flagsRestored = true;
+        // NOTHING TO RECONCILE on a device that has already been through setup — and
+        // this is what keeps the common cold start free of it. Every branch below
+        // reads local state only.
+        if (!(await isFirstRun(db)) && (await hasProfileFn(db)) && (await firstExtraSeen(db))) {
+          return;
+        }
+        try {
+          const r = await restoreAccountFlags(db, connector.client, u);
+          void logDiag(db, 'flags.restore',
+            `profile=${r.profile} content=${r.content} offline=${r.offline}`);
+        } catch (e: any) {
+          // A failed reconciliation shows setup to someone who did not need it —
+          // annoying, and strictly better than skipping setup for someone who did.
+          console.warn('[flags] restore failed:', e?.message ?? e);
+        }
+        setFirstRun(await isFirstRun(db));
+        setFirstExtra(!(await firstExtraSeen(db)));
+        setHasProfile(await hasProfileFn(db));
+        // The account may have carried a display language back with the profile.
+        const l = await savedLang(db);
+        if (l) { setLang(l); setLangState(l); }
+      };
+
       const applySessionNow = async (s: Session | null) => {
         if (s?.user?.id) {
           // THE CLAIM COMES BEFORE `setSession`, and that is the difference between
@@ -4205,6 +4255,11 @@ const checkClientMessages = async () => {
           // user's jobs, extras and photos — for the frames before the wipe starts.
           // hadar saw exactly that: "at first it logged me in to the last known user".
           if (!(await claimFor(s.user.id))) return;
+          // ALSO BEFORE `setSession`, and for the same reason: this decides whether
+          // the setup flow and the guided first-extra screen render at all, so it has
+          // to have answered before the auth gate opens. `session === undefined` (or
+          // the auth screen, mid-run) is already on screen while it works.
+          await restoreFlags(s.user);
           setSession(s);
           setOwner(s.user.id);
           // REQ-NOTIF1 — register this device for remote push, best-effort.
@@ -4245,6 +4300,10 @@ const checkClientMessages = async () => {
            * buckets into a device nobody is signed in to.
            */
           connected = false;
+          // The NEXT person to sign in on this run is a different account until proven
+          // otherwise, and their onboarding flags have to be reconciled against THEIR
+          // content — not skipped because the departing user's already were.
+          flagsRestored = false;
           db.disconnect().catch((e) =>
             console.log('disconnect on sign-out failed', e?.message ?? e));
         }
@@ -5365,7 +5424,9 @@ const checkClientMessages = async () => {
           name: pName, isSolo: pSolo === true,
           company: pSolo === false ? pCompany : null,
           trade: null,   // asked later, in Settings — see setupflow.tsx header
-        });
+        // The language picked one screen earlier travels with the account, so a
+        // reinstall does not put a Spanish speaker back into English.
+        }, lang);
         setHasProfile(true);
       };
 
@@ -8098,7 +8159,9 @@ const checkClientMessages = async () => {
         // owns the picker, the upload and the local cache (companylogo.ts), and a
         // second copy of that flow inside Settings is a second place for it to break.
         logoUri={logoUri} onLogoPress={() => setLogoSheet(true)}
-        onSaveProfile={async (p) => { await saveProfile(connector, db, p); setSettingsProfile(p); await refresh(); }}
+        // `lang` goes with it here too: Settings can change the display language, and
+        // the account copy is what survives a reinstall.
+        onSaveProfile={async (p) => { await saveProfile(connector, db, p, lang); setSettingsProfile(p); await refresh(); }}
         onSetLang={async (l) => { setLang(l); setLangState(l); await saveLang(db, l); }}
         // Settings -> Plans KEEPS the door Settings came through (no argument, so
         // `settingsFrom` is left as it is): he is still inside that journey, and closing
