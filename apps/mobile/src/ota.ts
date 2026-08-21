@@ -36,6 +36,16 @@ export const OUTBOX_TABLES = [
   'ewa_outbox',
   'extra_actor_outbox',
   'note_outbox',
+  // The walkthrough link (sql/418). Found by the completeness test below the moment it
+  // was added, which is the third time that test has earned itself.
+  //
+  // A CONSEQUENCE WORTH KNOWING: this list also feeds `claimDevice`'s handover
+  // refusal, so a device with undrained pair links cannot hand over to another
+  // account until they upload. That is the right answer — a pair link that never
+  // leaves the phone is the exact thing that made 98 of 102 photos unreachable — but
+  // it does mean the first launch after 418 queues a backlog that must drain before a
+  // handover will proceed.
+  'pair_outbox',
   // R5b/R5c: the client's answer and the contractor's reply in the negotiation
   // thread. Found by the completeness test below, NOT by me — which is the point.
   'r5b_outbox',

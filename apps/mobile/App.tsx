@@ -83,6 +83,8 @@ import { SplashScreen } from './src/ui/splashscreen';
 import { Drawer } from './src/ui/drawer';
 import appJson from './app.json';
 import { ensurePairSchema, linkPair } from './src/pair';
+import { backfillPairOutbox, drainPairOutbox, ensurePairSyncSchema, enqueuePair,
+         hydratePairs } from './src/pairsync';
 import { ensureAugmentSchema, noteAugment, appendAugmentDesc } from './src/augmentlog';
 import { clientSmsBody, type ClientSmsKind } from './src/clientsms';
 import { reachable, remindTargets } from './src/remindrecipients';
@@ -554,6 +556,9 @@ async function ensureLocalSchema(
   // up on a phone that did not take them. A CACHE beside `capture_commit`, never a
   // replacement for it; see evidencemirror.ts for why that distinction is load-bearing.
   await ensureMirrorSchema(db);
+  // The transport for capture_pair (sql/418). AFTER ensurePairSchema, which creates
+  // the table this queue carries.
+  await ensurePairSyncSchema(db);
 }
 
 export default function App() {
@@ -4176,6 +4181,15 @@ const checkClientMessages = async () => {
       //    UNREACHABLE for exactly the rows it was written for. Freeing them makes them
       //    schedulable again; if the capture is still unfiled the drain simply re-parks
       //    it, which costs one attempt and changes nothing.
+      /**
+       * EVERY DEVICE ARRIVES HERE WITH A BACKLOG. `capture_pair` has been written on
+       * every fused capture since it shipped and read by nothing but this phone, so
+       * without a backfill the transport added in sql/418 would only ever cover
+       * captures taken from now on — and most of a contractor's photos are already
+       * behind him. Idempotent; costs one query once the queue has drained.
+       */
+      const bp = await backfillPairOutbox(db);
+      if (bp.queued) console.log('backfill pairs:', JSON.stringify(bp));
       const rdc = await redriveParkedCaptures(db, ['23503', 'AWAITING_FILING']);
       if (rdc) console.log('redrive captures:', rdc);
       //  - captures parked on 23505 are asked about rather than assumed: a duplicate
@@ -4715,6 +4729,15 @@ const checkClientMessages = async () => {
            */
           // The server answered, or it did not. Either way Home stops guessing.
           setSynced((prev) => (hy.ok ? 'yes' : prev === 'yes' ? 'yes' : 'unreachable'));
+          /**
+           * THE PAIR LINK — what ties a walkthrough's photos to what was said.
+           * Without it a second device reaches only the ANCHOR capture of each extra,
+           * which on hadar's account was 4 photos out of 102.
+           */
+          const pd = await drainPairOutbox(db, connector.client);
+          if (pd.attempted) console.log('drain pairs:', JSON.stringify(pd));
+          const ph = await hydratePairs(db, connector.client, null);
+          if (ph.pulled) { console.log('hydrate pairs:', JSON.stringify(ph)); await refresh(); }
           const ev = await hydrateEvidence(db, connector.client, pid, data.user.id);
           if (ev.decisions || ev.versions || ev.captures) {
             console.log('hydrate evidence:', JSON.stringify(ev));
@@ -5009,6 +5032,10 @@ const checkClientMessages = async () => {
         });
         if (!pr.ok) { setUi({ k: 'refused', why: pr.reason }); return; }
         await linkPair(db, pairId, pr.captureId, 'photo', ph.atMs);
+        // …and queue it for the server, or the link lives on this phone only — which
+        // is how 98 of 102 photos became unreachable from any other device.
+        await enqueuePair(db, { pairId, captureId: pr.captureId, role: 'photo',
+                                atMs: ph.atMs, projectId: res.projectId });
         await noteCapturedBy(db, pr.captureId);
         ids.push(pr.captureId);
       }
@@ -5022,6 +5049,8 @@ const checkClientMessages = async () => {
         });
         if (!vr.ok) { setUi({ k: 'refused', why: `some saved; audio did not: ${vr.reason}` }); return; }
         await linkPair(db, pairId, vr.captureId, 'voice', seg.startedAtMs);
+        await enqueuePair(db, { pairId, captureId: vr.captureId, role: 'voice',
+                                atMs: seg.startedAtMs, projectId: res.projectId });
         await noteCapturedBy(db, vr.captureId);
         ids.push(vr.captureId);
       }
@@ -5125,6 +5154,9 @@ const checkClientMessages = async () => {
         pairId = `pair-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         for (const an of anchors) {
           await linkPair(db, pairId, an.capture_id, an.modality === 'photo' ? 'photo' : 'voice', Date.now());
+          await enqueuePair(db, { pairId, captureId: an.capture_id,
+                                  role: an.modality === 'photo' ? 'photo' : 'voice',
+                                  atMs: Date.now(), projectId: co.project_id });
         }
       }
 
@@ -5137,6 +5169,10 @@ const checkClientMessages = async () => {
         });
         if (!pr.ok) { setUi({ k: 'refused', why: pr.reason }); return; }
         await linkPair(db, pairId, pr.captureId, 'photo', ph.atMs);
+        // …and queue it for the server, or the link lives on this phone only — which
+        // is how 98 of 102 photos became unreachable from any other device.
+        await enqueuePair(db, { pairId, captureId: pr.captureId, role: 'photo',
+                                atMs: ph.atMs, projectId: co.project_id });
         await noteCapturedBy(db, pr.captureId);
         newIds.push(pr.captureId);
         photoN++;
@@ -5150,6 +5186,8 @@ const checkClientMessages = async () => {
         });
         if (!vr.ok) { setUi({ k: 'refused', why: `some saved; audio did not: ${vr.reason}` }); return; }
         await linkPair(db, pairId, vr.captureId, 'voice', seg.startedAtMs);
+        await enqueuePair(db, { pairId, captureId: vr.captureId, role: 'voice',
+                                atMs: seg.startedAtMs, projectId: co.project_id });
         await noteCapturedBy(db, vr.captureId);
         newIds.push(vr.captureId);
         voiceIds.push(vr.captureId);

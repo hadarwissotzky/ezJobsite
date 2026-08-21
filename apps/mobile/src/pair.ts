@@ -5,9 +5,14 @@
  * captures, never a column mutated onto capture_commit: an append-only local table
  * keyed by (pair_id, capture_id). Both members share the pair_id minted at capture.
  *
- * Local-only for now (a grouping hint for the grid/viewer); the captures themselves
- * are the evidence and sync through their own outbox. Deleting a pair row never
- * touches a capture.
+ * NO LONGER LOCAL-ONLY (2026-08-21). This header used to say "local-only for now (a
+ * grouping hint for the grid/viewer)", and that "for now" became load-bearing: the
+ * record screen reaches an extra's ANCHOR capture through `decision_version` and
+ * EVERYTHING ELSE in the walk through this table, so a link that lived on one handset
+ * meant 98 of hadar's 102 photos were unreachable from any other device. The transport
+ * is in `pairsync.ts` and the server side is sql/418; the captures themselves are
+ * still the evidence and still sync through their own outbox. Deleting a pair row
+ * never touches a capture.
  */
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 
