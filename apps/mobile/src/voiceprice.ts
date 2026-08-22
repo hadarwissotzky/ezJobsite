@@ -96,6 +96,14 @@ export type VoicePriceReading = {
  * "hasta" alone is "hasta el jueves" — neither carries money, so neither is ever
  * looked at. Accents are stripped before matching, so 'maximo' catches "máximo".
  */
+/**
+ * Spoken number words, for the leftover check above. Not a parser — a DETECTOR: its
+ * only job is to notice that a price span still contains a number the money parser did
+ * not account for. English and Spanish, because the transcript may be either.
+ */
+const NUMBER_WORDS =
+  /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|teen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|veinte|treinta|cuarenta|cincuenta|cien|ciento|mil)\b/;
+
 const NTE_CUES = [
   'not to exceed', 'not exceed', 'no more than', 'no higher than', 'not over',
   'up to', 'cap at', 'capped at', 'cap of', 'max of', 'maximum',
@@ -254,6 +262,8 @@ export function priceFromTasks(
   parse: MoneyParser
 ): VoicePriceReading | null {
   const hits: { cents: number; nte: boolean; heard: string; title: string }[] = [];
+  /** Segments whose price span carries more number than the parser could account for. */
+  const unreadable: { title: string; heard: string }[] = [];
   for (const t of tasks) {
     if (!t.priceWords) continue;
     // A task's price_words is one price span; still walk it in case the model tagged
@@ -261,6 +271,30 @@ export function priceFromTasks(
     // clean figures we cannot safely reduce, so we drop the whole task rather than pick.
     const figs = figuresIn(t.priceWords, parse).filter((f) => f.confidence === 'high' && f.cents !== null);
     if (figs.length !== 1) continue;
+    /**
+     * IS THERE MONEY LEFT OVER IN THE SPAN THE PARSER DID NOT READ?
+     *
+     * Found on a REAL transcript, 2026-08-21. The contractor said "fourteen hundred";
+     * Deepgram wrote "4 teen $100"; `parseMoney` reads "$100" with HIGH confidence and
+     * is not wrong to — "$100" is a dollar figure. The segment's true price was $1,400,
+     * and summing three segments produced $2,050 against a real total of $3,350.
+     *
+     * A single figure being confidently misread is survivable when the contractor sees
+     * it beside its own words and says "that's not right". It is NOT survivable inside
+     * a SUM, because the sum hides which part is wrong and reads as arithmetic rather
+     * than as a reading. Adding numbers together raises the bar on each one.
+     *
+     * So: strip what was matched, and if the remainder still carries a number — a
+     * numeral or a spoken number word — this span is not clean enough to add up.
+     * "about $850" leaves "about" and is fine. "4 teen $100" leaves "4 teen" and is
+     * not. The segment keeps its verbatim words for the read-back; it just stops being
+     * arithmetic the app is willing to do on his behalf.
+     */
+    const leftover = t.priceWords.replace(figs[0].matched ?? '', ' ');
+    if (/\d/.test(leftover) || NUMBER_WORDS.test(fold(leftover))) {
+      unreadable.push({ title: t.title, heard: t.priceWords });
+      continue;
+    }
     const nte = NTE_CUES.some((cue) => fold(`${t.priceWords} ${t.scope}`).includes(cue));
     hits.push({ cents: figs[0].cents as number, nte, heard: t.priceWords, title: t.title });
   }
@@ -302,6 +336,27 @@ export function priceFromTasks(
    */
   const total = hits.reduce((sum, h) => sum + h.cents, 0);
   const nte = hits.some((h) => h.nte);
+  /**
+   * ONE UNREADABLE SEGMENT POISONS THE TOTAL, so the total is not offered.
+   *
+   * The sum of the parts we CAN read is not the price of the job — it is the price of
+   * some of the job, and it looks exactly like the price of all of it. Showing it with
+   * one segment silently missing is worse than showing nothing, which is the whole
+   * reason mandate #6 exists.
+   *
+   * The breakdown still goes back, including the segments that would not parse, so the
+   * read-back can put his own words in front of him and let him type the figure.
+   */
+  if (unreadable.length) {
+    return {
+      amountCents: null, prefill: false,
+      mode: nte ? 'nte' : 'fixed', modeHeard: false,
+      heard: [...hits.map((h) => h.heard), ...unreadable.map((u) => u.heard)].join(' · '),
+      reasonKey: 'r2.priceSegmentUnclear',
+      reasonParams: { n: unreadable.length, of: hits.length + unreadable.length },
+      breakdown: hits.map((h) => ({ title: h.title, cents: h.cents, heard: h.heard })),
+    };
+  }
   return {
     amountCents: total, prefill: true,
     mode: nte ? 'nte' : 'fixed', modeHeard: nte,

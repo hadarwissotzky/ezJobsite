@@ -1446,6 +1446,10 @@ const EN: Record<string, string> = {
    * beside this line is what he checks — the parts, not a total he has to trust.
    */
   'r2.priceSummed': '{n} parts priced in the recording. Added up below — check each part before you send.',
+  // One segment's price could not be read cleanly, so the total is NOT offered — the
+  // sum of the parts we can read is the price of SOME of the job and looks exactly
+  // like the price of all of it.
+  'r2.priceSegmentUnclear': '{n} of {of} parts had a price we could not read clearly. Nothing was filled in — check the recording and type the total.',
   'r2.priceSummedNte': '{n} parts priced in the recording, one of them a cap. Added up below as a not-to-exceed — check each part before you send.',
   'r2.priceUnclear': 'A number went by, but not clearly enough to use as a price. Type the amount below.',
   'r2.modeFixed': 'Fixed price',
@@ -3257,6 +3261,7 @@ const ES: Record<string, string> = {
   'r2.priceHeardNte': 'Una sola cantidad en la grabación, dicha como tope. Ya está puesta abajo como tope máximo.',
   'r2.priceAmbiguous': '{n} cantidades en la grabación. No se llenó nada — escriba la que va a enviar.',
   'r2.priceSummed': '{n} partes con precio en la grabación. Sumadas abajo — revise cada parte antes de enviar.',
+  'r2.priceSegmentUnclear': '{n} de {of} partes tenían un precio que no pudimos leer bien. No se llenó nada — revise la grabación y escriba el total.',
   'r2.priceSummedNte': '{n} partes con precio en la grabación, una es un tope. Sumadas abajo como no-exceder — revise cada parte antes de enviar.',
   'r2.priceUnclear': 'Pasó un número, pero no lo bastante claro para usarlo como precio. Escriba la cantidad abajo.',
   'r2.modeFixed': 'Precio fijo',

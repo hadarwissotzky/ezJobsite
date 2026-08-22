@@ -226,3 +226,37 @@ test('one clean task among unpriced siblings prefills that one', () => {
   assert.equal(r?.amountCents, 150000);
   assert.equal(r?.prefill, true);
 });
+
+test('a garbled price span is NOT added into a total — the real transcript case', () => {
+  // Deepgram wrote "4 teen $100" for a spoken "fourteen hundred" (cap-mt3lcsy5,
+  // 2026-08-21). `parseMoney` reads "$100" with HIGH confidence and is not wrong to.
+  // Summed blindly, three segments came to $2,050 against a real total of $3,350 —
+  // a plausible figure, $1,300 short, on a document a homeowner signs.
+  //
+  // A misread figure is survivable when the contractor sees it beside his own words.
+  // It is not survivable inside a SUM, which hides which part is wrong and reads as
+  // arithmetic rather than as a reading.
+  const r = priceFromTasks([
+    { title: 'Remove and install face', priceWords: 'the installation will be about $850', scope: 'x' },
+    { title: 'Finish (sand and stain)', priceWords: 'staining is gonna be 4 teen $100', scope: 'x' },
+    { title: 'Tile base and backsplash', priceWords: 'tiles installation will be $1,100', scope: 'x' },
+  ], parse);
+  assert.equal(r?.prefill, false, 'one unreadable segment must stop the total being offered');
+  assert.equal(r?.amountCents, null);
+  assert.equal(r?.reasonKey, 'r2.priceSegmentUnclear');
+  assert.equal(r?.reasonParams.n, 1, 'one segment could not be read');
+  assert.equal(r?.reasonParams.of, 3);
+  // The parts that DID read still come back, so the read-back can show his own words.
+  assert.deepEqual(r?.breakdown.map((b) => b.cents), [85000, 110000]);
+});
+
+test('ordinary wording around a figure is not mistaken for a leftover number', () => {
+  // "about", "roughly", "call it" must not trip the detector — only a NUMBER left
+  // unaccounted for does. Otherwise the guard would refuse every natural sentence.
+  const r = priceFromTasks([
+    { title: 'Outlets', priceWords: 'call it about $450 for that', scope: 'x' },
+    { title: 'Trim', priceWords: 'roughly $200', scope: 'x' },
+  ], parse);
+  assert.equal(r?.prefill, true);
+  assert.equal(r?.amountCents, 65000);
+});
