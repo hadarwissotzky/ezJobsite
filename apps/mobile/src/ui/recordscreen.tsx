@@ -134,6 +134,9 @@ export type RecordScreenProps = {
   delivery?: CaptureDelivery | null;
   /** Grant cellular uploading from the screen it is blocking. */
   onAllowCellular?: () => void;
+  /** Whether the SERVER has been asked for this extra's write-up yet — see
+   *  ExtraDraftProps. Passed straight through; this screen makes no judgement. */
+  writeUp?: 'unknown' | 'absent';
   /** A reply is a MESSAGE: it commits nothing and prices nothing. REQ-LC23's
    *  `canReply` is enforced inside the screen by `threadState`, so this is passed
    *  unconditionally — the old caller-side status test was a second copy of it. */
@@ -274,6 +277,7 @@ export function RecordScreen(props: RecordScreenProps) {
           priceHeard={props.priceHeard}
           delivery={props.delivery}
           onAllowCellular={props.onAllowCellular}
+          writeUp={props.writeUp}
           jobPeople={props.jobPeople}
           onRemovePerson={props.onRemovePerson}
           onDelete={props.onDelete}

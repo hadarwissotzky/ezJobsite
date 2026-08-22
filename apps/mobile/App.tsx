@@ -1131,6 +1131,7 @@ const openRecord = async (changeOrderId: string) => {
   // lands (Codex review, 2026-07-22).
   setApproval(null); setRecordLc(null); setRecordTimeline([]);
   setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
+  setRecordWriteUp('unknown');
   setRecordNextId(null); setDetail(null); setZoomUri(null);
   // SPEC-extra-lifecycle-v1 — the stage layer, and it goes FIRST for a reason: it is
   // the only layer the screen cannot render without (it decides which of D1's three
@@ -1180,6 +1181,29 @@ const openRecord = async (changeOrderId: string) => {
     const ids = [...r.voices.map((v) => v.captureId), ...r.photos.map((ph) => ph.captureId)];
     const d = await captureDelivery(db, ids);
     if (recordIdRef.current === changeOrderId) setRecordDelivery(d);
+    /**
+     * AND THEN ASK THE SERVER, instead of concluding from the empty queue that it
+     * produced nothing (hadar, 2026-08-21).
+     *
+     * `captureDelivery` answers a question about THIS PHONE — is the queue empty, is
+     * the radio up. The draft screen was reading its silence as an answer about the
+     * SERVER, and the two are twenty seconds apart on a good day: on his fireplace
+     * extra the outbox emptied at 18:44:03 and the write-up existed at 18:44:23.
+     *
+     * ONLY when the files are actually up, because until then the question is not
+     * even meaningful — nothing has been given to the server to write up, and asking
+     * would cost a round trip to learn something we already know.
+     *
+     * A refusal (offline, timeout) leaves it 'unknown', which is the truthful answer
+     * and keeps the screen in its wait state. Mandate #7: no signal is Tuesday, and
+     * "we could not ask" must never render as "there is nothing".
+     */
+    if (d.pending === 0 && d.parked === 0 && !d.gate && ids.length) {
+      try {
+        const prop = await fetchLatestProposalForCaptures(connector.client, ids);
+        if (recordIdRef.current === changeOrderId && !prop) setRecordWriteUp('absent');
+      } catch { /* could not ask -> stays 'unknown' -> stays a wait */ }
+    }
   } catch { /* no diagnosis is better than a wrong one — StuckBlock renders nothing */ }
 };
 
@@ -1351,6 +1375,7 @@ const closeRecord = () => {
   recordIdRef.current = null;
   setRecord(null); setApproval(null); setRecordLc(null); setRecordTimeline([]);
   setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
+  setRecordWriteUp('unknown');
   setRecordNextId(null); setDetail(null); setZoomUri(null);
   // If this extra was opened FROM the company feed, go back to the feed (fresh) — not
   // to whatever nav was underneath (review 2026-07-25: don't lose the user's place).
@@ -3261,6 +3286,15 @@ const checkClientMessages = async () => {
   // the draft screen can NAME the cause instead of offering one button for two
   // different problems.
   const [recordDelivery, setRecordDelivery] = React.useState<CaptureDelivery | null>(null);
+  /**
+   * WHETHER THE SERVER HAS BEEN ASKED for the open extra's write-up.
+   *
+   * 'unknown' until it answers, and it MUST start there on every open: the draft
+   * screen may only report "nothing was written up" once somebody actually checked,
+   * and a value left over from the last extra is not a check.
+   */
+  const [recordWriteUp, setRecordWriteUp] =
+    React.useState<'unknown' | 'absent'>('unknown');
   const [recordNextId, setRecordNextId] = React.useState<string | null>(null);
   /**
    * SPEC-extra-lifecycle-v1 — the stage screens' inputs, its own hydration layer.
@@ -7877,6 +7911,7 @@ const checkClientMessages = async () => {
         // screen that adds voice or photos to the RECORD — keeps this door and the two
         // on the locked screen, so nothing was removed, only un-crossed.
         delivery={recordDelivery}
+        writeUp={recordWriteUp}
         // GRANTED FROM THE SCREEN IT IS BLOCKING (hadar 2026-08-06: the user has to be
         // able to solve this). The cellular default is OFF for a good reason — a 200 MB
         // walkthrough over a hotspot is a bill nobody agreed to — but a contractor who

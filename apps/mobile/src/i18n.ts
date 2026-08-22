@@ -1903,6 +1903,13 @@ const EN: Record<string, string> = {
   'stuck.needsCell': 'Waiting for Wi-Fi. Nothing goes up over cell data unless you allow it.',
   'stuck.offline': 'No connection right now. Everything is safe on this phone and goes up on its own when there is signal.',
   'stuck.parked': 'Something went wrong sending these up and it stopped trying.',
+  // A WAIT, NOT A FAULT. This is the state between "the files are up" and "the
+  // write-up exists" — on hadar's fireplace extra it was twenty seconds long, and
+  // the app spent it telling him our side had produced nothing. It says what is
+  // happening, gives the honest reason it can take a moment, and promises nothing
+  // it cannot keep: the extra is safe either way and he can write it himself now.
+  'stuck.writingTitle': 'Writing it up',
+  'stuck.writing': 'Your files are up. We\u2019re reading the recording and writing up the work now \u2014 that runs on our side and usually takes under a minute. It will appear here on its own. You can write the scope yourself instead at any time.',
   'stuck.noAnalysis': 'Your files are up, but nothing was written up from them. That part runs on our side, so trying again may help — and you can always write it yourself.',
   'stuck.uploadNow': 'Try sending them now',
   'stuck.tryAgain': 'Try again',
@@ -3625,6 +3632,8 @@ const ES: Record<string, string> = {
   'stuck.needsCell': 'Esperando Wi-Fi. Nada sube por datos móviles a menos que usted lo permita.',
   'stuck.offline': 'Sin conexión ahora mismo. Todo está guardado en este teléfono y sube solo cuando haya señal.',
   'stuck.parked': 'Algo falló al enviarlos y dejó de intentarlo.',
+  'stuck.writingTitle': 'Redactándolo',
+  'stuck.writing': 'Sus archivos ya subieron. Estamos leyendo la grabación y redactando el trabajo \u2014 eso corre de nuestro lado y suele tardar menos de un minuto. Aparecerá aquí solo. Mientras tanto, usted puede escribir el alcance cuando quiera.',
   'stuck.noAnalysis': 'Sus archivos ya subieron, pero no se redactó nada con ellos. Esa parte corre de nuestro lado, así que intentarlo otra vez puede ayudar — y siempre puede escribirlo usted.',
   'stuck.uploadNow': 'Intentar enviarlos ahora',
   'stuck.tryAgain': 'Intentar de nuevo',

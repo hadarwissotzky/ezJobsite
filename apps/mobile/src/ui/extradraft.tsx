@@ -262,6 +262,16 @@ export type ExtraDraftProps = {
    *  the user is looking at. Absent = the setting is only reachable in Settings. */
   onAllowCellular?: () => void;
   /**
+   * HAS THE SERVER ACTUALLY BEEN ASKED whether it wrote this up?
+   *
+   *   'absent'  — we asked and it has no write-up for these captures.
+   *   'unknown' — we have not asked, or the answer has not come back.
+   *
+   * Only 'absent' may be reported as a failure. See StuckBlock for why this had to
+   * become a fact the caller establishes rather than one this screen infers.
+   */
+  writeUp?: 'unknown' | 'absent';
+  /**
    * The OTHER people already on this job (the roster, minus whoever is shown above
    * as "Requested by"). Labels arrive translated — this screen does no t() over
    * role slugs.
@@ -682,15 +692,43 @@ function StuckBlock(p: ExtraDraftProps) {
    * upload, a silent recording, a failed analysis — keeps the caution treatment, because
    * each of those IS something a person can act on.
    */
+  /**
+   * "NOTHING WAS WRITTEN UP" IS A VERDICT ABOUT THE SERVER, AND IT WAS BEING
+   * DELIVERED BEFORE THE SERVER HAD ITS TURN (hadar, 2026-08-21: "Got a message that
+   * the files are up but nothing to read — this is just part of the transcription").
+   *
+   * MEASURED ON HIS ACCOUNT, not inferred. The fireplace recording:
+   *   18:29:29  captured
+   *   18:43:46  first byte reaches the server (14 minutes — cellular upload was off
+   *             and he was on 5G, which is the bug fixed one commit ago)
+   *   18:44:03  the last capture lands, so the outbox empties HERE
+   *   18:44:23  the pipeline finishes and the write-up exists
+   *
+   * Every branch below was a fact about the DEVICE — is the queue empty, is the radio
+   * up — and the last line then made a claim about the SERVER on no evidence at all.
+   * The moment the queue emptied at 18:44:03 this screen told him our side had
+   * produced nothing, while our side was twenty seconds from producing it. The
+   * transcription he was looking at was real; the sentence over it was not.
+   *
+   * So the failure sentence now requires that somebody actually asked. `writeUp`
+   * comes back 'absent' only after the server has been queried for these captures and
+   * answered no; until then this is a WAIT, drawn as one. The wait is not indefinite —
+   * the server applies a write-up the moment it exists (sql/394) and the 15-second
+   * hydrate brings it down, so this state ends by itself, which is exactly what a man
+   * on a jobsite should be able to assume and could not.
+   */
+  const stillWriting = p.writeUp !== 'absent';
   const title = offline ? t('stuck.offlineTitle')
     : waitingToUpload ? t('stuck.filesTitle')
     : heardNothing ? t('stuck.silentTitle')
+    : stillWriting ? t('stuck.writingTitle')
     : t('stuck.analysisTitle');
   const why = heardNothing ? t('stuck.silent')
     : d.parked > 0 ? t('stuck.parked')
     : cellBlocked ? t('stuck.needsCell')
     : offline ? t('stuck.offline')
     : waitingToUpload ? t({ k: 'stuck.uploading', p: { n: d.pending } })
+    : stillWriting ? t('stuck.writing')
     : t('stuck.noAnalysis');
 
   return (
@@ -698,7 +736,10 @@ function StuckBlock(p: ExtraDraftProps) {
       <View style={st.draftHead}>
         <View style={[st.draftDisc, offline && st.waitDisc]}>
           {/* A CLOCK, NOT A CROSS. The ✗ said something had gone wrong; nothing has. */}
-          <Icon name={offline ? 'offline' : 'failed'} size={17} color={C.card} />
+          {/* A wait gets the clock the offline state already won: nothing has gone
+              wrong, the server is working, and a ✗ over that is a lie with a shape. */}
+          <Icon name={offline ? 'offline' : stillWriting ? 'waiting' : 'failed'}
+                size={17} color={C.card} />
         </View>
         <Text style={st.draftTitle}>{title}</Text>
       </View>
