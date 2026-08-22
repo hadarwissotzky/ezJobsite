@@ -1224,7 +1224,59 @@ const openRecord = async (changeOrderId: string) => {
          * where the price is actually missing.
          */
         if (recordIdRef.current === changeOrderId && prop) {
-          setRecordPrice(priceFromTasks(prop.tasks, parseMoney));
+          const pr = priceFromTasks(prop.tasks, parseMoney);
+          setRecordPrice(pr);
+          /**
+           * AND WRITE IT, WITHOUT ASKING (hadar, 2026-08-21, asked directly and
+           * answered: no tap — fill it in automatically, editable if it is wrong).
+           *
+           * THIS IS A DELIBERATE, LOGGED DEPARTURE FROM MANDATE #2, which says
+           * anything carrying a price takes a human confirmation before it commits.
+           * CLAUDE.md §2 allows exactly this — "do not violate without an explicit,
+           * logged decision" — and this is the decision, made by the product owner in
+           * response to a question that showed him both behaviours side by side.
+           *
+           * WHAT STILL PROTECTS THE NUMBER, because the mandate's substance is not
+           * abandoned, only moved:
+           *   · The figure is arithmetic over numbers HE said. The model chose which
+           *     words are a price; `parseMoney` — ours, one implementation — made every
+           *     number; the model is still forbidden to author one (mandate #6).
+           *   · `priceFromTasks` refuses the whole total if ANY segment's span is
+           *     unreadable, so a garbled figure produces no prefill rather than a
+           *     confident wrong sum. That refusal is the reason this is safe to write.
+           *   · The breakdown is on the screen, so the sum is checkable, and the extra
+           *     is a DRAFT — he can edit the figure or any line before it goes.
+           *   · Sending remains a separate, deliberate human act with the price on
+           *     screen. That is the "before it sends" half of mandate #2, intact.
+           *
+           * ONLY ONTO AN UNPRICED DRAFT. `priceDraftExtra`'s own
+           * `WHERE status = 'draft'` is the second guard; this is the first. A figure a
+           * human typed is never overwritten by one the app worked out — that would be
+           * the app arguing with the contractor about his own price.
+           */
+          const row = (await db.getAll<{ amount_cents: number | null }>(
+            `SELECT amount_cents FROM change_order
+              WHERE id = ? AND status = 'draft' AND amount_cents IS NULL`,
+            [changeOrderId]))[0];
+          if (row && pr?.prefill && pr.amountCents !== null && pr.breakdown.length > 1) {
+            const cents = pr.amountCents;
+            const co = coRowsRef.current.find((c) => c.id === changeOrderId);
+            const res = await priceDraftExtra(db, {
+              changeOrderId,
+              amountCents: cents,
+              lineItems: pr.breakdown.map((b) => ({
+                description: b.title, qty: 1, unit_cents: b.cents, total_cents: b.cents,
+              })),
+              nteCents: pr.mode === 'nte' ? cents : null,
+              whoDirected: co?.who_directed || 'Owner',
+              numbersConfirmedAt: new Date(),
+            });
+            // A refusal is REPORTED. `validateLines` can reject this on a rounding gap,
+            // and an auto-fill that silently does nothing is the worst of both worlds —
+            // no price and no button, because the button hides once the reading exists.
+            if (!res.ok) void logDiag(db, 'price.autofill', res.reason.slice(0, 200));
+            else if (recordIdRef.current === changeOrderId) { await openRecord(changeOrderId); }
+          }
         }
       } catch { /* could not ask -> stays 'unknown' -> stays a wait */ }
     }
