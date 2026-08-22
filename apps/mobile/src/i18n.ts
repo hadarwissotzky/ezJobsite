@@ -923,7 +923,7 @@ const EN: Record<string, string> = {
   'cap.transOffline': 'Weak or no signal right now. Your extra is safe on this phone \u2014 it will back itself up on its own the moment you have signal. Tap Done to keep going.',
   'cap.transStalled': 'This is taking longer than usual to get ready. Your extra is saved and still finishing \u2014 we\u2019ll have it ready shortly. Tap Done to keep going; it\u2019ll be ready on your home screen.',
   'cap.transRetry': 'Trouble reaching the internet right now. Your extra is saved on this phone \u2014 it will back itself up on its own once you have a steady connection. Tap Done to keep going.',
-  'cap.transBlocked': 'This will back up on Wi-Fi. You\u2019re on cellular and cellular backup is off. Connect to Wi-Fi, or turn on cellular upload in Settings. Your extra is safe on this phone. Tap Done to keep going.',
+  'cap.transBlocked': 'This will back up on Wi-Fi. You\u2019re on cellular and cellular backup is off. Connect to Wi-Fi, or tap below to send it over cell data now. Your extra is safe on this phone. Tap Done to keep going.',
   // Kept: other callers may still use it, and removing a key is a separate act.
   'cap.transUploadProg': '{done} of {total} backed up (photos + audio)',
   // The upload sub-bar (hadar, 2026-08-21). The percentage is the glance — "is this
@@ -2832,7 +2832,7 @@ const ES: Record<string, string> = {
   'cap.transOffline': 'Señal débil o sin conexión ahora. Tu extra está a salvo en este teléfono — se respaldará solo en cuanto tengas señal. Toca Listo para continuar.',
   'cap.transStalled': 'Esto está tardando más de lo normal en prepararse. Tu extra está guardado y aún terminando — lo tendremos listo en breve. Toca Listo para continuar; estará listo en tu pantalla de inicio.',
   'cap.transRetry': 'Hay problemas para conectarse a internet ahora. Tu extra está guardado en este teléfono — se respaldará solo cuando la conexión sea estable. Toca Listo para continuar.',
-  'cap.transBlocked': 'Esto se respaldará con Wi-Fi. Estás en datos móviles y el respaldo por datos está desactivado. Conéctate a Wi-Fi o activa la subida por datos en Ajustes. Tu extra está a salvo en este teléfono. Toca Listo para continuar.',
+  'cap.transBlocked': 'Esto se respaldará con Wi-Fi. Estás en datos móviles y el respaldo por datos está desactivado. Conéctate a Wi-Fi o toca abajo para enviarlo por datos móviles ahora. Tu extra está a salvo en este teléfono. Toca Listo para continuar.',
   'cap.transUploadProg': '{done} de {total} respaldados (fotos + audio)',
   'cap.transUploadPct': '{pct}% respaldado',
   'cap.transUploadPhotos': '{done} de {total} fotos',

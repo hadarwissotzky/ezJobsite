@@ -2934,9 +2934,20 @@ const checkClientMessages = async () => {
     // (a text-only extra) means nothing to transcribe or analyse — mirror the
     // `transcribed` initializer above.
     let analyzedSeen = transition.anchorCaptureId === null;
-    // Latches true if drainOutbox refuses to upload on POLICY (on cellular with
+    // True while drainOutbox refuses to upload on POLICY (on cellular with
     // cellular-upload off — the default). That is not offline and not slow: it will
     // never finish here, so surface the Wi-Fi escape at once (Codex P2).
+    //
+    // NOT A LATCH ANY MORE (hadar, 2026-08-21). It was one because the block was
+    // unfixable from this screen — the only escapes were Wi-Fi or Settings, and a
+    // flag that flickered would have hidden the explanation. Now the screen offers
+    // the fix itself, so a latch would leave "turn on cellular upload" on display
+    // AFTER he turned it on: the one thing worse than a message with no action is a
+    // message that ignores the action.
+    //
+    // Safe to read per-call because `drainOutbox` sets `blocked` from the gate
+    // BEFORE it looks at a single row (uploader.ts) — it is null whenever the gate
+    // allowed the attempt, never merely "nothing to do".
     let blockedSeen = false;
     const kickDrain = async () => {
       try {
@@ -2952,7 +2963,7 @@ const checkClientMessages = async () => {
           await redriveNow(db, transition.ids);
           // THESE captures first: the background drain is fair, this one is urgent.
           const r = await drainOutbox(db, connector.client, uid, transition.ids);
-          if (r.blocked) blockedSeen = true;
+          blockedSeen = !!r.blocked;
         }
       } catch { /* the capture is safe locally; a failed push just retries */ }
     };
@@ -7006,6 +7017,43 @@ const checkClientMessages = async () => {
                               anchorCoId: coId, anchorCaptureId: anchor });
                 }}>
                   <Text style={s.trFileT}>{T('cap.transPickJob')}</Text>
+                </Pressable>
+              )}
+              {/**
+                * THE SAME RULE AS THE FILING BUTTON ABOVE, APPLIED TO THE OTHER
+                * BLOCKER (hadar, 2026-08-21: "it is asking me to turn cell backup on
+                * but we don't give the user the option to — there should be a link
+                * for them to do it from the message").
+                *
+                * `cap.transBlocked` said "turn on cellular upload in Settings" and
+                * offered nothing. The record screen has had this exact act wired for
+                * a while (`onAllowCellular`), so the app could already do it — it
+                * simply was not offered on the one screen where the problem is
+                * stated, which is the screen he is standing on when it happens.
+                *
+                * Telling somebody where a toggle lives, in a product built for people
+                * who do not think in software, is the failure CLAUDE.md's core design
+                * test names: he should not have to go and find it.
+                *
+                * It kicks the drain immediately, so granting it has a VISIBLE result
+                * rather than a promise — the bar above starts moving.
+                */}
+              {t.blocked && (
+                <Pressable style={s.trFile} onPress={() => void (async () => {
+                  await setCellularConsent(db, true);
+                  setCellOn(true);
+                  await redriveNow(db, t.ids);
+                  const { data } = await connector.client.auth.getSession();
+                  const uid = data?.session?.user?.id;
+                  if (!uid) return;
+                  // Clear the message from THIS drain's own answer, not optimistically.
+                  // If the gate still refuses — consent write failed, or he is on a
+                  // network the gate rejects for another reason — the message stays,
+                  // which is the truth. The poll below re-asks either way.
+                  const r = await drainOutbox(db, connector.client, uid, t.ids);
+                  setTransition((cur) => cur && { ...cur, blocked: !!r.blocked });
+                })()}>
+                  <Text style={s.trFileT}>{T('stuck.allowCell')}</Text>
                 </Pressable>
               )}
               <Pressable
