@@ -535,3 +535,11 @@ export async function noteSmsConsent(
         SET sms_consent_at_ms = COALESCE(sms_consent_at_ms, ?)
       WHERE id = ?`, [atMs, approverId]);
 }
+
+/**
+ * The roster PULL lives in its own leaf module for the same reason `APPROVER_DDL` and
+ * `personKey` do: this file imports i18n, which `node --test` cannot resolve, and the
+ * hydrate's rules (never resurrect a retired client, never walk recency backwards) are
+ * exactly the kind that must be testable. Re-exported so every caller keeps one path.
+ */
+export { hydrateApprovers } from './approverhydrate';

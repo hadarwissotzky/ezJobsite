@@ -251,7 +251,7 @@ import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisio
 import { renderCard, sendForConfirmation } from './src/confirmations';
 import { publishApprovalPhotos } from './src/approvalphotopublish';
 import {
-  ensureApproverSchema, drainR5cOutbox, suggestFor, listRoster, listKnownPeople, addApprover,
+  ensureApproverSchema, drainR5cOutbox, hydrateApprovers, suggestFor, listRoster, listKnownPeople, addApprover,
   markApproverUsed, setExtraType, reasonText, typeLabel, roleLabel, saveClientApprover, noteSmsConsent,
   retireApprover,
   type RosterMember,
@@ -4862,6 +4862,29 @@ const checkClientMessages = async () => {
           // queue that looks like sync.
           const ar = await drainR5cOutbox(db, connector.client, data.user.id);
           if (ar.attempted) console.log('drain r5c:', JSON.stringify(ar));
+          /**
+           * AND PULL THE ROSTER BACK DOWN — the half that was never built (Codex
+           * cross-model review 2026-08-22, P0).
+           *
+           * The comment directly above says an outbox nothing drains is a queue that
+           * looks like sync. This is the same sentence one step further on: an outbox
+           * that only ever UPLOADS is a queue that looks like sync too. R5c has pushed
+           * every client to Postgres for weeks — 30 rows are there — and no code path
+           * in the app has ever read one back, so every device that did not type the
+           * client in had an empty roster and every handover destroyed the lot.
+           *
+           * AFTER the drain, deliberately and for the same reason the supersession
+           * push runs before its hydrate: a row still queued here is a local intent
+           * the server has not seen, and pulling first would let the server's older
+           * answer land on top of it.
+           *
+           * ACCOUNT-WIDE (null), not the current project: Home and the send sheet
+           * both reach across jobs, and a project-scoped pull would leave every other
+           * jobsite's clients missing on a second device — the same mistake
+           * `hydrateChangeOrders` records having made.
+           */
+          const rh = await hydrateApprovers(db, connector.client, null);
+          if (rh.pulled || rh.updated) console.log('hydrate roster:', JSON.stringify(rh));
           // BEFORE the hydrate below, deliberately: a supersession the server has not
           // accepted yet is a local intent hydrateChangeOrders cannot see.
           const sx = await drainSupersessions(db, connector.client);
