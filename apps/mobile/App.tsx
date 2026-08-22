@@ -161,7 +161,7 @@ import { captureStatesForExtra } from './src/extrareadiness';
 import { discardSummary } from './src/discard';
 import { ensureVoiceCacheSchema, voiceReadingForDecision, narrationForExtra,
          captureIdsForDecision, type VoiceReading } from './src/voicesource';
-import type { PriceMode, VoicePriceReading } from './src/voiceprice';
+import { priceFromTasks, type PriceMode, type VoicePriceReading } from './src/voiceprice';
 import { VoicePriceCard } from './src/ui/voicepricecard';
 // R1: the Send-to prefill. GPS decides what to SUGGEST and never what to file --
 // prepareSendTo returns candidates and an opinion, the human commits it.
@@ -1131,7 +1131,7 @@ const openRecord = async (changeOrderId: string) => {
   // lands (Codex review, 2026-07-22).
   setApproval(null); setRecordLc(null); setRecordTimeline([]);
   setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
-  setRecordWriteUp('unknown');
+  setRecordWriteUp('unknown'); setRecordPrice(null);
   setRecordNextId(null); setDetail(null); setZoomUri(null);
   // SPEC-extra-lifecycle-v1 — the stage layer, and it goes FIRST for a reason: it is
   // the only layer the screen cannot render without (it decides which of D1's three
@@ -1202,6 +1202,30 @@ const openRecord = async (changeOrderId: string) => {
       try {
         const prop = await fetchLatestProposalForCaptures(connector.client, ids);
         if (recordIdRef.current === changeOrderId && !prop) setRecordWriteUp('absent');
+        /**
+         * AND READ THE PRICE OFF THE SEGMENTS WHILE THE PROPOSAL IS IN HAND
+         * (hadar, 2026-08-21: "if it recognises the price line items on the recordings
+         * it should total it — the set total button is redundant").
+         *
+         * The screen's read-back has been parsing `change_order.price_heard`, which is
+         * ONE span — sql/396 stores the first priced segment's words and nothing else.
+         * On his fireplace extra that span is "cost of $1,200, and that includes the
+         * garbage fees", so the button offered $1,200 as the TOTAL of a job that is
+         * $1,200 + $400 + the staining. A tappable button that writes a third of the
+         * price is worse than no button: it is wrong with a tick next to it.
+         *
+         * `priceFromTasks` is the function for this and has been since the summing
+         * work — it walks EVERY segment the model priced, parses each span with the
+         * app's own `parseMoney`, refuses the whole total if any span is unreadable
+         * ("4 teen $100"), and returns the breakdown beside the sum. It was wired into
+         * the priced composer only, which is the one screen hadar's extras never reach
+         * when the transition screen times out. Nothing new is trusted here: same
+         * parser, same refusals, same read-back — it is simply asked on the screen
+         * where the price is actually missing.
+         */
+        if (recordIdRef.current === changeOrderId && prop) {
+          setRecordPrice(priceFromTasks(prop.tasks, parseMoney));
+        }
       } catch { /* could not ask -> stays 'unknown' -> stays a wait */ }
     }
   } catch { /* no diagnosis is better than a wrong one — StuckBlock renders nothing */ }
@@ -1375,7 +1399,7 @@ const closeRecord = () => {
   recordIdRef.current = null;
   setRecord(null); setApproval(null); setRecordLc(null); setRecordTimeline([]);
   setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
-  setRecordWriteUp('unknown');
+  setRecordWriteUp('unknown'); setRecordPrice(null);
   setRecordNextId(null); setDetail(null); setZoomUri(null);
   // If this extra was opened FROM the company feed, go back to the feed (fresh) — not
   // to whatever nav was underneath (review 2026-07-25: don't lose the user's place).
@@ -3295,6 +3319,12 @@ const checkClientMessages = async () => {
    */
   const [recordWriteUp, setRecordWriteUp] =
     React.useState<'unknown' | 'absent'>('unknown');
+  /**
+   * THE PRICE READ OFF THE AI's SEGMENTS for the open extra — summed, with the
+   * per-segment breakdown that makes the sum checkable. Null until the proposal is
+   * fetched, and null forever when the recording carried no parseable segment price.
+   */
+  const [recordPrice, setRecordPrice] = React.useState<VoicePriceReading | null>(null);
   const [recordNextId, setRecordNextId] = React.useState<string | null>(null);
   /**
    * SPEC-extra-lifecycle-v1 — the stage screens' inputs, its own hydration layer.
@@ -7943,6 +7973,64 @@ const checkClientMessages = async () => {
         // composer uses — so a confirmed price is stamped `numbers_confirmed_at` like
         // every other one. Null when nothing was said, or a price already exists.
         priceHeard={(() => {
+          /**
+           * THE TOTAL IS THE SUM OF THE PRICED SEGMENTS, and the segments are shown so
+           * the sum can be checked (hadar, 2026-08-21).
+           *
+           * The segment reading wins whenever it produced a figure, because it is the
+           * one that read the WHOLE recording: `record.priceHeard` is a single span and
+           * on a multi-segment job it is a fraction of the price wearing the total's
+           * label. The single-span parse stays as the fallback for everything the model
+           * did not segment — a short "it's four hundred bucks" still works exactly as
+           * it did.
+           *
+           * WHAT IS NOT CHANGING: nothing is written until he presses. The figure is
+           * arithmetic over numbers HE said, parsed by our parser and never authored by
+           * the model, and `numbers_confirmed_at` is still stamped by that press and
+           * still gates Send (mandates #2 and #6). What the press no longer is, is a
+           * separate act of stating a total — the total is now derived from the lines,
+           * which is also what `validateLines` has always required of it.
+           */
+          const seg = recordPrice;
+          if (seg && seg.prefill && seg.amountCents !== null && seg.breakdown.length > 1) {
+            const cents = seg.amountCents;
+            const lines: LineItem[] = seg.breakdown.map((b) => ({
+              description: b.title, qty: 1,
+              unit_cents: b.cents, total_cents: b.cents,
+            }));
+            return {
+              words: seg.heard ?? '',
+              label: money(cents),
+              // Each segment with its own figure, above the total. He confirms the
+              // PARTS — a total he has to take on trust is the thing mandate #6 exists
+              // to prevent, and three lines he can check is not that.
+              breakdown: seg.breakdown.map((b) => ({ title: b.title, amount: money(b.cents) })),
+              onUse: async () => {
+                const co = coRowsRef.current.find((c) => c.id === record.id);
+                const r = await priceDraftExtra(db, {
+                  changeOrderId: record.id,
+                  amountCents: cents,
+                  lineItems: lines,
+                  // A CAP STAYS A CAP. `priceFromTasks` reads the total as NTE if ANY
+                  // segment was capped, because a sum containing a cap is not firm.
+                  // Recording it as a fixed price would put a number on an instrument
+                  // the contractor cannot hold — the more dangerous of the two errors —
+                  // so the cap is carried through and `nteClause` states it on the
+                  // document.
+                  nteCents: seg.mode === 'nte' ? cents : null,
+                  whoDirected: co?.who_directed || 'Owner',
+                  numbersConfirmedAt: new Date(),
+                });
+                // A refusal here used to be swallowed. `validateLines` can reject this
+                // (a rounding gap between the lines and the sum) and a silent no leaves
+                // him tapping a button that does nothing — the failure this project
+                // keeps re-learning.
+                if (!r.ok) { setAck({ kind: 'no', title: T('ack.notSaved'), detail: r.reason }); return; }
+                await refresh();
+                await openRecord(record.id);
+              },
+            };
+          }
           const words = record.priceHeard;
           if (!words) return null;
           const parsed = parseMoney(words);

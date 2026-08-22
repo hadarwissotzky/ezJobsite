@@ -128,7 +128,10 @@ export type RecordScreenProps = {
   onGenerate?: () => void;
   /** 396 — the read-back of a spoken price, composed by the caller (which owns
    *  `parseMoney`). Null when there is nothing to confirm. */
-  priceHeard?: { words: string; label: string; onUse: () => void } | null;
+  priceHeard?: {
+    words: string; label: string; onUse: () => void;
+    breakdown?: { title: string; amount: string }[];
+  } | null;
   /** Upload state for THIS extra's captures — the evidence behind the stuck-extra
    *  diagnosis. Null while it is being read. */
   delivery?: CaptureDelivery | null;

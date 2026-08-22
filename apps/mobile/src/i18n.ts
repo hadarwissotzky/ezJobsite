@@ -1916,6 +1916,10 @@ const EN: Record<string, string> = {
   'stuck.allowCell': 'Send over cell data',
   'stuck.writeItMyself': 'Write it myself',
   'price.youSaid': 'You said: “{words}”',
+  // The SUM's button. Different words from `price.useIt` on purpose: "Use $1,600"
+  // over three visible lines should say what the figure IS, or the segments read
+  // as options to pick from rather than parts that were added.
+  'price.useTotal': 'Use {amount} total',
   'price.useIt': 'Set the price to {amount}',
   'scope.working': 'Writing this up from your recording…',
   'scope.workingTitle': 'Still being written up',
@@ -3640,6 +3644,7 @@ const ES: Record<string, string> = {
   'stuck.allowCell': 'Enviar por datos móviles',
   'stuck.writeItMyself': 'Escribirlo yo mismo',
   'price.youSaid': 'Usted dijo: “{words}”',
+  'price.useTotal': 'Usar {amount} en total',
   'price.useIt': 'Fijar el precio en {amount}',
   'scope.working': 'Redactando esto a partir de su grabación…',
   'scope.workingTitle': 'Todavía se está redactando',

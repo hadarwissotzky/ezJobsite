@@ -110,6 +110,16 @@ const st = StyleSheet.create({
   sendBtnOff: { backgroundColor: C.steel, opacity: 0.55 },
   heard: { marginTop: 10, gap: 8 },
   heardSaid: { fontFamily: F.body, fontSize: 14, color: C.steel, fontStyle: 'italic' },
+  // Segment rows: label left, figure right, hairline between. The figures are
+  // right-aligned and tabular so the eye can add them down the column — that is the
+  // only reason this is a table and not a sentence.
+  heardLines: { gap: 0, marginTop: 2 },
+  heardLine: {
+    flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between',
+    gap: 12, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: C.line,
+  },
+  heardLineT: { flex: 1, fontFamily: F.body, fontSize: 14, color: C.ink },
+  heardLineA: { fontFamily: F.disp, fontSize: 15, color: C.ink, letterSpacing: 0.4 },
   sendTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   // The closing timestamp line. Quiet on purpose: it is provenance, not an action.
   stamp: { marginTop: 22, alignItems: 'center', gap: 2 },
@@ -248,7 +258,12 @@ export type ExtraDraftProps = {
   /** 396 — the spoken cost, its parsed figure, and the tap that accepts it. Null when
    *  he said no price, or when one is already set. The screen never parses: the caller
    *  owns `parseMoney` so there is one parser in the app, not one per screen. */
-  priceHeard?: { words: string; label: string; onUse: () => void } | null;
+  priceHeard?: {
+    words: string; label: string; onUse: () => void;
+    /** One row per priced segment, in the order they were spoken. Present only when
+     *  the figure is a SUM — it is what makes the sum checkable rather than trusted. */
+    breakdown?: { title: string; amount: string }[];
+  } | null;
   /**
    * THE STUCK-EXTRA WORKFLOW (hadar 2026-08-06). Files on the phone but no scope means
    * exactly one of two things, and the user must be able to act on either:
@@ -845,7 +860,7 @@ function PriceModes({ mode, onPick }: { mode: PriceMode; onPick: (m: PriceMode) 
 
 function DraftMoney({ rec, priceMode, heard }: {
   rec: ExtraRecord; priceMode: 'fixed' | 'nte';
-  heard?: { words: string; label: string; onUse: () => void } | null;
+  heard?: ExtraDraftProps['priceHeard'];
 }) {
   if (!rec.priced) {
     return (
@@ -864,7 +879,26 @@ function DraftMoney({ rec, priceMode, heard }: {
         {heard && (
           <View style={st.heard}>
             <Text style={st.heardSaid}>{t({ k: 'price.youSaid', p: { words: heard.words } })}</Text>
-            <Button label={t({ k: 'price.useIt', p: { amount: heard.label } })}
+            {/* THE SEGMENTS, EACH WITH ITS OWN FIGURE, ABOVE THE TOTAL (hadar
+                2026-08-21: "we can display a breakdown cost by segment ... the total
+                must be a combination of all segments").
+                It is not decoration and it is not a summary — it is the evidence for the
+                number on the button. A contractor asked to accept "$1,600" has to trust
+                us; the same man shown "$1,200 · $400" and asked to accept $1,600 is
+                checking arithmetic, which he can do on a ladder. That difference is the
+                whole of mandate #6 on this screen. */}
+            {!!heard.breakdown?.length && (
+              <View style={st.heardLines}>
+                {heard.breakdown.map((b, i) => (
+                  <View key={`${b.title}-${i}`} style={st.heardLine}>
+                    <Text style={st.heardLineT} numberOfLines={2}>{b.title}</Text>
+                    <Text style={st.heardLineA}>{b.amount}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            <Button label={t({ k: heard.breakdown?.length ? 'price.useTotal' : 'price.useIt',
+                               p: { amount: heard.label } })}
               icon="approved" onPress={heard.onUse} />
           </View>
         )}
