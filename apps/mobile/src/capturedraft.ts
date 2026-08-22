@@ -453,6 +453,44 @@ export async function alreadyCommittedItems(
   return { committed, total: items.length };
 }
 
+/**
+ * CLOSE THE DRAFTS WHOSE WALK ALREADY LANDED, BEFORE ANY OF THEM ARE OFFERED.
+ *
+ * hadar, 2026-08-21, screenshot: "UNFINISHED CAPTURE — the app closed before this walk
+ * was filed" over 4 photos he had already turned into a change order AND then deleted.
+ *
+ * `alreadyCommittedItems` was wired into the Keep BUTTON, so the duplicate could not be
+ * created — but the card was still SHOWN. That is only half a fix: the prompt exists to
+ * say "here is work you would otherwise lose", and showing it over work that is not
+ * lost teaches exactly the dismissal reflex `DraftSummary.recoverable` is written to
+ * avoid ("a recovery prompt for nothing teaches people to dismiss recovery prompts, and
+ * the next one will be real").
+ *
+ * Deleting the extra afterwards does not change the answer, and must not: `capture_commit`
+ * is append-only, so the bytes remain committed and a discard is recorded beside them.
+ * The draft's walk DID land. What happened to the document afterwards is a separate
+ * decision the contractor already made, and re-offering the raw walk is the app asking
+ * him to make it twice.
+ *
+ * Run before `recoverableDrafts`, so the list it returns is already true.
+ */
+export async function closeLandedDrafts(
+  db: AbstractPowerSyncDatabase, ownerId?: string
+): Promise<{ closed: number }> {
+  let closed = 0;
+  for (const h of await headers(db, ownerId)) {
+    if (h.state !== 'open') continue;
+    try {
+      const seen = await alreadyCommittedItems(db, h.draftId);
+      if (seen.total > 0 && seen.committed.length === seen.total) {
+        await closeDraft(db, h.draftId, 'committed');
+        closed++;
+      }
+    } catch { /* a draft we cannot read stays open and stays offered — the safe way round */ }
+  }
+  return { closed };
+}
+
 /** Audio already banked, in ms. What `capState()` is fed; never wall clock. */
 export async function bankedRecordedMs(db: AbstractPowerSyncDatabase, draftId: string): Promise<number> {
   const r = (await db.getAll<{ ms: number }>(

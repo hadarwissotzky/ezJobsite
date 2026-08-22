@@ -195,7 +195,7 @@ import { ensureNotifySchema, notifyPermissionStatus, requestNotifyPermission,
 // the client's messages; a reminder must go via the SAME link (R8) or the nudge
 // breaks the thing it is nudging about.
 import { canRemind, reminderText } from './src/remind';
-import { alreadyCommittedItems,
+import { alreadyCommittedItems, closeLandedDrafts,
          ensureDraftSchema, sweepDrafts, recoverableDrafts, readDraftArtifacts,
          closeDraft } from './src/capturedraft';
 // REQ-PROC4's acceptance test. Behind a flag because it writes 100 captures; see
@@ -3637,6 +3637,11 @@ const checkClientMessages = async () => {
     (async () => {
       try {
         await sweepDrafts(db, OWNER);
+        // BEFORE the offer, not on the button: a draft whose captures already committed
+        // is not unfinished work, and showing it as such is how a recovery prompt
+        // becomes something people dismiss without reading. See closeLandedDrafts.
+        const landed = await closeLandedDrafts(db, OWNER);
+        if (landed.closed) console.log('drafts already landed:', JSON.stringify(landed));
         const ds = await recoverableDrafts(db, OWNER);
         if (live) setDrafts(ds);
       } catch (e) {
