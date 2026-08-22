@@ -141,7 +141,7 @@ test('a parser that returns cents with no `matched` cannot spin the scanner', ()
 
 test('the AI-tagged price phrase prefills the field extractPrice left empty', () => {
   const r = priceFromTasks(
-    [{ priceWords: '$1,500', scope: 'Refinish and stain the fireplace.' }], parse);
+    [{ title: 'Fireplace', priceWords: '$1,500', scope: 'Refinish and stain the fireplace.' }], parse);
   assert.equal(r?.amountCents, 150000);
   assert.equal(r?.prefill, true);
   assert.equal(r?.mode, 'fixed');
@@ -150,34 +150,78 @@ test('the AI-tagged price phrase prefills the field extractPrice left empty', ()
 
 test('a cap cue in the price phrase makes it NTE, not fixed', () => {
   const r = priceFromTasks(
-    [{ priceWords: 'up to $2,000', scope: 'Time and materials on the drain.' }], parse);
+    [{ title: 'Drain', priceWords: 'up to $2,000', scope: 'Time and materials on the drain.' }], parse);
   assert.equal(r?.amountCents, 200000);
   assert.equal(r?.mode, 'nte');
   assert.equal(r?.modeHeard, true);
 });
 
-test('two tasks that each carry a clean price stay ambiguous — fill neither', () => {
+/**
+ * BEHAVIOUR CHANGED 2026-08-21, deliberately. This test asserted the opposite —
+ * "two tasks that each carry a clean price stay ambiguous — fill neither".
+ *
+ * That refusal conflated two different situations. TWO FIGURES IN ONE BREATH
+ * ("eighteen fifty, call it two grand") is one price said twice, and adding them
+ * invents money — `extractPrice` still refuses that, and the test below it still
+ * proves so. But two figures the MODEL attributed to two different SEGMENTS are two
+ * prices for two pieces of work, and their sum is what the job costs.
+ *
+ * hadar, 2026-08-21: "it doesn't add cost of multiple projects into a total … the
+ * total and the extraction must be a total (combination of all segments)."
+ *
+ * Mandate #6 is untouched by this: nothing is committed. The figure is offered
+ * through the same read-back as every other price, the breakdown is shown so the
+ * PARTS are what get confirmed, and `numbers_confirmed_at` still gates the send.
+ */
+test('segments that each carry a price are SUMMED into the total', () => {
   const r = priceFromTasks([
-    { priceWords: '$450', scope: 'Add three outlets.' },
-    { priceWords: '$200', scope: 'Trim out the window.' },
+    { title: 'Outlets', priceWords: '$450', scope: 'Add three outlets.' },
+    { title: 'Window trim', priceWords: '$200', scope: 'Trim out the window.' },
   ], parse);
-  assert.equal(r?.prefill, false);
-  assert.equal(r?.amountCents, null);
-  assert.equal(r?.reasonKey, 'r2.priceAmbiguous');
+  assert.equal(r?.prefill, true);
+  assert.equal(r?.amountCents, 65000, '$450 + $200');
+  assert.equal(r?.reasonKey, 'r2.priceSummed');
   assert.equal(r?.reasonParams.n, 2);
 });
 
+test('the breakdown keeps the segments in the order the work was described', () => {
+  // Not sorted by price. A homeowner reading "kitchen, then hall, then the make-good"
+  // is following the job; the same lines sorted by cost are a quote, not a plan.
+  const r = priceFromTasks([
+    { title: 'Kitchen', priceWords: '$900', scope: 'Kitchen first.' },
+    { title: 'Hall', priceWords: '$150', scope: 'Then the hall.' },
+    { title: 'Make good', priceWords: '$300', scope: 'Patch and paint after.' },
+  ], parse);
+  assert.deepEqual(r?.breakdown.map((b) => b.title), ['Kitchen', 'Hall', 'Make good']);
+  assert.equal(r?.amountCents, 135000);
+  assert.equal(r?.breakdown.reduce((n, b) => n + b.cents, 0), r?.amountCents,
+    'the total must equal the sum of the parts shown — always');
+});
+
+test('one capped segment makes the whole total a cap, never a firm price', () => {
+  // A total combining a firm price and a not-to-exceed is not firm. Calling it firm
+  // is the more dangerous of the two errors: it puts a number on an instrument the
+  // contractor cannot hold to.
+  const r = priceFromTasks([
+    { title: 'Rough-in', priceWords: '$800', scope: 'Rough in the circuit.' },
+    { title: 'Dig', priceWords: 'up to $1,200', scope: 'Trenching, time and materials.' },
+  ], parse);
+  assert.equal(r?.mode, 'nte');
+  assert.equal(r?.amountCents, 200000);
+  assert.equal(r?.reasonKey, 'r2.priceSummedNte');
+});
+
 test('no parseable task price returns null — caller falls back to the transcript scan', () => {
-  assert.equal(priceFromTasks([{ priceWords: null, scope: 'Fix the subfloor.' }], parse), null);
+  assert.equal(priceFromTasks([{ title: 'Segment', priceWords: null, scope: 'Fix the subfloor.' }], parse), null);
   assert.equal(priceFromTasks([], parse), null);
   // A task whose price_words hold no currency figure is not a price, so: null, not EMPTY.
-  assert.equal(priceFromTasks([{ priceWords: 'a few hours', scope: 'Sand it.' }], parse), null);
+  assert.equal(priceFromTasks([{ title: 'Segment', priceWords: 'a few hours', scope: 'Sand it.' }], parse), null);
 });
 
 test('one clean task among unpriced siblings prefills that one', () => {
   const r = priceFromTasks([
-    { priceWords: null, scope: 'Haul the debris.' },
-    { priceWords: '$1,500', scope: 'Refinish the fireplace.' },
+    { title: 'Segment', priceWords: null, scope: 'Haul the debris.' },
+    { title: 'Segment', priceWords: '$1,500', scope: 'Refinish the fireplace.' },
   ], parse);
   assert.equal(r?.amountCents, 150000);
   assert.equal(r?.prefill, true);

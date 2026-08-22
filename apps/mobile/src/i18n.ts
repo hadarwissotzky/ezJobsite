@@ -1440,6 +1440,13 @@ const EN: Record<string, string> = {
   'r2.priceHeardFixed': 'One price in the recording. It is filled in below as a fixed price.',
   'r2.priceHeardNte': 'One amount in the recording, said as a cap. It is filled in below as a not-to-exceed.',
   'r2.priceAmbiguous': '{n} amounts in the recording. Nothing was filled in — type the one you are sending.',
+  /**
+   * THE SUM, offered for confirmation (hadar, 2026-08-21). Still a read-back, not an
+   * applied figure: mandate #6 is satisfied by what he CHECKS, and the breakdown
+   * beside this line is what he checks — the parts, not a total he has to trust.
+   */
+  'r2.priceSummed': '{n} parts priced in the recording. Added up below — check each part before you send.',
+  'r2.priceSummedNte': '{n} parts priced in the recording, one of them a cap. Added up below as a not-to-exceed — check each part before you send.',
   'r2.priceUnclear': 'A number went by, but not clearly enough to use as a price. Type the amount below.',
   'r2.modeFixed': 'Fixed price',
   'r2.modeNte': 'Not to exceed',
@@ -3249,6 +3256,8 @@ const ES: Record<string, string> = {
   'r2.priceHeardFixed': 'Un solo precio en la grabación. Ya está puesto abajo como precio fijo.',
   'r2.priceHeardNte': 'Una sola cantidad en la grabación, dicha como tope. Ya está puesta abajo como tope máximo.',
   'r2.priceAmbiguous': '{n} cantidades en la grabación. No se llenó nada — escriba la que va a enviar.',
+  'r2.priceSummed': '{n} partes con precio en la grabación. Sumadas abajo — revise cada parte antes de enviar.',
+  'r2.priceSummedNte': '{n} partes con precio en la grabación, una es un tope. Sumadas abajo como no-exceder — revise cada parte antes de enviar.',
   'r2.priceUnclear': 'Pasó un número, pero no lo bastante claro para usarlo como precio. Escriba la cantidad abajo.',
   'r2.modeFixed': 'Precio fijo',
   'r2.modeNte': 'Sin pasar de',

@@ -71,6 +71,21 @@ export type VoicePriceReading = {
   /** Always set. The contractor is told what happened, in his language. */
   reasonKey: string;
   reasonParams: Record<string, string | number>;
+  /**
+   * PER-SEGMENT PRICES, when the work was quoted in parts (hadar, 2026-08-21: "it
+   * doesn't add cost of multiple projects into a total … in the scope we can display
+   * a breakdown cost by segment, if given, but the total and the extraction must be a
+   * total").
+   *
+   * Present only when more than one segment carried a price. Empty for the ordinary
+   * one-figure case, so nothing changes for the common path.
+   *
+   * The ORDER IS THE ORDER THE WORK WAS DESCRIBED IN — the model returns tasks in the
+   * sequence they happen, and this preserves it. A homeowner reading "kitchen, then
+   * hall, then the make-good" is following the job; the same three lines sorted by
+   * price are a quote, not a plan.
+   */
+  breakdown: Array<{ title: string; cents: number; heard: string }>;
 };
 
 /**
@@ -134,7 +149,7 @@ function figuresIn(clause: string, parse: MoneyParser): MoneyReading[] {
 
 const EMPTY: VoicePriceReading = {
   amountCents: null, prefill: false, mode: 'fixed', modeHeard: false, heard: null,
-  reasonKey: 'r2.priceNoneHeard', reasonParams: {},
+  reasonKey: 'r2.priceNoneHeard', reasonParams: {}, breakdown: [],
 };
 
 /**
@@ -172,7 +187,7 @@ export function extractPrice(transcript: string, parse: MoneyParser): VoicePrice
       mode: f.nte ? 'nte' : 'fixed',
       modeHeard: f.nte,
       heard: f.clause,
-      reasonKey: f.nte ? 'r2.priceHeardNte' : 'r2.priceHeardFixed',
+      reasonKey: f.nte ? 'r2.priceHeardNte' : 'r2.priceHeardFixed', breakdown: [],
       reasonParams: {},
     };
   }
@@ -195,7 +210,7 @@ export function extractPrice(transcript: string, parse: MoneyParser): VoicePrice
       mode: found.some((f) => f.nte) ? 'nte' : 'fixed',
       modeHeard: false,
       heard: found.map((f) => f.matched).filter(Boolean).join(' · ') || null,
-      reasonKey: 'r2.priceAmbiguous',
+      reasonKey: 'r2.priceAmbiguous', breakdown: [],
       reasonParams: { n: found.length },
     };
   }
@@ -204,7 +219,7 @@ export function extractPrice(transcript: string, parse: MoneyParser): VoicePrice
     return {
       amountCents: null, prefill: false, mode: 'fixed', modeHeard: false,
       heard: softest.clause,
-      reasonKey: 'r2.priceUnclear', reasonParams: {},
+      reasonKey: 'r2.priceUnclear', reasonParams: {}, breakdown: [],
     };
   }
 
@@ -235,10 +250,10 @@ export function extractPrice(transcript: string, parse: MoneyParser): VoicePrice
  * as "no price heard".
  */
 export function priceFromTasks(
-  tasks: { priceWords: string | null; scope: string }[],
+  tasks: { priceWords: string | null; scope: string; title: string }[],
   parse: MoneyParser
 ): VoicePriceReading | null {
-  const hits: { cents: number; nte: boolean; heard: string }[] = [];
+  const hits: { cents: number; nte: boolean; heard: string; title: string }[] = [];
   for (const t of tasks) {
     if (!t.priceWords) continue;
     // A task's price_words is one price span; still walk it in case the model tagged
@@ -247,7 +262,7 @@ export function priceFromTasks(
     const figs = figuresIn(t.priceWords, parse).filter((f) => f.confidence === 'high' && f.cents !== null);
     if (figs.length !== 1) continue;
     const nte = NTE_CUES.some((cue) => fold(`${t.priceWords} ${t.scope}`).includes(cue));
-    hits.push({ cents: figs[0].cents as number, nte, heard: t.priceWords });
+    hits.push({ cents: figs[0].cents as number, nte, heard: t.priceWords, title: t.title });
   }
   if (hits.length === 0) return null;
   if (hits.length === 1) {
@@ -256,13 +271,44 @@ export function priceFromTasks(
       amountCents: h.cents, prefill: true,
       mode: h.nte ? 'nte' : 'fixed', modeHeard: h.nte, heard: h.heard,
       reasonKey: h.nte ? 'r2.priceHeardNte' : 'r2.priceHeardFixed', reasonParams: {},
+      breakdown: [],
     };
   }
+  /**
+   * SEVERAL SEGMENTS, EACH WITH ITS OWN PRICE → THE TOTAL IS THEIR SUM.
+   *
+   * This used to refuse: `amountCents: null, prefill: false, 'r2.priceAmbiguous'`. The
+   * reasoning was mandate #6 — never trust a number from a transcript — and for TWO
+   * FIGURES IN ONE BREATH that is exactly right, because "eighteen fifty, call it two
+   * grand" is one price said twice and adding them invents money.
+   *
+   * But that is not this case, and conflating them cost hadar a working feature
+   * (2026-08-21: "it doesn't add cost of multiple projects into a total"). Here the
+   * MODEL has already separated the work into segments and attributed one price span
+   * to each. Two figures in two different segments are two different prices for two
+   * different pieces of work, and their sum is what the job costs. Adding them is
+   * arithmetic on what he said, not a guess about what he meant.
+   *
+   * MANDATE #6 IS STILL SATISFIED, and by the part that actually matters: nothing is
+   * committed. `prefill` offers the figure through the same read-back every other
+   * price goes through, the breakdown is shown so he confirms the PARTS rather than a
+   * total he has to trust, and `numbers_confirmed_at` still gates the send. What
+   * changes is that he now taps once to accept arithmetic he can check, instead of
+   * being told the app could not work it out.
+   *
+   * MIXED FIXED AND CAP READS AS A CAP. A total combining a firm price and a
+   * not-to-exceed is not firm, and calling it firm would be the more dangerous of the
+   * two errors — it would put a number on an instrument the contractor cannot hold.
+   */
+  const total = hits.reduce((sum, h) => sum + h.cents, 0);
+  const nte = hits.some((h) => h.nte);
   return {
-    amountCents: null, prefill: false,
-    mode: hits.some((h) => h.nte) ? 'nte' : 'fixed', modeHeard: false,
+    amountCents: total, prefill: true,
+    mode: nte ? 'nte' : 'fixed', modeHeard: nte,
     heard: hits.map((h) => h.heard).join(' · '),
-    reasonKey: 'r2.priceAmbiguous', reasonParams: { n: hits.length },
+    reasonKey: nte ? 'r2.priceSummedNte' : 'r2.priceSummed',
+    reasonParams: { n: hits.length },
+    breakdown: hits.map((h) => ({ title: h.title, cents: h.cents, heard: h.heard })),
   };
 }
 
