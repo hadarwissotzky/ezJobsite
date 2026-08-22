@@ -476,19 +476,58 @@ export async function alreadyCommittedItems(
  */
 export async function closeLandedDrafts(
   db: AbstractPowerSyncDatabase, ownerId?: string
-): Promise<{ closed: number }> {
-  let closed = 0;
+): Promise<{ closed: number; byDigest: number; byWindow: number }> {
+  let closed = 0, byDigest = 0, byWindow = 0;
   for (const h of await headers(db, ownerId)) {
     if (h.state !== 'open') continue;
+    const items = await draftItems(db, h.draftId).catch(() => []);
+    if (!items.length) continue;   // empty drafts are handled elsewhere
+
+    // ── 1. THE EXACT ANSWER: every item's bytes are already committed. ──────────
     try {
       const seen = await alreadyCommittedItems(db, h.draftId);
       if (seen.total > 0 && seen.committed.length === seen.total) {
         await closeDraft(db, h.draftId, 'committed');
-        closed++;
+        closed++; byDigest++;
+        continue;
       }
-    } catch { /* a draft we cannot read stays open and stays offered — the safe way round */ }
+    } catch { /* fall through to the window check */ }
+
+    /**
+     * ── 2. THE ANSWER THAT SURVIVES WHEN THE BYTES CANNOT BE COMPARED ──────────
+     *
+     * The digest check needs to READ each draft file and hash it, and it fails
+     * silently in two real situations: the committed copy is not byte-identical to
+     * the draft copy, and the draft's media is gone from disk. hadar hit one of them
+     * on 2026-08-21 — the server showed all five captures of that walk committed and
+     * uploaded, and the card still said "unfinished".
+     *
+     * So: did this device commit at least as many captures during the draft's own
+     * window as the draft is holding? A draft that banked four photos between 23:36
+     * and 23:38, on a device that committed five captures in that window, has landed.
+     *
+     * THIS IS INFERENCE AND IT IS SAID SO OUT LOUD, which is why it is second and not
+     * first. What it decides is narrow: whether to OFFER A RECOVERY PROMPT. It writes
+     * no evidence, touches no capture, and its worst case is a walk that is genuinely
+     * unfinished not being offered — recoverable by the contractor simply recording
+     * again, and weighed against a prompt that cries wolf every launch until he learns
+     * to dismiss it, which is the failure `DraftSummary.recoverable` names.
+     *
+     * The window is the draft's own, plus a minute: commits happen after the last
+     * bank, and a slow write must not fall outside its own session.
+     */
+    try {
+      const n = (await db.getAll<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM capture_commit
+          WHERE captured_at_ms >= ? AND captured_at_ms <= ?`,
+        [h.startedAtMs, h.updatedAtMs + 60_000]))[0]?.n ?? 0;
+      if (n >= items.length) {
+        await closeDraft(db, h.draftId, 'committed');
+        closed++; byWindow++;
+      }
+    } catch { /* a draft we cannot read about stays open and stays offered */ }
   }
-  return { closed };
+  return { closed, byDigest, byWindow };
 }
 
 /** Audio already banked, in ms. What `capState()` is fed; never wall clock. */
