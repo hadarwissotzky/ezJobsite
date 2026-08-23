@@ -57,6 +57,17 @@ const ONCE = process.argv.includes('--once');
  * Deepgram/Whisper and write the result. The signature is what the loop depends on;
  * the model is not.
  */
+/**
+ * SQL string literal, or the word null. Quotes are doubled, which is the whole job.
+ *
+ * MODULE SCOPE, not step scope: it was declared inside `structure`, and the second step
+ * to need it (`amend_scope`) would have thrown a ReferenceError at RUNTIME while passing
+ * `node --check` cleanly. Every value that reaches this function came off an audio file
+ * a stranger recorded, so a step that cannot reach it is a step that gets a hand-rolled
+ * quote instead.
+ */
+const q = (v) => (v === null || v === undefined || v === '') ? 'null' : `'${String(v).replace(/'/g, "''")}'`;
+
 const STEPS = {
   /**
    * REQ-PROC3 — transcribe + RETAIN THE ORIGINAL.
@@ -234,7 +245,6 @@ const STEPS = {
     try { g = JSON.parse(res.choices?.[0]?.message?.content ?? '{}'); }
     catch { throw { block: 'needs_connection', why: 'model returned non-JSON' }; }
 
-    const q = (v) => (v === null || v === undefined || v === '') ? 'null' : `'${String(v).replace(/'/g, "''")}'`;
 
     // THE MODEL NEVER SETS THE AMOUNT. Always null here.
     //
@@ -266,6 +276,100 @@ const STEPS = {
                 ${q(g.who_directed)}, ${cents === null ? 'null' : cents}, '${conf}',
                 'openai', 'gpt-4o-mini', ${q(transcript)}
            from public.capture c where c.id = '${job.capture_id}'`);
+  },
+  /**
+   * AMEND THE SCOPE OF WORK — the third option between "leave it alone" and "redo it".
+   *
+   * hadar, 2026-08-23: *"this is not a complete redo — this is an augmentation and
+   * amendment. we take the scope of work and the audio (if exists transcription) and we
+   * amend the scope of work if necessary"*.
+   *
+   * IT PROPOSES. IT NEVER WRITES `change_order`. `scope_of_work` is the text the client
+   * is asked to approve, so mandate #2 puts a mandatory human confirmation in front of
+   * any change to it. This step's whole output is a row in `capture_structured` that the
+   * app shows beside the current scope for the contractor to accept or reject.
+   *
+   * IT REFUSES ANYTHING PAST DRAFT. Once an extra is sent, the scope is the frozen
+   * instrument the signature is taken against. That guard is here AND in the app, on
+   * purpose: a rule this size should not have one gate.
+   *
+   * EVERY OUTCOME IS RECORDED, including the ones that change nothing — `no_change` is a
+   * finding ("we read both and the scope already covers it") and it is not the same fact
+   * as "this step never ran". An absent row cannot tell those apart, which is the lesson
+   * `resolve_project` below writes down at greater length.
+   */
+  amend_scope: async (job) => {
+    const transcript = sql(`select coalesce(text,'') from public.capture_transcript_current
+                             where capture_id = '${job.capture_id}'`);
+    const note = (status, scope, reason) =>
+      sql(`insert into public.capture_structured
+             (id, capture_id, owner_id, confidence, engine, engine_model,
+              from_transcript, amend_status, proposed_amended_scope, amend_reason)
+           select 'st-' || substr(md5(random()::text),1,10), '${job.capture_id}', c.owner_id,
+                  'none', 'openai', 'gpt-4o-mini', ${q(transcript)},
+                  '${status}', ${q(scope)}, ${q(reason)}
+             from public.capture c where c.id = '${job.capture_id}'`);
+
+    if (!transcript) { note('no_words', null, null); return; }
+
+    // The extra this capture was added to, reached the way the app reaches it:
+    // capture -> decision_version -> decision -> change_order.
+    const row = sql(`select co.status || '\u0001' || coalesce(co.scope_of_work,'')
+                       from public.change_order co
+                       join public.decision d on d.id = co.decision_id
+                       join public.decision_version dv on dv.decision_id = d.id
+                      where dv.capture_id = '${job.capture_id}'
+                      order by co.created_at desc limit 1`);
+    if (!row) { note('no_scope', null, null); return; }
+    const [status, existing] = String(row).split('\u0001');
+    // Past draft: frozen. Nothing is proposed, and the reason is recorded so the app can
+    // say why rather than showing an empty card.
+    if (status !== 'draft') { note('not_draft', null, null); return; }
+    if (!existing.trim()) { note('no_scope', null, null); return; }
+
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) throw { block: 'needs_api_key', why: 'no LLM key in the environment' };
+
+    const body = {
+      model: 'gpt-4o-mini',
+      // Deterministic, for the same reason `structure` is: a resumed job that disagrees
+      // with itself is unarguable in a dispute.
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content:
+          'You AMEND an existing scope of work. You are feeding a HUMAN CONFIRMATION step, not a database.\n' +
+          'You are given SCOPE (what the contractor has already written and may already have shown a client) and ADDED (what he said just now while adding to it).\n' +
+          'Rules, in order of importance:\n' +
+          '1. PRESERVE. Keep every existing line that ADDED does not change. This is an amendment, never a rewrite: do not reword, reorder, retitle or "improve" text that stands.\n' +
+          '2. NEVER invent. Only add what ADDED actually says. If ADDED says nothing that affects the scope, return changed=false.\n' +
+          '3. DO NOT add, change or mention any price, amount or number of dollars. Another part of the system owns those.\n' +
+          '4. Return the FULL amended scope in `scope`, not a diff — the contractor reads it whole before accepting.\n' +
+          '5. `reason` is ONE short line naming what you added, in his words, e.g. "adds two outlets in unit 3B". No preamble.\n' +
+          '6. changed=false whenever the existing scope already covers what was said.\n' +
+          'Return JSON: {changed: boolean, scope: string|null, reason: string|null}.' },
+        { role: 'user', content: `SCOPE:\n${existing}\n\nADDED:\n${transcript}` },
+      ],
+    };
+    const out = execFileSync('curl', ['-s', 'https://api.openai.com/v1/chat/completions',
+      '-H', `Authorization: Bearer ${key}`, '-H', 'Content-Type: application/json',
+      '-d', JSON.stringify(body)]).toString();
+    const res = JSON.parse(out || '{}');
+    if (res.error) throw { block: 'needs_api_key', why: res.error.message };
+    let g;
+    try { g = JSON.parse(res.choices?.[0]?.message?.content ?? '{}'); }
+    catch { throw { block: 'needs_connection', why: 'model returned non-JSON' }; }
+
+    const amended = typeof g.scope === 'string' ? g.scope.trim() : '';
+    // "changed" is not taken on the model's word alone: it must also have produced text,
+    // and text that is actually different from what is already there. A card offering
+    // the contractor his own scope back is a confirmation step that teaches him to tap
+    // Accept without reading, which is the failure mandate #2 exists to prevent.
+    if (!g.changed || !amended || amended === existing.trim()) {
+      note('no_change', null, typeof g.reason === 'string' ? g.reason.slice(0, 200) : null);
+      return;
+    }
+    note('amended', amended, typeof g.reason === 'string' ? g.reason.slice(0, 200) : null);
   },
   /**
    * REQ-P4 — content-assisted project detection.

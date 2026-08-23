@@ -79,8 +79,16 @@ begin
             -- without a vision model nobody has plugged in. Declaring no steps is
             -- the honest description of that.
             when new.modality = 'photo' then '[]'::jsonb
-            when new.modality = 'text'  then '["detect_language","resolve_project","structure"]'::jsonb
-            else '["transcribe","detect_language","resolve_project","structure"]'::jsonb
+            -- `amend_scope` (420) runs last and only matters for an EDIT: it reads the
+            -- scope of work the capture's extra already has and proposes an amended one.
+            -- It is enqueued for EVERY capture that can carry words because at insert
+            -- time nothing knows whether this is an edit -- the decision link is written
+            -- afterwards -- and the step records `no_scope` and stops when it turns out
+            -- not to be. Deciding here would mean guessing, and the guess would be wrong
+            -- in the direction that loses the feature.
+            when new.modality = 'text'
+              then '["detect_language","resolve_project","structure","amend_scope"]'::jsonb
+            else '["transcribe","detect_language","resolve_project","structure","amend_scope"]'::jsonb
           end)
   on conflict (id) do nothing;
   return new;

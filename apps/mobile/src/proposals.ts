@@ -127,6 +127,25 @@ export type Proposal = {
   billingTiming: 'next_invoice' | 'when_completed' | 'other' | null;
   exclusionsText: string | null;
   inclusionsText: string | null;
+  /**
+   * THE AMENDED SCOPE OF WORK, PROPOSED (hadar, 2026-08-23: an edit is "an augmentation
+   * and amendment", not a redo).
+   *
+   * The full amended text, ready to show beside the current scope. NEVER applied without
+   * the contractor accepting it: `scope_of_work` is what the client is asked to approve,
+   * so mandate #2 puts a confirmation in front of any change to it. Null unless
+   * `amendStatus` is 'amended'.
+   */
+  amendedScope: string | null;
+  /** One line naming what the model added, in his words — shown under the proposal so
+   *  he is not asked to accept a change he cannot see the reason for. */
+  amendReason: string | null;
+  /**
+   * What the amend pass concluded, or null when it never ran (every proposal written
+   * before 420). 'no_change' is a FINDING — "we read both and the scope already covers
+   * it" — and is deliberately distinguishable from never having looked.
+   */
+  amendStatus: 'amended' | 'no_change' | 'not_draft' | 'no_scope' | 'no_words' | null;
   confidence: Confidence;
   engine: string;
   engineModel: string | null;
@@ -146,7 +165,15 @@ const SECTION_COLS =
   ', proposed_sections, proposed_schedule_effect, proposed_schedule_days' +
   ', proposed_billing_timing, proposed_exclusions, proposed_inclusions';
 
-const PROPOSAL_COLS = BASE_COLS + SECTION_COLS;
+/**
+ * 420's columns. Appended to the same tier as 393's for the same reason its header
+ * gives: the client ships over the air and the migration is applied by a person, so
+ * between those two moments every select naming one of these fails with 42703 and the
+ * fallback below is what keeps the AI's write-up reaching the app at all.
+ */
+const AMEND_COLS = ', proposed_amended_scope, amend_reason, amend_status';
+
+const PROPOSAL_COLS = BASE_COLS + SECTION_COLS + AMEND_COLS;
 
 /**
  * Ask for 393's columns, and fall back to the old set when the server does not have
@@ -236,6 +263,12 @@ function rowToProposal(r: any): Proposal {
       ? r.proposed_exclusions.trim() : null,
     inclusionsText: typeof r.proposed_inclusions === 'string' && r.proposed_inclusions.trim()
       ? r.proposed_inclusions.trim() : null,
+    amendedScope: typeof r.proposed_amended_scope === 'string' && r.proposed_amended_scope.trim()
+      ? r.proposed_amended_scope : null,
+    amendReason: typeof r.amend_reason === 'string' && r.amend_reason.trim()
+      ? r.amend_reason.trim() : null,
+    amendStatus: enumOr(r.amend_status,
+      ['amended', 'no_change', 'not_draft', 'no_scope', 'no_words'] as const),
     confidence: (['high', 'low', 'none'].includes(r.confidence) ? r.confidence : 'low') as Confidence,
     engine: r.engine,
     engineModel: r.engine_model ?? null,
