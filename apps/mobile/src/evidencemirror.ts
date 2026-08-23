@@ -151,17 +151,29 @@ export type HydrateEvidenceResult = {
 export async function hydrateEvidence(
   db: AbstractPowerSyncDatabase,
   supabase: SupabaseClient,
-  projectId: string,
+  /**
+   * NULL = the whole account, and that is the case this feature exists for
+   * (code review, 2026-08-23 — HIGH).
+   *
+   * `hydrateChangeOrders` and `hydrateApprovers` were both made account-wide for one
+   * reason: on a device that has just signed in, NO project has been opened, so the
+   * caller's `projectIdRef` is still `INBOX_ID`. Leaving this one project-scoped meant
+   * `decision WHERE project_id = INBOX_ID` matched nothing — no decisions, no versions,
+   * no mirror rows, no photos — on exactly the device state the bug report describes
+   * ("images not displaying in the records after signing in as another user"). Even
+   * after opening a job, only that one job's evidence arrived.
+   */
+  projectId: string | null,
   ownerId: string,
 ): Promise<HydrateEvidenceResult> {
   const nil: HydrateEvidenceResult =
     { decisions: 0, versions: 0, captures: 0, offline: true };
 
   // ── decisions ────────────────────────────────────────────────────────────────
-  const { data: decs, error: de } = await supabase
+  const dq = supabase
     .from('decision')
-    .select('id, project_id, subject, scope_level, assignee, created_at_ms')
-    .eq('project_id', projectId);
+    .select('id, project_id, subject, scope_level, assignee, created_at_ms');
+  const { data: decs, error: de } = await (projectId ? dq.eq('project_id', projectId) : dq);
   if (de || !decs) {
     void logDiag(db, 'hydrate.evidence', `decision: ${String(de?.message ?? 'no data').slice(0, 120)}`);
     return nil;
@@ -290,6 +302,28 @@ export async function hydrateEvidence(
     // A capture with no object key is a row we cannot fetch bytes for. Skipping it
     // beats storing a mirror entry that can only ever fail to download.
     if (!key || !sha) continue;
+    /**
+     * A TIMESTAMP WE CANNOT READ IS SKIPPED OUT LOUD, NOT BOUND AS NaN
+     * (code review, 2026-08-23).
+     *
+     * `new Date(null).getTime()` is NaN, and `captured_at_ms` is INTEGER NOT NULL in a
+     * STRICT table — so the insert threw, the per-row catch logged it, and the capture
+     * vanished from the mirror with the only trace in `diag_log`. That is a photo that
+     * silently never appears on the second device, which is the exact failure this
+     * whole module was written to end.
+     *
+     * Skipped rather than defaulted to `Date.now()`: this column orders the walk and
+     * ties a photo to the sentence spoken over it. Inventing "now" for a capture taken
+     * last Tuesday would put it at the end of somebody's walkthrough and caption it
+     * with the wrong words — a quiet lie about evidence beats no lie, but a loud skip
+     * beats both.
+     */
+    const capturedAtMs = new Date(c.client_created_at).getTime();
+    if (!Number.isFinite(capturedAtMs)) {
+      void logDiag(db, 'hydrate.evidence',
+        `capture ${c.id}: unreadable client_created_at ${JSON.stringify(c.client_created_at)}`);
+      continue;
+    }
     try {
       const r = await db.execute(
         `INSERT OR IGNORE INTO capture_mirror
@@ -297,7 +331,7 @@ export async function hydrateEvidence(
             modality, captured_at_ms, gps_lat, gps_lng, local_relpath, cached_at_ms)
          VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL)`,
         [c.id, c.project_id, c.owner_id, key, sha, bytes.get(c.id) ?? null,
-         c.modality ?? null, new Date(c.client_created_at).getTime(),
+         c.modality ?? null, capturedAtMs,
          c.gps_lat ?? null, c.gps_lng ?? null]);
       if (r.rowsAffected) captures++;
     } catch (e: any) {

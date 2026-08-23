@@ -104,6 +104,16 @@ export type RecordVoice = {
   /** The full spoken transcript for THIS clip, from voice_transcript_cache. Null when
    *  it has not been written down yet (offline, no STT, still processing). */
   transcript: string | null;
+  /**
+   * The recogniser listened to this clip and there was no speech in it.
+   *
+   * Codex, 2026-08-23, P2: without this, a NULL transcript means both "not written down
+   * yet" and "there was never anything to write down", and the screen renders both as
+   * "Still writing down what you said…". So the processing screen would say "Nothing
+   * said — photos only" and the record it handed you to would go on claiming
+   * transcription was still running, forever, about a clip that was finished.
+   */
+  silent: boolean;
 };
 
 export type ExtraRecord = {
@@ -351,9 +361,18 @@ export async function extraRecord(
           `SELECT text FROM voice_transcript_cache WHERE capture_id = ?`, [vc.capture_id]))[0];
         transcript = tr?.text?.trim() || null;
       } catch { transcript = null; }
+      // Asked only when there is no transcript — a clip with words in it is not silent,
+      // and the table may not exist on a device that has not migrated yet.
+      let silent = false;
+      if (!transcript) {
+        try {
+          silent = !!(await db.getAll(
+            `SELECT 1 FROM voice_silent WHERE capture_id = ?`, [vc.capture_id]))[0];
+        } catch { silent = false; }
+      }
       return {
         captureId: vc.capture_id, uri, at: createdLabel(vc.captured_at_ms),
-        capturedAtMs: vc.captured_at_ms, present, transcript,
+        capturedAtMs: vc.captured_at_ms, present, transcript, silent,
       };
     }));
   }

@@ -69,7 +69,9 @@ export function RecordingsCard({ voices, startOpen }: {
           {v.transcript
             ? <Text style={[T.body, { fontSize: 15, marginTop: 6 }]} selectable>{v.transcript}</Text>
             : v.present
-              ? <Text style={[T.bodySteel, { fontSize: 13.5, marginTop: 6 }]}>{t('erec.transcriptPending')}</Text>
+              ? <Text style={[T.bodySteel, { fontSize: 13.5, marginTop: 6 }]}>
+                  {t(v.silent ? 'erec.transcriptSilent' : 'erec.transcriptPending')}
+                </Text>
               // The loss is stated by `VoiceClip` above rather than twice.
               : null}
         </View>

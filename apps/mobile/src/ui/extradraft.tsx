@@ -80,25 +80,36 @@ const st = StyleSheet.create({
   },
   // The draft banner, as the design draws it: a filled ochre disc + the state, then
   // the count and why, then the gaps as tappable "+ Add …" buttons.
+  /**
+   * TIGHTER (hadar, 2026-08-23: "the draft sign is big, taking a lot of space — as
+   * important as it is can you make it design wise nicer").
+   *
+   * It keeps its job — the state is the frame you read the rest of the screen through —
+   * and gives back the vertical space it was spending to say one short thing. The disc
+   * drops 32→26, the title 19→15 with the uppercase tracking that made it shout at 19
+   * eased off, and the detail line tucks under the head instead of sitting a full line
+   * below it. Same colours, same hierarchy, about 30pt shorter.
+   */
   draftBanner: {
     backgroundColor: CAUTION.soft, borderWidth: 1, borderColor: CAUTION.line,
-    borderRadius: 12, padding: 13,
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
   },
   /** Offline: the same slab in a NEUTRAL palette. Amber is the app's "something needs
    *  you" colour and nothing here does — it is waiting, which is the expected state on a
    *  jobsite, not a warning. */
   waitBanner: { backgroundColor: C.surfaceMuted, borderColor: C.line },
   waitDisc: { backgroundColor: C.steel },
-  draftHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  draftHead: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   draftDisc: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: CAUTION.ink,
+    width: 26, height: 26, borderRadius: 13, backgroundColor: CAUTION.ink,
     alignItems: 'center', justifyContent: 'center',
   },
   draftTitle: {
-    flex: 1, fontFamily: F.disp, fontSize: 19, color: CAUTION.ink,
-    textTransform: 'uppercase', letterSpacing: 0.8,
+    flex: 1, fontFamily: F.disp, fontSize: 15, color: CAUTION.ink,
+    textTransform: 'uppercase', letterSpacing: 0.6,
   },
-  draftCount: { fontFamily: F.bodySemi, fontSize: 14, color: C.ink, marginTop: 10 },
+  draftCount: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.ink, marginTop: 6,
+                lineHeight: 19 },
   draftWhy: { fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 2 },
   // Send, with its reason as a second line inside the button.
   sendBtn: {
@@ -472,7 +483,7 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
               <View style={st.draftBanner}>
                 <View style={st.draftHead}>
                   <View style={st.draftDisc}>
-                    <Icon name="waiting" size={17} color={C.card} />
+                    <Icon name="waiting" size={14} color={C.card} />
                   </View>
                   <Text style={st.draftTitle}>{t('draft.bannerTitle')}</Text>
                 </View>
@@ -1179,7 +1190,9 @@ function RawSection(p: ExtraDraftProps) {
           {v.transcript
             ? <Text style={[T.body, { fontSize: 15, marginTop: 4 }]} selectable>{v.transcript}</Text>
             : v.present
-              ? <Text style={[T.bodySteel, { fontSize: 13.5, marginTop: 4 }]}>{t('erec.transcriptPending')}</Text>
+              ? <Text style={[T.bodySteel, { fontSize: 13.5, marginTop: 4 }]}>
+                  {t(v.silent ? 'erec.transcriptSilent' : 'erec.transcriptPending')}
+                </Text>
               // The loss is stated by `VoiceClip` above rather than twice: one
               // missing file, one sentence.
               : null}

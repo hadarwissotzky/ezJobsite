@@ -760,6 +760,9 @@ const EN: Record<string, string> = {
   'erec.voiceN': 'Voice note {n}',
   'erec.transcript': 'What you said',
   'erec.transcriptPending': 'Still writing down what you said…',
+  // Finished, and what it found was nothing. NOT a failure — same rule silentnotice.ts
+  // sets out: he may have been shooting photos and never meant to talk.
+  'erec.transcriptSilent': 'No talking on this one',
   'erec.voicePlay': 'Play',
   'erec.voiceMissing': 'The audio isn’t on this phone anymore.',
   'erec.evidence': 'Evidence · {n}',
@@ -918,6 +921,10 @@ const EN: Record<string, string> = {
   'cap.transUploaded': 'Backed up online',
   'cap.transStt': 'Writing down what you said…',
   'cap.transSttDone': 'Written down',
+  // The recording had no speech in it. NOT a failure and the words must not imply one —
+  // same rule `silentnotice.ts` sets out: he may have been shooting photos and never
+  // meant to talk. This says what was found, and names the reading that follows from it.
+  'cap.transSttSilent': 'Nothing said — photos only',
   'cap.transAnalyze': 'Sorting out the details for you…',
   'cap.transAnalyzed': 'Details sorted',
   'cap.transOffline': 'Weak or no signal right now. Your extra is safe on this phone \u2014 it will back itself up on its own the moment you have signal. Tap Done to keep going.',
@@ -1580,6 +1587,10 @@ const EN: Record<string, string> = {
   'erec.rolePriced': 'Priced',
   'erec.roleSent': 'sent',
   'erec.approverRole': 'Approver',
+  // The client's sub-line on the record. "Approver" is a role word; this says what
+  // they DO with the document, which is the question the tile has to answer at a
+  // glance (hadar, 2026-08-23: "hard to tell who is it for and why").
+  'erec.approverWhy': 'Approves this change order',
   'erec.crewRole': 'Crew',
   'erec.kindExtra': 'Change order',
   // The screen's own name in the nav bar. It said the APP's name, which the reader
@@ -1867,6 +1878,23 @@ const EN: Record<string, string> = {
   'stuck.silentTitle': 'Nothing was heard',
   'stuck.silent': 'That recording has no words we can read. If you were adding photos, everything is saved — the work just needs describing.',
   'stuck.recordAgain': 'Record again',
+  // An EDIT whose parent extra has no jobsite yet. NOT a question and NOT a fault:
+  // the amendment is safe on the phone and rides up with the extra it belongs to.
+  // An edit never asks where the work goes — see the transition's `awaitingFiling`.
+  // WHO IS THIS FOR — the popup after the job is chosen on a new extra (hadar's flow,
+  // 2026-08-23). Skippable by design: the send sheet still asks, so this is an early
+  // chance to answer, never a new gate. See ui/clientpicksheet.tsx.
+  'clientpick.title': 'Who is this for?',
+  'clientpick.why': 'Pick the client now and this extra is ready to send when you are. You can also do it later.',
+  'clientpick.addNew': '+ Add a client',
+  'clientpick.fromContacts': 'Pick from contacts',
+  'clientpick.namePh': 'Client name',
+  'clientpick.phonePh': 'Mobile number',
+  'clientpick.phoneWhy': 'The number is how they get the approval text. You can add it later.',
+  'clientpick.save': 'Save client',
+  'clientpick.later': "I'll do this later",
+  'clientpick.backToList': 'Back to the list',
+  'cap.transHeldForJob': 'Saved to this extra. It will back up once the extra has a job \u2014 nothing to do now.',
   'cap.transNoJob': 'This is not filed to a job yet, so it cannot go up. Pick the job and it uploads on its own — everything is saved on this phone in the meantime.',
   'cap.transPickJob': 'Choose the job',
   'send.blocked.noPhotos': 'Add at least one photo — the evidence is what makes an extra believable.',
@@ -2718,6 +2746,7 @@ const ES: Record<string, string> = {
   'erec.voiceN': 'Nota de voz {n}',
   'erec.transcript': 'Lo que dijiste',
   'erec.transcriptPending': 'Todavía estamos escribiendo lo que dijiste…',
+  'erec.transcriptSilent': 'No se habló en esta',
   'erec.voicePlay': 'Reproducir',
   'erec.voiceMissing': 'El audio ya no está en este teléfono.',
   'erec.evidence': 'Evidencia · {n}',
@@ -2838,6 +2867,7 @@ const ES: Record<string, string> = {
   'cap.transUploaded': 'Respaldado en línea',
   'cap.transStt': 'Escribiendo lo que dijiste…',
   'cap.transSttDone': 'Ya quedó escrito',
+  'cap.transSttSilent': 'No se dijo nada — solo fotos',
   'cap.transAnalyze': 'Ordenando los detalles por ti…',
   'cap.transAnalyzed': 'Detalles ordenados',
   'cap.transOffline': 'Señal débil o sin conexión ahora. Tu extra está a salvo en este teléfono — se respaldará solo en cuanto tengas señal. Toca Listo para continuar.',
@@ -3374,6 +3404,7 @@ const ES: Record<string, string> = {
   'erec.rolePriced': 'Cotizó',
   'erec.roleSent': 'envió',
   'erec.approverRole': 'Aprobador',
+  'erec.approverWhy': 'Aprueba esta orden de cambio',
   'erec.crewRole': 'Cuadrilla',
   'erec.kindExtra': 'Orden de cambio',
   'erec.navTitle': 'Orden de cambio',
@@ -3607,6 +3638,17 @@ const ES: Record<string, string> = {
   'stuck.silentTitle': 'No se escuchó nada',
   'stuck.silent': 'Esa grabación no tiene palabras que podamos leer. Si estaba agregando fotos, todo está guardado — solo falta describir el trabajo.',
   'stuck.recordAgain': 'Grabar otra vez',
+  'clientpick.title': '\u00bfPara qui\u00e9n es esto?',
+  'clientpick.why': 'Elija el cliente ahora y este extra queda listo para enviar cuando usted quiera. Tambi\u00e9n puede hacerlo despu\u00e9s.',
+  'clientpick.addNew': '+ Agregar un cliente',
+  'clientpick.fromContacts': 'Elegir de contactos',
+  'clientpick.namePh': 'Nombre del cliente',
+  'clientpick.phonePh': 'N\u00famero de celular',
+  'clientpick.phoneWhy': 'El n\u00famero es c\u00f3mo reciben el mensaje de aprobaci\u00f3n. Puede agregarlo despu\u00e9s.',
+  'clientpick.save': 'Guardar cliente',
+  'clientpick.later': 'Lo hago despu\u00e9s',
+  'clientpick.backToList': 'Volver a la lista',
+  'cap.transHeldForJob': 'Guardado en este extra. Se respaldará cuando el extra tenga un trabajo \u2014 no hay nada que hacer ahora.',
   'cap.transNoJob': 'Esto aún no está asignado a un trabajo, así que no puede subir. Elija el trabajo y sube solo — todo está guardado en este teléfono mientras tanto.',
   'cap.transPickJob': 'Elegir el trabajo',
   'send.blocked.noPhotos': 'Agregue al menos una foto — la evidencia es lo que hace que un extra sea creíble.',

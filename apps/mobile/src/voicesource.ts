@@ -48,8 +48,39 @@ export const VOICE_CACHE_DDL = `
      cached_at_ms INTEGER NOT NULL
   ) STRICT`;
 
+/**
+ * "WE LISTENED AND THERE WAS NOTHING TO WRITE DOWN" — the verdict, made durable.
+ *
+ * hadar, 2026-08-23: *"now i didnt say anything because i just added photoes -- its a
+ * valid use case if there are photoes but no voice that is an indication that only
+ * photoes where added"*.
+ *
+ * `transcribeOnDevice` refuses to store an empty transcript, and it is right to: an
+ * empty row would win `capture_transcript_current`'s newest-wins and blank out a good
+ * cloud reading. But refusing SILENTLY left the processing screen with no way to tell
+ * "not transcribed yet" from "there was never anything to transcribe" — it gates its
+ * step on a row appearing in `voice_transcript_cache`, so a recording with no speech in
+ * it left "Writing down what you said…" on screen until a 90-tick timeout, and then
+ * called a finished capture slow.
+ *
+ * So silence gets its own row instead of no row. Separate table, not a nullable column
+ * on the cache: the cache's contract is `text NOT NULL`, append-once, and it is read as
+ * corroboration evidence (mandate #5). A silence marker is not a transcript and must
+ * never be selectable as one.
+ *
+ * NOT A FAULT, and nothing downstream may treat it as one — `silentnotice.ts` already
+ * establishes the wording: a recording with no speech is a legitimate thing to have
+ * made. This table says what happened, not that something went wrong.
+ */
+export const VOICE_SILENT_DDL = `
+  CREATE TABLE IF NOT EXISTS voice_silent (
+     capture_id  TEXT NOT NULL PRIMARY KEY,
+     noted_at_ms INTEGER NOT NULL
+  ) STRICT`;
+
 export async function ensureVoiceCacheSchema(db: AbstractPowerSyncDatabase) {
   await db.execute(VOICE_CACHE_DDL);
+  await db.execute(VOICE_SILENT_DDL);
 }
 
 /**

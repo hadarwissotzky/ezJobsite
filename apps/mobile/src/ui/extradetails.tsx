@@ -95,6 +95,10 @@ export type RawNote = {
   heading: string;
   /** The full spoken words. Null when nothing has been written down yet. */
   text: string | null;
+  /** The recogniser listened and there was no speech. Distinguishes "finished, and it
+   *  found nothing" from "not written down yet" — see `RecordVoice.silent`. Optional:
+   *  a producer that does not know defaults to the pending wording, as before. */
+  silent?: boolean;
   /** False when the audio the row promises is not on this device (mandate #1). */
   present: boolean;
   /** The audio file itself, so this tab can PLAY it and not only quote it. Optional
@@ -263,7 +267,9 @@ function RawNotes({ notes }: { notes: readonly RawNote[] }) {
           {n.text
             ? <Text selectable style={[T.body, { marginTop: 4 }]}>{n.text}</Text>
             : n.present
-              ? <Text style={[st.silent, { marginTop: 4 }]}>{t('erec.transcriptPending')}</Text>
+              ? <Text style={[st.silent, { marginTop: 4 }]}>
+                  {t(n.silent ? 'erec.transcriptSilent' : 'erec.transcriptPending')}
+                </Text>
               // Mandate #1: audio that is gone SAYS it is gone, and is never dressed
               // up as "still processing" — one is a wait, the other is a loss. Said
               // once: when there is a clip, `VoiceClip` above has already said it.

@@ -377,7 +377,7 @@ export function ChecklistRow({ state, label, hint, onPress }: {
  * or TypeScript merges them into one symbol and the error points at the import, not
  * at the cause.
  */
-export function PersonRow({ name, role, photoUri, kind = 'other' }: {
+export function PersonRow({ name, role, photoUri, kind = 'other', prominent }: {
   name: string;
   /** "Approver", "Crew" — the already-translated role word, not a slug. */
   role?: string;
@@ -385,6 +385,16 @@ export function PersonRow({ name, role, photoUri, kind = 'other' }: {
   /** Disc colour. `approver` is the one that carries authority (D4), so it is the
    *  one that reads differently. */
   kind?: 'approver' | 'crew' | 'other';
+  /**
+   * BIGGER, for the one person the card is about (hadar, 2026-08-23: "the tile of
+   * people involved is too small it's hard to tell who is it for and why").
+   *
+   * A 13.5pt name and a 12pt role under a 38pt disc is a list row — right for the
+   * fourth labourer on the job, wrong for the person whose money this asks for. This
+   * scales the SAME row rather than forking a second one, so the avatar rule and the
+   * initials rule stay single for the whole app, which is why this component exists.
+   */
+  prominent?: boolean;
 }) {
   // INK AND STEEL, NOT TWO GREENS. Green means "where this extra stands" and nothing
   // else (hadar, 2026-08-14); a person is not a status. The two discs were #536B49 and
@@ -392,17 +402,17 @@ export function PersonRow({ name, role, photoUri, kind = 'other' }: {
   // a mark that actually differs from the crew's.
   const bg = kind === 'approver' ? C.ink : kind === 'crew' ? C.steel : C.muted;
   return (
-    <View style={st.person}>
+    <View style={[st.person, prominent && st.personBig]}>
       {photoUri
-        ? <Image source={{ uri: photoUri }} style={st.avatar} />
+        ? <Image source={{ uri: photoUri }} style={[st.avatar, prominent && st.avatarBig]} />
         : (
-          <View style={[st.avatar, { backgroundColor: bg }]}>
-            <Text style={st.avatarT}>{initials(name)}</Text>
+          <View style={[st.avatar, prominent && st.avatarBig, { backgroundColor: bg }]}>
+            <Text style={[st.avatarT, prominent && st.avatarTBig]}>{initials(name)}</Text>
           </View>
         )}
       <View style={{ flex: 1 }}>
-        <Text style={st.rowLabel}>{name}</Text>
-        {role != null && <Text style={st.rowSub}>{role}</Text>}
+        <Text style={[st.rowLabel, prominent && st.rowLabelBig]}>{name}</Text>
+        {role != null && <Text style={[st.rowSub, prominent && st.rowSubBig]}>{role}</Text>}
       </View>
     </View>
   );
@@ -1215,6 +1225,13 @@ const st = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', backgroundColor: C.surfaceMuted,
   },
   avatarT: { fontFamily: F.disp, fontSize: 14, color: C.card },
+  // The prominent scale. One step up on every element so the row stays a row and does
+  // not become a card: 52pt disc, a name at reading size, a legible reason under it.
+  personBig: { gap: 14, minHeight: 68 },
+  avatarBig: { width: 52, height: 52, borderRadius: 26 },
+  avatarTBig: { fontSize: 19 },
+  rowLabelBig: { fontSize: 18, lineHeight: 23 },
+  rowSubBig: { fontSize: 13.5, color: C.steel, marginTop: 3, lineHeight: 18 },
 
   rail: { width: 16, alignItems: 'center' },
   dot: { width: 10, height: 10, borderRadius: 5, marginTop: 5 },

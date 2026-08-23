@@ -105,7 +105,7 @@ export function PeopleInvolved({ people, empty, onAddContact, style }: {
       {client.length > 0 && (
         <View style={st.group}>
           <Text style={st.groupLab}>{t('r5c.secClient')}</Text>
-          {client.map((p) => <PersonLine key={p.key} p={p} accent />)}
+          {client.map((p) => <PersonLine key={p.key} p={p} accent prominent />)}
         </View>
       )}
 
@@ -132,8 +132,8 @@ export function PeopleInvolved({ people, empty, onAddContact, style }: {
 
 /** One person, one row. `accent` is the client's tinted block — the one thing on this
  *  card that is not a plain row, because exactly one person here can sign (D4). */
-function PersonLine({ p, accent, divider }: {
-  p: RecordPerson; accent?: boolean; divider?: boolean;
+function PersonLine({ p, accent, divider, prominent }: {
+  p: RecordPerson; accent?: boolean; divider?: boolean; prominent?: boolean;
 }) {
   // Tappable only where there is something to change. A row that opened nothing but
   // still looked pressable would suggest the sealed record's signer can be swapped.
@@ -142,13 +142,15 @@ function PersonLine({ p, accent, divider }: {
     <RowEl
       onPress={p.onPress}
       accessibilityRole={p.onPress ? 'button' : undefined}
-      style={[st.personRow, accent && st.clientRow, divider && st.rowDivider]}
+      style={[st.personRow, accent && st.clientRow, prominent && st.clientRowBig,
+              divider && st.rowDivider]}
     >
       <View style={{ flex: 1, minWidth: 0 }}>
         {/* The kit's row, not a local copy: one avatar rule and one initials rule for
             the whole app, so a person does not get two different marks on two
             screens. */}
-        <PersonRow name={p.name} role={p.role} kind={p.kind} photoUri={p.photoUri} />
+        <PersonRow name={p.name} role={p.role} kind={p.kind} photoUri={p.photoUri}
+          prominent={prominent} />
       </View>
       {/* A VISIBLE ✕, not a swipe (hadar, 2026-08-05): a hidden gesture is what
           CLAUDE.md §1 rules out — someone who does not think in software has no reason
@@ -200,7 +202,11 @@ export function rosterOf(
   if (approver?.name.trim()) {
     seen.add(key(approver.name));
     out.push({ key: `a:${key(approver.name)}`, name: approver.name, kind: 'approver',
-               role: approver.role ?? t('erec.approverRole'), photoUri: approver.photoUri,
+               // "Approver" names a role; it does not answer "why is this person here".
+               // The default now says what they actually do with this document. An
+               // explicit role passed by the caller (a client TYPE, say "General
+               // contractor") still wins — that is more specific, not less.
+               role: approver.role ?? t('erec.approverWhy'), photoUri: approver.photoUri,
                onPress: approver.onPress, onRemove: approver.onRemove });
   }
   for (const p of others) {
@@ -256,6 +262,10 @@ const st = {
     borderWidth: 1, borderColor: C.line,
     borderRadius: 10, paddingHorizontal: 10, marginBottom: 2,
   },
+  /** The client's block, at the size the one person the extra is FOR deserves
+   *  (hadar, 2026-08-23). Only the padding changes here; the row inside scales
+   *  itself — see `PersonRow`'s `prominent`. */
+  clientRowBig: { paddingHorizontal: 12, paddingVertical: 6 },
   rowDivider: { borderTopWidth: 1, borderTopColor: C.line },
   // 44pt (mandate #3) — this is tapped with gloves on.
   removeX: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },

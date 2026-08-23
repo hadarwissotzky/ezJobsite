@@ -126,8 +126,38 @@ export async function recognizeFile(
       mod.addListener('error', (e: any) => {
         void logDiag(db, 'file.err',
           JSON.stringify(e?.error ?? e?.message ?? e ?? 'unknown').slice(0, 200));
+        /**
+         * `no-speech` IS AN ANSWER (hadar, 2026-08-23 — build 13 still sat on
+         * "Writing down what you said…" on a recording he never spoke into).
+         *
+         * Every other exit here means the recogniser COULD NOT READ the file:
+         * unsupported device, permission refused, import failure, timeout. This one
+         * means it read the file fine and there was no speech in it — the Web Speech
+         * code for exactly that, which expo-speech-recognition follows. Collapsing it
+         * into `null` with the can't-run cases is what made silence indistinguishable
+         * from "not finished yet", and the caller's empty-transcript branch — the one
+         * that records the verdict — was never reached.
+         *
+         * An empty transcript, NOT a stored one: `transcribeOnDevice` still refuses to
+         * write `text: ''` into the cache. This only lets it see what happened.
+         */
+        if (e?.error === 'no-speech') {
+          return done({ text: '', segments: null, language: null, durationSec: null });
+        }
         done(null);
       }),
+      /**
+       * `end` STAYS `null` — it is not evidence of silence (Codex, 2026-08-23, P1).
+       *
+       * I briefly made this branch report an empty transcript as belt-and-braces to the
+       * `no-speech` error above. It is not safe and the "we can tell afterwards from the
+       * diag" defence was wrong: `done()` settles AND removes every listener, so an
+       * early `end` does not merely guess — it actively locks the guess in and prevents
+       * a final result or a real error arriving later from correcting it. A decode
+       * failure that emits no `error` would be recorded as "nothing was said" about
+       * audio that has speech in it, which on this product is a false statement about
+       * evidence. Only the explicit `no-speech` verdict says the recogniser listened.
+       */
       mod.addListener('end', () => {
         if (!settled) void logDiag(db, 'file.end', 'ended with no final result');
         done(null);
@@ -307,7 +337,17 @@ export async function transcribeOnDevice(
   // Silence is a real result and must not become a stored transcript: an empty
   // row would win `capture_transcript_current`'s newest-wins and blank out a
   // good cloud reading. 368 refuses it server-side too; this is the near guard.
-  if (!t.text.trim()) return { ok: false, reason: 'empty' };
+  if (!t.text.trim()) {
+    // Record the VERDICT even though there is no transcript to store. Without this the
+    // only trace of "we listened and heard nothing" is the absence of a row, which is
+    // indistinguishable from "not done yet" — and the processing screen, which waits on
+    // that row, waited forever. See VOICE_SILENT_DDL for why it is its own table.
+    await db.execute(
+      `INSERT OR IGNORE INTO voice_silent (capture_id, noted_at_ms) VALUES (?, ?)`,
+      [captureId, Date.now()]
+    ).catch(() => { /* pre-migration device: the screen falls back to its timeout */ });
+    return { ok: false, reason: 'empty' };
+  }
 
   const segs = t.segments ? JSON.stringify(t.segments) : null;
   await db.execute(

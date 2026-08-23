@@ -59,6 +59,7 @@ import { cachedDeveloper, refreshDeveloper } from './src/devflag';
 // foreground, so this is the only surface that can carry a question arriving mid-session.
 import { MessageToast } from './src/ui/messagetoast';
 // The one unfinished state that cannot fix itself: processed, silent, and still empty.
+import { ClientPickSheet } from './src/ui/clientpicksheet';
 import { SilentNoticeSheet } from './src/ui/silentnoticesheet';
 import { ensureSilentNoticeSchema, markSilentNoticeShown, pendingSilentNotices,
          type SilentNotice } from './src/silentnotice';
@@ -86,6 +87,8 @@ import { ensurePairSchema, linkPair } from './src/pair';
 import { backfillPairOutbox, drainPairOutbox, ensurePairSyncSchema, enqueuePair,
          hydratePairs } from './src/pairsync';
 import { ensureAugmentSchema, noteAugment, appendAugmentDesc } from './src/augmentlog';
+import { ensureAugmentRetrySchema, markAugmentPending, clearAugmentPending,
+         retryPendingAugments } from './src/augmentretry';
 import { clientSmsBody, type ClientSmsKind } from './src/clientsms';
 import { reachable, remindTargets } from './src/remindrecipients';
 import { sendSms } from './src/sms';
@@ -547,6 +550,7 @@ async function ensureLocalSchema(
   await ensureConsentSchema(db);
   await ensurePairSchema(db);
   await ensureAugmentSchema(db);
+  await ensureAugmentRetrySchema(db);
   // R2: the device's own copy of transcripts, so the price read-back keeps
   // working in a basement (mandate #7). Fetching is opportunistic; a miss is an
   // empty, flagged price field, never a blocked screen.
@@ -703,6 +707,13 @@ export default function App() {
   // When set, the capture screen AUGMENTS this existing extra (adds photos/voice as
   // appended evidence) instead of minting a new extra (hadar, 2026-07-25).
   const [augmentCoId, setAugmentCoId] = React.useState<string | null>(null);
+  /** Step 6 of a new extra: who is this for. Set by `fileWalkTo` after the job is
+   *  chosen; `onDone` starts the processing screen once it is answered or skipped. */
+  const [clientPick, setClientPick] = React.useState<null | {
+    coId: string; projectId: string;
+    roster: Array<{ id: string; name: string }>;
+    onDone: () => void; busy: boolean;
+  }>(null);
   // REQ-PROC8: the capture whose AI proposal is being reviewed, or null.
   const [review, setReview] = React.useState<string | null>(null);
   // Walkthrough saved to the Inbox and awaiting a job: a change order MUST belong to a
@@ -758,6 +769,9 @@ export default function App() {
    *  the deep link lands before the database is open, and a flag waits where a call is
    *  lost. */
   const [pendingCapture, setPendingCapture] = React.useState(false);
+  /** The last home-screen quick action taken, so AppDelegate's cold-start retries of the
+   *  SAME press collapse to one open. See the `ezjobsite://capture` branch below. */
+  const quickActionNonce = React.useRef<string | null>(null);
   /**
    * Which door the current full-screen overlay (Settings or Plans) was opened through, so
    * its back button returns there. The drawer closes itself before running any of its
@@ -1026,7 +1040,26 @@ export default function App() {
        *   · on a cold start this URL can arrive before the app is `ready`, and a flag
        *     waits where a function call would simply be lost.
        */
-      if (url.startsWith('ezjobsite://capture')) { setPendingCapture(true); return; }
+      if (url.startsWith('ezjobsite://capture')) {
+        /**
+         * ONE NONCE, ONE OPEN (code review, 2026-08-23).
+         *
+         * AppDelegate now posts this URL SIX times across the first seven seconds,
+         * because a cold-start shortcut is dropped outright when no JS listener exists
+         * yet and a single 0.35 s post missed it every time the bridge was slower than
+         * that. The retries all carry the same `n=`, so taking a nonce once makes the
+         * rest free — and stops a late retry re-opening the camera on a man who already
+         * pressed back. A second long-press is a new invocation with a new nonce and is
+         * honoured. A URL with no nonce (an older build's shortcut) is always taken.
+         */
+        const n = url.split('n=')[1] ?? null;
+        if (n) {
+          if (quickActionNonce.current === n) return;
+          quickActionNonce.current = n;
+        }
+        setPendingCapture(true);
+        return;
+      }
       connector.sessionFromUrl(url).catch(() => { /* not a sign-in link */ });
     };
     void Linking.getInitialURL().then(take);
@@ -1933,7 +1966,22 @@ const finishAugmentById = async (changeOrderId: string, addedIds: string[]) => {
         `SELECT text FROM voice_transcript_cache WHERE capture_id IN (${marks})`, addedIds);
       text = said.map((r) => r.text?.trim()).filter(Boolean).join('\n\n');
     }
-    if (text) await appendAugmentDesc(db, changeOrderId, text);
+    if (text) {
+      await appendAugmentDesc(db, changeOrderId, text);
+      await clearAugmentPending(db, changeOrderId).catch(() => { /* best effort */ });
+    } else {
+      /**
+       * NOTHING TO APPEND *YET* IS NOT NOTHING TO APPEND (Codex, 2026-08-23, P1).
+       *
+       * This read the proposal once, fell back to the cache once, and if both were empty
+       * it silently gave up forever — so an edit finished on the device's silence verdict
+       * could land the contractor on a record missing the words the SERVER went on to
+       * transcribe a minute later. The evidence was always safe; the write-up was not.
+       *
+       * Marked, and retried on the sync tick for a bounded day. See augmentretry.ts.
+       */
+      await markAugmentPending(db, changeOrderId, addedIds).catch(() => { /* best effort */ });
+    }
   } catch { /* the evidence is committed; a missing addendum never un-saves it */ }
   await refresh();
   void openRecord(changeOrderId);
@@ -1958,7 +2006,8 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
   const anchorCapId = a.anchorCaptureId ?? null;
   if (anchorCoId) await rehomeDraftExtra(db, anchorCoId, projId);
   await refresh();
-  if (anchorCoId) {
+  const startProcessing = () => {
+    if (!anchorCoId) return;
     setTransition({
       ids: a.ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
       uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
@@ -1966,7 +2015,31 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
         photoDone: 0, photoTotal: 0, voiceDone: 0, voiceTotal: 0,
       blocked: false, isAugment: false,
     });
+  };
+  /**
+   * WHO IS THIS FOR — hadar's step 6 (2026-08-23), and it did not exist.
+   *
+   * The client was only ever asked for at SEND time. On an account with no roster that
+   * is the worst moment to find out: the scope is written, the price is set, Send is
+   * tapped, and only then is there nobody to send to. The live database has the phone
+   * account owning this job with ZERO approvers while all 30 roster rows sit under the
+   * other account, so the dead end is real and it is today's.
+   *
+   * BETWEEN THE JOB AND THE PROCESSING SCREEN, which is where his sequence puts it, and
+   * the processing screen only starts once this is answered or skipped — one modal at a
+   * time. Skipping is free: the send sheet still asks. This is an early chance, never a
+   * new gate (mandate #3 — he is on a ladder).
+   */
+  if (anchorCoId) {
+    try {
+      const roster = await listRoster(db, projId);
+      setClientPick({ coId: anchorCoId, projectId: projId,
+                      roster: roster.map((r) => ({ id: r.id, name: r.name })),
+                      onDone: startProcessing, busy: false });
+      return;
+    } catch { /* no roster readable — never let this stand between him and the upload */ }
   }
+  startProcessing();
 };
 
 /**
@@ -2966,6 +3039,18 @@ const checkClientMessages = async () => {
   const transitionRef = React.useRef<any>(null);
   const [transition, setTransition] = React.useState<null | {
     ids: string[]; anchorCaptureId: string | null; coId: string;
+    /**
+     * The anchor recording held no speech — set by the poll when `voice_silent` has a
+     * row for it. Optional because it is DISCOVERED, never declared: no caller can know
+     * it at the moment it opens this screen.
+     */
+    anchorSilent?: boolean;
+    /**
+     * The added captures are held because the PARENT extra has no jobsite yet — the
+     * uploader's `AWAITING_FILING` park. On an edit this is not a hold to act on, it is
+     * a fact to state: the amendment is safe and rides up with the extra it belongs to.
+     */
+    heldForFiling?: boolean;
     uploaded: boolean; transcribed: boolean; analyzed: boolean; offline: boolean;
     stalled: boolean; uploadDone: number; uploadTotal: number;
     lastError: string | null; blocked: boolean;
@@ -3035,6 +3120,12 @@ const checkClientMessages = async () => {
     // (a text-only extra) means nothing to transcribe or analyse — mirror the
     // `transcribed` initializer above.
     let analyzedSeen = transition.anchorCaptureId === null;
+    // Latches once the anchor recording is known to hold no speech. Separate from `tr`
+    // because the two mean different things to the person reading the screen: `tr` is
+    // "this step is finished", `silentSeen` is "and what it found was nothing".
+    let silentSeen = false;
+    /** Latches when the added captures are waiting on the PARENT extra's jobsite. */
+    let heldSeen = false;
     // True while drainOutbox refuses to upload on POLICY (on cellular with
     // cellular-upload off — the default). That is not offline and not slow: it will
     // never finish here, so surface the Wi-Fi escape at once (Codex P2).
@@ -3074,6 +3165,38 @@ const checkClientMessages = async () => {
       try { return (await Network.getNetworkStateAsync()).isConnected === false; }
       catch { return false; }  // can't tell → don't cry offline
     };
+    /**
+     * "EVERY recording in this capture was silent" — never "the first one was".
+     *
+     * Codex, 2026-08-23, P1: the first version asked only about `anchorCaptureId`, and
+     * the anchor is `audioSegments[0]` / `voiceIds[0]`. A session whose opening clip is
+     * silent and whose SECOND clip carries the actual explanation would have been
+     * declared finished on the strength of the empty one — the screen leaving early on
+     * exactly the recording that had the most to say. A verdict about a session has to
+     * be a verdict about all of it.
+     *
+     * `capture_commit` is the authority on which of these ids are voice. Zero voice rows
+     * returns false, not vacuous truth: "nothing to be silent about" is the anchor-less
+     * case, and that is already handled by `tr`'s initialiser.
+     *
+     * ISOLATED try/catch, deliberately. Folded into the caller's block, a missing
+     * `voice_silent` table (partial migration) threw past the cloud-proposal lookup that
+     * shares it, so the one device that most needed the server to release the gate was
+     * the one device that could never reach it. A failure here costs this answer only.
+     */
+    const allVoicesSilent = async (): Promise<boolean> => {
+      try {
+        const voices = await db.getAll<{ capture_id: string }>(
+          `SELECT capture_id FROM capture_commit
+            WHERE capture_id IN (${marks}) AND modality = 'voice'`, transition.ids);
+        if (!voices.length) return false;
+        const ids = voices.map((v) => v.capture_id);
+        const q = ids.map(() => '?').join(',');
+        const silent = await db.getAll<{ n: number }>(
+          `SELECT count(*) AS n FROM voice_silent WHERE capture_id IN (${q})`, ids);
+        return (silent[0]?.n ?? 0) >= ids.length;
+      } catch { return false; }
+    };
     (async () => {
       void kickDrain();  // start the upload NOW, don't wait for the 15s timer
       for (let tick = 0; alive && tick < 90; tick++) {
@@ -3088,10 +3211,71 @@ const checkClientMessages = async () => {
           lastN = n;
           if (firstCount < 0) firstCount = n;
           up = n === 0;
+          /**
+           * AN EDIT NEVER ASKS FOR A JOB (hadar, 2026-08-23, option (a)).
+           *
+           * `uploader.ts` parks a capture whose project is the Inbox sentinel as
+           * AWAITING_FILING, because `capture.project_id` references `project(id)` on
+           * the server and the Inbox has no row — sending it is a guaranteed FK
+           * rejection. `onAugmentCapture` inherits the project from the PARENT extra,
+           * so editing an extra that is itself unfiled parked every added capture, the
+           * outbox never drained, `up` never came true and the screen hung forever —
+           * with or without audio. That is the stall, and it is why nothing has
+           * uploaded since the parent extra was created in the Inbox.
+           *
+           * The park is right and stays: those bytes genuinely cannot be sent yet. What
+           * was wrong is the SCREEN treating a known, benign wait as an unfinished
+           * upload and demanding the contractor answer a filing question in the middle
+           * of an amendment. An edit is not a create; it does not get to ask where the
+           * work belongs, because it already belongs wherever its parent does.
+           *
+           * Only when EVERY remaining row is held for that reason. A genuine failure
+           * mixed in still holds the screen, because that one is not benign.
+           */
+          if (!up && transition.isAugment) {
+            const held = (await db.getAll<{ n: number }>(
+              `SELECT COUNT(*) AS n FROM capture_outbox
+                WHERE capture_id IN (${marks}) AND last_error_code = 'AWAITING_FILING'`,
+              transition.ids))[0]?.n ?? 0;
+            if (held > 0 && held >= n) { up = true; heldSeen = true; }
+          }
           if (!tr) {
             tr = !!(await db.getAll(
               `SELECT 1 FROM voice_transcript_cache WHERE capture_id = ?`,
               [transition.anchorCaptureId]))[0];
+            /**
+             * SILENCE IS AN ANSWER, NOT A PENDING STATE (hadar, 2026-08-23: "i didnt
+             * say anything because i just added photoes").
+             *
+             * The cache row above is the ONLY evidence this poll ever had that
+             * transcription finished, and `transcribeOnDevice` deliberately writes no
+             * row when the recording holds no speech. So a man who turned the mic on,
+             * said nothing and shot three photos watched "Writing down what you said…"
+             * for ninety seconds and was then told his finished capture was slow.
+             *
+             * `voice_silent` carries that verdict. Reading it here makes the step
+             * complete for the honest reason instead of the screen timing out, and
+             * `anchorSilent` lets the row say what actually happened.
+             */
+            if (tr) {
+              /**
+               * WORDS OUTRANK THE EARLIER SILENCE, and the verdict must be WITHDRAWN,
+               * not merely stopped from being re-asserted (code review, 2026-08-23).
+               *
+               * `silentSeen` latches across ticks, `tr` is recomputed inside each one.
+               * Without this line, a cloud transcript landing in the cache after silence
+               * had already latched would set `tr` from the row above and skip the block
+               * below — leaving `silentSeen` stale at true. The screen would then print
+               * "Nothing said — photos only" over a recording that HAS a transcript, and
+               * the gate would stop waiting for the AI pass that had just succeeded.
+               * A false statement about evidence is the one thing this screen may
+               * never make.
+               */
+              silentSeen = false;
+            } else {
+              silentSeen = await allVoicesSilent();
+              if (silentSeen) tr = true;
+            }
           }
           // Once the bytes are up, the only thing left is the cloud AI pass. Poll
           // it EVERY tick until it lands — it is the gate, not a bonus. Look across
@@ -3120,7 +3304,32 @@ const checkClientMessages = async () => {
         // nothing — and on a recording with nothing in it, on-device STT writes no cache
         // row at all, so `tr` could never turn true and the screen sat out its full 90
         // seconds telling a contractor it was slow when it was finished.
-        const ready = up && (tr || analyzedSeen) && analyzedSeen;
+        /**
+         * AND SILENCE ALSO ENDS THE WAIT (hadar, 2026-08-23: "version 13 it's stuck").
+         *
+         * The rule above hands the server the last word on whether a recording had
+         * speech, which is right when there is something to wait FOR. When the
+         * recogniser has already reported it heard nothing, there is not: the server
+         * refuses an empty transcript too (368), so no structured row is ever written,
+         * `analyzedSeen` can never latch, and the screen spends its full ninety seconds
+         * before calling a finished capture slow. That is the stall.
+         *
+         * THE TRADE, STATED: cloud STT is better than on-device, so a recording this
+         * device called silent could in principle hold speech the server would catch.
+         * The server still processes it and the description still grows if it does —
+         * what changes is only that the SCREEN stops standing there waiting for it.
+         */
+        /**
+         * …AND A SERVER THAT HAS NOT RECEIVED THE BYTES CANNOT BE WAITED ON.
+         *
+         * `heldSeen` means the added captures are parked until the parent extra has a
+         * jobsite, so the cloud pass will never run on them — no proposal is coming, and
+         * requiring `analyzedSeen` here would hang the edit for its full ninety seconds
+         * exactly as the upload gate did before it. The addendum is not lost: the
+         * finalizer marks it pending and `retryPendingAugments` applies it once the
+         * extra is filed and the words arrive.
+         */
+        const ready = up && (tr || analyzedSeen) && (analyzedSeen || silentSeen || heldSeen);
         // Only ask the radio once we've actually waited a beat and are still not
         // ready — and if we're online, re-kick the push.
         let offline = false;
@@ -3204,6 +3413,7 @@ const checkClientMessages = async () => {
           } catch { /* diagnostic only */ }
         }
         setTransition((t) => t && { ...t, uploaded: up, transcribed: tr,
+                                    anchorSilent: silentSeen, heldForFiling: heldSeen,
                                     analyzed: analyzedSeen, offline,
                                     uploadDone, uploadTotal, lastError,
                                     photoDone, photoTotal, voiceDone, voiceTotal,
@@ -4961,13 +5171,39 @@ const checkClientMessages = async () => {
           if (pd.attempted) console.log('drain pairs:', JSON.stringify(pd));
           const ph = await hydratePairs(db, connector.client, null);
           if (ph.pulled) { console.log('hydrate pairs:', JSON.stringify(ph)); await refresh(); }
-          const ev = await hydrateEvidence(db, connector.client, pid, data.user.id);
+          /**
+           * ACCOUNT-WIDE, like the two hydrates above it (code review, 2026-08-23).
+           *
+           * `pid` is `projectIdRef.current`, which is INBOX_ID until a job has been
+           * opened — and a device that has just signed in has opened none. Passing it
+           * scoped the pull to a project that owns nothing, so the evidence graph this
+           * whole path exists to restore stayed empty on precisely the device the bug
+           * was reported from. Same argument, same fix, same `null`.
+           */
+          const ev = await hydrateEvidence(db, connector.client, null, data.user.id);
           if (ev.decisions || ev.versions || ev.captures) {
             console.log('hydrate evidence:', JSON.stringify(ev));
           }
+          /**
+           * THE ADDENDA AN EDIT STILL OWES. `finishAugmentById` used to read the cloud
+           * proposal once and give up forever if it had not landed yet; this is the
+           * retry that makes "the description still grows" a true statement instead of
+           * an assumption. Bounded to a day inside the module. See augmentretry.ts.
+           */
+          const ra = await retryPendingAugments(db, {
+            nowMs: Date.now(),
+            fetchProposal: (ids) => fetchLatestProposalForCaptures(connector.client, ids),
+            append: async (coId, text) => { await appendAugmentDesc(db, coId, text); },
+          }).catch(() => ({ appended: 0, stillPending: 0 }));
+          if (ra.appended) {
+            console.log('augment addenda applied late:', JSON.stringify(ra));
+            await refresh();
+          }
           // Then the bytes, a bounded batch per tick — photos only, because photos are
           // what the cards and the record screen draw. See cacheMirroredPhotos.
-          const mm = await cacheMirroredPhotos(db, connector.client, { projectId: pid });
+          // Unscoped for the same reason as the hydrate above: a mirror row this device
+          // pulled account-wide must not be filtered out of the download by INBOX_ID.
+          const mm = await cacheMirroredPhotos(db, connector.client, {});
           if (mm.downloaded || mm.failed) {
             console.log('mirror media:', JSON.stringify(mm));
             if (mm.downloaded) await refresh();
@@ -6980,6 +7216,50 @@ const checkClientMessages = async () => {
   // bytes: a screen that always looks like it is working is a screen that can lie.
   // Decision: mockup look on the happy path, full detail retained underneath, and the
   // offline/stalled/blocked branch still takes over with plain words + a Done button.
+  /**
+   * STEP 6, and it renders ABOVE the processing screen on purpose: `fileWalkTo` holds
+   * the transition back until this is answered, so the two never stack. Answer or skip,
+   * then `onDone` starts the upload.
+   */
+  if (clientPick) {
+    const cp = clientPick;
+    const finish = () => { setClientPick(null); cp.onDone(); };
+    return (
+      <ClientPickSheet
+        scope={coRowsRef.current.find((c) => c.id === cp.coId)?.scope ?? T('erec.untitled')}
+        roster={cp.roster}
+        busy={cp.busy}
+        onSkip={finish}
+        onPickContact={pickContactValue}
+        onPick={async (c) => {
+          setClientPick({ ...cp, busy: true });
+          // The name is the key `who_directed` stores — same rule as saveClientApprover,
+          // so a client picked here and one picked in the send sheet are the same person.
+          const r = await setDraftClient(db, cp.coId, c.name).catch(
+            () => ({ ok: false as const, reason: 'could not save' }));
+          if (!r.ok) setFiled(r.reason);
+          await markApproverUsed(db, c.id).catch(() => { /* recency is not load-bearing */ });
+          await refresh();
+          finish();
+        }}
+        onAdd={async (name, phone) => {
+          setClientPick({ ...cp, busy: true });
+          try {
+            await saveClientApprover(db, { projectId: cp.projectId, name, phone: phone || null });
+            const r = await setDraftClient(db, cp.coId, name);
+            if (!r.ok) setFiled(r.reason);
+            await refresh();
+          } catch (e: any) {
+            // LOUD, never silent: a client he typed and did not get is worse than being
+            // asked again, because he will believe it is on the extra.
+            setFiled(String(e?.message ?? e));
+          }
+          finish();
+        }}
+      />
+    );
+  }
+
   if (transition) {
     const t = transition;
     // Every row tracks a REAL signal. Transcription only exists when there is an
@@ -6988,8 +7268,14 @@ const checkClientMessages = async () => {
     const steps: { done: boolean; doing: string; doneKey: string }[] = [
       { done: true, doing: 'cap.transSaved', doneKey: 'cap.transSaved' },
       { done: t.uploaded, doing: 'cap.transUpload', doneKey: 'cap.transUploaded' },
+      // "Written down" is a claim about words, so it cannot be printed over a recording
+      // that had none (hadar, 2026-08-23). When the poll finds the anchor was silent the
+      // row still COMPLETES — nothing more is coming — but it says what was actually
+      // found, and the "photos only" reading is the point: no voice on an extra that has
+      // photos means photos are all that were added.
       ...(t.anchorCaptureId !== null
-        ? [{ done: t.transcribed, doing: 'cap.transStt', doneKey: 'cap.transSttDone' }] : []),
+        ? [{ done: t.transcribed, doing: 'cap.transStt',
+             doneKey: t.anchorSilent ? 'cap.transSttSilent' : 'cap.transSttDone' }] : []),
       // The AI pass belongs to a new extra AND to a voice edit (which now re-summarises
       // what was added). A photos-only edit ran no AI, so it claims no such step.
       ...((!t.isAugment || t.anchorCaptureId !== null)
@@ -7011,11 +7297,24 @@ const checkClientMessages = async () => {
     // no row. So the bytes sit there until a human picks the job — which means the
     // screen was promising an arrival that could not happen, and printing a dev string
     // to a contractor instead of the one thing he can do about it.
-    const awaitingFiling = !!t.lastError && /AWAITING_FILING/i.test(t.lastError);
+    /**
+     * NEVER ON AN EDIT (hadar, 2026-08-23, option (a)): "if it is an edit not a create
+     * new … if a jobsite is already set don't display the jobsite selection/creation."
+     *
+     * The filing prompt belongs to a NEW extra, which genuinely has nowhere to go until
+     * a human says where. An amendment already has a home — its parent's — and asking
+     * again in the middle of an edit both blocks the screen and asks a question the
+     * answer to which is not the contractor's to give here. `heldForFiling` says the
+     * same fact calmly instead, and the extra carries its amendment up whenever it is
+     * itself filed.
+     */
+    const awaitingFiling =
+      !t.isAugment && !!t.lastError && /AWAITING_FILING/i.test(t.lastError);
     // Any surfaced error puts the screen into the reassure-and-let-them-proceed state;
     // the message below picks the right plain-language words for which kind it is.
-    const trouble = t.offline || t.stalled || t.blocked || !!t.lastError;
+    const trouble = t.offline || t.stalled || t.blocked || !!t.lastError || !!t.heldForFiling;
     const warnKey = awaitingFiling ? 'cap.transNoJob'
+      : t.heldForFiling ? 'cap.transHeldForJob'
       : t.blocked ? 'cap.transBlocked'
       : t.offline ? 'cap.transOffline'
       : netRetry ? 'cap.transRetry'
@@ -7141,7 +7440,7 @@ const checkClientMessages = async () => {
                   is not debugging information to the person holding the phone — it is
                   evidence that something broke. A genuine stall keeps it: there the
                   detail is the only clue anyone has. */}
-              {t.lastError && !netRetry && !awaitingFiling && (
+              {t.lastError && !netRetry && !awaitingFiling && !t.heldForFiling && (
                 <Text style={s.trWarnErr}>{t.lastError}</Text>
               )}
               {/* THE ACT THAT ENDS IT, offered where the problem is stated. Filing is
