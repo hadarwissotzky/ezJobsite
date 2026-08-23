@@ -21,3 +21,12 @@ ios/Pods/
 .expo/
 **/*.xcuserdatad
 **/DerivedData/
+
+# Added 2026-08-23 after an EAS build died in "Configure expo-updates" with
+# "Runtime version calculated on local machine not equal to runtime version
+# calculated during build". Xcode writes .xcodeproj/project.xcworkspace/ locally;
+# ios/.gitignore excludes it, so it never reaches the builder — but fingerprint
+# was still hashing it here. Measured: hashing it made the local ios/ hash
+# 1c8b1533, ignoring it gives 1cb86fb2, which is what a clean checkout produces.
+# This is derived IDE state, not app identity, so it belongs on this list.
+**/*.xcodeproj/project.xcworkspace/

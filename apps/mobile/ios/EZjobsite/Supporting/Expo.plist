@@ -11,7 +11,7 @@
     <key>EXUpdatesURL</key>
     <string>https://u.expo.dev/2627bce9-ca41-4f4e-b50f-6d810818e651</string>
     <key>EXUpdatesRuntimeVersion</key>
-    <string>file:fingerprint</string>
+    <string>1.0.0</string>
     <key>EXUpdatesRequestHeaders</key>
     <dict>
       <key>expo-channel-name</key>
