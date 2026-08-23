@@ -525,22 +525,37 @@ export async function closeLandedDrafts(
      * being offered"; it was not, and that is the one loss mandate #1 calls
      * unforgivable.
      *
-     * The exact key was there all along. `setDraftStamp` writes
-     * `started_at_ms = stamp.capturedAtMs`, and `performCapture` writes
-     * `captured_at_ms = stamp.capturedAtMs` from the SAME session stamp — one instant,
-     * at millisecond resolution, taken once when the screen mounted. Rows carrying it
-     * are this session's and no other's.
+     * THE KEY IS EACH ITEM'S OWN TIME, and my first attempt at this got it wrong
+     * (hadar, 2026-08-23: "I know that the co was fully processed" — and the recovery
+     * prompt was offering it anyway, in builds 17-20).
      *
-     * A draft that never got its stamp keeps the screen-mount time in `started_at_ms`,
-     * matches nothing, and stays open. That is the safe direction: offered again, not
-     * deleted.
+     * I replaced the window with `captured_at_ms = capture_draft.started_at_ms`, on the
+     * reasoning that `setDraftStamp` writes `started_at_ms = stamp.capturedAtMs` and
+     * `performCapture` writes `captured_at_ms` from the same stamp. The first half is
+     * true; the second is not. Every caller overrides it per item —
+     * `stamp: { ...a.stamp, capturedAtMs: ph.atMs }` — so `captured_at_ms` is the
+     * SHUTTER, not the session. The equality matched nothing, this branch stopped
+     * closing anything at all, and a walk that had landed perfectly went on being
+     * offered back as unfinished evidence.
+     *
+     * `capture_draft_item.at_ms` is the other end of that same assignment: the photo's
+     * shutter, the segment's start. So the honest question is item by item — is there a
+     * committed capture stamped at this exact millisecond? — and the draft has landed
+     * only when EVERY item can answer yes.
+     *
+     * That is stronger than the range it replaced, not weaker. Two photos cannot share
+     * a millisecond shutter on one device, and requiring all of them makes a
+     * coincidental match by an unrelated session essentially impossible — which is the
+     * whole point, because `closeDraft` deletes the media.
      */
     try {
+      const times = Array.from(new Set(items.map((it) => it.atMs)));
+      const marks2 = times.map(() => '?').join(',');
       const n = (await db.getAll<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM capture_commit
-          WHERE captured_at_ms = ? AND (? IS NULL OR owner_id = ?)`,
-        [h.startedAtMs, ownerId ?? null, ownerId ?? null]))[0]?.n ?? 0;
-      if (n >= items.length) {
+        `SELECT COUNT(DISTINCT captured_at_ms) AS n FROM capture_commit
+          WHERE captured_at_ms IN (${marks2}) AND (? IS NULL OR owner_id = ?)`,
+        [...times, ownerId ?? null, ownerId ?? null]))[0]?.n ?? 0;
+      if (times.length > 0 && n >= times.length) {
         await closeDraft(db, h.draftId, 'committed');
         closed++; byWindow++;
       }
