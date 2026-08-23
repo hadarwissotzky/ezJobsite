@@ -53,6 +53,30 @@ export const PAIR_OUTBOX_DDL = [
       last_error_code    TEXT,
       last_error_text    TEXT
    ) STRICT`,
+
+  /**
+   * WHAT HAS ALREADY BEEN SENT — because the outbox cannot answer that question
+   * (code review, 2026-08-23).
+   *
+   * `drainPairOutbox` DELETES the row on success and `backfillPairOutbox` treats the
+   * absence of a row as "never sent". Those two are the same condition, so every cold
+   * start re-queued every pairing this device holds, forever. The header's claim that
+   * the backfill "costs one query once the queue has drained" was false by
+   * construction.
+   *
+   * It is not merely wasted RPCs: `pair_outbox` is one of `OUTBOX_TABLES`, so a fresh
+   * backlog every launch makes `inFlight` non-zero, which BLOCKS the OTA gate and makes
+   * `claimDevice` refuse a device handover until the whole backlog re-uploads. A
+   * bookkeeping bug was holding two unrelated features shut.
+   *
+   * A marker rather than "stop deleting": the outbox carries retry state and is meant
+   * to drain to empty, and an empty outbox is what `inFlight` reads. This table only
+   * ever answers "already done".
+   */
+  `CREATE TABLE IF NOT EXISTS pair_synced (
+      mutation_id  TEXT NOT NULL PRIMARY KEY,
+      synced_at_ms INTEGER NOT NULL
+   ) STRICT`,
 ] as const;
 
 export async function ensurePairSyncSchema(db: AbstractPowerSyncDatabase): Promise<void> {
@@ -107,6 +131,12 @@ export async function drainPairOutbox(
         p_role: row.role, p_at_ms: row.at_ms, p_project_id: row.project_id,
       });
       if (error) throw error;
+      // MARKER FIRST, then the delete. A kill between the two leaves the row queued and
+      // re-uploads it, which `ingest_pair_v1` collapses; the other order would forget
+      // the send and hand the backfill its backlog back.
+      await db.execute(
+        `INSERT OR IGNORE INTO pair_synced (mutation_id, synced_at_ms) VALUES (?, ?)`,
+        [row.mutation_id, Date.now()]);
       await db.execute(`DELETE FROM pair_outbox WHERE mutation_id = ?`, [row.mutation_id]);
       r.uploaded++;
     } catch (e: any) {
@@ -183,8 +213,10 @@ export async function hydratePairs(
  * and every photo already on the handset would stay stranded there — which is most of
  * them.
  *
- * Idempotent through `enqueuePair`'s derived mutation id, so running it on every launch
- * costs one query once the queue has drained.
+ * Idempotent, and it now actually is: the guard checks `pair_synced` as well as
+ * `pair_outbox`. Checking the outbox alone was checking the same condition the drain
+ * clears, so every launch re-queued the entire backlog — see `pair_synced`'s DDL for
+ * what that was holding shut.
  *
  * The project id comes from `capture_commit`, which is where this device recorded it.
  * A pairing whose capture is not committed locally is skipped rather than guessed at:
@@ -203,6 +235,9 @@ export async function backfillPairOutbox(
          JOIN capture_commit cc ON cc.capture_id = p.capture_id
         WHERE NOT EXISTS (
           SELECT 1 FROM pair_outbox o WHERE o.mutation_id = 'pm-' || p.pair_id || '-' || p.capture_id
+        )
+          AND NOT EXISTS (
+          SELECT 1 FROM pair_synced s WHERE s.mutation_id = 'pm-' || p.pair_id || '-' || p.capture_id
         )`);
     let queued = 0;
     for (const r of rows) {

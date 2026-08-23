@@ -282,4 +282,21 @@ test('a long company name and address cannot buy a third segment', () => {
     `a real message must never exceed two segments, got ${smsSegments(long)}`);
   assert.match(long, /Open it here/, 'the link survives the trim');
   assert.match(long, /Reply STOP/, 'the opt-out survives the trim — the campaign depends on it');
+  /**
+   * THE TRIM MUST ACTUALLY TRIM (code review, 2026-08-23).
+   *
+   * The three assertions above all passed while the trim branch was unreachable: the
+   * candidate was built with a `…`, which forces UCS-2 at 67 chars a segment, so every
+   * shortened body still measured 4+ segments and the code fell through to dropping the
+   * job line. A two-segment message with no `Job:` line satisfies "<= 2 segments", "the
+   * link survives" and "the opt-out survives" perfectly — which is why the bug lived.
+   *
+   * So assert the OUTCOME the feature exists for: a shortened job line is present, and
+   * the whole body is still GSM-7.
+   */
+  assert.match(long, /Job: 1155 Stanyan Street/,
+    'a trimmed job line must survive — dropping it entirely is the fall-through, not the feature');
+  assert.match(long, /Job:[^\n]*\.\.\./,
+    'the trimmed line ends in periods, never the non-GSM-7 ellipsis character');
+  assert.ok(isGsm7(long), 'one non-GSM-7 character doubles the segment count');
 });

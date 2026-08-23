@@ -513,14 +513,33 @@ export async function closeLandedDrafts(
      * again, and weighed against a prompt that cries wolf every launch until he learns
      * to dismiss it, which is the failure `DraftSummary.recoverable` names.
      *
-     * The window is the draft's own, plus a minute: commits happen after the last
-     * bank, and a slow write must not fall outside its own session.
+     * THE SESSION IS MATCHED EXACTLY, NOT GUESSED AT WITH A TIME WINDOW
+     * (code review, 2026-08-23 — HIGH).
+     *
+     * This counted EVERY `capture_commit` row whose `captured_at_ms` fell in
+     * `[startedAtMs, updatedAtMs + 60s]`, regardless of which session wrote it, and
+     * `closeDraft` DELETES the draft's media directory. So a walk that was killed
+     * before it committed could be erased by an unrelated extra that happened to
+     * commit enough captures in the same minute — the app destroying the only copy of
+     * bytes it never committed. The comment above says the worst case is "a walk not
+     * being offered"; it was not, and that is the one loss mandate #1 calls
+     * unforgivable.
+     *
+     * The exact key was there all along. `setDraftStamp` writes
+     * `started_at_ms = stamp.capturedAtMs`, and `performCapture` writes
+     * `captured_at_ms = stamp.capturedAtMs` from the SAME session stamp — one instant,
+     * at millisecond resolution, taken once when the screen mounted. Rows carrying it
+     * are this session's and no other's.
+     *
+     * A draft that never got its stamp keeps the screen-mount time in `started_at_ms`,
+     * matches nothing, and stays open. That is the safe direction: offered again, not
+     * deleted.
      */
     try {
       const n = (await db.getAll<{ n: number }>(
         `SELECT COUNT(*) AS n FROM capture_commit
-          WHERE captured_at_ms >= ? AND captured_at_ms <= ?`,
-        [h.startedAtMs, h.updatedAtMs + 60_000]))[0]?.n ?? 0;
+          WHERE captured_at_ms = ? AND (? IS NULL OR owner_id = ?)`,
+        [h.startedAtMs, ownerId ?? null, ownerId ?? null]))[0]?.n ?? 0;
       if (n >= items.length) {
         await closeDraft(db, h.draftId, 'committed');
         closed++; byWindow++;

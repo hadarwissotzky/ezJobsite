@@ -50,24 +50,45 @@ public class AppDelegate: ExpoAppDelegate {
   // travels (see `application(_:open:)` above). JS therefore needs one more case in a
   // listener it already has, rather than a new bridge.
   //
-  // THE DELAY IS NOT A FLOURISH. On a COLD start the shortcut fires while React Native is
-  // still coming up, and `Linking.getInitialURL()` cannot see it — a quick action does not
-  // populate `launchOptions[.url]`, so an immediately-posted URL lands before any JS
-  // listener exists and is lost. The app side ALSO holds the intent in state until it is
-  // ready (see `pendingCapture` in App.tsx), so this is belt and braces: either half alone
-  // would drop the cold case some of the time.
+  // ONE DELAYED POST WAS NOT ENOUGH, AND THE "BELT AND BRACES" CLAIM WAS WRONG
+  // (code review, 2026-08-23).
+  //
+  // On a COLD start the shortcut fires while React Native is still coming up. A quick
+  // action does not populate `launchOptions[.url]`, so `Linking.getInitialURL()` cannot
+  // recover it, and `RCTOpenURLNotification` is DROPPED outright when no JS listener is
+  // subscribed yet. `pendingCapture` in App.tsx only helps once that listener has fired,
+  // so it is not an independent second net — it is downstream of the very event that got
+  // lost. A single 0.35 s post therefore did nothing at all whenever the bridge took
+  // longer than 350 ms to mount, which on a jobsite handset is the ordinary case.
+  //
+  // So post REPEATEDLY across the window a cold start actually takes. Each attempt
+  // carries the SAME nonce, and JS ignores a nonce it has already taken, so the retries
+  // cost nothing once one has landed and cannot re-open capture after the user has
+  // navigated away. A second long-press is a new invocation with a new nonce and is
+  // honoured normally.
+  //
+  // Still no native module and no new dependency: this is the same RCTLinkingManager
+  // path the sign-in link travels, posted more than once.
+  private static let quickActionRetryDelays: [TimeInterval] = [0.35, 1.0, 2.0, 3.5, 5.0, 7.0]
+
   public override func application(
     _ application: UIApplication,
     performActionFor shortcutItem: UIApplicationShortcutItem,
     completionHandler: @escaping (Bool) -> Void
   ) {
-    guard shortcutItem.type == "com.hilo.ezjobsite.capture",
-          let url = URL(string: "ezjobsite://capture") else {
+    guard shortcutItem.type == "com.hilo.ezjobsite.capture" else {
       completionHandler(false)
       return
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-      RCTLinkingManager.application(application, open: url, options: [:])
+    let nonce = UUID().uuidString
+    guard let url = URL(string: "ezjobsite://capture?n=\(nonce)") else {
+      completionHandler(false)
+      return
+    }
+    for delay in Self.quickActionRetryDelays {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+        RCTLinkingManager.application(application, open: url, options: [:])
+      }
     }
     completionHandler(true)
   }

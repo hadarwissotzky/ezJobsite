@@ -229,13 +229,24 @@ export function clientSmsBody(o: ClientSmsInput): string {
   const body = `${what}${job}${cta}${closing}${stop}`;
   if (smsSegments(body) <= 2 || !job) return body;
 
-  // Trim the job line until it fits, ellipsis included so nothing looks truncated by
-  // accident. Bounded by construction: `job` only ever shrinks.
+  /**
+   * Trim the job line until it fits, with three PERIODS and not an ellipsis character
+   * (code review, 2026-08-23).
+   *
+   * `…` is outside GSM-7 — the very thing the header 150 lines up warns about, and the
+   * warning even names "no ellipsis character". One of them re-encodes the whole body
+   * as UCS-2 at 67 characters a segment, so every candidate built here came back at 4+
+   * segments, the loop could never return, and the fall-through dropped the job line
+   * every single time. The feature has never once worked: a client got no job line on
+   * exactly the messages where a trimmed one would have fitted.
+   *
+   * Bounded by construction: `label` only ever shrinks.
+   */
   let label = (o.jobLabel as string).trim();
   while (label.length > 8) {
     label = label.slice(0, -6);
     const shorter = `${what}
-Job: ${label}…${cta}${closing}${stop}`;
+Job: ${label}...${cta}${closing}${stop}`;
     if (smsSegments(shorter) <= 2) return shorter;
   }
   // Nothing left to give: drop the job line entirely rather than send three segments.
