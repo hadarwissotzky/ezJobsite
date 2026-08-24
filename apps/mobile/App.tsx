@@ -7520,6 +7520,12 @@ const checkClientMessages = async () => {
               omitted — only the four foreground icons were supplied. */}
           <Icon name="hardhat" size={62} />
 
+          {/* Last of four on a NEW extra. An AUGMENT is not that sequence: it has no
+              job question and no owner question, so numbering it would describe a
+              walk he did not take. */}
+          {!t.isAugment && (
+            <Text style={s.flowStepOnDark}>{T({ k: 'flow.stepOf', p: { n: '4', of: '4' } } as any)}</Text>
+          )}
           <Text style={s.trTitle}>
             {T(t.isAugment ? 'cap.transTitleAug' : 'cap.transTitle')}
           </Text>
@@ -7808,6 +7814,23 @@ const checkClientMessages = async () => {
         {paywallEl}
         <ScrollView contentContainerStyle={{ padding: 18, paddingTop: 8, paddingBottom: 40 }}
           keyboardShouldPersistTaps="handled">
+          {/**
+            * WHERE HE IS IN THE SEQUENCE (hadar, 2026-08-24: "its subtle but these are
+            * multi steps 1. record 2. select job site 3. select owner 4. progress").
+            *
+            * Four screens follow one Done tap and each one used to arrive as if it were
+            * the only thing happening. That is fine when you have seen it before and
+            * disorienting the first time: a man who has just finished talking is handed
+            * a question, then another question, then a progress ring, with nothing
+            * saying how many more there are or that there is an end.
+            *
+            * A quiet line, not a stepper bar: it answers "how much longer" without
+            * becoming furniture on a screen whose job is one question. Step 1 is the
+            * recording he just finished — counted, because it is the step he DID, and
+            * leaving it out would make "1 of 3" mean something different from what he
+            * just lived through.
+            */}
+          <Text style={s.flowStep}>{T({ k: 'flow.stepOf', p: { n: '2', of: '4' } } as any)}</Text>
           <Text style={s.jpTitle}>{T('assign.title')}</Text>
           <Text style={s.jpSub}>{T('jobpick.sub')}</Text>
 
@@ -12576,6 +12599,14 @@ const s = StyleSheet.create({
   waitAmt: { fontFamily: 'BarlowCondensed_700Bold', fontSize: 19, color: '#151A1E' },
   waitRow2: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
   waitMeta: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#5E666E' },
+  /** The step line on the post-record screens. Label-quiet: it reports, it does not
+   *  compete with the question underneath it. */
+  flowStep: { fontFamily: 'Inter_600SemiBold', fontSize: 12, letterSpacing: 1.1,
+              color: '#8c959f', textTransform: 'uppercase', marginBottom: 6 },
+  /** Same line on the processing screen, which sits on the cream page like the rest. */
+  flowStepOnDark: { fontFamily: 'Inter_600SemiBold', fontSize: 12, letterSpacing: 1.1,
+                    color: '#8c959f', textTransform: 'uppercase', marginBottom: 8,
+                    textAlign: 'center' },
   homeTabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   homeTab: { flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: '#D5D0C7',
     backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },

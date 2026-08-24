@@ -88,6 +88,8 @@ const EN: Record<string, string> = {
   'cap.fromGalleryTag': 'FROM PHONE',
   'cap.closeSheet': 'Close',
   'assign.saved': 'Saved on this phone',
+  // The post-record sequence: record -> job -> owner -> progress (2026-08-24).
+  'flow.stepOf': 'Step {n} of {of}',
   'assign.title': 'Which job is this for?',
   'assign.sub': 'Saved safe on this phone. A change order belongs to a job — pick one, or make it.',
   'assign.search': 'Search jobs or address',
@@ -2199,6 +2201,7 @@ const ES: Record<string, string> = {
   'cap.fromGalleryTag': 'DEL TELÉFONO',
   'cap.closeSheet': 'Cerrar',
   'assign.saved': 'Guardado en este teléfono',
+  'flow.stepOf': 'Paso {n} de {of}',
   'assign.title': '¿De qué trabajo es esto?',
   'assign.sub': 'Guardado seguro en este teléfono. Un cambio pertenece a un trabajo — elige uno o créalo.',
   'assign.search': 'Busca trabajo o dirección',

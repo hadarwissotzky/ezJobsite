@@ -72,6 +72,11 @@ export function ClientPickSheet(props: {
       }
     >
       <View style={{ paddingBottom: 4 }}>
+        {/* Third of four — see the note on the job picker's step line. */}
+        <Text style={{ fontFamily: F.dispSemi, fontSize: 12, letterSpacing: 1.1,
+          color: C.steel, textTransform: 'uppercase', marginBottom: 6 }}>
+          {t({ k: 'flow.stepOf', p: { n: '3', of: '4' } } as any)}
+        </Text>
         <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink }} numberOfLines={2}>
           {props.scope}
         </Text>
