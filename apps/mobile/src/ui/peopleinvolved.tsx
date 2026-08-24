@@ -293,13 +293,41 @@ const st = {
     // The client is distinguished by POSITION and a HEADING instead, which survive
     // sunlight, colour-blindness and a screenshot.
     backgroundColor: C.surfaceMuted,
-    borderWidth: 1, borderColor: C.line,
-    borderRadius: 10, paddingHorizontal: 10, marginBottom: 2,
+    /**
+     * FULL-BLEED, UNBORDERED, SQUARE (hadar, 2026-08-24: "the selected people should
+     * be gray as it is now but the full width of the section without border and
+     * rounded [borders]").
+     *
+     * It was an inset pill: a rounded, outlined chip floating inside the card with a
+     * 14pt margin of cream around it. Three edges saying the same thing -- the fill,
+     * the border and the radius -- when the fill alone already says it, and the pill
+     * repeated the card-inside-a-card shape the scope block was just fixed for.
+     *
+     * The negative margin cancels T.card's 14pt gutter so the grey runs to the card's
+     * own edges; the matching padding puts the CONTENT back on the gutter, so only the
+     * fill moves outward and the text still lines up with every other row.
+     */
+    marginHorizontal: -14, paddingHorizontal: 14,
+    marginBottom: 2,
   },
-  /** The client's block, at the size the one person the extra is FOR deserves
-   *  (hadar, 2026-08-23). Only the padding changes here; the row inside scales
-   *  itself — see `PersonRow`'s `prominent`. */
-  clientRowBig: { paddingHorizontal: 12, paddingVertical: 6 },
+  /**
+   * The client's block, at the size the one person the extra is FOR deserves (hadar,
+   * 2026-08-23). Only the padding lives here; the row inside scales itself — see
+   * `PersonRow`'s `prominent`.
+   *
+   * 10% SHORTER (hadar, same note: "the selected items height should be 10% shorter").
+   *
+   * The arithmetic, because the number is not arbitrary and the next person will want
+   * to know where it came from: the height is driven by kit's `personBig` minHeight of
+   * 60 plus this padding top and bottom. It was 6 + 60 + 6 = 72. 72 x 0.9 = 64.8, so
+   * the padding becomes 2.5 a side: 2.5 + 60 + 2.5 = 65.
+   *
+   * The padding is what moves, NOT `personBig`. That minHeight is the shared avatar
+   * row used across the app, and shrinking it here would shrink every person on every
+   * screen to fix one block. The horizontal padding is gone entirely -- `clientRow`
+   * now owns the gutter, since it is the thing that bleeds.
+   */
+  clientRowBig: { paddingVertical: 2.5 },
   rowDivider: { borderTopWidth: 1, borderTopColor: C.line },
   // 44pt (mandate #3) — this is tapped with gloves on.
   removeX: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
