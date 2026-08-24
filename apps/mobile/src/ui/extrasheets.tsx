@@ -79,6 +79,12 @@ function PickRow({ p, onPick }: {
 export function ClientSheet(props: {
   visible: boolean;
   editable: boolean;
+  /** Why adding is refused, when it is. Shown instead of the add rows so a closed
+   *  door is never a blank space. Defaults to the sent-and-frozen wording. */
+  frozenReasonKey?: string;
+  /** Invite someone to the company — the same act as the send sheet's row. Omitted
+   *  where there is nothing to invite anyone to. */
+  onInvite?: () => void;
   /** The client already on this extra, if any. */
   name: string | null;
   clientType: ClientType | null;
@@ -217,6 +223,21 @@ export function ClientSheet(props: {
             * list of ways to name a person, which is what they are, and they sit where
             * the eye already is instead of after the fold.
             */}
+          {/**
+            * NEVER HIDDEN SILENTLY (hadar, 2026-08-24: "i still cannot add anyone
+            * else"). These rows were gated on `editable` and simply vanished when it
+            * was false, which left him tapping "Add someone else" and reaching a sheet
+            * that offered nothing and explained nothing — indistinguishable from a
+            * broken screen, and impossible to diagnose from a release build where the
+            * console is stripped. A capability that is refused must SAY it is refused
+            * and why; that is the same rule the frozen editors already follow.
+            */}
+          {!props.editable && (
+            <Text style={st.emptyBody}>
+              {t(props.frozenReasonKey ?? 'det.frozenSentBody')}
+            </Text>
+          )}
+
           {props.editable && !adding && (
             <>
               <Pressable style={st.addRow} onPress={() => { void fromPhone(); }}
@@ -229,6 +250,22 @@ export function ClientSheet(props: {
                 <Icon name="personAdd" size={18} color={C.brand} />
                 <Text style={st.addRowT}>{t('client.addNewPerson')}</Text>
               </Pressable>
+              {/**
+                * THE THIRD WAY, and it already existed everywhere but here (hadar,
+                * 2026-08-24: "i cannot invite"). `inviteFromSend` in App.tsx does the
+                * whole job — the company-id fallback for the empty local `company`
+                * table, the free-tier member cap checked BEFORE the RPC, the share
+                * sheet — and was reachable only from the send sheet. This is the same
+                * act, offered where he is standing when he thinks of it, not a second
+                * implementation of it.
+                */}
+              {props.onInvite && (
+                <Pressable style={st.addRow} onPress={props.onInvite}
+                  accessibilityRole="button">
+                  <Icon name="send" size={18} color={C.brand} />
+                  <Text style={st.addRowT}>{t('r5c.inviteTeam')}</Text>
+                </Pressable>
+              )}
             </>
           )}
 

@@ -8263,6 +8263,9 @@ const checkClientMessages = async () => {
         // the existing client's type question (hadar, 2026-08-05).
         mode={clientOpen ?? 'client'}
         onPickContact={pickContactValue}
+        // The invite act, reachable from where he is rather than only from the send
+        // sheet. Same function, same cap check, same share sheet.
+        onInvite={() => { void inviteFromSend(); }}
         onClose={() => setClientOpen(null)}
         onSave={(v) => { void saveClient(record.id, v, clientOpen ?? 'client'); }}
       />
