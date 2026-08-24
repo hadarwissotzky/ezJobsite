@@ -114,6 +114,7 @@ import type { ExtraDetailField } from './src/ui/extranegotiation';
 import { sendReadiness, UNTITLED_SCOPE } from './src/sendreadiness';
 import { mergeTimeline, openCount, type MergedEvent } from './src/eventtimeline';
 import { SettingsScreen } from './src/ui/settingsscreen';
+import { extraState, extraBucket, isClosed } from './src/extrabucket';
 import { billingTenantId, createInvite, ensureBillingTenant, ensureOwnCompany,
          listMembers, listMyCompanies, myCompany, resolveMyCompany, setActiveCompany,
          type Member } from './src/company';
@@ -9278,13 +9279,14 @@ const checkClientMessages = async () => {
    * the contractor he is waiting on a client he has just told to stop looking. A new
    * terminal status that is not listed becomes a lie about the one state it is not.
    */
-  const stateKey = (status: string, questions: number):
-    'approved' | 'declined' | 'cancelled' | 'draft' | 'needs' | 'waiting' =>
-    status === 'approved' ? 'approved'
-    : status === 'declined' ? 'declined'
-    : status === 'cancelled' ? 'cancelled'
-    : status === 'draft' ? 'draft'
-    : questions > 0 ? 'needs' : 'waiting';
+  /**
+   * ONE TABLE, NOT THREE CHAINS (2026-08-24). This was a chain of `if`s ending in
+   * `questions > 0 ? 'needs' : 'waiting'`, which silently absorbed every status nobody
+   * remembered — `cancelled` and `superseded` both read as "waiting for a yes". See
+   * `extrabucket.ts` for the three defects that came out of that default and why the
+   * answer is an exhaustive `Record` TypeScript can refuse.
+   */
+  const stateKey = (status: string, questions: number) => extraState(status, questions);
   const stateColor: Record<string, { bg: string; fg: string; emoji: string; label: string }> = {
     waiting:  { bg: 'rgba(164,122,63,0.13)', fg: '#A47A3F', emoji: '⏳', label: T('act.chipWaiting') },
     needs:    { bg: 'rgba(109,127,137,0.14)', fg: '#5E7079', emoji: '💬', label: T('act.chipNeeds') },
@@ -9294,6 +9296,11 @@ const checkClientMessages = async () => {
     // NEUTRAL, not the declined red: a decline is the client's refusal, a withdrawal is
     // his own act carried out. Same reasoning as the record screen's banner tone.
     cancelled: { bg: '#EFEBE3',              fg: '#5E666E', emoji: '↩︎', label: T('act.chipCancelled') },
+    // `stateKey` can return this since 2026-08-24 — a retired version used to take the
+    // old chain's default and read as "waiting". These maps are indexed by its output
+    // WITHOUT a fallback (`stateColor[st].label`), so a missing entry is a crash, not a
+    // wrong colour.
+    superseded: { bg: '#EFEBE3',             fg: '#5E666E', emoji: '↺', label: T('co.chip.superseded') },
   };
   // Outlined status pill for the Home rows — the mockup's look (thin colored
   // border + colored text, no fill), in the design-system palette (global.css).
@@ -9304,6 +9311,7 @@ const checkClientMessages = async () => {
     draft:    { border: '#c3bab2', text: '#6b625b' },
     declined: { border: '#e0a59c', text: '#8B5148' },
     cancelled: { border: '#c3bab2', text: '#6b625b' },
+    superseded: { border: '#c3bab2', text: '#6b625b' },
   };
   /**
    * THE CHIP EVERY EXTRA ROW WEARS — one source for Home, the company feed AND the
@@ -9365,6 +9373,9 @@ const checkClientMessages = async () => {
       declined: { color: '#8B3A2C', bg: '#F3D3CD', line: '#F3D3CD' },
       // Withdrawn: ended, by him. Neutral, same weight as the rest.
       cancelled: { color: '#4A4A46', bg: '#E2DED6', line: '#E2DED6' },
+      // Replaced by a newer version. Ended, and not by anybody's decision — the same
+      // neutral as withdrawn.
+      superseded: { color: '#4A4A46', bg: '#E2DED6', line: '#E2DED6' },
     };
     const c = map[st] ?? map.draft;
     // "Not sent" rather than "Created" for a draft: what a draft needs to say on a row
@@ -9811,8 +9822,9 @@ const shortJob = (name: string): string => {
      * already says, and a fifth pill on a jobsite phone buys a distinction he can read
      * off the card anyway.
      */
-    const closedList = homeExtras.filter(
-      (e) => e.status === 'declined' || e.status === 'cancelled');
+    // `isClosed` covers superseded as well — a retired version is ended, and it used to
+    // sit in Waiting because nothing named it.
+    const closedList = homeExtras.filter((e) => isClosed(e.status));
     // The hero totals money still OUT ON THE CLIENT — sent only. A draft has never
     // left the phone, so it is NOT "waiting for approval" and must not inflate this.
     const outstanding = [...questioned, ...waitingList].reduce((sum, e) => sum + (e.amount_cents ?? 0), 0);
@@ -10521,7 +10533,7 @@ const shortJob = (name: string): string => {
     const list = homeExtras.filter((e) => {
       if (activityTab === 'all') return true;
       const k = stateOf(e);
-      if (activityTab === 'closed') return k === 'declined' || k === 'cancelled';
+      if (activityTab === 'closed') return isClosed(e.status);
       return k === activityTab;
     });
     return (
@@ -10627,12 +10639,17 @@ const shortJob = (name: string): string => {
    *
    * Ended is ended, whoever ended it — the chip on each card says which.
    */
+  /**
+   * The same table Home uses. It used to be its own chain with its own default, and its
+   * own version of the bug: declined and withdrawn extras counted toward the job's
+   * "Awaiting response" tile — a number he reads to decide whether to chase anybody.
+   *
+   * A DRAFT STILL COUNTS AS `needs` HERE, which differs from Home and is deliberate: on
+   * a job screen an unfinished extra IS work owed, and it is his own.
+   */
   const jobBucket = (c: LedgerRow): 'needs' | 'waiting' | 'approved' | 'closed' => {
-    if (c.status === 'approved') return 'approved';
-    if (c.status === 'declined' || c.status === 'cancelled') return 'closed';
-    if (c.status === 'draft') return 'needs';
-    const disp = displayStatus(c.status, { openQuestions: questions[c.id] ?? 0 });
-    return disp === 'discussing' ? 'needs' : 'waiting';
+    const b = extraBucket(c.status, questions[c.id] ?? 0);
+    return b === 'draft' ? 'needs' : b;
   };
   const jobNeeds = coRows.filter((c) => jobBucket(c) === 'needs');
   const jobWaiting = coRows.filter((c) => jobBucket(c) === 'waiting');
