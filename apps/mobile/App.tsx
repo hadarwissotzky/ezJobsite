@@ -792,7 +792,8 @@ export default function App() {
    */
   const [settingsFrom, setSettingsFrom] = React.useState<'drawer' | 'screen'>('drawer');
   // The Job screen's pill filter (hadar, 2026-07-23 mockup): null = all extras.
-  const [jobFilter, setJobFilter] = React.useState<null | 'needs' | 'waiting' | 'approved'>(null);
+  const [jobFilter, setJobFilter] =
+    React.useState<null | 'needs' | 'waiting' | 'approved' | 'closed'>(null);
   const [labelFilter, setLabelFilter] = React.useState<string | null>(null); // REQ-PM14 Jobs-list filter
   const [jobsArchived, setJobsArchived] = React.useState(false);             // REQ-PM4 Jobs-list archived view
   const [archivedCards, setArchivedCards] = React.useState<ProjectCard[]>([]);
@@ -3837,7 +3838,8 @@ const checkClientMessages = async () => {
   // camera-first workspace + capture grid.
   const [nav, setNav] = React.useState<'home' | 'project' | 'jobs' | 'activity' | 'notifications'>('home');
   // The Activity page's status tab (hadar, 2026-07-23 mockup): all extras, filtered.
-  const [activityTab, setActivityTab] = React.useState<'all' | 'waiting' | 'approved' | 'needs'>('all');
+  const [activityTab, setActivityTab] =
+    React.useState<'all' | 'waiting' | 'approved' | 'needs' | 'closed'>('all');
   // Home's summary-chip filter. Filters the Home list IN PLACE — tapping a chip must
   // never navigate away (hadar 2026-07-27: "it takes me to another page"). null = show
   // every section; a value shows only that one, and tapping the live chip clears it.
@@ -10384,9 +10386,22 @@ const shortJob = (name: string): string => {
     const tabLabel: Record<typeof activityTab, string> = {
       all: T('act.tabAll'), waiting: T('act.tabWaiting'),
       approved: T('act.tabApproved'), needs: T('act.tabNeeds'),
+      closed: T('home.closedChip'),
     };
-    const TABS: Array<typeof activityTab> = ['all', 'waiting', 'approved', 'needs'];
-    const list = homeExtras.filter((e) => activityTab === 'all' || stateOf(e) === activityTab);
+    const TABS: Array<typeof activityTab> = ['all', 'waiting', 'approved', 'needs', 'closed'];
+    /**
+     * `closed` matches TWO state keys — declined and cancelled — so it cannot be the
+     * plain equality every other tab uses (hadar, 2026-08-24). Before `stateKey` named
+     * `cancelled`, a withdrawn extra answered `stateOf(e) === 'waiting'` and showed under
+     * Waiting here as well; now it answers neither, so without this tab it would be
+     * reachable only through All.
+     */
+    const list = homeExtras.filter((e) => {
+      if (activityTab === 'all') return true;
+      const k = stateOf(e);
+      if (activityTab === 'closed') return k === 'declined' || k === 'cancelled';
+      return k === activityTab;
+    });
     return (
       <View style={s.homeC}>
         <View style={s.dashHdr}>
@@ -10478,8 +10493,21 @@ const shortJob = (name: string): string => {
   // attempt); the bottom nav is absolutely positioned so no inline overlay can
   // shove it. The capture-workspace tools survive inside the same scroll.
   const jobProj = projects.find((p) => p.id === projectId);
-  const jobBucket = (c: LedgerRow): 'needs' | 'waiting' | 'approved' => {
+  /**
+   * CLOSED IS ITS OWN BUCKET HERE TOO (hadar, 2026-08-24: "under the job section i
+   * should be able to see the closed as well").
+   *
+   * The same fall-through Home had: everything that is not approved, not a draft and
+   * not discussing landed in `waiting`, so a DECLINED extra and a WITHDRAWN one both
+   * counted toward "Awaiting response" on the job's own stat tile. The tile is a
+   * number he reads to decide whether to chase anybody, and it was counting work
+   * nobody is going to answer.
+   *
+   * Ended is ended, whoever ended it — the chip on each card says which.
+   */
+  const jobBucket = (c: LedgerRow): 'needs' | 'waiting' | 'approved' | 'closed' => {
     if (c.status === 'approved') return 'approved';
+    if (c.status === 'declined' || c.status === 'cancelled') return 'closed';
     if (c.status === 'draft') return 'needs';
     const disp = displayStatus(c.status, { openQuestions: questions[c.id] ?? 0 });
     return disp === 'discussing' ? 'needs' : 'waiting';
@@ -10487,10 +10515,12 @@ const shortJob = (name: string): string => {
   const jobNeeds = coRows.filter((c) => jobBucket(c) === 'needs');
   const jobWaiting = coRows.filter((c) => jobBucket(c) === 'waiting');
   const jobApproved = coRows.filter((c) => jobBucket(c) === 'approved');
+  const jobClosed = coRows.filter((c) => jobBucket(c) === 'closed');
   const jobTotal = coRows.reduce((n, c) => n + (c.amount_cents ?? 0), 0);
   const jobShown = jobFilter === 'needs' ? jobNeeds
     : jobFilter === 'waiting' ? jobWaiting
-    : jobFilter === 'approved' ? jobApproved : coRows;
+    : jobFilter === 'approved' ? jobApproved
+    : jobFilter === 'closed' ? jobClosed : coRows;
   const jobMapUrl = jobProj
     ? (jobMaps[jobProj.id]
         ?? mapUrlFor(process.env.EXPO_PUBLIC_STATIC_MAP_URL, jobProj.lat, jobProj.lng))
@@ -11082,6 +11112,13 @@ const shortJob = (name: string): string => {
               { k: 'needs',    icon: 'statPerson' as const, label: T('job.statNeeds'),    n: jobNeeds.length },
               { k: 'waiting',  icon: 'statClock'  as const, label: T('job.statWaiting'),  n: jobWaiting.length },
               { k: 'approved', icon: 'statCheck'  as const, label: T('job.statApproved'), n: jobApproved.length },
+              // A FOURTH TILE ONLY WHEN THERE IS SOMETHING IN IT. A job where nothing
+              // was ever declined or withdrawn should not carry a permanent zero — it
+              // reads as a category he is failing at rather than one that is empty.
+              ...(jobClosed.length
+                ? [{ k: 'closed' as const, icon: 'statClock' as const,
+                     label: T('job.statClosed'), n: jobClosed.length }]
+                : []),
             ] as const).map((st) => (
               <Pressable key={st.k} style={[s.jsStat, jobFilter === st.k && s.jsStatOn]}
                 accessibilityRole="button"
@@ -11146,6 +11183,7 @@ const shortJob = (name: string): string => {
               { k: 'needs',    label: T('job.pillNeeds') },
               { k: 'waiting',  label: T('job.pillWaiting') },
               { k: 'approved', label: T('job.pillApproved') },
+              { k: 'closed',   label: T('home.closedChip') },
             ] as const).map((f) => (
               <Pressable key={String(f.k)}
                 style={[s.jsPill, jobFilter === f.k && s.jsPillOn]}
