@@ -49,7 +49,7 @@ import { canDelete, canSend, chipKey, displayStatus, stageOf } from '../extralif
 import { canSendExtra } from '../extraprocstate';
 import { t } from '../i18n';
 import {
-  APP_NAME, Button, Card, MoneyBlock, ChecklistRow, PhotoGrid, Row, ScreenHeader, Section,
+  APP_NAME, Button, Card, Chip, MoneyBlock, ChecklistRow, PhotoGrid, Row, ScreenHeader, Section,
   StatusBanner, SyncedPill, VoiceClip, type ChecklistState, type PhotoTile, type RowTone,
 } from './kit';
 import { C, F, T, label as labelStyle, money as moneyStyle, tint } from './theme';
@@ -90,18 +90,49 @@ const st = StyleSheet.create({
    * eased off, and the detail line tucks under the head instead of sitting a full line
    * below it. Same colours, same hierarchy, about 30pt shorter.
    */
+  /**
+   * THE STUCK BANNER — and it is now the ONLY user of these styles.
+   *
+   * The draft state used to share them, so two passes of shrinking (19 -> 15 -> 12)
+   * were aimed at the draft case and quietly made THIS one smaller too. Nobody asked
+   * for that, and it is the wrong direction here: this block appears when the upload is
+   * parked, the phone is offline, or the analysis will not finish — the cases that
+   * genuinely need him. Now that a draft no longer wears amber, this can look like what
+   * it is. Restored to the size the draft banner had before I started.
+   */
   draftBanner: {
     backgroundColor: CAUTION.soft, borderWidth: 1, borderColor: CAUTION.line,
-    borderRadius: 12, paddingHorizontal: 11, paddingVertical: 9,
+    borderRadius: 12, padding: 13,
   },
   /** Offline: the same slab in a NEUTRAL palette. Amber is the app's "something needs
    *  you" colour and nothing here does — it is waiting, which is the expected state on a
    *  jobsite, not a warning. */
   waitBanner: { backgroundColor: C.surfaceMuted, borderColor: C.line },
   waitDisc: { backgroundColor: C.steel },
-  draftHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  /**
+   * THE DRAFT STATE IS METADATA, NOT AN ALERT.
+   *
+   * It was a `CAUTION.soft` card with a `CAUTION.line` border, a filled ochre disc, an
+   * icon and uppercase display type — which is, precisely, how this app says SOMETHING
+   * NEEDS YOU. I spent two passes shrinking the type inside it and hadar reported the
+   * same thing all three times, because the size was never what made it read as an
+   * error. The furniture and the palette did.
+   *
+   * A draft is not a problem. It is where every extra starts and where most of them sit
+   * while he works. Dressing the most ordinary state in the product as a warning also
+   * costs amber its meaning, so that when the genuinely alarming states appear —
+   * offline, stalled, blocked, waiting to be filed — they look like everything else.
+   * Those keep the tinted banner; this no longer competes with them, or with the
+   * extra's own title directly above it.
+   */
+  draftState: {},
+  draftChipRow: { flexDirection: 'row' },
+  draftStateLine: {
+    fontFamily: F.body, fontSize: 14, color: C.steel, marginTop: 8, lineHeight: 20,
+  },
+  draftHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   draftDisc: {
-    width: 20, height: 20, borderRadius: 10, backgroundColor: CAUTION.ink,
+    width: 32, height: 32, borderRadius: 16, backgroundColor: CAUTION.ink,
     alignItems: 'center', justifyContent: 'center',
   },
   /**
@@ -117,11 +148,11 @@ const st = StyleSheet.create({
    * subject of it.
    */
   draftTitle: {
-    flex: 1, fontFamily: F.dispSemi, fontSize: 12, color: CAUTION.ink,
-    textTransform: 'uppercase', letterSpacing: 1.1,
+    flex: 1, fontFamily: F.disp, fontSize: 17, color: CAUTION.ink,
+    textTransform: 'uppercase', letterSpacing: 0.8,
   },
-  draftCount: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.ink, marginTop: 5,
-                lineHeight: 19 },
+  draftCount: { fontFamily: F.bodySemi, fontSize: 14, color: C.ink, marginTop: 9,
+                lineHeight: 20 },
   draftWhy: { fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 2 },
   // Send, with its reason as a second line inside the button.
   sendBtn: {
@@ -492,18 +523,20 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
               // buttons in a warning-coloured card also read as the thing to press on
               // a screen whose actual next step is Edit or Send — which is how a
               // status banner turned into the busiest control on the page.
-              <View style={st.draftBanner}>
-                <View style={st.draftHead}>
-                  <View style={st.draftDisc}>
-                    <Icon name="waiting" size={11} color={C.card} />
-                  </View>
-                  <Text style={st.draftTitle}>{t('draft.bannerTitle')}</Text>
+              <View style={st.draftState}>
+                {/* A GHOST PILL, NOT A WARNING BLOCK (hadar, 2026-08-23, third pass:
+                    "still the draft section looks like a big error notice").
+                    `Chip outline` is the app's existing word for this — its own comment
+                    says it "reports a fact ... it is not itself a coloured status" — and
+                    Home already draws "Not sent" exactly this way. One fact, one look. */}
+                <View style={st.draftChipRow}>
+                  <Chip outline kind="pending" label={t('draft.bannerTitle')} />
                 </View>
                 {/* While the pipeline is still running, the gap count is not the
                     honest headline — nothing is owed by the contractor yet, the app
                     simply has not finished reading his recording. Say THAT instead of
                     "4 things left", which blames him for a wait that is ours. */}
-                <Text style={st.draftCount}>
+                <Text style={st.draftStateLine}>
                   {!hasEvidence && !scopeWritten ? t('draft.noEvidenceHere')
                     : notProcessed ? t(procWhyKey(props.proc))
                     : !scopeWritten ? t('draft.notWrittenUp')
