@@ -425,3 +425,58 @@ export function nteClause(
 ): { k: string; p: Record<string, string> } | null {
   return mode === 'nte' ? { k: 'r2.nteClause', p: { amount: amountDisplay } } : null;
 }
+
+/**
+ * THE PRICE TO PREFILL A DRAFT EXTRA WITH — the two readings, and which may be written.
+ *
+ * hadar, 2026-08-23, fireplace extra: he finished the recording with "all in all,
+ * about $1,200" and the extra arrived with no price and no Set-total button. Nothing
+ * was broken in the extraction — the model read the job correctly, four segments,
+ * high confidence. The gap was between two correct rules with nothing bridging them.
+ *
+ * `structure.ts` rule 7 tells the model that one figure covering the whole job
+ * "belongs to no segment — leave every segment null and let the total stand alone",
+ * and it obeyed: every `price_words` null. But `proposed_amount_cents` is fenced off
+ * (mandate #6 — a model invented $450 from "four fifty"), so there is no field for
+ * that total to stand in. It stands in the transcript, and the screen was only ever
+ * asking the segments. Whole-job pricing is how most contractors quote, so the most
+ * ordinary recording there is produced no price at all.
+ *
+ * WHICH READING WINS. Segments first: when the contractor priced the work in parts,
+ * those parts ARE the price and the transcript would only re-find the same figures.
+ * The transcript is the fallback for the shape that leaves no segment prices behind.
+ *
+ * WHAT MAY BE WRITTEN WITHOUT ASKING is deliberately narrower than what may be SHOWN,
+ * and the two differ per reading:
+ *
+ *   · A segment reading needs MORE THAN ONE priced segment. One priced segment among
+ *     four means he priced one segment, not the job; that sum is short, and a short
+ *     total with a tick next to it is worse than no total. (Unchanged rule — this is
+ *     the `breakdown.length > 1` guard, moved here rather than rewritten.)
+ *   · A transcript reading carries no breakdown at all: one figure, spoken once,
+ *     covering everything. There is no arithmetic to check because none was done, and
+ *     `extractPrice` already refuses two figures or a bare "750".
+ *
+ * Everything below prefill stays where it was: the figure is arithmetic over numbers
+ * HE said, the extra is a draft, and sending is still a separate human act.
+ */
+export function draftPrice(
+  tasks: { priceWords: string | null; scope: string; title: string }[],
+  transcript: string | null,
+  parse: MoneyParser,
+): { reading: VoicePriceReading | null; writable: boolean } {
+  const seg = priceFromTasks(tasks, parse);
+  if (seg) {
+    return {
+      reading: seg,
+      writable: seg.prefill && seg.amountCents !== null && seg.breakdown.length > 1,
+    };
+  }
+  const whole = transcript ? extractPrice(transcript, parse) : null;
+  return {
+    reading: whole,
+    // `breakdown.length === 0` is what distinguishes a whole-job figure from a summed
+    // one; extractPrice never populates a breakdown, so this is belt-and-braces.
+    writable: !!whole && whole.prefill && whole.amountCents !== null && whole.breakdown.length === 0,
+  };
+}

@@ -165,7 +165,7 @@ import { captureStatesForExtra } from './src/extrareadiness';
 import { discardSummary } from './src/discard';
 import { ensureVoiceCacheSchema, voiceReadingForDecision, narrationForExtra,
          captureIdsForDecision, type VoiceReading } from './src/voicesource';
-import { priceFromTasks, type PriceMode, type VoicePriceReading } from './src/voiceprice';
+import { draftPrice, type PriceMode, type VoicePriceReading } from './src/voiceprice';
 import { VoicePriceCard } from './src/ui/voicepricecard';
 // R1: the Send-to prefill. GPS decides what to SUGGEST and never what to file --
 // prepareSendTo returns candidates and an opinion, the human commits it.
@@ -1269,7 +1269,19 @@ const openRecord = async (changeOrderId: string) => {
          * where the price is actually missing.
          */
         if (recordIdRef.current === changeOrderId && prop) {
-          const pr = priceFromTasks(prop.tasks, parseMoney);
+          /**
+           * A WHOLE-JOB TOTAL IS NOT A SEGMENT PRICE, AND IT WAS FALLING THROUGH.
+           *
+           * hadar's fireplace extra ended with "all in all, about $1,200" and arrived
+           * with no price: the model was told to leave every segment null when one
+           * figure covers the job, and this screen only ever asked the segments.
+           *
+           * `draftPrice` owns both readings and the rule for which may be written
+           * without asking — see its header for why the two differ. It is in
+           * voiceprice.ts so the rule is testable; it was inline here, where nothing
+           * could reach it.
+           */
+          const { reading: pr, writable } = draftPrice(prop.tasks, prop.fromTranscript, parseMoney);
           setRecordPrice(pr);
           /**
            * AND WRITE IT, WITHOUT ASKING (hadar, 2026-08-21, asked directly and
@@ -1303,7 +1315,7 @@ const openRecord = async (changeOrderId: string) => {
             `SELECT amount_cents FROM change_order
               WHERE id = ? AND status = 'draft' AND amount_cents IS NULL`,
             [changeOrderId]))[0];
-          if (row && pr?.prefill && pr.amountCents !== null && pr.breakdown.length > 1) {
+          if (row && writable && pr && pr.amountCents !== null) {
             const cents = pr.amountCents;
             const co = coRowsRef.current.find((c) => c.id === changeOrderId);
             const res = await priceDraftExtra(db, {

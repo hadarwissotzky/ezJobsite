@@ -15,7 +15,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractPrice, priceFromTasks, nteClause, type MoneyReading } from './voiceprice.ts';
+import { draftPrice, extractPrice, priceFromTasks, nteClause, type MoneyReading } from './voiceprice.ts';
 
 const parse = (text: string): MoneyReading => {
   const m = text.match(/\$\s?([\d,]+(?:\.\d{1,2})?)/)
@@ -311,4 +311,69 @@ test('two distinct figures in one span are unreadable, not silently skipped', ()
   ], parse);
   assert.equal(r?.amountCents, null);
   assert.equal(r?.reasonKey, 'r2.priceSegmentUnclear');
+});
+
+// ── draftPrice: which reading fills the extra, and which may be written ──────────
+//
+// The bug these pin, in hadar's words on 2026-08-23: a finished recording with a
+// price spoken plainly at the end of it produced an extra with no price at all.
+
+/** The four unpriced segments the model returned for the fireplace recording. */
+const FIREPLACE_SEGMENTS = [
+  { title: 'Demo existing fireplace face', priceWords: null, scope: 'Remove the face and demo the tiles.' },
+  { title: 'Frame and install new face', priceWords: null, scope: 'Frame and install the new face.' },
+  { title: 'Tile bottom and face', priceWords: null, scope: 'Tile the bottom and the face.' },
+  { title: 'Sand and stain', priceWords: null, scope: 'Sand three times and stain three times.' },
+];
+
+test('a whole-job total spoken once fills the extra', () => {
+  // The real shape: every segment null BY INSTRUCTION, one figure at the end.
+  const { reading, writable } = draftPrice(
+    FIREPLACE_SEGMENTS,
+    'It will not change the schedule, but it will cost, all in all, about $1,200.',
+    parse);
+  assert.equal(reading?.amountCents, 120000);
+  assert.equal(writable, true, 'the price he said out loud was left off the extra');
+  assert.deepEqual(reading?.breakdown, [], 'a figure nobody itemised must not grow a breakdown');
+});
+
+test('no price anywhere writes nothing', () => {
+  const { reading, writable } = draftPrice(
+    FIREPLACE_SEGMENTS, 'We will start on Monday and it should take a week.', parse);
+  assert.equal(writable, false);
+  assert.equal(reading?.amountCents, null);
+});
+
+test('a bare number in the transcript is not a price', () => {
+  // mandate #6, via extractPrice: "750" with no currency marker never prefills.
+  const { writable } = draftPrice(FIREPLACE_SEGMENTS, 'It will be 750 probably.', parse);
+  assert.equal(writable, false);
+});
+
+test('two figures in the transcript write nothing — we do not pick', () => {
+  const { writable } = draftPrice(
+    FIREPLACE_SEGMENTS, 'The demo is $400 and then the tile runs $900.', parse);
+  assert.equal(writable, false, 'the app chose between two figures the contractor said');
+});
+
+test('segment prices outrank the transcript', () => {
+  const { reading, writable } = draftPrice(
+    [{ title: 'Bath', priceWords: '$1,200', scope: 'The hall bath.' },
+     { title: 'Hall', priceWords: '$400', scope: 'The hall.' }],
+    'the bathroom is $1,200, the hall another $400', parse);
+  assert.equal(reading?.amountCents, 160000, 'it must SUM the parts, not re-read the transcript');
+  assert.equal(writable, true);
+  assert.equal(reading?.breakdown.length, 2);
+});
+
+test('ONE priced segment among several is not the price of the job', () => {
+  // The unchanged guard, restated at its new home: he priced one segment, not the
+  // job, so that figure must be shown and never written.
+  const { reading, writable } = draftPrice(
+    [{ title: 'Demo', priceWords: '$500', scope: 'Demo the face.' },
+     { title: 'Tile', priceWords: null, scope: 'Tile the face.' },
+     { title: 'Stain', priceWords: null, scope: 'Stain it.' }],
+    'demo is $500', parse);
+  assert.equal(reading?.amountCents, 50000, 'he should still SEE what was read');
+  assert.equal(writable, false, 'a partial total was auto-written as the price of the job');
 });
