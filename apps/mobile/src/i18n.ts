@@ -1968,6 +1968,10 @@ const EN: Record<string, string> = {
   'client.onThisJob': 'ON THIS JOB',
   'client.fromOtherJobs': 'FROM YOUR OTHER JOBS',
   'client.fromContacts': 'Get from my phone',
+  // The second way in, added 2026-08-23: a person who is not in the app AND not in
+  // the phone's contacts. On a jobsite that is most of them.
+  'client.addNewPerson': 'Add someone new',
+  'client.continueWith': 'Continue',
   'client.noNumber': 'No number saved',
   'client.pickSomeoneElse': 'Someone else',
   'client.type.homeowner': 'Homeowner',
@@ -3707,6 +3711,8 @@ const ES: Record<string, string> = {
   'client.onThisJob': 'EN ESTE TRABAJO',
   'client.fromOtherJobs': 'DE SUS OTROS TRABAJOS',
   'client.fromContacts': 'Traer de mi teléfono',
+  'client.addNewPerson': 'Agregar a alguien nuevo',
+  'client.continueWith': 'Continuar',
   'client.noNumber': 'Sin número guardado',
   'client.pickSomeoneElse': 'Otra persona',
   'client.type.homeowner': 'Propietario',

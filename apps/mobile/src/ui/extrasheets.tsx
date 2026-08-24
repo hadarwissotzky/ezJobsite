@@ -126,8 +126,14 @@ export function ClientSheet(props: {
       // starts at the list.
       setChosen(props.mode === 'client' && props.name
         ? { name: props.name, phone: null } : null);
+      setAdding(false); setNewName(''); setNewPhone('');
     }
   }, [props.visible, props.name, props.mode]);
+
+  /** The type-a-new-person form. Closed by default: the list is the common case. */
+  const [adding, setAdding] = React.useState(false);
+  const [newName, setNewName] = React.useState('');
+  const [newPhone, setNewPhone] = React.useState('');
 
   const q = query.trim().toLowerCase();
   const matches = q
@@ -197,9 +203,64 @@ export function ClientSheet(props: {
             <Text style={st.emptyBody}>{t('client.emptyBody')}</Text>
           )}
 
-          {props.editable && (
-            <Button label={t('client.fromContacts')} icon="people"
-              onPress={() => { void fromPhone(); }} style={{ marginTop: 12 }} />
+          {/**
+            * TWO WAYS IN, BOTH VISIBLE (hadar, 2026-08-23: "it only let me add existing
+            * people in the app's contact list. This is the opportunity to add other
+            * people (from contact or new)").
+            *
+            * The sheet could only ever offer people it already knew, plus a phone-book
+            * import buried in a button under the list. Someone standing on a jobsite
+            * with a name and a number and no contact card had nowhere to put them —
+            * which is most of the people on a job.
+            *
+            * ROWS, not a button at the bottom: they read as two more entries in the
+            * list of ways to name a person, which is what they are, and they sit where
+            * the eye already is instead of after the fold.
+            */}
+          {props.editable && !adding && (
+            <>
+              <Pressable style={st.addRow} onPress={() => { void fromPhone(); }}
+                accessibilityRole="button">
+                <Icon name="people" size={18} color={C.brand} />
+                <Text style={st.addRowT}>{t('client.fromContacts')}</Text>
+              </Pressable>
+              <Pressable style={st.addRow} onPress={() => setAdding(true)}
+                accessibilityRole="button">
+                <Icon name="personAdd" size={18} color={C.brand} />
+                <Text style={st.addRowT}>{t('client.addNewPerson')}</Text>
+              </Pressable>
+            </>
+          )}
+
+          {props.editable && adding && (
+            <View style={{ marginTop: 8 }}>
+              <TextInput
+                value={newName}
+                onChangeText={setNewName}
+                style={st.search}
+                placeholder={t('clientpick.namePh')}
+                placeholderTextColor={C.steel}
+                autoFocus
+              />
+              <TextInput
+                value={newPhone}
+                onChangeText={setNewPhone}
+                style={[st.search, { marginTop: 8 }]}
+                placeholder={t('clientpick.phonePh')}
+                placeholderTextColor={C.steel}
+                keyboardType="phone-pad"
+              />
+              {/* The number is what the approval text is sent to, so its absence is
+                  stated rather than discovered at send time. Not a blocker: a name
+                  written down beats a person forgotten. */}
+              <Text style={st.addHint}>{t('clientpick.phoneWhy')}</Text>
+              <Button
+                label={t('client.continueWith')}
+                disabled={newName.trim().length < 2}
+                onPress={() => setChosen({ name: newName.trim(), phone: newPhone.trim() || null })}
+                style={{ marginTop: 12 }}
+              />
+            </View>
           )}
         </>
       ) : (
@@ -622,6 +683,12 @@ const st = StyleSheet.create({
     fontFamily: F.bodySemi, fontSize: 12, color: C.steel,
     letterSpacing: 0.6, marginTop: 14, marginBottom: 4,
   },
+  addRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    minHeight: 52, borderTopWidth: 1, borderTopColor: C.line,
+  },
+  addRowT: { fontFamily: F.bodySemi, fontSize: 16, color: C.brand },
+  addHint: { fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 8 },
   search: {
     fontFamily: F.body, fontSize: 15.5, color: C.ink, minHeight: 48,
     borderWidth: 1, borderColor: C.line, borderRadius: 12,
