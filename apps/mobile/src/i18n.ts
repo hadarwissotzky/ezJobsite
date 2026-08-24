@@ -1776,10 +1776,21 @@ const EN: Record<string, string> = {
   // Both mechanisms in one line. It replaces a paragraph under each button: the
   // distinction still cannot be missed (REQ-LC21/22), it just is not the page.
   'neg.mechanismBoth': 'Remind uses the same link. Revising sends a new one and kills the old.',
-  // "People involved" named a category and left him to work out the rest (hadar,
-  // 2026-08-23: "still hard to tell what that section is"). This says what the section
-  // is FOR: one of these people approves it, the others worked on it.
-  'neg.people': 'Who approves this, and who worked on it',
+  /**
+   * NAMED FOR WHAT IS IN IT (hadar, 2026-08-24: "need to change the title of the change
+   * order section of the owners to something like clients and teams").
+   *
+   * It was "Who approves this, and who worked on it" — written on 2026-08-23 because
+   * "People involved" named a category and left him to work out the rest. That reading
+   * held while the card was one undifferentiated list. It stopped holding once the card
+   * grew the CLIENT and YOUR TEAM group headings: the sentence now explains what two
+   * labels twelve points below it already say, and a heading that restates its own
+   * contents is a heading nobody reads.
+   *
+   * Two words matching the two groups underneath. It is set as a real heading now
+   * rather than as a caption — see `title` in peopleinvolved.tsx.
+   */
+  'neg.people': 'Client and team',
   'neg.viewAll': 'View all',
   'neg.replyTo': 'Reply to {name}…',
   'neg.approverOnly': 'Only {name} can approve this. Anyone else here can read it and ask questions.',
@@ -3598,7 +3609,7 @@ const ES: Record<string, string> = {
   'neg.remindShort': 'Recordar',
   'neg.reviseShort': 'Revisar y reenviar',
   'neg.mechanismBoth': 'Recordar usa el mismo enlace. Revisar manda uno nuevo y anula el anterior.',
-  'neg.people': 'Quién lo aprueba y quién trabajó en ello',
+  'neg.people': 'Cliente y equipo',
   'neg.viewAll': 'Ver todo',
   'neg.replyTo': 'Responder a {name}…',
   'neg.approverOnly': 'Solo {name} puede aprobar esto. Los demás pueden leerlo y hacer preguntas.',

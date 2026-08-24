@@ -237,11 +237,21 @@ const st = {
    * the heading it is, and the name comes back down to meet it.
    */
   /**
-   * A SENTENCE, SO IT IS SET LIKE ONE. The label used to be the two words "People
-   * involved" and wore the app's spaced small-caps treatment; now that it says what the
-   * section is FOR, uppercase + 1.2 tracking would make a readable line into a wall.
-   * Sentence case, no tracking, and it keeps the label colour so it still reads as a
-   * heading rather than as body copy.
+   * A HEADING AGAIN, AND LARGER (hadar, 2026-08-24: "make the title even larger").
+   *
+   * The type has moved twice for reasons worth keeping straight. It began as an 11.5pt
+   * spaced small-caps label. On 2026-08-23 the text became a full sentence and the
+   * treatment followed it — sentence case, no tracking, 13.5pt, steel — because
+   * uppercase tracking turns a readable line into a wall.
+   *
+   * The text is two words again, so the sentence reasoning no longer applies, and 13.5pt
+   * steel left it QUIETER than the 16pt ink name sitting under it. That inverts the
+   * hierarchy in exactly the way he objected to the first time: the card reads as though
+   * it is about the person rather than as a section that lists people.
+   *
+   * 18pt ink outranks the name it introduces, which is what a section title is for.
+   * Sentence case stays — the small-caps treatment belongs to the app's quiet field
+   * labels, and this is no longer one of those.
    */
   /**
    * THE RULE UNDER THE TITLE (hadar, 2026-08-24: "every section should have a title and
@@ -256,8 +266,8 @@ const st = {
    * Full-bleed against T.card's 14pt padding, the same way `sectionTitleIn` runs to the
    * card edges: a rule that stops short reads as an underlined word.
    */
-  title: { fontSize: 13.5, letterSpacing: 0, textTransform: 'none' as const,
-           color: C.steel,
+  title: { fontFamily: F.dispSemi, fontSize: 18, letterSpacing: -0.1,
+           textTransform: 'none' as const, color: C.ink,
            paddingBottom: 10, marginBottom: 12,
            borderBottomWidth: 1, borderBottomColor: C.line,
            marginHorizontal: -14, paddingHorizontal: 14 },
