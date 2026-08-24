@@ -270,7 +270,36 @@ export function priceFromTasks(
     // "$95/hr up to $2,000" — two figures there is genuinely a cap, but two DISTINCT
     // clean figures we cannot safely reduce, so we drop the whole task rather than pick.
     const figs = figuresIn(t.priceWords, parse).filter((f) => f.confidence === 'high' && f.cents !== null);
-    if (figs.length !== 1) continue;
+    /**
+     * A PRICE HE SAID THAT WE COULD NOT READ IS NOT A SEGMENT WITHOUT A PRICE.
+     *
+     * hadar, 2026-08-23, on a real recording: "extraction was incorrect as well, we
+     * cannot miss that". He priced three of four segments out loud — "$500 plus all the
+     * disposal fees", "That will be $500", "It will be 750 probably" — and the app
+     * offered $1,000. The third vanished with no trace: he said "750" without a
+     * currency marker, `parseMoney` correctly refuses that as anything better than LOW
+     * confidence (mandate #6 — a bare number might be a price), the high-confidence
+     * filter emptied `figs`, and this was a bare `continue`.
+     *
+     * So the poisoning rule twenty lines below — "the sum of the parts we CAN read is
+     * not the price of the job... showing it with one segment silently missing is worse
+     * than showing nothing" — never fired, because nothing recorded that a segment had
+     * been missed. The total looked complete, arrived with a checkable breakdown, and
+     * was $750 short.
+     *
+     * THE TEST IS WHETHER THE SPAN CARRIES A NUMBER AT ALL. A `price_words` of "no
+     * charge" or "included in the base" claims no money and must stay silent — marking
+     * that unreadable would poison a total over a segment that is genuinely free. One
+     * that holds a digit or a spoken number word is a price claim we failed to reduce,
+     * and it belongs in `unreadable` whether that is because the figure was ambiguous
+     * (`> 1`) or because it was never confident enough to use (`0`).
+     */
+    if (figs.length !== 1) {
+      if (/\d/.test(t.priceWords) || NUMBER_WORDS.test(fold(t.priceWords))) {
+        unreadable.push({ title: t.title, heard: t.priceWords });
+      }
+      continue;
+    }
     /**
      * IS THERE MONEY LEFT OVER IN THE SPAN THE PARSER DID NOT READ?
      *
@@ -299,7 +328,22 @@ export function priceFromTasks(
     hits.push({ cents: figs[0].cents as number, nte, heard: t.priceWords, title: t.title });
   }
   if (hits.length === 0) return null;
-  if (hits.length === 1) {
+  /**
+   * THE POISON CHECK HAS TO COME BEFORE THE SINGLE-HIT SHORTCUT.
+   *
+   * Found by the firewall test, 2026-08-23, while fixing the bug above it. The
+   * shortcut returned one clean segment as a confident `prefill: true` WITHOUT ever
+   * looking at `unreadable` — so a walk with one readable price and one the parser
+   * could not reduce offered the readable one as if it were the price of the job. That
+   * is precisely the failure the comment below this describes and refuses for the
+   * multi-segment case: "the sum of the parts we CAN read is not the price of the job —
+   * it is the price of some of the job, and it looks exactly like the price of all of
+   * it." One part is no different from three.
+   *
+   * So the check moved up. `hits.length === 1` with nothing unreadable still takes the
+   * shortcut and still reads back as a single heard price, unchanged.
+   */
+  if (!unreadable.length && hits.length === 1) {
     const h = hits[0];
     return {
       amountCents: h.cents, prefill: true,

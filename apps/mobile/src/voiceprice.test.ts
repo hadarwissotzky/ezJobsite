@@ -260,3 +260,55 @@ test('ordinary wording around a figure is not mistaken for a leftover number', (
   assert.equal(r?.prefill, true);
   assert.equal(r?.amountCents, 65000);
 });
+
+/**
+ * THE FIREWALL RECORDING, 2026-08-23. hadar priced three of four segments out loud and
+ * the app offered a confident $1,000 — the third, "It will be 750 probably", vanished
+ * without a word because he said the number with no currency marker. These are his
+ * actual `price_words`, copied from `capture_structured` for
+ * cap-mt6hxw50-dqpl67n0.
+ */
+const FIREWALL = [
+  { title: 'Demo existing firewall face', priceWords: '$500 plus all the disposal fees',
+    scope: 'Remove the existing firewall face and dispose of the debris.' },
+  { title: 'Build and install new firewall face', priceWords: null,
+    scope: 'Build a new frame, install the new firewall face.' },
+  { title: 'Set homeowner-supplied tiles', priceWords: 'That will be $500',
+    scope: 'Cut, set, and grout the tiles supplied by the homeowner.' },
+  { title: 'Finish and stain the new facing', priceWords: 'It will be 750 probably',
+    scope: 'Sand and stain the new facing three times.' },
+];
+
+test('a price he SAID that we could not read refuses the total instead of dropping it', () => {
+  const r = priceFromTasks(FIREWALL, parse);
+  assert.equal(r?.amountCents, null,
+    'a total missing $750 must not be offered — the sum of the parts we can read is not the price of the job');
+  assert.equal(r?.prefill, false);
+  assert.equal(r?.reasonKey, 'r2.priceSegmentUnclear');
+  assert.equal(r?.reasonParams.n, 1, 'exactly one segment was unreadable');
+  assert.equal(r?.reasonParams.of, 3, 'out of the three that claimed a price');
+  assert.match(r?.heard ?? '', /750/, 'his own words for the dropped price go back to him');
+});
+
+test('the two readable segments still come back as a breakdown to check', () => {
+  const r = priceFromTasks(FIREWALL, parse);
+  assert.deepEqual(r?.breakdown.map((b) => b.cents), [50000, 50000]);
+});
+
+test('a segment that claims no money at all stays silent and does not poison the total', () => {
+  const r = priceFromTasks([
+    { title: 'Demo', priceWords: '$500', scope: 'Demo the face.' },
+    { title: 'Haul away', priceWords: 'no charge', scope: 'Take the debris.' },
+  ], parse);
+  assert.equal(r?.amountCents, 50000, '"no charge" is not an unreadable price, it is no price');
+  assert.equal(r?.prefill, true);
+});
+
+test('two distinct figures in one span are unreadable, not silently skipped', () => {
+  const r = priceFromTasks([
+    { title: 'Demo', priceWords: '$500', scope: 'Demo.' },
+    { title: 'Labour', priceWords: '$95 an hour, about $2,000 total', scope: 'Crew time.' },
+  ], parse);
+  assert.equal(r?.amountCents, null);
+  assert.equal(r?.reasonKey, 'r2.priceSegmentUnclear');
+});
