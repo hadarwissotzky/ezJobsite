@@ -3843,7 +3843,8 @@ const checkClientMessages = async () => {
   // every section; a value shows only that one, and tapping the live chip clears it.
   // Opens on 'needs' (hadar 2026-08-05): what needs YOU is the reason to open the app,
   // so it is selected by default; tapping the live chip still clears to every section.
-  const [homeFilter, setHomeFilter] = React.useState<null | 'needs' | 'waiting' | 'approved'>('needs');
+  const [homeFilter, setHomeFilter] =
+    React.useState<null | 'needs' | 'waiting' | 'approved' | 'closed'>('needs');
   /**
    * "Learn how it works", from the first-run Home. It exists because the design put a
    * link there and A LINK THAT OPENS NOTHING IS THE WORST CONTROL ON A FIRST SCREEN —
@@ -9184,10 +9185,20 @@ const checkClientMessages = async () => {
    * Note `questions > 0` outranks 'sent': an extra the client has asked something about
    * is in YOUR court, not theirs, whatever the status column says.
    */
+  /**
+   * `cancelled` IS NAMED, because the fall-through lied about it (hadar, 2026-08-24:
+   * "if a CO was declined or canceled we need a section to host them or a TAG").
+   *
+   * Everything unmatched here ends at `questions > 0 ? 'needs' : 'waiting'`, so a
+   * withdrawn extra wore the Waiting chip and sat under "Waiting for a yes" — telling
+   * the contractor he is waiting on a client he has just told to stop looking. A new
+   * terminal status that is not listed becomes a lie about the one state it is not.
+   */
   const stateKey = (status: string, questions: number):
-    'approved' | 'declined' | 'draft' | 'needs' | 'waiting' =>
+    'approved' | 'declined' | 'cancelled' | 'draft' | 'needs' | 'waiting' =>
     status === 'approved' ? 'approved'
     : status === 'declined' ? 'declined'
+    : status === 'cancelled' ? 'cancelled'
     : status === 'draft' ? 'draft'
     : questions > 0 ? 'needs' : 'waiting';
   const stateColor: Record<string, { bg: string; fg: string; emoji: string; label: string }> = {
@@ -9196,6 +9207,9 @@ const checkClientMessages = async () => {
     approved: { bg: '#E7ECDD',                fg: '#536B49', emoji: '✅', label: T('act.chipApproved') },
     draft:    { bg: '#EFEBE3',                fg: '#5E666E', emoji: '📝', label: T('act.chipCreated') },
     declined: { bg: 'rgba(139,81,72,0.13)',  fg: '#8B5148', emoji: '✋', label: T('act.chipDeclined') },
+    // NEUTRAL, not the declined red: a decline is the client's refusal, a withdrawal is
+    // his own act carried out. Same reasoning as the record screen's banner tone.
+    cancelled: { bg: '#EFEBE3',              fg: '#5E666E', emoji: '↩︎', label: T('act.chipCancelled') },
   };
   // Outlined status pill for the Home rows — the mockup's look (thin colored
   // border + colored text, no fill), in the design-system palette (global.css).
@@ -9205,6 +9219,7 @@ const checkClientMessages = async () => {
     approved: { border: '#3bbe77', text: '#157a47' },  // mint-500 border, mint-700 text
     draft:    { border: '#c3bab2', text: '#6b625b' },
     declined: { border: '#e0a59c', text: '#8B5148' },
+    cancelled: { border: '#c3bab2', text: '#6b625b' },
   };
   /**
    * THE CHIP EVERY EXTRA ROW WEARS — one source for Home, the company feed AND the
@@ -9658,6 +9673,22 @@ const shortJob = (name: string): string => {
       e.status === 'draft' || (e.status === 'sent' && e.questions > 0));
     const waitingList = homeExtras.filter((e) => e.status === 'sent' && e.questions === 0);
     const approvedList = homeExtras.filter((e) => e.status === 'approved');
+    /**
+     * CLOSED — declined and withdrawn, together, and it is the section that was missing.
+     *
+     * Home had three buckets. `declined` produced its own state key and appeared in NONE
+     * of them, so a client's refusal simply vanished from the screen; `cancelled` fell
+     * through into Waiting. Both are ENDED extras, neither is a draft to finish or an
+     * answer to chase, and both are things a contractor needs to find again — a decline
+     * is the record of why the work did not happen, and it is evidence in exactly the
+     * dispute this product exists to prevent.
+     *
+     * One bucket rather than two: they differ in WHO ended it, which the chip on each row
+     * already says, and a fifth pill on a jobsite phone buys a distinction he can read
+     * off the card anyway.
+     */
+    const closedList = homeExtras.filter(
+      (e) => e.status === 'declined' || e.status === 'cancelled');
     // The hero totals money still OUT ON THE CLIENT — sent only. A draft has never
     // left the phone, so it is NOT "waiting for approval" and must not inflate this.
     const outstanding = [...questioned, ...waitingList].reduce((sum, e) => sum + (e.amount_cents ?? 0), 0);
@@ -9837,6 +9868,7 @@ const shortJob = (name: string): string => {
               { k: 'needs',    label: T('act.chipNeeds') },
               { k: 'waiting',  label: T('act.chipWaiting') },
               { k: 'approved', label: T('act.chipApproved') },
+              { k: 'closed',   label: T('home.closedChip') },
             ] as const).map((f) => {
               const on = homeFilter === f.k;
               return (
@@ -9858,7 +9890,8 @@ const shortJob = (name: string): string => {
           {(() => {
             // A filter hides the other sections. "See all" focuses this one; while
             // focused the link flips to "Show all" and clears — both in place.
-            const bucket = (labelKey: string, f: 'needs' | 'waiting' | 'approved' | null, list: Extra[]) => {
+            const bucket = (labelKey: string,
+              f: 'needs' | 'waiting' | 'approved' | 'closed' | null, list: Extra[]) => {
               if (!list.length) return null;
               if (homeFilter && homeFilter !== f) return null;
               const focused = homeFilter === f;
@@ -9884,11 +9917,12 @@ const shortJob = (name: string): string => {
             // A filter that matches nothing would otherwise paint a blank page — and
             // 'needs' is now the DEFAULT, so that is the common case for a user with
             // extras but nothing awaiting them. Say so, and say how to get out.
-            const shown = { needs, waiting: waitingList, approved: approvedList };
+            const shown = { needs, waiting: waitingList, approved: approvedList, closed: closedList };
             return (<>
               {bucket('home.waitingForYes', 'waiting', waitingList)}
               {bucket('home.needsResponse', 'needs', needs)}
               {bucket('home.approvedSec', 'approved', approvedList)}
+              {bucket('home.closedSec', 'closed', closedList)}
               {homeFilter && shown[homeFilter].length === 0 && homeExtras.length > 0 && (
                 // A FILTERED empty, so the copy must not claim the account is empty —
                 // there ARE change orders, just none in this bucket. The way out is a

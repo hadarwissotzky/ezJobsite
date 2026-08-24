@@ -462,6 +462,11 @@ const EN: Record<string, string> = {
   'home.draftsSec': 'Drafts',
   'home.finishSend': 'Finish & send →',
   'home.notSent': 'Not sent',
+  // CLOSED — declined and withdrawn together (2026-08-24). The section that was
+  // missing: a declined extra appeared in none of Home's three buckets and simply
+  // vanished, and a withdrawn one fell through into "Waiting for a yes".
+  'home.closedSec': 'Closed \u2014 declined or withdrawn',
+  'home.closedChip': 'Closed',
   'home.approvedSec': 'Approved',
   'home.clientQuestion': 'Client question',
   'home.sentAgo': 'Sent {ago}',
@@ -480,6 +485,7 @@ const EN: Record<string, string> = {
   'act.chipApproved': 'Approved',
   'act.chipCreated': 'Created',
   'act.chipDeclined': 'Declined',
+  'act.chipCancelled': 'Withdrawn',
   // ── empty states (hadar, 2026-08-18) ──
   // TITLE + BODY, not one sentence. The title names what is missing; the body says what
   // will fill it, which is the half that turns "this is broken" into "not yet". Used only
@@ -2520,6 +2526,8 @@ const ES: Record<string, string> = {
   'home.draftsSec': 'Borradores',
   'home.finishSend': 'Terminar y enviar →',
   'home.notSent': 'Sin enviar',
+  'home.closedSec': 'Cerradas \u2014 rechazadas o retiradas',
+  'home.closedChip': 'Cerradas',
   'home.approvedSec': 'Aprobado',
   'home.clientQuestion': 'Pregunta del cliente',
   'home.sentAgo': 'Enviado {ago}',
@@ -2538,6 +2546,7 @@ const ES: Record<string, string> = {
   'act.chipApproved': 'Aprobado',
   'act.chipCreated': 'Creado',
   'act.chipDeclined': 'Rechazado',
+  'act.chipCancelled': 'Retirada',
   'act.empty': 'Aún no hay extras aquí.',
   'act.emptyTitle': 'Aún no hay órdenes de cambio',
   'act.emptyBody': 'Todo lo que capture en este trabajo aparece aquí, lo más reciente primero.',
