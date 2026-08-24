@@ -720,7 +720,17 @@ export default function App() {
   // job, so this sheet asks — nearby jobs, search, or create one here. Captures are
   // already durable before it opens; dismissing leaves them safe in the Inbox.
   const [assign, setAssign] = React.useState<null | {
-    ids: string[]; lat: number | null; lng: number | null;
+    /**
+     * The captures this walk is about to commit, resolving to their ids and the change
+     * order behind them (hadar, 2026-08-23 — the sheet now opens BEFORE the commit
+     * finishes, so it cannot be handed the ids up front). `fileWalkTo` awaits this, so
+     * a tap that lands before durability waits for it rather than racing it.
+     *
+     * Optional because the OTHER caller — the parked-capture path on the processing
+     * screen — is filing captures that committed long ago and passes `ids` directly.
+     */
+    ready?: Promise<{ ids: string[]; anchorCoId: string; anchorCaptureId: string | null }>;
+    ids?: string[]; lat: number | null; lng: number | null;
     uris: string[]; secs: number;
     /** The change order behind this walk — filing continues the flow into it. */
     anchorCoId?: string;
@@ -1997,21 +2007,36 @@ const finishAugmentById = async (changeOrderId: string, addedIds: string[]) => {
  * unprocessed draft with nothing uploaded and no next step (hadar, 2026-07-24).
  */
 const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
-  for (const id of a.ids) {
+  /**
+   * DURABILITY FIRST, EVEN THOUGH THE SHEET IS ALREADY UP (hadar, 2026-08-23).
+   *
+   * The job picker now draws before the commit has finished, so a fast tap can arrive
+   * while bytes are still being hashed and written. Awaiting `ready` is what keeps
+   * mandate #1's order intact: nothing is filed, and therefore nothing is uploaded,
+   * until the captures it names actually exist. The wait is invisible on a normal tap
+   * because he takes a second or two to read the list.
+   *
+   * `ids` is still honoured directly for the other caller — the processing screen's
+   * parked-capture path files captures that committed long ago.
+   */
+  const done = a.ready ? await a.ready : null;
+  const ids = done?.ids ?? a.ids ?? [];
+  if (!ids.length) return;
+  for (const id of ids) {
     await fileCapture(db, { captureId: id, projectId: projId, by: OWNER });
   }
   setAssign(null); setAssignQ(''); setFiled(null);
   setProjectId(projId);
-  const anchorCoId = a.anchorCoId;
-  const anchorCapId = a.anchorCaptureId ?? null;
+  const anchorCoId = done?.anchorCoId ?? a.anchorCoId;
+  const anchorCapId = done?.anchorCaptureId ?? a.anchorCaptureId ?? null;
   if (anchorCoId) await rehomeDraftExtra(db, anchorCoId, projId);
   await refresh();
   const startProcessing = () => {
     if (!anchorCoId) return;
     setTransition({
-      ids: a.ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
+      ids, anchorCaptureId: anchorCapId, coId: anchorCoId,
       uploaded: false, transcribed: anchorCapId === null, analyzed: false, offline: false,
-      stalled: false, uploadDone: 0, uploadTotal: a.ids.length, lastError: null,
+      stalled: false, uploadDone: 0, uploadTotal: ids.length, lastError: null,
         photoDone: 0, photoTotal: 0, voiceDone: 0, voiceTotal: 0,
       blocked: false, isAugment: false,
     });
@@ -5479,7 +5504,29 @@ const checkClientMessages = async () => {
     // checked BEFORE showCapture in the render, so it takes over the instant it is
     // set; showCapture is cleared in the finally as cleanup, causing no flash.
     setUi({ k: 'saving' });
-    try {
+    /**
+     * THE FIRST STEP SHOWS IMMEDIATELY; THE COMMIT RUNS BEHIND IT
+     * (hadar, 2026-08-23: "there is no need for that splash screen -- display the
+     * first step right away, if it is new CO then it will be choose the location
+     * followed by the homeowner").
+     *
+     * The job picker needs nothing the commit produces: the GPS fix, the preview
+     * thumbnails and the duration all come off `a`, which is in hand the moment the
+     * capture screen hands over. Only FILING needs the capture ids, and filing happens
+     * after he taps a job. So the sheet no longer waits for two seconds of hashing and
+     * disk writes to finish before it will draw.
+     *
+     * THE ORDER MANDATE #1 REQUIRES IS UNCHANGED. The bytes still commit durably before
+     * anything is uploaded or filed, and they commit to the RESOLVED job — Inbox when
+     * GPS is unsure — exactly as before. What changed is only what is on screen while
+     * that happens. `fileWalkTo` awaits `ready` before it files anything, so a tap that
+     * lands early waits for durability rather than racing it.
+     *
+     * The baking that the capture screen's opaque overlay exists to hide is already
+     * FINISHED by the time this runs — `finish()` bakes every photo before it calls
+     * `onCapture` — so nothing is exposed by handing the screen over here.
+     */
+    const commit = (async () => {
       const res = await resolveFor(a.stamp);
       const pairId = `pair-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const ids: string[] = [];
@@ -5489,7 +5536,7 @@ const checkClientMessages = async () => {
           input: photoCapture(ph.bytes, ph.mime),
           stamp: { ...a.stamp, capturedAtMs: ph.atMs },   // each photo's own snap time
         });
-        if (!pr.ok) { setUi({ k: 'refused', why: pr.reason }); return; }
+        if (!pr.ok) throw new Error(pr.reason);
         await linkPair(db, pairId, pr.captureId, 'photo', ph.atMs);
         // …and queue it for the server, or the link lives on this phone only — which
         // is how 98 of 102 photos became unreachable from any other device.
@@ -5506,14 +5553,14 @@ const checkClientMessages = async () => {
           input: voiceCapture(seg.bytes, seg.mime),
           stamp: { ...a.stamp, capturedAtMs: seg.startedAtMs },
         });
-        if (!vr.ok) { setUi({ k: 'refused', why: `some saved; audio did not: ${vr.reason}` }); return; }
+        if (!vr.ok) throw new Error(`some saved; audio did not: ${vr.reason}`);
         await linkPair(db, pairId, vr.captureId, 'voice', seg.startedAtMs);
         await enqueuePair(db, { pairId, captureId: vr.captureId, role: 'voice',
                                 atMs: seg.startedAtMs, projectId: res.projectId });
         await noteCapturedBy(db, vr.captureId);
         ids.push(vr.captureId);
       }
-      if (!ids.length) { setUi({ k: 'refused', why: 'nothing to save' }); return; }
+      if (!ids.length) throw new Error('nothing to save');
       setUi({ k: 'saved', id: ids[0] });
 
       // THE RECORDING IS THE EXTRA — on THIS path too. All of this was wired
@@ -5561,21 +5608,29 @@ const checkClientMessages = async () => {
       // first. Filing it (fileAll) then starts the processing transition. The job
       // is ALWAYS picked by a human (mandate #8 — GPS only pre-sorts the list).
       const anchorCapId = a.audioSegments.length ? ids[a.photos.length] : null;
-      setAssign({
-        ids, lat: a.stamp.lat, lng: a.stamp.lng,
-        uris: a.previewUris, secs: a.durationSecs,
+      return {
+        ids,
         anchorCoId: anchorCapId ? `co-${anchorCapId}` : `co-${ids[0]}`,
         anchorCaptureId: anchorCapId,
-      });
-    } catch (e: any) {
+      };
+    })();
+
+    // A REFUSAL MUST STILL REACH HIM, and now it has to travel further: the sheet is
+    // already up, so the failure takes it down again rather than appearing behind it.
+    commit.catch((e: any) => {
+      setAssign(null);
       setUi({ k: 'refused', why: e?.message ?? String(e) });
-    } finally {
-      // Cleanup only — the job sheet (or a refusal) already owns the screen by now,
-      // so this never shows Home. Kept out of the top so the capture screen stays up
-      // through the commit.
-      setShowCapture(false);
-      await refresh();
-    }
+    });
+
+    setAssign({
+      ready: commit,
+      lat: a.stamp.lat, lng: a.stamp.lng,
+      uris: a.previewUris, secs: a.durationSecs,
+    });
+    setShowCapture(false);
+    // Not awaited into the hand-over: the sheet is drawn, and Home behind it can catch
+    // up whenever the write finishes.
+    void commit.then(() => refresh()).catch(() => { /* already surfaced above */ });
   };
 
   // AUGMENT an existing extra with more photos/voice (hadar, 2026-07-25). Same
