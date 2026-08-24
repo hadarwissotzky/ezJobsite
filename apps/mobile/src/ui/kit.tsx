@@ -748,8 +748,8 @@ export function Button({
  *  screens pass their own name instead, which is what the design does. */
 export const APP_NAME = 'EZChangeOrders';
 
-export function ScreenHeader({ title, onBack, backLabel, right, kicker, kickerRight, navTitle,
-  onOverflow, overflowLabel, onTitleChange }: {
+export function ScreenHeader({ title, onBack, backLabel, right, kicker, kickerRight,
+  kickerIcon, navTitle, onOverflow, overflowLabel, onTitleChange }: {
   /** The big display title. OPTIONAL: a detail screen names itself in the nav row
    *  and has nothing left to repeat underneath, which is what the design shows.
    *  Omit it there rather than passing '' — an empty display line still costs its
@@ -775,6 +775,9 @@ export function ScreenHeader({ title, onBack, backLabel, right, kicker, kickerRi
    *  from `right`, which sits on the title row — the negotiation design puts the pill up
    *  on the kicker line and lets the big title own its full width. */
   kickerRight?: React.ReactNode;
+  /** A small mark on the LEFT of the kicker line, for something true of the line — a
+   *  sync tick, say. `kickerRight` is where the record's STATE goes. */
+  kickerIcon?: React.ReactNode;
   /** The context line — "EXTRA · MILLER — HALL BATH". Renders ABOVE the title,
    *  where it reads as the address of the thing you are looking at. Below it, it
    *  reads as a caption on the title and cost a whole line of a 375pt screen to
@@ -820,6 +823,11 @@ export function ScreenHeader({ title, onBack, backLabel, right, kicker, kickerRi
       {kicker != null && kicker !== '' && (
         kickerRight != null ? (
           <View style={st.kickerRow}>
+            {/* An icon BEFORE the identity line, for a fact that is about the line
+                itself — "this change order, on this job, backed up" (2026-08-24). It
+                sits inside the flexed Text's row rather than in `kickerRight`, which is
+                the slot the STATE occupies. */}
+            {kickerIcon}
             <Text style={[labelStyle, { flex: 1 }]} numberOfLines={1}>{kicker}</Text>
             {kickerRight}
           </View>
@@ -1351,13 +1359,25 @@ const st = StyleSheet.create({
     backgroundColor: C.brandSoft, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5,
   },
   syncedPillText: { fontFamily: F.bodySemi, fontSize: 12.5, color: C.brand },
-  kickerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  kickerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
   // The design sets the stage-screen title in a heavy CONDENSED face at display size,
   // filling the width (supersedes the earlier Barlow-Bold 22). fontFamily + fontSize
   // here win over the `display(22)` base because this style comes later in the array.
+  /**
+   * BIGGER (hadar, 2026-08-24: "the title needs to be much bigger" — the record detail
+   * "is hard to tell right now").
+   *
+   * 34 -> 40. The title is the one thing on the screen that says WHICH change order
+   * this is, and it was competing with a state pill, a sync pill and a readiness
+   * sentence stacked around it. Two of those have moved into the header line and one is
+   * gone, so the width they were taking goes back to the name of the thing.
+   *
+   * `lineHeight` tracks it at 1.05: this face is condensed and set in caps, and a wider
+   * leading on a two-line title opens a gap that reads as two separate headings.
+   */
   headerTitle: {
-    fontFamily: F.disp, fontSize: 34, lineHeight: 36,
-    textTransform: 'uppercase', letterSpacing: 0.3,
+    fontFamily: F.disp, fontSize: 40, lineHeight: 42,
+    textTransform: 'uppercase', letterSpacing: 0.2,
   },
   // While editing: a quiet underline so the field is visibly live without the title
   // jumping size or position.

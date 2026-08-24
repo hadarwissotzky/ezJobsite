@@ -125,9 +125,7 @@ const st = StyleSheet.create({
    * Those keep the tinted banner; this no longer competes with them, or with the
    * extra's own title directly above it.
    */
-  draftState: {},
   /** `flex-start` so the pill hugs its label instead of stretching the row. */
-  draftChipRow: { flexDirection: 'row', alignItems: 'flex-start' },
   /** Deliberately the same numbers as kit's `syncedPill`, so the two status pills on
    *  this screen are one family. Tone is the only difference. */
   statePill: {
@@ -137,9 +135,6 @@ const st = StyleSheet.create({
   },
   statePillT: { fontFamily: F.bodySemi, fontSize: 12.5, color: CAUTION.ink,
                 textTransform: 'uppercase', letterSpacing: 0.6 },
-  draftStateLine: {
-    fontFamily: F.body, fontSize: 14, color: C.steel, marginTop: 8, lineHeight: 20,
-  },
   draftHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   draftDisc: {
     width: 32, height: 32, borderRadius: 16, backgroundColor: CAUTION.ink,
@@ -501,10 +496,34 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             draft the price is BELOW the scope (391) — the scope is content here, not
             header. */}
         <View style={st.headerSlab}>
+        {/**
+          * THE HEADER, REORGANISED (hadar, 2026-08-24: "the title needs to be much
+          * bigger, the draft not sent needs to move to where the synced is now, remove
+          * the ready to send text, and synced needs to move to the CO header").
+          *
+          * What it was: a kicker line ending in a green "Synced" pill, then the title,
+          * then a state pill on its own line, then a sentence about readiness. Four
+          * horizontal bands before the first fact, and the loudest thing on them was a
+          * pill reporting that a database write had succeeded.
+          *
+          * What it is: the identity line carries "Synced" because that is what it is
+          * ABOUT — this change order, on this job, backed up. The state pill takes the
+          * top-right slot, which is the first place the eye lands on a phone. And the
+          * title gets the width both of them vacated.
+          */}
         <ScreenHeader
           title={rec.title}
           kicker={kicker(props)}
-          kickerRight={rec.synced ? <SyncedPill label={t('neg.synced')} /> : undefined}
+          kickerIcon={rec.synced
+            ? <Icon name="cloud" size={14} color={C.brand} /> : undefined}
+          kickerRight={isDraft
+            ? (
+              <View style={st.statePill}>
+                <Icon name="waiting" size={14} color={CAUTION.ink} />
+                <Text style={st.statePillT}>{t('draft.bannerTitle')}</Text>
+              </View>
+            )
+            : undefined}
           onTitleChange={isDraft ? props.onRetitle : undefined}
           navTitle={t('erec.navTitle')}
           onBack={props.onBack}
@@ -513,59 +532,24 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
           overflowLabel={t('erec.moreActions')}
         />
 
-        {/* WHERE IT STANDS, FIRST (hadar 2026-08-06: "the draft not sent notice needs
-            to move above the scope of work"). It used to sit three blocks down, under
-            the scope and the price, so the first thing on screen was a document that
-            looked finished. The state is the frame you read the rest through: a scope
-            you are proofreading and a scope that has already gone to a client are the
-            same words meaning different things. */}
-        <View style={{ marginTop: 14 }}>
+        {/**
+          * ONLY A NON-DRAFT SHOWS A STATE BAND HERE NOW (hadar, 2026-08-24: "remove the
+          * ready to send text (no need)").
+          *
+          * A draft's state moved INTO the header — the pill sits top-right where the eye
+          * lands — so repeating it here was the same fact twice, one under the other.
+          * The readiness sentence went with it: "Ready to send. One more would help you
+          * get a yes" is a THIRD copy of what the checklist below names item by item and
+          * the Send button's own subtitle states again. He removed a fourth copy of this
+          * same list on 2026-08-06 for the same reason.
+          *
+          * A SENT or APPROVED extra keeps its band. There the state is not a label on a
+          * document he is still writing — it is the thing he came to the screen to read,
+          * and it carries a detail line the header has no room for.
+          */}
+        <View style={{ marginTop: isDraft ? 0 : 14 }}>
           {isDraft
-            ? (
-              // The design's draft banner: a FILLED ochre disc with the hourglass, the
-              // state beside it, and the count. It SAYS where the extra stands; it is
-              // no longer a place to act.
-              //
-              // The "+ Cost › / + Payment timing ›" buttons were removed here (hadar
-              // 2026-08-06). They were a third copy of the same list: the count above
-              // them names how many gaps there are, the checklist below names each one
-              // and opens it, and Send at the bottom names the count again. Four
-              // buttons in a warning-coloured card also read as the thing to press on
-              // a screen whose actual next step is Edit or Send — which is how a
-              // status banner turned into the busiest control on the page.
-              <View style={st.draftState}>
-                {/* A STATE PILL — colour and an icon, at pill scale (hadar,
-                    2026-08-23, fourth pass: "you removed the section but now it
-                    disappears — need an icon and color").
-                    The ghost outline went too far the other way: a grey hairline pill
-                    under a heavy display title is furniture, and he stopped seeing it.
-                    So this borrows the shape the SAME SCREEN already proves works — the
-                    "Synced" pill on the kicker line: soft tint, small icon, semibold
-                    label, 8pt radius. Identical size and weight, caution tone instead of
-                    brand. It reads as a status about the document, beside a green one
-                    that reads the same way, and neither of them is an alert card. */}
-                <View style={st.draftChipRow}>
-                  <View style={st.statePill}>
-                    <Icon name="waiting" size={14} color={CAUTION.ink} />
-                    <Text style={st.statePillT}>{t('draft.bannerTitle')}</Text>
-                  </View>
-                </View>
-                {/* While the pipeline is still running, the gap count is not the
-                    honest headline — nothing is owed by the contractor yet, the app
-                    simply has not finished reading his recording. Say THAT instead of
-                    "4 things left", which blames him for a wait that is ours. */}
-                <Text style={st.draftStateLine}>
-                  {!hasEvidence && !scopeWritten ? t('draft.noEvidenceHere')
-                    : notProcessed ? t(procWhyKey(props.proc))
-                    : !scopeWritten ? t('draft.notWrittenUp')
-                    : bannerDetail(readiness)}
-                </Text>
-                {/* The banner's second line is gone (hadar, 2026-08-05: "overwhelming — there are
-                    a lot of things and text here"). "These are required for approval"
-                    restated the line above it, which already says "N things left before
-                    you can send it". Two sentences, one fact. */}
-              </View>
-            )
+            ? null
             : (
               // Never the draft banner over a row that is not a draft: the state
               // line is the one thing on this screen a contractor acts on.
@@ -1011,24 +995,6 @@ function bannerBlockers(r: SendReadiness): readonly SendBlocker[] {
   return r.blockers.filter((b) => b !== 'no_description');
 }
 
-function bannerDetail(r: SendReadiness): string {
-  // Singular and plural are SEPARATE KEYS, not one string carrying "thing(s)".
-  // `t()` interpolates and does not decline, so a single string has to hedge — and
-  // "1 required thing(s) still missing" is what shipped. A contractor reading that
-  // learns the app was written by someone who was not picturing him.
-  const blocking = bannerBlockers(r);
-  if (blocking.length > 0) {
-    return t(blocking.length === 1
-      ? 'draft.bannerBlocked1'
-      : { k: 'draft.bannerBlockedN', p: { n: blocking.length } });
-  }
-  if (r.recommended.length > 0) {
-    return t(r.recommended.length === 1
-      ? 'draft.bannerReadyGaps1'
-      : { k: 'draft.bannerReadyGaps', p: { n: r.recommended.length } });
-  }
-  return t('draft.bannerReady');
-}
 
 
 /** The names behind the count. Blockers when there are any — they are what Send is
