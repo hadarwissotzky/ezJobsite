@@ -1227,11 +1227,15 @@ const st = StyleSheet.create({
   avatarT: { fontFamily: F.disp, fontSize: 14, color: C.card },
   // The prominent scale. One step up on every element so the row stays a row and does
   // not become a card: 52pt disc, a name at reading size, a legible reason under it.
-  personBig: { gap: 14, minHeight: 68 },
-  avatarBig: { width: 52, height: 52, borderRadius: 26 },
-  avatarTBig: { fontSize: 19 },
-  rowLabelBig: { fontSize: 18, lineHeight: 23 },
-  rowSubBig: { fontSize: 13.5, color: C.steel, marginTop: 3, lineHeight: 18 },
+  // Tuned down from the first pass (52/19/18): at that size the name overpowered the
+  // section label above it and the card read as a profile rather than a list of people.
+  // Still clearly the most important row on the card, no longer the loudest thing on
+  // the screen. See `title` in peopleinvolved.tsx for the other half of the balance.
+  personBig: { gap: 12, minHeight: 60 },
+  avatarBig: { width: 44, height: 44, borderRadius: 22 },
+  avatarTBig: { fontSize: 16 },
+  rowLabelBig: { fontSize: 16, lineHeight: 21 },
+  rowSubBig: { fontSize: 13, color: C.steel, marginTop: 2, lineHeight: 17 },
 
   rail: { width: 16, alignItems: 'center' },
   dot: { width: 10, height: 10, borderRadius: 5, marginTop: 5 },

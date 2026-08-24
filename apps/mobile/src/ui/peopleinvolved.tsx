@@ -226,14 +226,24 @@ export function rosterOf(
 
 const st = {
   card: { borderRadius: 12, marginTop: 10, marginBottom: 0 },
-  title: { fontSize: 11.5, letterSpacing: 1.4, color: C.muted, marginBottom: 10 },
+  /**
+   * REBALANCED (hadar, 2026-08-23, second pass: "the people involved section title is so
+   * small the name of the selected owner is so big it looks confusing").
+   *
+   * My first pass fixed one half and broke the other. Raising the client's name to 18pt
+   * answered "who is it for", but it left an 11.5pt muted label above a bold 18pt name,
+   * which inverts the hierarchy: the card looked like it was ABOUT the person rather
+   * than a section that lists people. The label now carries enough weight to be read as
+   * the heading it is, and the name comes back down to meet it.
+   */
+  title: { fontSize: 13, letterSpacing: 1.2, color: C.steel, marginBottom: 10 },
   group: {},
   groupGap: { marginTop: 14, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12 },
   // The group heading. Quieter than the people under it and louder than the card's
   // own label — it is a divider that happens to be a word.
   groupLab: {
-    fontFamily: F.dispSemi, fontSize: 11.5, letterSpacing: 1.2, color: C.steel,
-    textTransform: 'uppercase', marginBottom: 4,
+    fontFamily: F.dispSemi, fontSize: 12.5, letterSpacing: 1.1, color: C.steel,
+    textTransform: 'uppercase', marginBottom: 5,
   },
   /**
    * A VERTICAL LIST, ONE PERSON PER ROW (hadar, 2026-08-14: "the invited people

@@ -92,23 +92,35 @@ const st = StyleSheet.create({
    */
   draftBanner: {
     backgroundColor: CAUTION.soft, borderWidth: 1, borderColor: CAUTION.line,
-    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
+    borderRadius: 12, paddingHorizontal: 11, paddingVertical: 9,
   },
   /** Offline: the same slab in a NEUTRAL palette. Amber is the app's "something needs
    *  you" colour and nothing here does — it is waiting, which is the expected state on a
    *  jobsite, not a warning. */
   waitBanner: { backgroundColor: C.surfaceMuted, borderColor: C.line },
   waitDisc: { backgroundColor: C.steel },
-  draftHead: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  draftHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   draftDisc: {
-    width: 26, height: 26, borderRadius: 13, backgroundColor: CAUTION.ink,
+    width: 20, height: 20, borderRadius: 10, backgroundColor: CAUTION.ink,
     alignItems: 'center', justifyContent: 'center',
   },
+  /**
+   * A LABEL, NOT A HEADLINE (hadar, 2026-08-23, second pass: "it is still very big and
+   * competing with the title").
+   *
+   * My first pass took it 19 -> 15 and that was not enough, because the problem was
+   * never only the number: at display weight, uppercase, in ochre, across the full width
+   * of the card, it read as the heading of the screen. The extra's own title sits
+   * directly above it and is the thing he came to read. So this drops to 12 and to the
+   * small-caps treatment the rest of the app uses for section labels — the state is
+   * still the frame you read the screen through, it just stops claiming to be the
+   * subject of it.
+   */
   draftTitle: {
-    flex: 1, fontFamily: F.disp, fontSize: 15, color: CAUTION.ink,
-    textTransform: 'uppercase', letterSpacing: 0.6,
+    flex: 1, fontFamily: F.dispSemi, fontSize: 12, color: CAUTION.ink,
+    textTransform: 'uppercase', letterSpacing: 1.1,
   },
-  draftCount: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.ink, marginTop: 6,
+  draftCount: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.ink, marginTop: 5,
                 lineHeight: 19 },
   draftWhy: { fontFamily: F.body, fontSize: 13, color: C.steel, marginTop: 2 },
   // Send, with its reason as a second line inside the button.
@@ -483,7 +495,7 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
               <View style={st.draftBanner}>
                 <View style={st.draftHead}>
                   <View style={st.draftDisc}>
-                    <Icon name="waiting" size={14} color={C.card} />
+                    <Icon name="waiting" size={11} color={C.card} />
                   </View>
                   <Text style={st.draftTitle}>{t('draft.bannerTitle')}</Text>
                 </View>
