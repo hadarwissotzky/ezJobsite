@@ -1330,6 +1330,10 @@ const openRecord = async (changeOrderId: string) => {
               nteCents: pr.mode === 'nte' ? cents : null,
               whoDirected: co?.who_directed || 'Owner',
               numbersConfirmedAt: new Date(),
+              // The SELECT above already asked; this asks again IN the write, because
+              // between the two he can type his own price on the screen he is looking
+              // at. The app must never overwrite a figure a human entered.
+              onlyIfUnpriced: true,
             });
             // A refusal is REPORTED. `validateLines` can reject this on a rounding gap,
             // and an auto-fill that silently does nothing is the worst of both worlds —
@@ -8639,6 +8643,7 @@ const checkClientMessages = async () => {
                   nteCents: seg.mode === 'nte' ? cents : null,
                   whoDirected: co?.who_directed || 'Owner',
                   numbersConfirmedAt: new Date(),
+                  onlyIfUnpriced: true,
                 });
                 // A refusal here used to be swallowed. `validateLines` can reject this
                 // (a rounding gap between the lines and the sum) and a silent no leaves

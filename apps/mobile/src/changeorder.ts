@@ -1171,24 +1171,66 @@ export async function priceDraftExtra(
     exclusions?: string | null;
     whoDirected: string;
     numbersConfirmedAt: Date;
+    /** Write only onto a draft that has NO price yet, in the same statement as the
+     *  write. For the auto-fill paths, which must never argue with a figure a human
+     *  typed. See the guard below. */
+    onlyIfUnpriced?: boolean;
   }
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const lineItems = o.lineItems ?? [];
   const bad = validateLines(lineItems, o.amountCents);
   if (bad) return { ok: false, reason: bad };
 
+  /**
+   * A PRICE WRITE MUST NOT ERASE THE TERMS (Codex adversarial review, 2026-08-24).
+   *
+   * This UPDATE used to set `billing_timing`, `schedule_effect`, `schedule_days` and
+   * `exclusions` on EVERY call, binding `o.X ?? null`. Three of the six callers do not
+   * pass them — the two auto-fill paths and the quick total — so `undefined ?? null`
+   * wrote NULL, and setting a price silently deleted the schedule impact, the billing
+   * timing and the "not included" list a contractor had already filled in. Nothing
+   * failed and nothing was reported: the draft simply lost its terms, and D3 lets an
+   * extra send with all four silent, so it could go to a client that way.
+   *
+   * It got worse today rather than starting today. The auto-fill only fired when the
+   * work was quoted in parts; the whole-job fallback added this morning made it fire on
+   * the ordinary single-figure recording too, which is most of them.
+   *
+   * `undefined` NOW MEANS "LEAVE IT", `null` STILL MEANS "CLEAR IT". The composer
+   * passes these deliberately — sometimes as null, to clear — so the two cases cannot
+   * be collapsed. A key the caller never mentioned is not an instruction to erase.
+   */
+  const sets = ['amount_cents = ?', 'nte_cents = ?', 'line_items = ?',
+                'who_directed = ?', 'numbers_confirmed_at_ms = ?'];
+  const args: unknown[] = [o.amountCents, o.nteCents ?? null, JSON.stringify(lineItems),
+                           o.whoDirected, o.numbersConfirmedAt.getTime()];
+  if ('billingTiming' in o) { sets.push('billing_timing = ?'); args.push(o.billingTiming ?? null); }
+  if ('scheduleEffect' in o) { sets.push('schedule_effect = ?'); args.push(o.scheduleEffect ?? null); }
+  if ('scheduleDays' in o) { sets.push('schedule_days = ?'); args.push(o.scheduleDays ?? null); }
+  if ('exclusions' in o) { sets.push('exclusions = ?'); args.push(o.exclusions?.trim() || null); }
+
+  /**
+   * CHECK-AND-WRITE IN ONE STATEMENT (same review).
+   *
+   * The auto-fill reads "is this draft still unpriced?" and then calls this, which only
+   * required `status = 'draft'`. Between the two the contractor can type his own price —
+   * he is looking at the screen the read was for — and the app would overwrite the
+   * number he just entered with the one it worked out. `onlyIfUnpriced` puts the
+   * condition in the UPDATE, where it is atomic, instead of in a separate SELECT.
+   *
+   * The composer does NOT set it: re-pricing an already-priced draft is exactly what
+   * that screen is for.
+   */
+  const guard = o.onlyIfUnpriced ? ' AND amount_cents IS NULL' : '';
   const upd = await db.execute(
-    `UPDATE change_order SET amount_cents = ?, nte_cents = ?, line_items = ?,
-        who_directed = ?, numbers_confirmed_at_ms = ?,
-        billing_timing = ?, schedule_effect = ?, schedule_days = ?, exclusions = ?
-      WHERE id = ? AND status = 'draft'`,
-    [o.amountCents, o.nteCents ?? null, JSON.stringify(lineItems),
-     o.whoDirected, o.numbersConfirmedAt.getTime(),
-     o.billingTiming ?? null, o.scheduleEffect ?? null,
-     o.scheduleDays ?? null, o.exclusions?.trim() || null, o.changeOrderId]
+    `UPDATE change_order SET ${sets.join(', ')}
+      WHERE id = ? AND status = 'draft'${guard}`,
+    [...args, o.changeOrderId]
   );
   if (!upd.rowsAffected) {
-    return { ok: false, reason: 'this extra is not a draft anymore' };
+    return { ok: false, reason: o.onlyIfUnpriced
+      ? 'this extra already has a price'
+      : 'this extra is not a draft anymore' };
   }
 
   // Refresh the still-queued INSERT payload, if any, so the server's first
@@ -1200,14 +1242,18 @@ export async function priceDraftExtra(
     let p: any = null;
     try { p = JSON.parse(q[0].payload_json); } catch { /* corrupt: drain will park it */ }
     if (p) {
+      // MIRRORS THE UPDATE ABOVE, and must keep mirroring it. This payload is what
+      // the server sees FIRST for an extra whose INSERT is still queued, so a field
+      // nulled here is nulled in the cloud even though the row on the device kept it.
+      // Same rule: only override what the caller actually passed.
       const next = {
         ...p, amount_cents: o.amountCents, nte_cents: o.nteCents ?? null,
         line_items: lineItems, who_directed: o.whoDirected,
         numbers_confirmed_at_ms: o.numbersConfirmedAt.getTime(),
-        billing_timing: o.billingTiming ?? null,
-        schedule_effect: o.scheduleEffect ?? null,
-        schedule_days: o.scheduleDays ?? null,
-        exclusions: o.exclusions?.trim() || null,
+        ...('billingTiming' in o ? { billing_timing: o.billingTiming ?? null } : {}),
+        ...('scheduleEffect' in o ? { schedule_effect: o.scheduleEffect ?? null } : {}),
+        ...('scheduleDays' in o ? { schedule_days: o.scheduleDays ?? null } : {}),
+        ...('exclusions' in o ? { exclusions: o.exclusions?.trim() || null } : {}),
       };
       const json = JSON.stringify(next);
       await db.execute(
