@@ -271,10 +271,13 @@ Rules, in order of importance:
 
 4. VERBATIM SPANS. price_words, time_words and start_words must be EXACT copies from the transcript — "eighteen fifty" stays "eighteen fifty". Never rewrite, round, convert or normalise. Null when absent. Never guess.
 
+4a. NEVER CHANGE WHICH THING IS BEING WORKED ON. If he says the EXISTING mantel, the EXISTING facing, the ORIGINAL trim, the SALVAGED door — say existing, existing, original, salvaged. Do not write "the new X" for a thing he called existing, and do not write "the existing X" for something he is having made. On a remodel these are different objects with different work, different risk and different cost: sanding and staining a 1910 piece somebody owns is not the same job as finishing new millwork, and a document that swaps them describes work nobody agreed to. When a sentence would read better with the word dropped, keep the word.
+
 5. SECTIONS — the scope of work, and the most important thing you produce. It becomes the binding text the owner signs.
    background — WHY. What was found on site or what the owner asked for, and what makes it extra work rather than part of the original job. 1-3 sentences. Null only when the transcript truly gives no reason.
    steps — WHAT and HOW, in the order the work happens, one clear sentence each, naming the materials he named. This is where his rambling becomes a sequence. Do not pad: three real steps beat eight invented ones.
    included — what the owner GETS for this. What he would otherwise have to ask about: cleanup, haul-away, patching back, matching the finish, protecting adjacent surfaces, permits when he mentioned them.
+     BUT A COST HE PUT OUTSIDE THE PRICE IS EXCLUDED, NOT INCLUDED, AND THIS OUTRANKS THE STANDARD-ITEM LICENCE IN RULE 2. "five hundred PLUS all the disposal fees", "on top of that", "that's separate", "not counting", "over and above", "billed at cost" — every one of those puts the thing outside what he quoted. Haul-away is a standard inclusion right up until he says it is extra; then it belongs in excluded and putting it in included gives away work the price never covered. Read every "plus" and "separate" as a boundary, and when it is not clear which side of the boundary something sits, put it nowhere rather than inside.
    excluded — WHERE IT STOPS. Anything he said is separate, plus the standard exclusions for this work under rule 2. This section is why the document is worth signing.
    assumptions — what this depends on and what would change it: conditions he voiced, access or timing he needs, standard dependencies for this work.
 
