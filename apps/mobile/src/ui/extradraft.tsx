@@ -49,7 +49,7 @@ import { canDelete, canSend, chipKey, displayStatus, stageOf } from '../extralif
 import { canSendExtra } from '../extraprocstate';
 import { t } from '../i18n';
 import {
-  APP_NAME, Button, Card, Chip, MoneyBlock, ChecklistRow, PhotoGrid, Row, ScreenHeader, Section,
+  APP_NAME, Button, Card, MoneyBlock, ChecklistRow, PhotoGrid, Row, ScreenHeader, Section,
   StatusBanner, SyncedPill, VoiceClip, type ChecklistState, type PhotoTile, type RowTone,
 } from './kit';
 import { C, F, T, label as labelStyle, money as moneyStyle, tint } from './theme';
@@ -126,7 +126,17 @@ const st = StyleSheet.create({
    * extra's own title directly above it.
    */
   draftState: {},
-  draftChipRow: { flexDirection: 'row' },
+  /** `flex-start` so the pill hugs its label instead of stretching the row. */
+  draftChipRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  /** Deliberately the same numbers as kit's `syncedPill`, so the two status pills on
+   *  this screen are one family. Tone is the only difference. */
+  statePill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: CAUTION.soft, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 5,
+  },
+  statePillT: { fontFamily: F.bodySemi, fontSize: 12.5, color: CAUTION.ink,
+                textTransform: 'uppercase', letterSpacing: 0.6 },
   draftStateLine: {
     fontFamily: F.body, fontSize: 14, color: C.steel, marginTop: 8, lineHeight: 20,
   },
@@ -524,13 +534,21 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
               // a screen whose actual next step is Edit or Send — which is how a
               // status banner turned into the busiest control on the page.
               <View style={st.draftState}>
-                {/* A GHOST PILL, NOT A WARNING BLOCK (hadar, 2026-08-23, third pass:
-                    "still the draft section looks like a big error notice").
-                    `Chip outline` is the app's existing word for this — its own comment
-                    says it "reports a fact ... it is not itself a coloured status" — and
-                    Home already draws "Not sent" exactly this way. One fact, one look. */}
+                {/* A STATE PILL — colour and an icon, at pill scale (hadar,
+                    2026-08-23, fourth pass: "you removed the section but now it
+                    disappears — need an icon and color").
+                    The ghost outline went too far the other way: a grey hairline pill
+                    under a heavy display title is furniture, and he stopped seeing it.
+                    So this borrows the shape the SAME SCREEN already proves works — the
+                    "Synced" pill on the kicker line: soft tint, small icon, semibold
+                    label, 8pt radius. Identical size and weight, caution tone instead of
+                    brand. It reads as a status about the document, beside a green one
+                    that reads the same way, and neither of them is an alert card. */}
                 <View style={st.draftChipRow}>
-                  <Chip outline kind="pending" label={t('draft.bannerTitle')} />
+                  <View style={st.statePill}>
+                    <Icon name="waiting" size={14} color={CAUTION.ink} />
+                    <Text style={st.statePillT}>{t('draft.bannerTitle')}</Text>
+                  </View>
                 </View>
                 {/* While the pipeline is still running, the gap count is not the
                     honest headline — nothing is owed by the contractor yet, the app
@@ -1069,7 +1087,19 @@ function PeopleSection(p: ExtraDraftProps) {
     p.requestedBy
       ? {
           name: p.requestedBy,
-          role: p.clientTypeLabel || t('erec.approverRole'),
+          /**
+           * WHY THIS PERSON IS HERE, not just what to call them (hadar, 2026-08-23:
+           * "why hadar is take care of both").
+           *
+           * This said "Approver" — a role word that names a category and answers
+           * nothing. The one thing a contractor needs from this line is what that
+           * person DOES with the document in front of him. When the client's type is
+           * known ("General contractor") both facts are worth having, so both are
+           * shown: who they are to him, then what they do with this.
+           */
+          role: p.clientTypeLabel
+            ? `${p.clientTypeLabel} · ${t('erec.approverWhy')}`
+            : t('erec.approverWhy'),
           // The client column opens the client editor: on a draft the signer is still
           // a choice, and this is the one place on the screen that says who it is.
           onPress: p.onEditClient ?? p.onEditDetails,

@@ -236,7 +236,15 @@ const st = {
    * than a section that lists people. The label now carries enough weight to be read as
    * the heading it is, and the name comes back down to meet it.
    */
-  title: { fontSize: 13, letterSpacing: 1.2, color: C.steel, marginBottom: 10 },
+  /**
+   * A SENTENCE, SO IT IS SET LIKE ONE. The label used to be the two words "People
+   * involved" and wore the app's spaced small-caps treatment; now that it says what the
+   * section is FOR, uppercase + 1.2 tracking would make a readable line into a wall.
+   * Sentence case, no tracking, and it keeps the label colour so it still reads as a
+   * heading rather than as body copy.
+   */
+  title: { fontSize: 13.5, letterSpacing: 0, textTransform: 'none' as const,
+           color: C.steel, marginBottom: 12 },
   group: {},
   groupGap: { marginTop: 14, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12 },
   // The group heading. Quieter than the people under it and louder than the card's
