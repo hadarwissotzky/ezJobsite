@@ -60,9 +60,13 @@ const LEGAL: ReadonlyArray<readonly [string, string]> = [
   ['sent', 'approved'],
   ['sent', 'declined'],
   ['sent', 'superseded'],
+  // The withdrawal (421, hadar 2026-08-24). It amends REQ-LC20, which had named
+  // "cancel" as a move that does not exist. Only from `sent`: a draft has no live
+  // instrument and nobody to tell, and an approved record is frozen forever.
+  ['sent', 'cancelled'],
 ];
 
-test('every one of the 25 ordered pairs answers exactly as the spec says', () => {
+test('every one of the 36 ordered pairs answers exactly as the spec says', () => {
   for (const from of ALL) {
     for (const to of ALL) {
       const want = LEGAL.some(([f, t]) => f === from && t === to);
@@ -83,8 +87,8 @@ test('DEF-1: a superseded or declined row can NEVER reach approved', () => {
   assert.equal(canApprove('approved'), false, 'and it is not approved twice either');
 });
 
-test('the three terminal states have no successors at all — that empty list IS the seal', () => {
-  for (const s of ['approved', 'declined', 'superseded'] as const) {
+test('the four terminal states have no successors at all — that empty list IS the seal', () => {
+  for (const s of ['approved', 'declined', 'superseded', 'cancelled'] as const) {
     assert.deepEqual([...LEGAL_TRANSITIONS[s]], [], s);
     for (const to of ALL) assert.equal(canTransition(s, to), false, `${s} → ${to}`);
   }
@@ -185,7 +189,7 @@ test('display functions are re-exported from extrastatus, not reimplemented', ()
   assert.equal(displayStatus('sent', { openQuestions: 1 }), 'discussing');
   assert.equal(isAwaiting('discussing'), true);
   assert.deepEqual([...STORED_STATUSES],
-    ['draft', 'sent', 'approved', 'declined', 'superseded']);
+    ['draft', 'sent', 'approved', 'declined', 'superseded', 'cancelled']);
 });
 
 // ── adoption is not action ────────────────────────────────────────────────────
@@ -223,4 +227,19 @@ test('an identical status is not an adoption, and an unknown one is never a lice
   for (const s of STORED_STATUSES) assert.equal(canAdoptServerStatus(s, s), false, s);
   assert.equal(canAdoptServerStatus('draft', 'viewed'), false);
   assert.equal(canAdoptServerStatus('viewed', 'approved'), false);
+});
+
+/**
+ * A WITHDRAWAL CANNOT UNDO A SIGNATURE (421). The server refuses the cancel outright
+ * when a confirmed response exists; these are the local half of the same rule, so a
+ * device that is behind on sync cannot reach the state either.
+ */
+test('cancelled is terminal and can never become approved', () => {
+  assert.equal(canTransition('cancelled', 'approved'), false,
+    'withdrawing then approving would let a contractor un-sign a signed document');
+  assert.equal(canApprove('cancelled'), false);
+  assert.equal(canTransition('approved', 'cancelled'), false,
+    'an approved record is frozen and permanent — mandate #1');
+  assert.equal(canTransition('draft', 'cancelled'), false,
+    'a draft has no live instrument and nobody to tell; that act is delete, not withdraw');
 });

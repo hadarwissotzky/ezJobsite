@@ -284,3 +284,38 @@ export function replyNoticeSmsBody(o: {
   return `${who} replied to your question.` +
     `\n\nRead it and approve or decline here:\n${o.url}`;
 }
+
+/**
+ * "That change order is withdrawn" — the note every recipient gets when the contractor
+ * cancels a sent extra (421, hadar 2026-08-24: "when that is done by the contractor --
+ * send a note to all of the recepients").
+ *
+ * NO LINK, and that is the whole shape of it. Every other message this module writes
+ * ends in a URL because it wants an action; this one is the opposite — the link is dead
+ * (`cancelled_at`, 421) and pointing them at a page that refuses them would read as a
+ * broken message rather than a withdrawal. A client who wants the page can scroll up to
+ * the original text; it will tell them plainly what happened.
+ *
+ * NO PRICE. The figure is gone with the instrument, and repeating it here would put an
+ * amount in front of somebody for work that is no longer offered.
+ *
+ * THE REASON IS OPTIONAL and quoted only when he gave one. An invented explanation on
+ * his behalf would be the app speaking for the contractor to his own client.
+ *
+ * GSM-7, like everything else here — see `isGsm7`'s header for what one stray character
+ * costs. Plain hyphens, straight quotes, no ellipsis.
+ */
+export function cancelledSmsBody(o: {
+  companyName?: string | null;
+  jobLabel?: string | null;
+  reason?: string | null;
+}): string {
+  const who = (o.companyName ?? '').trim() || 'Your contractor';
+  const job = (o.jobLabel ?? '').trim();
+  const why = (o.reason ?? '').trim();
+  return `${who} has withdrawn the change order they sent you.`
+    + (job ? `\nJob: ${job}` : '')
+    + (why ? `\nReason: ${why}` : '')
+    + `\n\nNo approval is needed. Nothing has been agreed and you will not be charged for it.`
+    + `\n\nReply STOP to opt out.`;
+}

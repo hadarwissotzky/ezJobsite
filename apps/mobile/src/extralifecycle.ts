@@ -107,10 +107,23 @@ export function stageOf(status: string): Stage {
  */
 export const LEGAL_TRANSITIONS: Readonly<Record<StoredStatus, readonly StoredStatus[]>> = {
   draft: ['sent', 'approved', 'declined'],
-  sent: ['approved', 'declined', 'superseded'],
+  /**
+   * `sent → cancelled` — the withdrawal (421, hadar 2026-08-24). It amends REQ-LC20,
+   * which named "cancel" as a move that does not exist.
+   *
+   * NOT reachable from `draft`: a draft has no live instrument and nobody to tell, so
+   * withdrawing one is deleting it, which is a different act with its own rules.
+   * NOT reachable from `approved`: an approved record is frozen and permanent, and a
+   * transition that could land on top of one would let a contractor un-sign a signed
+   * document. `cancel_change_order_v1` refuses that server-side too, so the rule holds
+   * on both sides rather than resting on this table alone.
+   */
+  sent: ['approved', 'declined', 'superseded', 'cancelled'],
   approved: [],
   declined: [],
   superseded: [],
+  /** Terminal. Nothing follows a withdrawal — see the seal note above. */
+  cancelled: [],
 };
 
 /**
@@ -160,7 +173,11 @@ export function canTransition(from: string, to: string): boolean {
  * destroy the evidence that the two sides disagree.
  */
 const PROGRESS: Readonly<Record<StoredStatus, number>> = {
-  draft: 0, sent: 1, approved: 2, declined: 2, superseded: 2,
+  // `cancelled` ranks with the other terminals: a device that only saw `sent` adopts
+  // it, and nothing — including an approval arriving late — overwrites it locally. The
+  // server is the one place that arbitrates cancel-versus-approve, and it refuses the
+  // cancel rather than racing (421).
+  draft: 0, sent: 1, approved: 2, declined: 2, superseded: 2, cancelled: 2,
 };
 
 export function canAdoptServerStatus(local: string, server: string): boolean {

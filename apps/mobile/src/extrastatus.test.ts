@@ -29,6 +29,7 @@ test('AC: every status R7 names is reachable from displayStatus', () => {
     displayStatus('approved', quiet),
     displayStatus('declined', quiet),
     displayStatus('superseded', quiet),
+    displayStatus('cancelled', quiet),
   ]);
   for (const s of LEDGER_STATUSES) {
     assert.ok(reached.has(s), `${s} is in the vocabulary but nothing produces it`);
@@ -95,9 +96,13 @@ test('only a sent extra may be superseded', () => {
 
 test('the stored vocabulary matches the databases CHECK constraint exactly', () => {
   // 030_change_order.sql and CHANGE_ORDER_DDL both say:
-  //   check (status in ('draft','sent','approved','declined','superseded'))
+  //   check (status in ('draft','sent','approved','declined','superseded','cancelled'))
+  // `cancelled` joined in 421. THREE places had to move together — the server DDL, the
+  // device DDL, and this list — plus `allowCancelledStatus`, which widens the CHECK on
+  // devices that already exist. This assertion is what makes forgetting one of them a
+  // test failure instead of a constraint violation on somebody's phone.
   assert.deepEqual([...STORED_STATUSES],
-    ['draft', 'sent', 'approved', 'declined', 'superseded']);
+    ['draft', 'sent', 'approved', 'declined', 'superseded', 'cancelled']);
   assert.equal(isStoredStatus('discussing'), false,
     'discussing is derived; storing it would break the CHECK on both sides');
   assert.equal(isStoredStatus('sent'), true);
@@ -107,4 +112,15 @@ test('every status has its own chip key — two statuses must never share a labe
   const keys = LEDGER_STATUSES.map(chipKey);
   assert.equal(new Set(keys).size, LEDGER_STATUSES.length);
   assert.equal(chipKey('discussing'), 'co.chip.discussing');
+});
+
+test('a withdrawn extra never displays as an editable draft', () => {
+  // The fall-through at the end of displayStatus returns 'draft' for anything it does
+  // not recognise. A new terminal status that is not listed above it therefore renders
+  // as a draft and offers Send on an instrument the client was told was withdrawn.
+  assert.equal(displayStatus('cancelled'), 'cancelled');
+  assert.equal(displayStatus('cancelled', { openQuestions: 3 }), 'cancelled',
+    'an unanswered question does not make a withdrawn extra a live negotiation');
+  assert.equal(isAwaiting('cancelled'), false,
+    'withdrawn money is not money awaiting approval');
 });

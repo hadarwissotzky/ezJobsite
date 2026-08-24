@@ -725,6 +725,25 @@ async function load() {
   ]);
   if (error) { done('⚠️', 'Could not load this', 'Check your connection and open the link again.'); return; }
 
+  /**
+   * WITHDRAWN — checked BEFORE superseded, and that order is the whole point (421).
+   *
+   * A cancelled link is also retired, so it would otherwise fall into the branch below
+   * and be told "this version was replaced", with a forward link that does not exist.
+   * Nothing replaced it: the contractor withdrew the request. Telling a client the wrong
+   * one of those sends them hunting through their messages for a newer text that was
+   * never sent.
+   *
+   * It offers NO action and no link. There is nothing for them to approve, nothing owed,
+   * and the last line says so — that is the question a person actually has when a
+   * request they were considering disappears.
+   */
+  if (st && st.found && st.cancelled && !st.answered) {
+    done('—', 'This was withdrawn',
+      'Your contractor withdrew this change order. There is nothing to approve, nothing has been agreed, and you will not be charged for it. If you think this is a mistake, contact them directly.');
+    return;
+  }
+
   if (st && st.found && st.superseded && !st.answered) {
     // R6 AC2: LINK to the current version, do not describe it. This used to say
     // "please open the most recent link they texted you", which asks a homeowner
@@ -2150,7 +2169,10 @@ function askQuestion(d) {
       // round a loop that can never succeed, on a document that no longer exists.
       // Named, for the same reason `answer()` names it.
       if ((error.message || '').includes('replaced by a newer one') ||
-          error.hint === 'link_superseded') {
+          error.hint === 'link_superseded' ||
+          // Withdrawn while this page was open. Same class: the act is refused because
+          // the instrument is gone, not because the tap failed.
+          error.hint === 'link_cancelled') {
         screen(`<div class="done"><div class="mark err">🔄</div>
           <h2>This version was replaced</h2>
           <p>The contractor sent an updated version while this page was open. Your

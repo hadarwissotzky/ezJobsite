@@ -56,6 +56,11 @@ begin
   return jsonb_build_object(
     'found', true,
     'superseded', r.superseded_at is not null,
+    -- WITHDRAWN IS NOT REPLACED (421). A superseded link points the client forward to
+    -- the version that replaced it; a cancelled one has no successor and must say so,
+    -- or the page sends them hunting for a link that does not exist. Reported
+    -- separately for that reason, and the page checks it FIRST.
+    'cancelled', r.cancelled_at is not null,
     'answered', answered,
     'expired', now() > r.expires_at,
     -- The token only. The page builds the URL from its own origin.

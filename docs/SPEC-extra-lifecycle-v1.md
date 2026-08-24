@@ -305,13 +305,37 @@ and why the stricter rule is the correct one.
 **The goal of Stage 2 is communication, revision and resend.** The extra is live, the link is out,
 and exactly three contractor moves exist.
 
-**REQ-LC20 — The contractor's move set in Stage 2 is exactly: Reply · Remind · Revise & Resend.**
-No fourth move. In particular there is no "edit", no "cancel", no "mark approved by hand", and no
-"delete". A contractor who wants the work not to happen issues nothing — the link expires (30 days,
-`020`) or he revises to a version the client declines.
-- **Accept:** the record screen and thread screen expose exactly these three affordances on a
-  `sent` extra, and each is disabled with a stated reason when its own precondition fails.
-- `[trace: D1 · R5b ("two moves from a thread") · R8 (remind)]`
+**REQ-LC20 — The contractor's move set in Stage 2 is exactly: Reply · Remind · Revise & Resend ·
+Withdraw.** No fifth move. In particular there is still no "edit", no "mark approved by hand", and
+no "delete".
+
+**AMENDED 2026-08-24 [hadar]: "Withdraw" was added; this requirement previously named "cancel" as a
+move that does not exist.** The original reasoning was that a contractor who wants the work not to
+happen "issues nothing — the link expires (30 days, `020`) or he revises to a version the client
+declines". Both of those leave a LIVE instrument sitting in a client's messages for up to a month
+with nothing said, and the second requires him to author a version he does not want in order to
+have it refused. That is the miscommunication this product exists to prevent, performed by the
+product. The move is now explicit, and it tells the counterparty rather than letting the silence do
+it.
+
+The withdrawal is bounded by three rules, all enforced on both sides:
+- **Only from `sent`.** A draft has no live instrument and nobody to tell (that act is delete); an
+  approved record is frozen and permanent (REQ-LC30, mandate #1).
+- **An approval WINS a race.** `cancel_change_order_v1` refuses outright when a confirmed response
+  exists, and says so, rather than racing the status. A cancellation that could land on top of a
+  signature would let a contractor un-sign a signed document.
+- **The link dies in the same transaction as the status,** so an approval already in flight cannot
+  land after the withdrawal.
+
+`cancelled` is a SIXTH stored status, not a reuse of `superseded`: superseded means a newer version
+replaced this one and the client's page links them forward to it (367), whereas a withdrawal has no
+successor, and printing "replaced" on an instrument nothing replaced is a false statement about
+what happened.
+- **Accept:** the record screen exposes exactly these four affordances on a `sent` extra, each
+  disabled with a stated reason when its own precondition fails; every recipient of the confirmation
+  receives a note; and the client page says "withdrawn", never "replaced".
+- `[trace: D1 · R5b ("two moves from a thread") · R8 (remind) · 421_cancel_sent_extra.sql ·
+  hadar 2026-08-24]`
 
 **REQ-LC21 — `Remind` MUST reuse the live link and MUST NOT mint a token.**
 R8 says it in five words — "always via the same link". Minting a token would fire `250`'s supersede

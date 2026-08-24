@@ -153,6 +153,8 @@ export type RecordScreenProps = {
   /** REQ-LC22 Revise & resend. Passed unconditionally; `threadState.canRevise`
    *  (which is `canSupersede`) decides inside the screen. */
   onRevise: () => void;
+  /** Withdraw a sent extra (421). Passed through to Stage 2; absent elsewhere. */
+  onWithdraw?: () => void;
   /** Open one collapsed field / the detail subscreens (extradetails.tsx). */
   onOpenDetail: (field: ExtraDetailField) => void;
   /** Tapping one of the three pricing modes under the price on a draft. */
@@ -351,6 +353,7 @@ export function RecordScreen(props: RecordScreenProps) {
         onReply={props.onReply}
         onRemind={props.onRemind}
         onRevise={props.onRevise}
+        onWithdraw={props.onWithdraw}
         onOpenDetail={props.onOpenDetail}
         onAddContact={props.onAddContact}
         version={lifecycle.version}

@@ -473,6 +473,14 @@ const BANNER = {
   approved:   { tone: 'approved', icon: 'approved' },
   declined:   { tone: 'danger',   icon: 'failed' },
   superseded: { tone: 'neutral',  icon: 'history' },
+  /**
+   * Withdrawn by the contractor (421). NEUTRAL, not danger: `declined` is the client
+   * saying no and is red because it is a refusal he has to reckon with. This is his own
+   * decision, already carried out, and colouring his own act as an alarm would tell him
+   * something went wrong when nothing did. Same reasoning as `superseded`, which is the
+   * other "this version is over and nobody is at fault" state.
+   */
+  cancelled:  { tone: 'neutral',  icon: 'failed' },
 } as const;
 
 export type BannerKind = keyof typeof BANNER;

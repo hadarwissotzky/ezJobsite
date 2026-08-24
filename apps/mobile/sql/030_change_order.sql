@@ -48,7 +48,7 @@ create table if not exists public.change_order (
   numbers_confirmed_at timestamptz not null,
 
   status         text not null default 'draft'
-                   check (status in ('draft','sent','approved','declined','superseded')),
+                   check (status in ('draft','sent','approved','declined','superseded','cancelled')),
   created_at     timestamptz not null default now()
 );
 

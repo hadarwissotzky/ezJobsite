@@ -89,7 +89,7 @@ import { backfillPairOutbox, drainPairOutbox, ensurePairSyncSchema, enqueuePair,
 import { ensureAugmentSchema, noteAugment, appendAugmentDesc } from './src/augmentlog';
 import { ensureAugmentRetrySchema, markAugmentPending, clearAugmentPending,
          retryPendingAugments } from './src/augmentretry';
-import { clientSmsBody, type ClientSmsKind } from './src/clientsms';
+import { cancelledSmsBody, clientSmsBody, type ClientSmsKind } from './src/clientsms';
 import { reachable, remindTargets } from './src/remindrecipients';
 import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
@@ -2159,6 +2159,82 @@ if (__DEV__) {
   (globalThis as any).__pickClient =
     (id: string, name: string) => { void chooseClient({ id, name }); };
 }
+/**
+ * WITHDRAW A SENT EXTRA, and tell everyone who was asked to approve it.
+ *
+ * hadar, 2026-08-24: "i need to be able to cancel a none approved but sent co -- when
+ * that is done by the contractor -- send a note to all of the recepients". This amends
+ * SPEC-extra-lifecycle-v1 REQ-LC20, which had named "cancel" as a Stage 2 move that does
+ * not exist; the amendment and its reasoning are in that file and in 421.
+ *
+ * THE SERVER DECIDES, NOT THIS FUNCTION. `cancel_change_order_v1` re-checks ownership,
+ * refuses anything that is not `sent`, and refuses outright if a confirmed response
+ * exists — so a client who tapped Approve a second earlier WINS, and he is told they
+ * already approved it rather than the two racing. The status move and the killing of
+ * every live link happen in that one transaction, so an approval in flight cannot land
+ * after the withdrawal.
+ *
+ * THE NOTES GO OUT FROM HERE, deliberately. An RPC that both mutated and sent would own
+ * a delivery failure it cannot retry; this way the withdrawal is committed the moment
+ * the RPC returns, and a text that fails to send is a message problem, not a lost act.
+ * Every recipient is told, including one who was reminded on a second channel — the RPC
+ * deduplicates by destination.
+ */
+const withdrawExtra = async (changeOrderId: string, reason: string | null) => {
+  try {
+    const { data, error } = await connector.client.rpc('cancel_change_order_v1', {
+      p_change_order_id: changeOrderId, p_reason: reason,
+    });
+    if (error) {
+      const hint = (error as any)?.hint ?? '';
+      setAck({ kind: 'no',
+        title: T('cancel.failedH'),
+        detail: hint === 'already_approved' ? T('cancel.alreadyApproved')
+              : hint === 'not_sent' ? T('cancel.notSent')
+              : error.message });
+      return;
+    }
+    // The local row follows the server's word. `canTransition` is not consulted: this
+    // is LEARNING a move the server just made, which is `adoptServerStatus`'s
+    // distinction and not this path's to re-litigate.
+    await db.execute(
+      `UPDATE change_order SET status = 'cancelled' WHERE id = ?`, [changeOrderId]);
+
+    const co = (await db.getAll<{ scope: string; project_id: string }>(
+      `SELECT scope, project_id FROM change_order WHERE id = ?`, [changeOrderId]))[0];
+    const proj = co ? (await db.getAll<{ name: string }>(
+      `SELECT name FROM project WHERE id = ?`, [co.project_id]))[0] : undefined;
+    const prof = await getProfile(db);
+
+    const recipients: Array<{ channel: string; destination: string }> =
+      ((data as any)?.recipients ?? []).filter((r: any) => r?.destination);
+    const body = cancelledSmsBody({
+      companyName: prof?.company ?? null,
+      jobLabel: proj?.name ?? null,
+      reason,
+    });
+    let told = 0, failed = 0;
+    for (const r of recipients) {
+      if (r.channel !== 'sms') continue;
+      const sent = await sendSms(connector.client, r.destination, body);
+      if (sent.ok) told++; else failed++;
+    }
+    await refresh();
+    /**
+     * WHAT ACTUALLY HAPPENED, including the half that did not. A withdrawal whose notes
+     * failed to send is the dangerous state — the contractor believes the client knows
+     * and the client is still looking at a live-looking text — so the count of failures
+     * is stated rather than swallowed.
+     */
+    setAck({ kind: 'ok', title: T('cancel.doneH'),
+      detail: failed > 0
+        ? T({ k: 'cancel.doneSomeFailed', p: { n: String(told), f: String(failed) } } as any)
+        : T({ k: 'cancel.doneTold', p: { n: String(told) } } as any) });
+  } catch (e: any) {
+    setAck({ kind: 'no', title: T('cancel.failedH'), detail: e?.message ?? String(e) });
+  }
+};
+
 /**
  * Invite a teammate from the send sheet.
  *
@@ -8641,6 +8717,26 @@ const checkClientMessages = async () => {
           if (!c) { setFiled(T('erec.errStillLoading')); return; }
           closeRecord(); startRevision(c);
         }}
+        /**
+         * WITHDRAW (421). Offered only while the extra is genuinely `sent`: the server
+         * refuses anything else, and an affordance that always fails is worse than one
+         * that is absent. The confirmation is mandatory and states the two consequences
+         * he cannot see — the link dies, and everyone gets a text — because this cannot
+         * be undone (mandate #2: nothing carrying a commitment moves unasked).
+         */
+        onWithdraw={record.status === 'sent'
+          ? () => {
+              const id = record.id;
+              Alert.alert(
+                T('cancel.confirmH'), T('cancel.confirmBody'),
+                [
+                  { text: T('common.cancel'), style: 'cancel' },
+                  { text: T('cancel.confirmYes'), style: 'destructive',
+                    onPress: () => { closeRecord(); void withdrawExtra(id, null); } },
+                ],
+              );
+            }
+          : undefined}
         onOpenDetail={(field) => openDetail(field)}
         /**
          * PICKING A PRICING MODE opens the cost editor already switched to it, rather

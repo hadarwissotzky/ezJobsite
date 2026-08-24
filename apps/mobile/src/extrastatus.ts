@@ -10,7 +10,7 @@
  *
  * WHY A DERIVATION AND NOT A SIXTH STORED STATUS.
  *   `change_order.status` is CHECK-constrained to
- *   ('draft','sent','approved','declined','superseded') on both sides
+ *   ('draft','sent','approved','declined','superseded','cancelled') on both sides
  *   (030_change_order.sql, CHANGE_ORDER_DDL). "In Discussion" is deliberately NOT
  *   in that list: 220_question_path.sql states the model outright — "a request with
  *   question rows and no response is in discussion", derivable and not a fourth
@@ -24,15 +24,24 @@
  *   R7's AC names discussing as one of the five statuses that must be shown.
  */
 
-/** What a ledger row can say. The stored five, plus the derived one. */
+/** What a ledger row can say. The stored six, plus the derived one. */
 export const LEDGER_STATUSES = [
-  'draft', 'sent', 'discussing', 'approved', 'declined', 'superseded',
+  'draft', 'sent', 'discussing', 'approved', 'declined', 'superseded', 'cancelled',
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
 /** The stored vocabulary — what `change_order.status` is allowed to hold. */
 export const STORED_STATUSES = [
-  'draft', 'sent', 'approved', 'declined', 'superseded',
+  /**
+   * `cancelled` — the contractor withdrew a sent extra before anyone answered
+   * (421, hadar 2026-08-24). A SIXTH status rather than reusing `superseded`,
+   * because superseded means "a newer version replaced this" and the client's page
+   * links them forward to it; a withdrawal has no successor, and printing "replaced"
+   * on an instrument nothing replaced is a false statement about what happened.
+   *
+   * Terminal, like the other three: nothing follows a withdrawal.
+   */
+  'draft', 'sent', 'approved', 'declined', 'superseded', 'cancelled',
 ] as const;
 export type StoredStatus = (typeof STORED_STATUSES)[number];
 
@@ -83,7 +92,15 @@ export function isStoredStatus(v: string): v is StoredStatus {
  * an invention.
  */
 export function displayStatus(stored: string, signals?: StatusSignals): LedgerStatus {
-  if (stored === 'approved' || stored === 'declined' || stored === 'superseded') {
+  /**
+   * `cancelled` JOINS THE TERMINAL PASSTHROUGH, and leaving it out was not cosmetic:
+   * the fall-through at the bottom of this function returns 'draft', so a withdrawn
+   * extra would have rendered as an editable draft — offering Send on an instrument
+   * the contractor had already told the client was off. Caught by reading the
+   * fall-through rather than by a test, which is why one now exists below.
+   */
+  if (stored === 'approved' || stored === 'declined' || stored === 'superseded'
+      || stored === 'cancelled') {
     return stored;
   }
   if ((signals?.openQuestions ?? 0) > 0) return 'discussing';

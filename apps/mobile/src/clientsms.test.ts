@@ -14,7 +14,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { clientSmsBody, isGsm7, replyNoticeSmsBody, smsSegments } from './clientsms.ts';
+import { cancelledSmsBody, clientSmsBody, isGsm7, replyNoticeSmsBody, smsSegments } from './clientsms.ts';
 
 // A real instrument in the 391 layout, which is what renderCard emits today.
 const PRICED = [
@@ -299,4 +299,44 @@ test('a long company name and address cannot buy a third segment', () => {
   assert.match(long, /Job:[^\n]*\.\.\./,
     'the trimmed line ends in periods, never the non-GSM-7 ellipsis character');
   assert.ok(isGsm7(long), 'one non-GSM-7 character doubles the segment count');
+});
+
+/* ------------------------------------------------------- the withdrawal note -- */
+
+test('the withdrawal note carries NO link — the link is dead', () => {
+  const b = cancelledSmsBody({ companyName: 'Wissotzky Bros', jobLabel: '1155 Stanyan St' });
+  assert.ok(!/https?:\/\//.test(b),
+    'pointing a client at a page that refuses them reads as a broken message');
+  assert.match(b, /withdrawn/i);
+  assert.match(b, /1155 Stanyan St/);
+});
+
+test('the withdrawal note never carries a price', () => {
+  const b = cancelledSmsBody({ companyName: 'Wissotzky Bros', jobLabel: 'X', reason: 'Owner changed their mind' });
+  assert.ok(!/\$/.test(b),
+    'an amount for work no longer offered is a figure nobody should be looking at');
+  assert.match(b, /Owner changed their mind/);
+});
+
+test('no reason given means no reason quoted — the app never explains for him', () => {
+  const b = cancelledSmsBody({ companyName: 'Wissotzky Bros', jobLabel: 'X' });
+  assert.ok(!/Reason:/.test(b));
+});
+
+test('it says nothing is owed, because that is the client\'s actual question', () => {
+  const b = cancelledSmsBody({ companyName: 'Wissotzky Bros' });
+  assert.match(b, /not be charged/);
+});
+
+test('the withdrawal note stays GSM-7 and inside two segments', () => {
+  const b = cancelledSmsBody({
+    companyName: 'Wissotzky Brothers General Contracting and Restoration LLC',
+    jobLabel: '1155 Stanyan Street, Apartment 4B, San Francisco, California 94117',
+  });
+  assert.ok(isGsm7(b), `not GSM-7: ${JSON.stringify(b)}`);
+  assert.ok(smsSegments(b) <= 2, `${smsSegments(b)} segments`);
+});
+
+test('EVERY message a client can receive carries the opt-out — including this one', () => {
+  assert.match(cancelledSmsBody({ companyName: 'X' }), /Reply STOP/);
 });

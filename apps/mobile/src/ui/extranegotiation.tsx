@@ -152,6 +152,9 @@ export type ExtraNegotiationProps = {
   /** Hands off to the priced read-back composer. This screen never issues a price
    *  itself (mandate #2). */
   onRevise: () => void;
+  /** Withdraw a sent extra nobody has answered (421). Omitted where it is not
+   *  available — an approved or declined extra is past withdrawing. */
+  onWithdraw?: () => void;
   onOpenDetail: (field: ExtraDetailField) => void;
   /** Which version this row is (1 = the original), derived from the supersession
    *  lineage. Shown here for the same reason it is shown on the sealed screen: the
@@ -251,10 +254,31 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
 
   // The ⋯ nav overflow — the design carries it on this screen. It offers the two acts
   // that are not one-tap on the page itself: revise & resend, and the full history.
+  /**
+   * WITHDRAW JOINS THE OVERFLOW, not the page (421, hadar 2026-08-24).
+   *
+   * It belongs beside Revise for the same reason Revise is there: it is an act, it is
+   * not one-tap, and it is not what he came to this screen to do. Putting it on the page
+   * would make ending the conversation as prominent as continuing it.
+   *
+   * `destructiveButtonIndex` because it kills a live instrument and cannot be undone —
+   * iOS colours it red, which is the one place red is right here: the CHIP stays neutral
+   * because a withdrawal is not a fault, but the button that performs it is a warning.
+   */
   const showOverflow = React.useCallback(() => {
+    const withdraw = props.onWithdraw;
+    const options = withdraw
+      ? [t('neg.reviseShort'), t('neg.viewHistory'), t('cancel.action'), t('common.cancel')]
+      : [t('neg.reviseShort'), t('neg.viewHistory'), t('common.cancel')];
     ActionSheetIOS.showActionSheetWithOptions(
-      { options: [t('neg.reviseShort'), t('neg.viewHistory'), t('common.cancel')], cancelButtonIndex: 2 },
-      (i) => { if (i === 0) props.onRevise(); else if (i === 1) props.onViewHistory(); },
+      { options,
+        cancelButtonIndex: withdraw ? 3 : 2,
+        destructiveButtonIndex: withdraw ? 2 : undefined },
+      (i) => {
+        if (i === 0) props.onRevise();
+        else if (i === 1) props.onViewHistory();
+        else if (i === 2 && withdraw) withdraw();
+      },
     );
   }, [props]);
 

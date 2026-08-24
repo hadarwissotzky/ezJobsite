@@ -88,7 +88,7 @@ export const CHANGE_ORDER_DDL = [
       -- price at the same bar the server does, so being offline never lowers it.
       numbers_confirmed_at_ms INTEGER NOT NULL,
       status        TEXT NOT NULL DEFAULT 'draft'
-                      CHECK (status IN ('draft','sent','approved','declined','superseded')),
+                      CHECK (status IN ('draft','sent','approved','declined','superseded','cancelled')),
       signed_by     TEXT,
       created_at_ms INTEGER NOT NULL,
       -- The Simplest Jobsite Flow (FLOW-SIMPLEST-JOBSITE.md, 2026-07-23):
@@ -159,6 +159,7 @@ export const CHANGE_ORDER_DDL = [
 export async function ensureChangeOrderSchema(db: AbstractPowerSyncDatabase) {
   for (const s of CHANGE_ORDER_DDL) await db.execute(s);
   await makeAmountNullable(db);
+  await allowCancelledStatus(db);
   await ensureFlowFields(db);
 }
 
@@ -292,6 +293,73 @@ export type ScheduleEffect = (typeof SCHEDULE_EFFECTS)[number];
  * correct only while the column order matches, and silently shifts every value
  * one place the day someone inserts a column into the DDL above.
  */
+/**
+ * WIDEN THE STATUS CHECK so a withdrawn extra can be stored (421, 2026-08-24).
+ *
+ * `CREATE TABLE IF NOT EXISTS` does not alter an existing table, so every device that
+ * has ever run this app still holds `CHECK (status IN (... 'superseded'))`. Hydrating a
+ * `cancelled` row onto one raises a constraint violation — on the pull path, for a fact
+ * the server has already committed, which is the shape of failure mandate #7 forbids:
+ * being behind on sync must not produce a wrong outcome.
+ *
+ * SAME SHAPE AS `makeAmountNullable` BELOW, and for the same reason it is that shape:
+ * this table holds the contractor's ledger, including sent extras a homeowner may have
+ * approved. One transaction, an explicit column list rather than `SELECT *`, and the
+ * trigger recreated afterwards because it went with the dropped table.
+ *
+ * Detected from the table's own SQL rather than a version number: the question is
+ * literally "does this CHECK admit the word", and `sqlite_master` answers it exactly.
+ */
+async function allowCancelledStatus(db: AbstractPowerSyncDatabase) {
+  const row = (await db.getAll<{ sql: string }>(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='change_order'`))[0];
+  // Absent (the DDL above just built it correctly) or already widened.
+  if (!row?.sql || row.sql.includes("'cancelled'")) return;
+
+  await db.writeTransaction(async (tx) => {
+    await tx.execute(`CREATE TABLE change_order_cancelrebuild (
+      id TEXT PRIMARY KEY, decision_id TEXT NOT NULL, project_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL, scope TEXT NOT NULL CHECK (length(scope) > 0),
+      line_items TEXT NOT NULL DEFAULT '[]',
+      amount_cents INTEGER CHECK (amount_cents IS NULL OR amount_cents >= 0),
+      currency TEXT NOT NULL DEFAULT 'USD', nte_cents INTEGER,
+      is_mini INTEGER NOT NULL DEFAULT 0 CHECK (is_mini IN (0,1)),
+      who_directed TEXT NOT NULL, ref_estimate TEXT,
+      numbers_confirmed_at_ms INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft','sent','approved','declined','superseded','cancelled')),
+      signed_by TEXT, created_at_ms INTEGER NOT NULL
+    ) STRICT`);
+    await tx.execute(`INSERT INTO change_order_cancelrebuild
+      (id, decision_id, project_id, owner_id, scope, line_items, amount_cents,
+       currency, nte_cents, is_mini, who_directed, ref_estimate,
+       numbers_confirmed_at_ms, status, signed_by, created_at_ms)
+      SELECT id, decision_id, project_id, owner_id, scope, line_items, amount_cents,
+             currency, nte_cents, is_mini, who_directed, ref_estimate,
+             numbers_confirmed_at_ms, status, signed_by, created_at_ms
+        FROM change_order`);
+    const before = (await tx.getAll<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM change_order`))[0]?.n ?? -1;
+    const after = (await tx.getAll<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM change_order_cancelrebuild`))[0]?.n ?? -2;
+    // COUNTED BEFORE THE DROP, like migrateOutboxFk: a rebuild that lost a sent extra
+    // must leave the original standing, not report success.
+    if (before !== after) throw new Error(`change_order rebuild would lose rows: ${before} -> ${after}`);
+    await tx.execute(`DROP TABLE change_order`);
+    await tx.execute(`ALTER TABLE change_order_cancelrebuild RENAME TO change_order`);
+    // The trigger went with the dropped table. Without it a sent change order becomes
+    // editable, which is the one thing the frozen rule exists to prevent.
+    await tx.execute(`CREATE TRIGGER IF NOT EXISTS change_order_frozen
+       BEFORE UPDATE ON change_order
+       WHEN old.status IN ('sent','approved','declined')
+        AND (new.amount_cents IS NOT old.amount_cents
+             OR new.scope IS NOT old.scope
+             OR new.nte_cents IS NOT old.nte_cents)
+       BEGIN SELECT RAISE(ABORT, 'a sent change order is frozen: supersede it'); END`);
+  });
+  console.log('change_order: status CHECK now admits cancelled');
+}
+
 async function makeAmountNullable(db: AbstractPowerSyncDatabase) {
   const cols = await db.getAll<{ name: string; notnull: number }>(
     `SELECT name, "notnull" FROM pragma_table_info('change_order')`);
@@ -311,7 +379,7 @@ async function makeAmountNullable(db: AbstractPowerSyncDatabase) {
       who_directed TEXT NOT NULL, ref_estimate TEXT,
       numbers_confirmed_at_ms INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'draft'
-        CHECK (status IN ('draft','sent','approved','declined','superseded')),
+        CHECK (status IN ('draft','sent','approved','declined','superseded','cancelled')),
       signed_by TEXT, created_at_ms INTEGER NOT NULL
     ) STRICT`);
     await tx.execute(`INSERT INTO change_order_rebuild
