@@ -49,6 +49,7 @@ import { truncate, type ThreadState } from '../discussion';
 import type { RemindVerdict } from '../remind';
 import { chipKey, displayStatus, type LedgerStatus } from '../extrastatus';
 import { currentLang, t } from '../i18n';
+import { copyLink } from '../copylink';
 import { mergeDictation, startDictation } from '../livedictation';
 import { DiscussionLog } from './threadscreen';
 import { PeopleInvolved, rosterOf } from './peopleinvolved';
@@ -155,6 +156,14 @@ export type ExtraNegotiationProps = {
   /** Withdraw a sent extra nobody has answered (421). Omitted where it is not
    *  available — an approved or declined extra is past withdrawing. */
   onWithdraw?: () => void;
+  /**
+   * THE LIVE CLIENT LINK, so he can copy it and email it himself (hadar 2026-08-24).
+   *
+   * Read from `co_live_link`, which holds exactly one live token per extra — copying
+   * hands over the SAME URL Remind texts and mints nothing. Null on an extra whose link
+   * never minted; the row then says so instead of offering a Copy that does nothing.
+   */
+  linkUrl?: string | null;
   onOpenDetail: (field: ExtraDetailField) => void;
   /** Which version this row is (1 = the original), derived from the supersession
    *  lineage. Shown here for the same reason it is shown on the sealed screen: the
@@ -354,6 +363,7 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
           canReply={thread.canReply}
           canRevise={thread.canRevise}
           onRemind={() => { void remind(); }}
+          linkUrl={props.linkUrl ?? null}
           onReply={toReply}
           onRevise={props.onRevise}
           note={actionNote}
@@ -539,6 +549,9 @@ function WaitingBlock(props: {
   canReply: boolean;
   canRevise: boolean;
   onRemind: () => void;
+  /** The live client link, for the copy row. Absent on an extra whose link never
+   *  minted — the row then says that rather than offering a dead Copy. */
+  linkUrl?: string | null;
   onReply: () => void;
   onRevise: () => void;
   note: string | null;
@@ -611,9 +624,79 @@ function WaitingBlock(props: {
         {refusal !== null && (
           <Text style={[st.mechanism, st.mechanismWarn]}>{refusal}</Text>
         )}
+        {/* THE SAME LINK, AS A LINK (hadar, 2026-08-24: "user should be able to have
+            access and copy the client portal CO link in case they need to send it via
+            email"). Remind composes a text message, which is the right default and is
+            not the only way a link travels — an email address, an assistant, a lender.
+            Inside this card and under Remind on purpose: this is what he reaches for
+            when the text did not land, which is the state this whole card is about. */}
+        {props.waiting !== 'settled' && <CopyLinkRow url={props.linkUrl ?? null} />}
       </View>
 
       {props.note !== null && <Text style={st.failure}>{props.note}</Text>}
+    </View>
+  );
+}
+
+/**
+ * The client's link, shown and copyable.
+ *
+ * IT SHOWS THE URL. A bare "Copy link" button asks a contractor to trust that something
+ * invisible happened; seeing the address he is about to paste is what makes the button
+ * believable, and it is the only place in the app the link is legible at all.
+ *
+ * THE CONFIRMATION IS THE BUTTON. It becomes "Copied" for a moment rather than raising a
+ * toast over the screen — the hand is already on the button, so that is where the answer
+ * belongs, and it costs no extra touch (mandate #3).
+ *
+ * A FAILURE IS SAID OUT LOUD. `copyLink` refuses a missing or relative URL and reports a
+ * pasteboard that would not take it; showing "Copied" over an empty clipboard would send
+ * him to an email with nothing to paste and no idea why.
+ */
+function CopyLinkRow({ url }: { url: string | null }) {
+  const [state, setState] = React.useState<'idle' | 'copied'>('idle');
+  const [failure, setFailure] = React.useState<string | null>(null);
+  // Clear the "Copied" label without leaving a timer behind on a screen he navigated
+  // away from.
+  React.useEffect(() => {
+    if (state !== 'copied') return;
+    const h = setTimeout(() => setState('idle'), 2200);
+    return () => clearTimeout(h);
+  }, [state]);
+
+  const press = async () => {
+    setFailure(null);
+    const r = await copyLink(url);
+    if (r.ok) { setState('copied'); return; }
+    // `r8.noLink` and `link.notConfigured` are message keys; anything else is the
+    // pasteboard's own words, which are more useful than a generic sentence.
+    setFailure(r.reason === 'r8.noLink' || r.reason === 'link.notConfigured'
+      ? t(r.reason as 'r8.noLink') : r.reason);
+  };
+
+  return (
+    <View style={st.linkRow}>
+      <Text style={st.linkLabel}>{t('link.clientLink')}</Text>
+      <View style={st.linkLine}>
+        <Text style={st.linkUrl} numberOfLines={1} ellipsizeMode="middle">
+          {url || t('link.none')}
+        </Text>
+        <Pressable
+          onPress={() => { void press(); }}
+          disabled={!url}
+          hitSlop={8}
+          style={({ pressed }) => [st.linkBtn, pressed && { opacity: 0.6 }, !url && { opacity: 0.4 }]}
+        >
+          <Icon name={state === 'copied' ? 'approved' : 'ntClipboard'} size={14} color={C.brand} />
+          <Text style={st.linkBtnText}>
+            {state === 'copied' ? t('link.copied') : t('link.copy')}
+          </Text>
+        </Pressable>
+      </View>
+      {/* Says what the link IS, because "copy" alone does not answer the question a
+          contractor actually has: whether pasting this into an email makes a second,
+          competing link. It does not — there is only ever one (250_one_live_link). */}
+      <Text style={st.linkHint}>{failure ?? t('link.sameLinkHint')}</Text>
     </View>
   );
 }
@@ -1241,6 +1324,27 @@ const st = StyleSheet.create({
   waitDetail: { fontFamily: F.body, fontSize: 14, color: C.ink, lineHeight: 21, marginTop: 4 },
   // The full-width Remind button. Height trimmed ~20% (46→37); corners ~20% less round (12→10).
   remindInCard: { marginTop: 12, minHeight: 37, borderRadius: 10 },
+
+  // The copy-link row, inside the waiting card under Remind. Separated by a hairline
+  // rather than its own box: it is a second way to do the same errand, not a second
+  // subject.
+  linkRow: { marginTop: 12, paddingTop: 11, borderTopWidth: 1, borderTopColor: C.brandLine },
+  linkLabel: {
+    fontFamily: F.body, fontSize: 11, fontWeight: '700', color: C.steel,
+    letterSpacing: 0.6, textTransform: 'uppercase',
+  },
+  linkLine: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 5 },
+  // The URL yields; the button never shrinks. A half-visible Copy is not a control.
+  linkUrl: {
+    flex: 1, minWidth: 0, fontFamily: F.body, fontSize: 12.5, color: C.ink,
+  },
+  linkBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingVertical: 7, paddingHorizontal: 11,
+    borderRadius: 8, borderWidth: 1, borderColor: C.brandLine, backgroundColor: C.raised,
+  },
+  linkBtnText: { fontFamily: F.body, fontSize: 13, fontWeight: '700', color: C.brand },
+  linkHint: { fontFamily: F.body, fontSize: 12, color: C.steel, marginTop: 6, lineHeight: 16 },
 
   // The Info / Messages / Activity segmented control. One track; the active segment is
   // filled brand-green with light text, the rest are quiet. Tight padding so the active

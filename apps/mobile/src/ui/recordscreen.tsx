@@ -96,6 +96,9 @@ export type RecordLifecycle = {
   /** `canRemind(...)` at load time. A refusal carries its reason so the button is
    *  never silently dead. */
   remind: RemindVerdict;
+  /** The live client link, so the waiting card can offer it for an email (2026-08-24).
+   *  Null before the extra is sent. */
+  linkUrl?: string | null;
   /** Which version this row is (1 = original), derived from the supersession lineage
    *  by `versionNumber` — never stored. */
   version: number;
@@ -348,6 +351,7 @@ export function RecordScreen(props: RecordScreenProps) {
         thread={threadState({ coStatus: rec.status, messages, nowMs: Date.now() })}
         undelivered={props.undelivered}
         remind={lifecycle.remind}
+        linkUrl={lifecycle.linkUrl ?? null}
         formatAt={createdLabel}
         onBack={props.onBack}
         onReply={props.onReply}

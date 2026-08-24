@@ -359,6 +359,9 @@ type RecordLcState = {
    *  question count that changes under the open record. */
   remindCount: number;
   remindLastMs: number | null;
+  /** The live client link's URL, for the copy row on the waiting card. Null until an
+   *  extra has been sent; `co_live_link` holds one live token per extra. */
+  linkUrl: string | null;
 };
 
 /** A stable per-CALENDAR-DAY key in LOCAL time — the thing the feed groups on.
@@ -1451,6 +1454,7 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
       version,
       remindCount: link?.remindCount ?? 0,
       remindLastMs: link?.lastRemindMs ?? null,
+      linkUrl: link?.url ?? null,
       view: {
         version,
         // REQ-LC12. recordactors.ts states the derivation and it holds here for the
@@ -8540,6 +8544,9 @@ const checkClientMessages = async () => {
             // replaced.
             inDiscussion: (questions[record.id] ?? 0) > 0,
           }, Date.now()),
+          // The URL itself, so the waiting card can offer it for an email. Same link
+          // Remind texts — `liveLinkFor` reads the one live token.
+          linkUrl: recordLc.linkUrl,
         }}
         approval={approval}
         thread={recordThread}

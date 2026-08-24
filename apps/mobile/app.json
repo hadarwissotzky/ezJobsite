@@ -29,7 +29,7 @@
       "entitlements": {
         "aps-environment": "production"
       },
-      "buildNumber": "40"
+      "buildNumber": "42"
     },
     "android": {
       "adaptiveIcon": {
@@ -99,7 +99,7 @@
       ],
       "expo-web-browser"
     ],
-    "runtimeVersion": "1.0.0",
+    "runtimeVersion": "1.1.0",
     "updates": {
       "url": "https://u.expo.dev/2627bce9-ca41-4f4e-b50f-6d810818e651",
       "fallbackToCacheTimeout": 0,

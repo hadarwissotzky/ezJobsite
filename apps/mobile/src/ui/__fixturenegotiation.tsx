@@ -117,6 +117,8 @@ export function FixtureNegotiation() {
     onBack: noop,
     onReply: async () => {},
     onRemind: async () => ({ ok: true }),
+    // A live link, so the copy-link row shows in the preview.
+    linkUrl: 'https://ez.example.com/confirm.html?t=demo-token-abc123',
     onRevise: noop,
     onOpenDetail: noop,
     onViewHistory: noop,

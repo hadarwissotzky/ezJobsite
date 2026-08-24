@@ -870,6 +870,15 @@ const EN: Record<string, string> = {
   'r8.inDiscussion': 'They asked a question and are waiting on you. Answer it first.',
   'r8.notSent': 'This has not been sent yet.',
   'r8.noLink': 'No link on this phone for that extra. Send it again to create one.',
+  // The copy-link row (hadar 2026-08-24). "The link you sent" and not "URL": the word
+  // has to name the thing he already texted, or he cannot tell whether copying makes a
+  // second one. The hint answers that outright, because it is the actual worry.
+  'link.clientLink': 'The link you sent',
+  'link.copy': 'Copy',
+  'link.copied': 'Copied',
+  'link.none': 'No link yet',
+  'link.sameLinkHint': 'Paste it into an email if you need to. It is the same link — nothing new is created.',
+  'link.notConfigured': 'This phone has no web address set for approval links, so there is nothing to copy.',
   // R8 in-app activity centre.
   'r8.activity': 'Activity',
   // The edit acknowledgement (hadar 2026-08-12). Each names the FIELD that moved, so
@@ -2858,6 +2867,12 @@ const ES: Record<string, string> = {
   'r8.inDiscussion': 'Hizo una pregunta y está esperando su respuesta. Respóndala primero.',
   'r8.notSent': 'Esto todavía no se ha enviado.',
   'r8.noLink': 'No hay enlace en este teléfono para ese extra. Envíelo de nuevo para crear uno.',
+  'link.clientLink': 'El enlace que envió',
+  'link.copy': 'Copiar',
+  'link.copied': 'Copiado',
+  'link.none': 'Aún no hay enlace',
+  'link.sameLinkHint': 'Péguelo en un correo si lo necesita. Es el mismo enlace — no se crea uno nuevo.',
+  'link.notConfigured': 'Este teléfono no tiene una dirección web configurada para los enlaces de aprobación, así que no hay nada que copiar.',
   // R8 centro de actividad.
   'r8.activity': 'Actividad',
   // El aviso de edición (hadar 2026-08-12).
