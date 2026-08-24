@@ -41,7 +41,7 @@
  *      honesty (mandate #1) stays in exactly one component.
  */
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { ApprovalPanel } from '../eventlog';
 import type { MergedEvent } from '../eventtimeline';
@@ -1040,11 +1040,35 @@ function Frame({ title, status, onBack, children, footer }: {
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
+  /**
+   * THE KEYBOARD USED TO EAT THE END OF WHAT HE WAS WRITING (hadar, 2026-08-23:
+   * "edit description of work -- i cannot scroll to the bottom of the text to edit it").
+   *
+   * A plain ScrollView does not move for the keyboard. On a multiline field the caret
+   * goes under it the moment the text outgrows the visible box — and the scope of work
+   * is the LONGEST field in the product; the worked example in the fixtures runs past a
+   * thousand characters. There was no way to reach the tail of it to edit.
+   *
+   * NOT a footer-bar problem, though it looks like one: `st.bar` is a normal-flow
+   * sibling of this ScrollView inside a `flex: 1` screen, so it has never overlaid the
+   * content and the existing `paddingBottom: 32` was right. I nearly "fixed" that too
+   * and would have added 80pt of dead space under every editor.
+   *
+   * Fixed in `Frame` rather than in `ScopeOfWorkEditor` because every editor sharing
+   * this shell has the same fault — the price screen, the exclusions screen — and a fix
+   * in one would have left the others broken in a way nobody had reported yet.
+   */
   return (
-    <View style={T.screen}>
+    <KeyboardAvoidingView
+      style={T.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 32 }}
         keyboardShouldPersistTaps="handled"
+        // Drag the keyboard away instead of hunting for a Done button — mandate #3:
+        // this is a man with gloves on.
+        keyboardDismissMode="interactive"
       >
         {/* A detail screen names itself in the NAV ROW, not as a display title
             underneath — the design does this, and it is right: these screens are
@@ -1055,7 +1079,7 @@ function Frame({ title, status, onBack, children, footer }: {
         <Text style={st.footerState}>{stateFooter(status)}</Text>
       </ScrollView>
       {footer && <View style={st.bar}>{footer}</View>}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
