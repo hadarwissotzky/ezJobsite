@@ -272,7 +272,7 @@ import { applyLocalApproval, centsFromInput, createChangeOrder, createLinkedExtr
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
          createdLabel, markLocalSent, money, moneyWhole, parseMoney, validateLines,
          CO_AUTHOR_JOIN, CO_PHOTO_SUBQUERY,
-         type LineItem, type LedgerRow, priceDraftExtra, setDraftFlowFields, rehomeDraftExtra,
+         type LineItem, type LedgerRow, parseLineItems, priceDraftExtra, setDraftFlowFields, rehomeDraftExtra,
          shortDate,
          type BillingTiming, type ScheduleEffect,
 } from './src/changeorder';
@@ -2810,6 +2810,12 @@ const sendPricedApproval = async (
     nteCents: c.nte_cents,
     companyName: prof?.company || prof?.name || null,
     approvedRunningCents: approvedCents, changeOrderId: c.id,
+    // THE BREAKDOWN TRAVELS WITH THE PRICE, for the same reason the cap does: the
+    // client's page renders the parts only if they are frozen into the instrument
+    // here, and a page that shows one figure with nothing behind it makes a total
+    // assembled from three quoted pieces look like a number somebody typed
+    // (hadar 2026-08-24). Empty on the extras priced as one figure, which is most.
+    lineItems: parseLineItems(c.line_items),
     // Flow terms (375): they ride into the frozen instrument. Null on extras
     // that predate them — renderCard omits the line rather than inventing one.
     billingTiming: c.billing_timing, scheduleEffect: c.schedule_effect,

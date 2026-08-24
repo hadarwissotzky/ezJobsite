@@ -484,6 +484,34 @@ export type LineItem = {
   total_cents: number;
 };
 
+/**
+ * A STORED BREAKDOWN, READ BACK SAFELY.
+ *
+ * `line_items` is TEXT holding JSON, so anything could be in there — a truncated
+ * write, a row from an older shape, a null. A corrupt breakdown must not take the
+ * record it belongs to down with it: the extra still has a scope, a price and a
+ * signature, and refusing to open it because one display grid will not parse is a
+ * worse failure than showing the price with no breakdown under it.
+ *
+ * It is NOT rewritten to `[]` on the row. Nothing here saves; an unparseable value
+ * stays exactly as stored, so whatever is in there is still recoverable by hand.
+ * (Same posture App.tsx takes when it loads a draft for editing.)
+ *
+ * Entries that are not well-formed lines are dropped individually — a grid with two
+ * good rows out of three is still wrong to TOTAL, which is why the callers show the
+ * extra's own `amount_cents` as the total and never sum this array.
+ */
+export function parseLineItems(raw: string | null | undefined): LineItem[] {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw ?? '[]'); } catch { return []; }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((l): l is LineItem =>
+    !!l && typeof l === 'object'
+    && typeof (l as LineItem).description === 'string'
+    && typeof (l as LineItem).total_cents === 'number'
+    && Number.isFinite((l as LineItem).total_cents));
+}
+
 /** qty x unit, in integer cents. The one place this multiplication happens. */
 export function lineTotal(qty: number, unitCents: number): number {
   return Math.round(qty * unitCents);
@@ -937,6 +965,9 @@ export type LedgerRow = {
   extra_type: string | null;
   /** Flow-mock fields (375). Null on extras that predate them — first-class,
    *  same rule as extra_type; renderCard simply omits the line. */
+  /** The breakdown as STORED (raw JSON text), for the send path to freeze into the
+   *  client's instrument. Parsed with `parseLineItems`; never rendered from here. */
+  line_items: string | null;
   billing_timing: string | null;
   schedule_effect: string | null;
   schedule_days: number | null;
@@ -1070,13 +1101,14 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     status: string; is_mini: number; signed_by: string | null;
     created_at_ms: number; pending: number; extra_type: string | null;
     billing_timing: string | null; schedule_effect: string | null;
-    schedule_days: number | null; exclusions: string | null;
+    schedule_days: number | null; exclusions: string | null; line_items: string | null;
     photo_relpath: string | null; co_number: number | null;
   }>(
     `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.scope_of_work,
             co.amount_cents, co.nte_cents, co.co_number,
             co.status, co.is_mini, co.signed_by, co.created_at_ms, co.extra_type,
             co.billing_timing, co.schedule_effect, co.schedule_days, co.exclusions,
+            co.line_items,
             ${CO_PHOTO_SUBQUERY} AS photo_relpath,
             EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending
        FROM change_order co
@@ -1105,6 +1137,7 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
       extra_type: r.extra_type,
       billing_timing: r.billing_timing, schedule_effect: r.schedule_effect,
       schedule_days: r.schedule_days, exclusions: r.exclusions,
+      line_items: r.line_items,
       photo_relpath: r.photo_relpath, co_number: r.co_number,
       // "on this phone" and "in the cloud" are different facts and the sender is
       // entitled to know which one they are looking at.

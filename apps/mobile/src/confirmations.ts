@@ -150,6 +150,15 @@ export async function sendForConfirmation(
     amountCents?: number | null; nteCents?: number | null;
     companyName?: string | null; approvedRunningCents?: number | null;
     changeOrderId?: string | null;
+    /**
+     * THE COST BROKEN DOWN BY PART, frozen with the price (hadar 2026-08-24).
+     *
+     * Sent when the extra was priced in parts; omitted when one figure covers the
+     * whole job, which is most sends. It is frozen deliberately (200's `line_items`
+     * column, in the tamper guard): the client's page must show the parts the SIGNER
+     * saw, not the parts the draft happens to carry today.
+     */
+    lineItems?: { description: string; qty: number; unit_cents: number; total_cents: number }[] | null;
     /** Flow fields — rendered into the frozen instrument by renderCard. */
     billingTiming?: string | null; scheduleEffect?: string | null;
     scheduleDays?: number | null; exclusions?: string | null;
@@ -203,6 +212,10 @@ export async function sendForConfirmation(
     p_job_label: o.projectName,
     p_approved_running_cents: o.approvedRunningCents ?? null,
     p_change_order_id: o.changeOrderId ?? null,
+    // Null rather than [] for "no parts": the column reads as absent, and the page's
+    // "render nothing" branch keys off absence. An empty array is a breakdown that
+    // exists and has no rows, which is not a thing this ever means.
+    p_line_items: o.lineItems?.length ? o.lineItems : null,
   });
   if (error) return { ok: false, reason: error.message };
 

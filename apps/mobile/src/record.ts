@@ -35,7 +35,7 @@
  */
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import * as FS from 'expo-file-system/legacy';
-import { createdLabel, money } from './changeorder';
+import { createdLabel, money, parseLineItems } from './changeorder';
 import { augmentEventsFor } from './augmentlog';
 import { getLang, t } from './i18n';
 
@@ -116,6 +116,17 @@ export type RecordVoice = {
   silent: boolean;
 };
 
+/** One row of the cost grid. Pre-formatted: screens render, they do not do money. */
+export type CostLine = {
+  /** What this part of the job is — the line's description. */
+  title: string;
+  /** "2 × $450" when a line carries a real quantity; null for the ordinary 1 × line,
+   *  where repeating the unit price beside an identical total reads as a mistake. */
+  detail: string | null;
+  /** This line's total, formatted. */
+  amount: string;
+};
+
 export type ExtraRecord = {
   id: string;
   title: string;
@@ -146,6 +157,22 @@ export type ExtraRecord = {
    */
   priceHeard: string | null;
   nte: string | null;
+  /**
+   * THE COST BROKEN DOWN BY PART, when the extra carries one (hadar, 2026-08-24:
+   * "if there were a separation of cost by part (breakdown) this breakdown needs to
+   * be displayed clearly").
+   *
+   * Empty for the ordinary extra — a single figure covering the whole job has no
+   * parts, and an invented one-row "grid" saying the same number twice is noise.
+   * Non-empty only when the contractor priced the work in pieces out loud and
+   * `priceFromTasks` summed them, or he itemised it by hand.
+   *
+   * DISPLAY ONLY, AND NEVER SUMMED BY A SCREEN. The extra's `amount` is the total;
+   * these rows explain it. If a line failed to parse it is dropped
+   * (`parseLineItems`), so summing here could quietly under-report the job — the
+   * exact class of error mandate #6 exists to prevent.
+   */
+  costLines: CostLine[];
   isMini: boolean;
   /** THIS EXTRA'S NUMBER ON ITS JOB — "Extra #4". Null on a row that predates the
    *  column and has not been backfilled yet; the kicker then omits the number rather
@@ -221,6 +248,7 @@ export async function extraRecord(
     summary: string | null;
     amount_cents: number | null;
     price_heard?: string | null;
+    line_items?: string | null;
     job_name: string | null;
     nte_cents: number | null; is_mini: number; who_directed: string;
     numbers_confirmed_at_ms: number; status: string; signed_by: string | null;
@@ -230,7 +258,7 @@ export async function extraRecord(
     co_number: number | null;
   }>(
     `SELECT co.id, co.decision_id, co.scope, co.scope_of_work, co.summary,
-            co.amount_cents, co.nte_cents, co.is_mini, co.price_heard,
+            co.amount_cents, co.nte_cents, co.is_mini, co.price_heard, co.line_items,
             co.who_directed, co.numbers_confirmed_at_ms, co.status, co.signed_by,
             co.created_at_ms,
             co.sent_at_ms, co.approved_at_ms, co.declined_at_ms, co.superseded_at_ms,
@@ -521,6 +549,13 @@ export async function extraRecord(
     extraNo: co.co_number ?? null,
     jobName: co.job_name ?? null,
     nte: co.nte_cents == null ? null : money(co.nte_cents),
+    costLines: parseLineItems(co.line_items).map((l) => ({
+      title: l.description,
+      // A quantity is only worth the ink when it is not 1 — "1 × $900" beside a $900
+      // total is the same number said twice.
+      detail: l.qty > 1 ? `${l.qty} × ${money(l.unit_cents)}` : null,
+      amount: money(l.total_cents),
+    })),
     isMini: co.is_mini === 1,
     created: createdLabel(co.created_at_ms),
     createdAtMs: co.created_at_ms,

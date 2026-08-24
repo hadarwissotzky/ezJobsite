@@ -620,6 +620,58 @@ export function MoneyBlock({ amount, subtitle, muted, green }: {
   );
 }
 
+/**
+ * THE COST GRID — what each part of the job costs, when the job was priced in parts.
+ *
+ * hadar, 2026-08-24: "what is missing is a grid if there were a separation of cost by
+ * part (breakdown) this breakdown needs to be displayed clearly". The figure was on
+ * screen and the parts behind it were not, on the extra and on the client's page
+ * alike, so a total assembled from three quoted pieces looked exactly like a number
+ * somebody typed. A homeowner asked to approve $2,400 can see what the $2,400 is.
+ *
+ * IT RENDERS, IT DOES NOT CALCULATE. `total` is the extra's own `amount_cents`,
+ * passed in. This component never sums the rows: a line dropped by `parseLineItems`
+ * would make a self-summed total quietly too small, and a wrong number shown
+ * confidently beside a signature is the failure mandate #6 is written against. When
+ * the rows do not add to the total that is a fact worth SEEING, not hiding — which
+ * is why the two numbers come from different places and are both shown.
+ *
+ * ABSENT, NOT EMPTY. No rows means the screen renders nothing at all — not a heading
+ * over blank space. Most extras carry one price for the whole job and have no parts;
+ * a one-row grid restating the total is noise.
+ */
+export function CostBreakdown({ lines, total, label, totalLabel }: {
+  lines: { title: string; detail?: string | null; amount: string }[];
+  /** The extra's own total, formatted. Never computed here. */
+  total?: string | null;
+  /** The words come from the caller: this file holds no copy but the app's own name,
+   *  so the screens keep i18n and the kit keeps layout. */
+  label: string;
+  totalLabel: string;
+}) {
+  if (!lines.length) return null;
+  return (
+    <View style={st.costGrid}>
+      <Text style={st.costHead}>{label}</Text>
+      {lines.map((l, i) => (
+        <View key={`${l.title}-${i}`} style={st.costRow}>
+          <View style={st.costLabelCol}>
+            <Text style={st.costTitle}>{l.title}</Text>
+            {!!l.detail && <Text style={st.costDetail}>{l.detail}</Text>}
+          </View>
+          <Text style={st.costAmount}>{l.amount}</Text>
+        </View>
+      ))}
+      {total != null && total !== '' && (
+        <View style={[st.costRow, st.costTotalRow]}>
+          <Text style={st.costTotalLabel}>{totalLabel}</Text>
+          <Text style={st.costTotalAmount}>{total}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 /** The status chip, as a component. `chipStyle` already owned the colours; every
  *  screen still rebuilt the two-element tree around it. */
 export function Chip({ kind, label, outline }: {
@@ -1327,6 +1379,37 @@ const st = StyleSheet.create({
     fontVariant: ['tabular-nums'], letterSpacing: -0.5,
   },
   moneySub: { fontFamily: F.body, fontSize: 14, color: C.steel, marginTop: 3 },
+  // The cost grid. A hairline-boxed table rather than free rows: the point is that
+  // these numbers belong TO the figure above them, and an unbounded list of
+  // label/amount pairs reads as unrelated facts about the extra.
+  costGrid: {
+    marginTop: 14, borderWidth: 1, borderColor: C.line,
+    borderRadius: radii.md, paddingHorizontal: 14, paddingVertical: 4,
+  },
+  costHead: {
+    fontFamily: F.body, fontSize: 11, fontWeight: '700', color: C.steel,
+    letterSpacing: 0.7, textTransform: 'uppercase', marginTop: 10, marginBottom: 2,
+  },
+  costRow: {
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+    paddingVertical: 10, gap: 16, borderTopWidth: 1, borderTopColor: C.line,
+  },
+  // The label column yields; the money column never wraps or shrinks — a truncated
+  // price is worse than a truncated description.
+  costLabelCol: { flex: 1, minWidth: 0 },
+  costTitle: { fontFamily: F.body, fontSize: 15, color: C.ink, lineHeight: 20 },
+  costDetail: { fontFamily: F.body, fontSize: 12.5, color: C.steel, marginTop: 2 },
+  costAmount: {
+    fontFamily: F.body, fontSize: 15, color: C.ink, fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  // The total is set apart by a heavier rule, the way a receipt sets it apart.
+  costTotalRow: { borderTopWidth: 1.5, borderTopColor: C.line, marginTop: 2 },
+  costTotalLabel: { fontFamily: F.body, fontSize: 14, fontWeight: '700', color: C.ink },
+  costTotalAmount: {
+    fontFamily: F.disp, fontSize: 17, color: C.ink,
+    fontVariant: ['tabular-nums'], letterSpacing: -0.2,
+  },
   // The nav bar carries a full-bleed hairline under it, the divider the design draws
   // below "EZChangeOrders". The negative horizontal margin + matching padding pushes
   // the border to the screen edges while the content stays on the 18pt gutter; the

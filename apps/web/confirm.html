@@ -289,6 +289,10 @@
   .csum tr.this td { background: #F3F4F2; font-weight: 600; }
   .csum tr.tot td { font-weight: 700; }
   .csumnote { font-size: 12.5px; color: var(--steel); margin-top: 8px; line-height: 1.45; }
+  /* The cost grid reuses .csum entirely -- same table, same rules, same right-aligned
+     tabular money column -- so the breakdown and the contract summary read as one
+     family instead of two invented tables. Only the quantity sub-label is new. */
+  .cbqty { display: block; font-size: 12.5px; color: var(--steel); margin-top: 2px; }
 
   .allshots { display: flex; align-items: center; justify-content: center; gap: 8px;
               margin-top: 8px; min-height: 46px; border: 1px solid var(--line);
@@ -1935,6 +1939,8 @@ function renderPriced(d, notice) {
           </div>
         </div>
 
+        ${costBand(d)}
+
         ${scheduleLine ? `
         <div class="band bandsched">
           <div class="sec" style="border:0;padding:0">
@@ -2105,6 +2111,50 @@ function nteBand(d) {
 }
 
 /** Contract summary as a band inside the sheet, not a card beside it. */
+/**
+ * WHAT THE PRICE IS MADE OF — the parts, when the job was quoted in parts.
+ *
+ * hadar, 2026-08-24: "if there were a separation of cost by part (breakdown) this
+ * breakdown needs to be displayed clearly and that is true for the homeowners side
+ * (client portal)." The page showed one large figure and nothing behind it, so a
+ * total assembled from three pieces the contractor quoted out loud was indistinguishable
+ * from a number he typed. This is the band a homeowner reads to answer "what am I
+ * paying for", and it sits directly under the scope for that reason.
+ *
+ * FROZEN, LIKE EVERY OTHER FIGURE ON THIS PAGE. `line_items` is a column on
+ * confirmation_request, written at send and locked by the tamper guard (200). It is
+ * NOT a live read of the draft: a signer who approved $400 + $1,250 + $750 must see
+ * those three numbers years later even if the extra was re-priced since.
+ *
+ * IT NEVER SUMS THE ROWS. The total shown is `amount_cents` — the figure at the top of
+ * the page and the figure on the Approve button — because a self-summed total could
+ * disagree with the one being signed, and the number beside a signature must have
+ * exactly one source. If the parts do not add up to the total, that is a fact the
+ * reader is entitled to SEE, not something this function should paper over.
+ *
+ * ABSENT ON MOST DOCUMENTS. One price for the whole job has no parts, and a one-row
+ * table restating the headline figure is noise. Renders nothing for a null, a
+ * non-array, an empty array, or a server that predates the column.
+ */
+function costBand(d) {
+  const lines = Array.isArray(d.line_items) ? d.line_items : [];
+  const rows = lines
+    .filter((l) => l && typeof l.description === 'string' && typeof l.total_cents === 'number')
+    .map((l) => {
+      // A quantity earns its place only when it is not 1: "1 x $900" beside a $900
+      // total is the same number said twice.
+      const qty = (typeof l.qty === 'number' && l.qty > 1 && typeof l.unit_cents === 'number')
+        ? `<span class="cbqty">${esc(String(l.qty))} × ${esc(usd(l.unit_cents))}</span>` : '';
+      return `<tr><td>${esc(l.description)}${qty}</td><td>${esc(usd(l.total_cents))}</td></tr>`;
+    });
+  if (!rows.length) return '';
+  if (d.amount_cents != null) {
+    rows.push(`<tr class="tot"><td>Total</td><td>${esc(usd(d.amount_cents))}</td></tr>`);
+  }
+  return `<div class="band"><div class="bandh">What it costs, by part</div>
+    <table class="csum">${rows.join('')}</table></div>`;
+}
+
 function summaryBand(d) {
   const pr = d.__project;
   const prior = pr ? pr.approved_total_cents : d.approved_running_cents;

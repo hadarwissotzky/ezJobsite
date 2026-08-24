@@ -25,6 +25,25 @@ alter table public.confirmation_request
   add column if not exists approved_running_cents integer,   -- snapshot at send time
   add column if not exists change_order_id        text;
 
+-- THE COST BROKEN DOWN BY PART, frozen with everything else [2026-08-24].
+--
+-- hadar: "if there were a separation of cost by part (breakdown) this breakdown needs
+-- to be displayed clearly and that is true for the homeowners side (client portal)."
+-- The page showed one figure and nothing behind it, so a total assembled from three
+-- pieces the contractor quoted out loud looked exactly like a number he typed.
+--
+-- IT IS PART OF THE INSTRUMENT, NOT A READING AID, which is why it is a frozen column
+-- here and not a live read of change_order.line_items. The whole reason the priced
+-- fields were frozen (see the header) applies with more force to a breakdown: a
+-- signer who approved $400 + $1,250 + $750 must see those three numbers two years
+-- later even if the draft they came from was since re-priced. A live join would show
+-- today's parts under yesterday's signature. It is added to the guard below.
+--
+-- NULL on every existing row and on any send that had no breakdown, which is most of
+-- them: one price for the whole job has no parts. The page renders nothing then.
+alter table public.confirmation_request
+  add column if not exists line_items jsonb;
+
 -- The signature: the full name the client typed to approve. Part of the response
 -- evidence, append-only like the rest of it.
 alter table public.confirmation_response
@@ -44,7 +63,8 @@ create or replace function public.confirmation_request_guard() returns trigger
        or new.company_name        is distinct from old.company_name
        or new.job_label           is distinct from old.job_label
        or new.approved_running_cents is distinct from old.approved_running_cents
-       or new.change_order_id     is distinct from old.change_order_id then
+       or new.change_order_id     is distinct from old.change_order_id
+       or new.line_items          is distinct from old.line_items then
       raise exception 'the approval instrument is frozen: price/scope/text cannot change after send';
     end if;
     return new;
@@ -83,6 +103,8 @@ begin
     'company_name', r.company_name,
     'job_label', r.job_label,
     'approved_running_cents', r.approved_running_cents,
+    -- The parts behind the figure. Null when the job was quoted as one price.
+    'line_items', r.line_items,
     'answered_action', resp.action,
     'answered_at', resp.responded_at,
     'signed_name', resp.signed_name
@@ -100,6 +122,12 @@ grant execute on function public.confirmation_fetch(text) to anon, authenticated
 -- Recreate create/respond with the new parameters. DROP first: adding parameters
 -- changes the signature, and an overload alongside the old one invites ambiguity.
 drop function if exists public.confirmation_create(text,text,text,text,text,text,text,text,text);
+-- ...and again for the pre-breakdown signature [2026-08-24]. Same reasoning as the
+-- line above: p_line_items has a default, so without this drop the old 16-argument
+-- function survives beside the new 17-argument one and a positional call is ambiguous.
+drop function if exists public.confirmation_create(
+  text,text,text,text,text,text,text,text,text,
+  integer,integer,text,text,text,integer,text);
 create or replace function public.confirmation_create(
   p_token text, p_decision_id text, p_project_id text, p_kind text,
   p_shown_content text, p_shown_sha256 text, p_counterparty text,
@@ -107,17 +135,20 @@ create or replace function public.confirmation_create(
   p_amount_cents integer default null, p_nte_cents integer default null,
   p_scope_title text default null, p_company_name text default null,
   p_job_label text default null, p_approved_running_cents integer default null,
-  p_change_order_id text default null
+  p_change_order_id text default null,
+  -- The breakdown as sent. A jsonb array of {description, qty, unit_cents,
+  -- total_cents}; null when the extra carries no parts.
+  p_line_items jsonb default null
 ) returns jsonb language plpgsql security definer set search_path = public as $$
 begin
   insert into public.confirmation_request (token, decision_id, project_id, owner_id, kind,
     shown_content, shown_sha256, counterparty_label, channel, destination,
     amount_cents, nte_cents, scope_title, company_name, job_label,
-    approved_running_cents, change_order_id)
+    approved_running_cents, change_order_id, line_items)
   values (p_token, p_decision_id, p_project_id, auth.uid(), p_kind,
           p_shown_content, p_shown_sha256, p_counterparty, p_channel, p_destination,
           p_amount_cents, p_nte_cents, p_scope_title, p_company_name, p_job_label,
-          p_approved_running_cents, p_change_order_id);
+          p_approved_running_cents, p_change_order_id, p_line_items);
   return jsonb_build_object('status','created','token',p_token);
 end $$;
 revoke all on function public.confirmation_create from public, anon;

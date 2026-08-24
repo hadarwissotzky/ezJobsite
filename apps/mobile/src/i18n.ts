@@ -1635,6 +1635,11 @@ const EN: Record<string, string> = {
   'erec.photoOf': '{n} of {total}',
   'erec.kindDecision': 'Decision',
   'erec.priceToCome': 'No price given yet',
+  // The cost grid (hadar 2026-08-24). "What it costs by part" and not "Line items":
+  // the reader is a homeowner, and an accounting word for the same idea makes the
+  // one section built to answer "what am I paying for" sound like paperwork.
+  'cost.breakdown': 'What it costs, by part',
+  'cost.total': 'Total',
   // The record's action bar (design prototype c5). Labels only — the flows they
   // open (remind, revise, send, share) each keep their own strings.
   'erec.send': 'Send for approval',
@@ -3473,6 +3478,8 @@ const ES: Record<string, string> = {
   'erec.photoOf': '{n} de {total}',
   'erec.kindDecision': 'Decisión',
   'erec.priceToCome': 'Todavía sin precio',
+  'cost.breakdown': 'Lo que cuesta, por parte',
+  'cost.total': 'Total',
   'erec.send': 'Enviar para aprobación',
   'erec.process': 'Subir y procesar',
   'erec.processing': 'Subiendo…',

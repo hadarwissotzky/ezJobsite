@@ -45,7 +45,7 @@ import type { FlowTerms } from '../flowterms';
 import { t } from '../i18n';
 import { Icon, type IconName } from './icon';
 import {
-  APP_NAME, Button, MoneyBlock, Card, PersonRow, PhotoGrid, Row, ScreenHeader, Section, StatusBanner, SyncedPill,
+  APP_NAME, Button, CostBreakdown, MoneyBlock, Card, PersonRow, PhotoGrid, Row, ScreenHeader, Section, StatusBanner, SyncedPill,
   type PhotoTile,
 } from './kit';
 import { PeopleInvolved, rosterOf } from './peopleinvolved';
@@ -176,11 +176,22 @@ export function ExtraLockedScreen(props: ExtraLockedProps) {
         )}
 
         {rec.priced ? (
-          <MoneyBlock
-            amount={rec.amount}
-            subtitle={`${rec.nte ? t({ k: 'erec.nte', p: { amount: rec.nte } }) : t('erec.fixed')}`
-              + `${rec.isMini ? ` · ${t('erec.mini')}` : ''} · ${t('erec.yourPrice')}`}
-          />
+          <>
+            <MoneyBlock
+              amount={rec.amount}
+              subtitle={`${rec.nte ? t({ k: 'erec.nte', p: { amount: rec.nte } }) : t('erec.fixed')}`
+                + `${rec.isMini ? ` · ${t('erec.mini')}` : ''} · ${t('erec.yourPrice')}`}
+            />
+            {/* PART OF THE AGREED TERMS, not a reading aid: `line_items` is frozen at
+                send with the rest of the instrument, so the breakdown a signer saw is
+                the breakdown shown here two years later. */}
+      <CostBreakdown
+        lines={rec.costLines}
+        total={rec.amount}
+        label={t('cost.breakdown')}
+        totalLabel={t('cost.total')}
+      />
+          </>
         ) : (
           // Never "—" and never "no cost change": one is a dash posing as an amount, the
           // other tells the reader the work was free. What is true is narrower than both.

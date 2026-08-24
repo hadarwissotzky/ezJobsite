@@ -49,7 +49,7 @@ import { canDelete, canSend, chipKey, displayStatus, stageOf } from '../extralif
 import { canSendExtra } from '../extraprocstate';
 import { t } from '../i18n';
 import {
-  APP_NAME, Button, Card, MoneyBlock, ChecklistRow, PhotoGrid, Row, ScreenHeader, Section,
+  APP_NAME, Button, Card, CostBreakdown, MoneyBlock, ChecklistRow, PhotoGrid, Row, ScreenHeader, Section,
   StatusBanner, SyncedPill, VoiceClip, type ChecklistState, type PhotoTile, type RowTone,
 } from './kit';
 import { C, F, T, label as labelStyle, money as moneyStyle, tint } from './theme';
@@ -967,10 +967,20 @@ function DraftMoney({ rec, priceMode, heard }: {
     ? t({ k: 'erec.nte', p: { amount: rec.nte } })
     : t('erec.fixed');
   return (
-    <MoneyBlock
-      amount={rec.amount}
-      subtitle={`${mode}${rec.isMini ? ` · ${t('erec.mini')}` : ''} · ${t('erec.yourPrice')}`}
-    />
+    <>
+      <MoneyBlock
+        amount={rec.amount}
+        subtitle={`${mode}${rec.isMini ? ` · ${t('erec.mini')}` : ''} · ${t('erec.yourPrice')}`}
+      />
+      {/* The parts behind the figure, when he priced the work in parts. Renders
+          nothing at all when there are none — see CostBreakdown. */}
+      <CostBreakdown
+        lines={rec.costLines}
+        total={rec.amount}
+        label={t('cost.breakdown')}
+        totalLabel={t('cost.total')}
+      />
+    </>
   );
 }
 

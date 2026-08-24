@@ -55,7 +55,7 @@ import { PeopleInvolved, rosterOf } from './peopleinvolved';
 import { RecordingsCard } from './recordings';
 import { Icon, type IconName } from './icon';
 import {
-  APP_NAME, BottomSheet, Button, MoneyBlock, Card, Chip, PersonRow as PersonRowView, Row,
+  APP_NAME, BottomSheet, Button, CostBreakdown, MoneyBlock, Card, Chip, PersonRow as PersonRowView, Row,
   ScreenHeader, PhotoGrid, StatusBanner, TimelineRow, type PhotoTile,
 } from './kit';
 import { C, F, T, label as labelStyle, money as moneyStyle, tint } from './theme';
@@ -508,10 +508,18 @@ function MoneyLine({ rec }: { rec: ExtraRecord }) {
   }
   const mode = rec.nte ? t({ k: 'erec.nte', p: { amount: rec.nte } }) : t('erec.fixed');
   return (
-    <MoneyBlock
-      amount={rec.amount}
-      subtitle={`${mode}${rec.isMini ? ` · ${t('erec.mini')}` : ''} · ${t('erec.yourPrice')}`}
-    />
+    <>
+      <MoneyBlock
+        amount={rec.amount}
+        subtitle={`${mode}${rec.isMini ? ` · ${t('erec.mini')}` : ''} · ${t('erec.yourPrice')}`}
+      />
+      <CostBreakdown
+        lines={rec.costLines}
+        total={rec.amount}
+        label={t('cost.breakdown')}
+        totalLabel={t('cost.total')}
+      />
+    </>
   );
 }
 

@@ -42,6 +42,14 @@ const rec: ExtraRecord = {
 ASSUMING · Both chimney breasts sound · The 1910 piece comes off intact — if not we stop and call you · Paint assumed to contain LEAD until tested.`,
   status: 'sent',
   amount: '$2,400',
+  // A PRICED-IN-PARTS extra, so the cost grid is visible in the preview. The parts
+  // sum to the $2,400 above; the screen shows that total from `amount` and never
+  // adds these up itself.
+  costLines: [
+    { title: 'Pull permit and disconnect', detail: null, amount: '$400.00' },
+    { title: 'Panel and breakers', detail: null, amount: '$1,250.00' },
+    { title: 'Install and terminate', detail: '2 × $375.00', amount: '$750.00' },
+  ],
   priced: true,
   // 396: a priced fixture has nothing to read back — the quote only exists
   // while a price does not.
