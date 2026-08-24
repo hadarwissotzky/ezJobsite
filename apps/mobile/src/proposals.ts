@@ -189,17 +189,25 @@ const PROPOSAL_COLS = BASE_COLS + SECTION_COLS + AMEND_COLS;
  * The failure is loud in the other direction (the fallback simply returns the older
  * shape, whose new fields are null), so the cost of being wrong here is one round-trip.
  */
+/**
+ * `amendAware` is passed to the builder, NOT baked into it, and the reason is the
+ * fallback: the filter names `amend_status`, so on a server that has not run 420 the
+ * filtered query 42703s exactly as the column list does — and the retry would carry the
+ * same filter into the same error. The retry therefore asks the OLD question, which is
+ * the right one for an old server: there are no amend rows there to exclude.
+ */
 async function selectProposal(
   client: SupabaseClient,
-  build: (cols: string) => PromiseLike<{ data: unknown[] | null; error: unknown }>,
+  build: (cols: string, amendAware: boolean) =>
+    PromiseLike<{ data: unknown[] | null; error: unknown }>,
 ): Promise<Proposal | null> {
-  let { data, error } = await build(PROPOSAL_COLS);
+  let { data, error } = await build(PROPOSAL_COLS, true);
   if (error) {
     const code = (error as { code?: string }).code;
     // Only a SCHEMA disagreement retries. A permission or network error is not fixed
     // by asking for fewer columns, and retrying it would just double the wait.
     if (code !== '42703' && code !== 'PGRST204' && code !== 'PGRST200') return null;
-    ({ data, error } = await build(BASE_COLS));
+    ({ data, error } = await build(BASE_COLS, false));
     if (error) return null;
   }
   if (!data?.length) return null;
@@ -210,12 +218,11 @@ async function selectProposal(
 export async function fetchProposal(
   client: SupabaseClient, captureId: string
 ): Promise<Proposal | null> {
-  return selectProposal(client, (cols) => client
-    .from('capture_structured')
-    .select(cols)
-    .eq('capture_id', captureId)
-    .order('created_at', { ascending: false })
-    .limit(1) as any);
+  return selectProposal(client, (cols, amendAware) => {
+    const q = client.from('capture_structured').select(cols).eq('capture_id', captureId);
+    return (amendAware ? q.is('amend_status', null) : q)
+      .order('created_at', { ascending: false }).limit(1) as any;
+  });
 }
 
 /**
@@ -227,12 +234,43 @@ export async function fetchLatestProposalForCaptures(
   client: SupabaseClient, captureIds: string[]
 ): Promise<Proposal | null> {
   if (!captureIds.length) return null;
-  return selectProposal(client, (cols) => client
+  return selectProposal(client, (cols, amendAware) => {
+    const q = client.from('capture_structured').select(cols).in('capture_id', captureIds);
+    return (amendAware ? q.is('amend_status', null) : q)
+      .order('created_at', { ascending: false }).limit(1) as any;
+  });
+}
+
+/**
+ * The latest SCOPE AMENDMENT for a set of captures. A separate reader on purpose.
+ *
+ * THIS IS THE FIX FOR THE BUG 420 SHIPPED WITH (code review, 2026-08-23, HIGH). The
+ * `amend_scope` step writes a row for EVERY outcome — including `no_words` and
+ * `no_scope`, which is right, because "we looked and there was nothing" is a finding.
+ * But those rows carry `confidence 'none'` and no `proposed_*` values, and the readers
+ * above take the newest row unconditionally. So the amend row shadowed the write-up:
+ * `applyProposalToExtra` returns early on 'none', which silently cost the extra its
+ * summary, its AI tags, its type AND the tasks the priced composer fills the total
+ * from — the headline feature of the same branch, disabled by its own migration.
+ *
+ * Two questions, two queries. The proposal readers now exclude amend rows; this one
+ * asks for exactly them.
+ */
+export async function fetchLatestAmendmentForCaptures(
+  client: SupabaseClient, captureIds: string[]
+): Promise<Proposal | null> {
+  if (!captureIds.length) return null;
+  const { data, error } = await client
     .from('capture_structured')
-    .select(cols)
+    .select(PROPOSAL_COLS)
     .in('capture_id', captureIds)
+    .not('amend_status', 'is', null)
     .order('created_at', { ascending: false })
-    .limit(1) as any);
+    .limit(1) as any;
+  // No fallback tier: a server without 420 has no amendments to report, and asking it
+  // the old question would return a write-up dressed as an amendment.
+  if (error || !data?.length) return null;
+  return rowToProposal(data[0]);
 }
 
 function rowToProposal(r: any): Proposal {

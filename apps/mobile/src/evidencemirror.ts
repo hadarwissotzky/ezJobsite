@@ -367,6 +367,42 @@ export async function cacheMirroredPhotos(
   o: { projectId?: string | null; limit?: number } = {},
 ): Promise<CacheResult> {
   const limit = o.limit ?? 12;
+
+  /**
+   * THE SAME GATE THE UPLOAD PATH HAS, ON THE WAY DOWN (code review, 2026-08-23, HIGH).
+   *
+   * `drainOutbox` refuses to PUSH bytes over cellular without consent, and its comment
+   * gives the reason: "a 200 MB walkthrough pushed over a hotspot is a bill the
+   * contractor never agreed to and finds out about at the end of the month." Pulling
+   * full-resolution photos down costs him exactly the same money, and this runs on the
+   * 15-second sync tick — so an account with a hundred mirrored photos would draw
+   * hundreds of megabytes over cell data within minutes of signing in, silently. The
+   * "bounded batch" comment above answers batch size; it never answered which network
+   * the bytes cross.
+   *
+   * Made worse by this branch, not merely inherited: the hydrate went account-wide
+   * today, so the mirror now covers every project on the account rather than one.
+   *
+   * Refused, not failed. Nothing is lost by waiting for Wi-Fi — the bytes are safe in
+   * Storage and `local_relpath` stays null, which already means "not downloaded yet".
+   */
+  try {
+    // REQUIRED IN HERE, like `expo-file-system` below and for the same reason the
+    // header gives: a module-scope import of either makes this file unloadable under
+    // `node --test`, and four suites went red proving it.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getCellularConsent, uploadGate } = require('./consent');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Network = require('expo-network');
+    const state = await Network.getNetworkStateAsync();
+    const gate = uploadGate(
+      { isConnected: !!state.isConnected,
+        isCellular: state.type === Network.NetworkStateType.CELLULAR },
+      await getCellularConsent(db)
+    );
+    if (!gate.upload) return { downloaded: 0, failed: 0, remaining: 0 };
+  } catch { /* cannot read the radio: fall through rather than stall the cache */ }
+
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const FS = require('expo-file-system/legacy');
 
