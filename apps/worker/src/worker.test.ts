@@ -196,6 +196,42 @@ test('resolve_project writes a signal from the transcript', async () => {
   assert.match(ins.args.from_transcript, /14 Elm St/);
 });
 
+// THE RACE THAT LOOKED LIKE A HEALTHY PIPELINE.
+//
+// hadar, 2026-08-23: "the latest co that was created it is stack on writing it up".
+// Both engines had written a row 302ms apart — Deepgram's 1,537 characters, then the
+// phone's 34-character fragment. The read took the newest, `structure` was handed four
+// words, answered `confidence: none` on them (correctly), and the extra kept its
+// placeholder. Nothing errored and no job blocked, so every diagnostic said fine.
+//
+// Rows arrive newest-first, so the fragment is FIRST here — the order that produced
+// the bug — and the cloud reading still has to win.
+test('the phone fragment never outranks the cloud transcript', async () => {
+  const sb = fakeClient(job({ steps: ['resolve_project'] }), [
+    { text: "All right, we're gonna do a", engine: 'ios-ondevice' },
+    { text: 'work at 14 Elm St', engine: 'deepgram' },
+  ]);
+  await runOnce(sb, 'w1');
+
+  const ins = sb.calls.find((c: any) => c.fn === 'insert');
+  assert.match(ins.args.from_transcript, /14 Elm St/,
+    'the worker structured the phone fragment instead of the cloud transcript');
+});
+
+// The other half: preferring the cloud engine must not DISCARD an on-device reading
+// when it is the only one there. Offline, the phone's pass is the whole record, and
+// refusing it would turn a working offline capture into a silent nothing (mandate #7).
+test('an on-device reading is used when it is the only one', async () => {
+  const sb = fakeClient(job({ steps: ['resolve_project'] }), [
+    { text: 'work at 14 Elm St', engine: 'ios-ondevice' },
+  ]);
+  await runOnce(sb, 'w1');
+
+  const ins = sb.calls.find((c: any) => c.fn === 'insert');
+  assert.match(ins.args.from_transcript, /14 Elm St/);
+  assert.equal(ins.args.confidence, 'high');
+});
+
 // 'none' is a real answer — "the words point at nothing we know". Recording it is
 // what distinguishes a capture that was considered from one never reached.
 test('no match still writes a signal, with confidence none', async () => {

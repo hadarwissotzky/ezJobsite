@@ -242,6 +242,52 @@ export async function runStep(
   return { ok: false, reason: 'needs_api_key' };
 }
 
+/** The phone's own recogniser. Its rows are a fast partial, never the final reading. */
+const ON_DEVICE_ENGINE = 'ios-ondevice';
+
+/**
+ * THE CURRENT READING OF ONE CAPTURE — the cloud engine outranks the phone.
+ *
+ * hadar, 2026-08-23: "the latest co that was created it is stack on writing it up".
+ * It was not stuck. Both engines had run and BOTH had written a row, 302ms apart:
+ * Deepgram's 1,537 characters at 18:25:11.458, then the on-device recogniser's 34
+ * ("All right, we're gonna do a client") at 18:25:11.760. This read took the newest,
+ * so a four-word fragment became the whole recording, `structure` answered
+ * `confidence: none` on it — correctly, there is nothing in four words — and the
+ * extra kept its "still being written up" placeholder forever. Nothing errored, no
+ * job was blocked, and every diagnostic said the pipeline was healthy.
+ *
+ * WHY NEWEST-WINS IS THE WRONG RULE HERE. It is right for a RE-transcribe of the
+ * same engine, which is what it was written for. It is wrong across engines, because
+ * the two are not competing versions of one reading — the on-device pass is a fast
+ * partial that exists so the phone has something to show offline, and the cloud pass
+ * is the accurate one. Which arrives last is a race, and a race is not evidence.
+ *
+ * The device view `capture_transcript_current` (sql/150) now ranks the same way, so
+ * the phone and the worker read the same words. This is the worker's half: the view
+ * is a view, and none of these call sites ever selected from it.
+ *
+ * Returns `{ text: null }` for NO ROW — which the callers keep distinct from an empty
+ * string, because heard-nothing is an answer and not-yet-transcribed is not.
+ */
+async function currentTranscript(
+  sb: SupabaseClient, captureId: string,
+): Promise<{ error: string | null; text: string | null }> {
+  // A handful, not one: a capture can carry several readings and the newest cloud one
+  // has to be reachable past however many on-device rows landed after it.
+  const { data, error } = await sb
+    .from('capture_transcript').select('text, engine')
+    .eq('capture_id', captureId)
+    .order('created_at', { ascending: false }).limit(8);
+  if (error) return { error: error.message, text: null };
+  const rows = (data ?? []) as { text: string | null; engine: string | null }[];
+  if (!rows.length) return { error: null, text: null };
+  const cloud = rows.find((r) => r.engine !== ON_DEVICE_ENGINE);
+  const row = cloud ?? rows[0];
+  return { error: null, text: typeof row.text === 'string' ? row.text : null };
+}
+
+
 /**
  * Which job do these words point at? (170)
  *
@@ -256,15 +302,10 @@ export async function runStep(
  * jobs.
  */
 async function resolveProject(sb: SupabaseClient, job: Job): Promise<StepOutcome> {
-  // Newest transcript wins: 150 is append-only, so a re-transcribe is a NEW row
-  // and the latest is the current reading.
-  const { data: tr, error: trErr } = await sb
-    .from('capture_transcript').select('text')
-    .eq('capture_id', job.capture_id)
-    .order('created_at', { ascending: false }).limit(1);
-  if (trErr) return { ok: false, reason: 'needs_connection', error: trErr.message };
+  const read = await currentTranscript(sb, job.capture_id);
+  if (read.error) return { ok: false, reason: 'needs_connection', error: read.error };
 
-  const text = tr?.[0]?.text;
+  const text = read.text;
   // No transcript yet means the step is out of order, not that it failed. Park
   // it rather than writing a 'none' signal derived from nothing — a signal that
   // says "matched nothing" when nothing was READ is a lie about evidence.
@@ -388,11 +429,7 @@ export function serviceClient(): SupabaseClient {
  * the work.
  */
 async function extraTranscript(sb: SupabaseClient, captureId: string): Promise<string> {
-  const one = async (id: string) => {
-    const { data } = await sb.from('capture_transcript').select('text')
-      .eq('capture_id', id).order('created_at', { ascending: false }).limit(1);
-    return (data?.[0]?.text ?? '').trim();
-  };
+  const one = async (id: string) => ((await currentTranscript(sb, id)).text ?? '').trim();
   // Which decision is this capture part of?
   const { data: mine } = await sb.from('decision_version').select('decision_id')
     .eq('capture_id', captureId).limit(1);
