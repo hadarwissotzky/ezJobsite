@@ -79,16 +79,28 @@ begin
             -- without a vision model nobody has plugged in. Declaring no steps is
             -- the honest description of that.
             when new.modality = 'photo' then '[]'::jsonb
-            -- `amend_scope` (420) runs last and only matters for an EDIT: it reads the
-            -- scope of work the capture's extra already has and proposes an amended one.
-            -- It is enqueued for EVERY capture that can carry words because at insert
-            -- time nothing knows whether this is an edit -- the decision link is written
-            -- afterwards -- and the step records `no_scope` and stops when it turns out
-            -- not to be. Deciding here would mean guessing, and the guess would be wrong
-            -- in the direction that loses the feature.
+            /* `amend_scope` (420) IS NOT ENQUEUED, and this comment is the reason.
+             *
+             * NEVER ENQUEUE A STEP THE DEPLOYED WORKER DOES NOT IMPLEMENT. I added it
+             * here on 2026-08-24 while the step itself sat on a feature branch. Render
+             * deploys the worker from `main` (render.yaml, autoDeploy), so the running
+             * worker met a step it had never heard of and did the correct thing: parked
+             * the job. `worker.ts:238` explains why parking beats succeeding — "a step
+             * that passes without doing anything marks the capture processed and hands
+             * the contractor an empty card".
+             *
+             * The cost was not theoretical. hadar recorded a change order, the write-up
+             * landed (structure runs BEFORE this), and then the job blocked — so the
+             * pipeline never reported finished, the Send button never appeared, and the
+             * price never auto-filled. Two bugs, one line, and the line was mine.
+             *
+             * PUT IT BACK when the worker carrying `amend_scope` is deployed to main —
+             * not before. The enqueue and the implementation must ship together, and
+             * the implementation is the one that has to land first.
+             */
             when new.modality = 'text'
-              then '["detect_language","resolve_project","structure","amend_scope"]'::jsonb
-            else '["transcribe","detect_language","resolve_project","structure","amend_scope"]'::jsonb
+              then '["detect_language","resolve_project","structure"]'::jsonb
+            else '["transcribe","detect_language","resolve_project","structure"]'::jsonb
           end)
   on conflict (id) do nothing;
   return new;
