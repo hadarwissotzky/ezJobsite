@@ -9367,12 +9367,40 @@ const checkClientMessages = async () => {
    * WHAT CHANGES BETWEEN THE SCREENS IS THE META, and only the meta: Home spans jobs,
    * so the job NAME is the first thing that must be said. Inside a job it never is.
    */
+/**
+ * The job, short enough to share a line with the state chip.
+ *
+ * A jobsite name is usually an address — "1155 Stanyan St · San Francisco, CA" — and the
+ * part that distinguishes one job from another on this account is almost always the
+ * FRONT of it. So take the first segment before a separator, and cap it. The full
+ * address is still on the card's meta line directly below.
+ */
+const shortJob = (name: string): string => {
+  const head = name.split(/\s+[·,]\s+|,\s+/)[0].trim() || name.trim();
+  return head.length > 22 ? `${head.slice(0, 21).trimEnd()}…` : head;
+};
+
   const extraRow = (e: Extra, i: number) => {
     const st = stateOf(e);
     const row = (
       <ExtraCard key={e.id} chip={extraChip(st)}
+        /**
+         * THE JOB LEADS, THE NUMBER QUALIFIES (hadar, 2026-08-24: "look at the co
+         * numbers in waiting an approved they are the same -- that is a bug").
+         *
+         * `co_number` is per project and correctly so — it is the number printed on the
+         * client's own document. But Home mixes jobs, so two cards read "Change Order
+         * #2" and the only thing telling them apart was an address one digit different
+         * (1155 vs 1151 Stanyan), on another line, in grey. Leading with the job makes
+         * the pair unique at a glance without touching the number the client sees.
+         *
+         * The short job name, not the full address: this line is one line and shares it
+         * with the state chip. `meta` below still carries the address in full.
+         */
         kicker={e.co_number != null
-          ? T({ k: 'job.coNo', p: { n: e.co_number } })
+          ? (e.pname
+              ? T({ k: 'job.coNoOn', p: { job: shortJob(e.pname), n: e.co_number } })
+              : T({ k: 'job.coNo', p: { n: e.co_number } }))
           : T('job.coNoNumber')}
         title={e.scope || T('home.draftsSec')}
         photoUri={e.photo_relpath ? FS.documentDirectory + e.photo_relpath : null}

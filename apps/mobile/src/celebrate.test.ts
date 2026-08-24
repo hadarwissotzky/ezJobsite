@@ -61,13 +61,13 @@ test('the FIRST launch celebrates nothing that was already approved', async () =
   const db = await fresh([
     { id: 'old-1' }, { id: 'old-2' }, { id: 'draft-1', status: 'draft' },
   ]);
-  await ensureCelebrateSchema(db);
+  await ensureCelebrateSchema(db, 0);
   assert.deepEqual(await pendingCelebrations(db), []);
 });
 
 test('an approval that lands AFTER the table exists IS news', async () => {
   const db = await fresh([{ id: 'old-1' }]);
-  await ensureCelebrateSchema(db);
+  await ensureCelebrateSchema(db, 0);
   await db.execute(
     `INSERT INTO change_order (id, project_id, scope, status, created_at_ms, amount_cents)
      VALUES ('new-1','p-1','Relocate panel','approved',2000,125000)`);
@@ -80,11 +80,11 @@ test('re-running the schema does NOT re-seed over live news', async () => {
   // approval that arrived while the app was closed would be stamped as already-seen on
   // the very next start and he would never see it.
   const db = await fresh([]);
-  await ensureCelebrateSchema(db);
+  await ensureCelebrateSchema(db, 0);
   await db.execute(
     `INSERT INTO change_order (id, project_id, scope, status, created_at_ms)
      VALUES ('new-1','p-1','Relocate panel','approved',2000)`);
-  await ensureCelebrateSchema(db);
+  await ensureCelebrateSchema(db, 0);
   assert.equal((await pendingCelebrations(db)).length, 1);
 });
 
@@ -92,7 +92,7 @@ test('re-running the schema does NOT re-seed over live news', async () => {
 
 test('only approved rows surface', async () => {
   const db = await fresh();
-  await ensureCelebrateSchema(db);
+  await ensureCelebrateSchema(db, 0);
   for (const st of ['draft', 'sent', 'declined', 'superseded', 'approved']) {
     await db.execute(
       `INSERT INTO change_order (id, project_id, scope, status, created_at_ms)
@@ -104,7 +104,7 @@ test('only approved rows surface', async () => {
 
 test('the queue reads forward — oldest approval first', async () => {
   const db = await fresh();
-  await ensureCelebrateSchema(db);
+  await ensureCelebrateSchema(db, 0);
   await db.execute(`INSERT INTO change_order (id,project_id,scope,status,created_at_ms,approved_at_ms)
                     VALUES ('b','p-1','x','approved',1,9000)`);
   await db.execute(`INSERT INTO change_order (id,project_id,scope,status,created_at_ms,approved_at_ms)
@@ -121,7 +121,7 @@ test('approvals on OTHER jobs surface too, carrying their job id', async () => {
   // A signature on another jobsite is still the best news he gets today. The popup has to
   // be able to switch jobs before opening the record, so the id travels with it.
   const db = await fresh();
-  await ensureCelebrateSchema(db);
+  await ensureCelebrateSchema(db, 0);
   await db.execute(`INSERT INTO project (id,name) VALUES ('p-2','Maple Ave')`);
   await db.execute(`INSERT INTO change_order (id,project_id,scope,status,created_at_ms)
                     VALUES ('co-2','p-2','x','approved',1)`);
@@ -134,7 +134,7 @@ test('an unsynced job row loses the NAME, never the celebration', async () => {
   // An INNER JOIN here would swallow the most important event in the product because a
   // cosmetic label had not synced yet.
   const db = await fresh();
-  await ensureCelebrateSchema(db);
+  await ensureCelebrateSchema(db, 0);
   await db.execute(`INSERT INTO change_order (id,project_id,scope,status,created_at_ms)
                     VALUES ('co-9','p-missing','x','approved',1)`);
   const [c] = await pendingCelebrations(db);
@@ -144,7 +144,7 @@ test('an unsynced job row loses the NAME, never the celebration', async () => {
 
 test('dismissing one leaves the rest queued', async () => {
   const db = await fresh();
-  await ensureCelebrateSchema(db);
+  await ensureCelebrateSchema(db, 0);
   for (const id of ['a', 'b']) {
     await db.execute(`INSERT INTO change_order (id,project_id,scope,status,created_at_ms)
                       VALUES (?, 'p-1','x','approved',1)`, [id]);
@@ -206,4 +206,42 @@ test('an empty title falls back to the body rather than an empty headline', () =
   assert.equal(
     celebrationDescription({ scope: '   ', scopeOfWork: 'Relocate the main panel 6ft' }),
     'Relocate the main panel 6ft');
+});
+
+/**
+ * THE BUG hadar HIT ON 2026-08-24: "every time I log into 415497 I get this message of
+ * approval". A fresh sign-in (or `purgeLocalData` on a device handover) drops these
+ * tables, so the row-by-row seed runs against an EMPTY `change_order` and marks nothing;
+ * hydration then delivers months of already-approved extras and every one reads as news.
+ */
+test('an approval that predates this install is history, not news', async () => {
+  const db = await fresh([]);
+  // The device meets the account at t=5000. Nothing existed locally when it did.
+  await ensureCelebrateSchema(db, 5000);
+  // …then the hydrate arrives, carrying an approval the client signed long before.
+  await db.execute(
+    `INSERT INTO change_order (id,project_id,scope,status,created_at_ms,approved_at_ms)
+     VALUES ('co-old','p1','Signed in July','approved',900,1000)`);
+  assert.deepEqual(await pendingCelebrations(db), [],
+    'confetti for a job approved before this phone ever saw the account');
+});
+
+test('an approval that lands after the install still celebrates', async () => {
+  const db = await fresh([]);
+  await ensureCelebrateSchema(db, 5000);
+  await db.execute(
+    `INSERT INTO change_order (id,project_id,scope,status,created_at_ms,approved_at_ms)
+     VALUES ('co-new','p1','Signed just now','approved',5100,6000)`);
+  const out = await pendingCelebrations(db);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].changeOrderId, 'co-new');
+});
+
+test('an approval exactly ON the epoch counts as news, not history', async () => {
+  const db = await fresh([]);
+  await ensureCelebrateSchema(db, 5000);
+  await db.execute(
+    `INSERT INTO change_order (id,project_id,scope,status,created_at_ms,approved_at_ms)
+     VALUES ('co-edge','p1','Same millisecond','approved',4000,5000)`);
+  assert.equal((await pendingCelebrations(db)).length, 1);
 });

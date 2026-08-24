@@ -40,18 +40,55 @@ export const CELEBRATE_DDL = [
    ) STRICT`,
 ];
 
-export async function ensureCelebrateSchema(db: AbstractPowerSyncDatabase) {
+/**
+ * The sentinel row that records WHEN this device started caring about approvals.
+ *
+ * Not a real change order id, and it cannot collide with one: every id in this product
+ * is `co-<capture id>`.
+ */
+export const EPOCH_KEY = '__epoch__';
+
+export async function ensureCelebrateSchema(
+  db: AbstractPowerSyncDatabase,
+  /** The floor. Injectable so a test can set it without inventing real-world clocks —
+   *  the same shape `pendingAugments` uses, and for the same reason. */
+  nowMs: number = Date.now(),
+) {
   const existed = await db.getAll<{ name: string }>(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='approval_celebrated'`
   );
   for (const s of CELEBRATE_DDL) await db.execute(s);
-  // SEED THE WATERMARK on first creation — see the header. Only approvals that land
-  // AFTER the feature exists are news.
   if (!existed.length) {
+    // SEED THE WATERMARK on first creation — see the header. Only approvals that land
+    // AFTER the feature exists are news.
     await db.execute(
       `INSERT OR IGNORE INTO approval_celebrated (change_order_id, at_ms)
          SELECT id, ? FROM change_order WHERE status = 'approved'`,
-      [Date.now()]
+      [nowMs]
+    );
+    /**
+     * …AND A TIME FLOOR, BECAUSE THE SEED ABOVE CANNOT SEE WHAT HAS NOT ARRIVED YET
+     * (hadar, 2026-08-24: "every time I log into 415497 I get this message of
+     * approval").
+     *
+     * The seed reads `change_order`. On a fresh sign-in — or after `purgeLocalData`
+     * drops the app-owned tables on a device handover — that table is EMPTY at this
+     * moment, so it marks NOTHING. Hydration then pulls months of already-approved
+     * extras down, every one of them absent from `approval_celebrated`, and each is
+     * treated as an approval that just happened. He gets confetti for a job the client
+     * signed in July, every single time he signs in.
+     *
+     * The row-by-row watermark could never have covered this: it can only mark rows
+     * that exist. A TIME floor covers the ones that do not yet. An approval that landed
+     * before this device knew the account is history, not news — the same judgement the
+     * header already makes about approvals that predate the feature.
+     *
+     * It lives in this table on purpose: dropped when the table is dropped, recreated
+     * with it, so its lifetime is exactly the lifetime of "what this install has seen".
+     */
+    await db.execute(
+      `INSERT OR REPLACE INTO approval_celebrated (change_order_id, at_ms) VALUES (?, ?)`,
+      [EPOCH_KEY, nowMs]
     );
   }
 }
@@ -96,7 +133,14 @@ export async function pendingCelebrations(
          LEFT JOIN project p ON p.id = co.project_id
         WHERE co.status = 'approved'
           AND co.id NOT IN (SELECT change_order_id FROM approval_celebrated)
-        ORDER BY COALESCE(co.approved_at_ms, co.created_at_ms) ASC`
+          -- Nothing that happened before this install met the account. See EPOCH_KEY.
+          -- COALESCE so a row with no approval timestamp is judged by when it was made;
+          -- a missing epoch (a table from before this change) floors at 0 and behaves
+          -- exactly as it did.
+          AND COALESCE(co.approved_at_ms, co.created_at_ms, 0) >=
+              COALESCE((SELECT at_ms FROM approval_celebrated WHERE change_order_id = ?), 0)
+        ORDER BY COALESCE(co.approved_at_ms, co.created_at_ms) ASC`,
+      [EPOCH_KEY]
     );
     return rows.map((r) => ({
       changeOrderId: r.id,

@@ -369,6 +369,18 @@ const EN: Record<string, string> = {
   'job.chipNeeds': 'Needs approval',
   'job.chipWaiting': 'Waiting on client',
   'job.chipApproved': 'Approved',
+  // ON A CROSS-JOB LIST THE NUMBER ALONE IS AMBIGUOUS (hadar, 2026-08-24: "look at the
+  // co numbers in waiting an approved they are the same -- that is a bug").
+  //
+  // The DATA is right: `co_number` is per project (sql/419 locks on
+  // `co_number:project_id`), so 1155 Stanyan #2 and 1151 Stanyan #2 are both genuinely
+  // the second extra on their own job. That is the number the client sees on their own
+  // document and it must not change. What was wrong is the LABEL: Home mixes jobs, so
+  // two cards read "Change Order #2" and the only thing separating them is an address
+  // one digit apart, on a different line, in grey.
+  //
+  // So the job leads on the cross-job lists and the number qualifies it.
+  'job.coNoOn': '{job} · #{n}',
   'job.coNo': 'Change Order #{n}',
   'job.coNoNumber': 'Change order',
   'job.initiated': 'Initiated {d}',
@@ -2423,6 +2435,7 @@ const ES: Record<string, string> = {
   'job.chipNeeds': 'Necesita aprobación',
   'job.chipWaiting': 'Esperando al cliente',
   'job.chipApproved': 'Aprobado',
+  'job.coNoOn': '{job} · #{n}',
   'job.coNo': 'Orden de cambio #{n}',
   'job.coNoNumber': 'Orden de cambio',
   'job.initiated': 'Iniciada {d}',
