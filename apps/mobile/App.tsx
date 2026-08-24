@@ -9319,12 +9319,39 @@ const checkClientMessages = async () => {
    * unsent work; a job screen only lists sent extras) and `declined`.
    */
   const extraChip = (st: string) => {
+    /**
+     * FILLED, NOT OUTLINED (hadar, 2026-08-24, with the marketing sheet beside it:
+     * "the tags on the records -- not sent needs to be much more visual -- like these
+     * colors").
+     *
+     * These were white pills with a thin coloured border and coloured text. At 11pt on
+     * a card that already carries a green kicker, a bold title and two grey lines, the
+     * outline reads as more furniture — and "Not sent", the one state that is asking
+     * him for something, was the quietest of the lot in plain grey.
+     *
+     * A solid fill is the whole point: the status is the thing a man scanning a list of
+     * fourteen extras is looking for, and it should be findable without reading. The
+     * palette matches the one on the product sheet — blue for sent, amber for a client
+     * question, green for approved.
+     *
+     * `line` is kept and set to the fill so the shape is unchanged; a filled pill with
+     * a contrasting border reads as two shapes.
+     */
     const map: Record<string, { color: string; bg: string; line: string }> = {
-      waiting:  { color: '#2E5AA8', bg: '#FFFFFF', line: '#B9CBE8' },
-      needs:    { color: '#C2610C', bg: '#FFFFFF', line: '#F0C89B' },
-      approved: { color: '#3A5230', bg: '#EDF2E9', line: '#C3D3BA' },
-      draft:    { color: '#6b625b', bg: '#FFFFFF', line: '#D8D2CA' },
-      declined: { color: '#8B5148', bg: '#FFFFFF', line: '#E0A59C' },
+      // Sent and quiet. Blue, as on the sheet.
+      waiting:  { color: '#FFFFFF', bg: '#3E6FBF', line: '#3E6FBF' },
+      // The client asked something. Amber — it wants him, but nothing is wrong.
+      needs:    { color: '#3A2E12', bg: '#F0B93B', line: '#F0B93B' },
+      approved: { color: '#FFFFFF', bg: '#2F8F55', line: '#2F8F55' },
+      // NOT SENT. The one he asked for by name: it is the state that is waiting on HIM,
+      // so it gets the ochre the rest of the app uses for "something needs you" rather
+      // than the grey it had, which said "nothing here".
+      draft:    { color: '#3A2E12', bg: '#E8C77A', line: '#E8C77A' },
+      declined: { color: '#FFFFFF', bg: '#A8503F', line: '#A8503F' },
+      // Withdrawn: ended, by him, and not a fault. Solid so it is still findable at a
+      // glance, neutral so it does not read as an alarm — the same call the record
+      // screen's banner makes.
+      cancelled: { color: '#FFFFFF', bg: '#8A837B', line: '#8A837B' },
     };
     const c = map[st] ?? map.draft;
     // "Not sent" rather than "Created" for a draft: what a draft needs to say on a row

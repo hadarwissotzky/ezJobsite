@@ -109,6 +109,7 @@ export function ExtraCard({
   return (
     <Pressable style={st.card} onPress={onPress}
       accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? title}>
+      <View style={st.cardRow}>
       {photoUri
         ? <Image source={{ uri: photoUri }} style={st.thumb} resizeMode="cover" />
         : <View style={[st.thumb, st.thumbEmpty]}>
@@ -173,31 +174,45 @@ export function ExtraCard({
           )}
           <Icon name={'chevRight' as IconName} size={16} color="#8A93A0" />
         </View>
-
-        {/* THE CLOSING LINE — who raised it, and when. Last, not under the title
-            (hadar, 2026-08-14).
-            The label stays quiet and the NAME carries the weight: "Raised by" is the
-            same two words on every row of the feed, so bolding it would emphasise the
-            one part that never varies. The date sits hard right, which gives the two
-            facts their own ends of the row and lets a long name run without pushing
-            the date off the card. */}
-        {(!!person?.name || !!personRight) && (
-          <View style={st.person}>
-            {!!person?.name && (
-              <>
-                <Icon name={'person' as IconName} size={14} color="#4a4a46" />
-                <Text style={st.personT} numberOfLines={1}>
-                  {!!person.label && <Text style={st.personLab}>{person.label} </Text>}
-                  {person.name}
-                </Text>
-              </>
-            )}
-            {!!personRight && (
-              <Text style={st.personWhen} numberOfLines={1}>{personRight}</Text>
-            )}
-          </View>
-        )}
       </View>
+      </View>
+
+      {/* THE CLOSING LINE — who raised it, and when. Last, not under the title
+          (hadar, 2026-08-14). The label stays quiet and the NAME carries the weight:
+          "Raised by" is the same two words on every row of the feed, so bolding it
+          would emphasise the one part that never varies. The date sits hard right,
+          which gives the two facts their own ends of the row and lets a long name run
+          without pushing the date off the card. */}
+      {/**
+        * THE FOOTER SPANS THE WHOLE CARD (hadar, 2026-08-24: "the bottom section where
+        * the creator lives needs to be the length of the record and the creator name
+        * needs to be left aligned all the way to the left side of the record").
+        *
+        * It used to live INSIDE the text column, which starts to the right of the 72pt
+        * thumbnail — so its hairline began a third of the way across and the name was
+        * indented under the title rather than aligned to the card. That read as one more
+        * line of the title block instead of as the row's footer.
+        *
+        * Moving it out means the card is now a COLUMN of [row(thumb, text), footer]
+        * rather than a bare row. The thumbnail and the text column are unchanged inside
+        * that row; only their wrapper is new.
+        */}
+      {(!!person?.name || !!personRight) && (
+        <View style={st.person}>
+          {!!person?.name && (
+            <>
+              <Icon name={'person' as IconName} size={14} color="#4a4a46" />
+              <Text style={st.personT} numberOfLines={1}>
+                {!!person.label && <Text style={st.personLab}>{person.label} </Text>}
+                {person.name}
+              </Text>
+            </>
+          )}
+          {!!personRight && (
+            <Text style={st.personWhen} numberOfLines={1}>{personRight}</Text>
+          )}
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -207,8 +222,10 @@ const st = StyleSheet.create({
   // hold — "Change Order #18" beside "Waiting on owner" — overran a 375pt screen and
   // clipped the chip. The thumbnail gives up 4pt and the gaps 3pt between them, which
   // buys the top row its margin and widens the meta and schedule lines for free.
-  card: { flexDirection: 'row', gap: 9, backgroundColor: '#FFFFFF', borderWidth: 1,
+  // A COLUMN now: the thumb/text row, then a full-width footer under it.
+  card: { backgroundColor: '#FFFFFF', borderWidth: 1,
     borderColor: '#E4E1D9', borderRadius: 8, padding: 12, marginBottom: 8 },
+  cardRow: { flexDirection: 'row', gap: 9 },
   thumb: { width: 72, height: 72, borderRadius: 6, backgroundColor: '#EFEBE3' },
   thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
 
@@ -226,8 +243,10 @@ const st = StyleSheet.create({
   meta: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#6b625b', marginTop: 2 },
   // The closing line. A hairline above it so it reads as the row's footer rather than
   // as one more fact that happened to end up last.
-  person: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 9,
-    paddingTop: 8, borderTopWidth: 1, borderTopColor: '#EFEBE3' },
+  // Full card width, so the rule runs edge to edge and the name starts at the card's
+  // own left margin rather than under the title.
+  person: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10,
+    paddingTop: 9, borderTopWidth: 1, borderTopColor: '#EFEBE3' },
   personT: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#131110', flexShrink: 1 },
   personLab: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#6b625b' },
   // `marginLeft: auto` and not a spacer View: with no person on the row the date still
