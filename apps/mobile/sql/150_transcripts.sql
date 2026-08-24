@@ -56,12 +56,43 @@ create policy transcript_own on public.capture_transcript for select to authenti
 -- never said — the same reason processing_state is server-owned.
 revoke insert, update, delete on public.capture_transcript from authenticated;
 
--- The current transcript: newest wins, history kept. Same law as decision_version.
+/*
+ * The current transcript: THE BETTER ENGINE WINS, then newest. History kept.
+ *
+ * IT WAS NEWEST-WINS, AND THAT LOST A CONTRACTOR HIS WRITE-UP (hadar, 2026-08-24:
+ * "the latest co is stuck on writing it up").
+ *
+ * For cap-mt7kfwc8-oo3l5fho, Deepgram returned 1,537 characters at 18:25:11.458 and the
+ * phone's own recogniser returned 34 -- "All right, we're gonna do a client" -- at
+ * 18:25:11.760. Three hundred milliseconds later. Under newest-wins the fragment
+ * superseded the full reading, `structure` was handed four words, honestly answered
+ * `confidence: none`, and the change order kept its placeholder scope while the screen
+ * said it was still being written up. The audio was 2.3 MB. Nothing was stuck; the good
+ * transcript was sitting in the table underneath a worse one.
+ *
+ * 368 SAW THIS COMING and mis-sized it: "in production the two land minutes apart in
+ * separate transactions so it would rarely bite". That was true when the device
+ * transcribed lazily. It stopped being true when on-device STT started running at
+ * commit and uploading through `stt_outbox` -- now both engines finish within a second
+ * of each other and the order is a coin toss.
+ *
+ * THE RULE THAT DOES NOT DEPEND ON TIMING: the two engines are not peers. The cloud
+ * reading is the authoritative one -- it is why the pipeline pays for it. The
+ * on-device reading exists so the app has SOMETHING immediately and offline, and it is
+ * a fallback by design (`ondevicestt.ts`: "the worker's cloud path still covers this
+ * capture"). So rank the engine first and let recency break ties within an engine.
+ *
+ * Anything that is not `ios-ondevice` counts as cloud, deliberately: a new cloud engine
+ * should outrank the phone from the day it is added, without having to remember this
+ * view exists.
+ */
 create or replace view public.capture_transcript_current as
 select distinct on (capture_id)
        capture_id, text, source_language, engine, engine_model, created_at
   from public.capture_transcript
- order by capture_id, created_at desc;
+ order by capture_id,
+          (engine = 'ios-ondevice'),   -- false sorts first: cloud outranks the phone
+          created_at desc;
 grant select on public.capture_transcript_current to authenticated;
 
 -- The columns 140 added to `capture` are DEAD: they can never be written, because
