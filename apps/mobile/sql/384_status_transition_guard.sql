@@ -58,9 +58,20 @@ create or replace function public.change_order_transition_guard() returns trigge
     return new;
   end if;
 
+  -- `sent -> cancelled` — the withdrawal (421, hadar 2026-08-24). It amends REQ-LC20.
+  --
+  -- THIS FILE WAS THE FOURTH COPY OF THE TRANSITION TABLE and I missed it: 421 widened
+  -- the CHECK constraint and the app's LEGAL_TRANSITIONS, and the RPC's UPDATE then hit
+  -- THIS trigger and was refused with "illegal change order transition sent -> cancelled"
+  -- in front of the contractor. The guard was right to refuse; the omission was mine.
+  --
+  -- Deliberately NOT reachable from `draft` (nothing live to withdraw, nobody to tell)
+  -- or from any terminal state (an approved record is frozen and permanent, mandate #1).
+  -- Nothing may leave `cancelled` either: it is absent from every left-hand side below,
+  -- which is what makes it terminal here as well as in the app.
   if not (
        (old.status = 'draft' and new.status in ('sent','approved','declined'))
-    or (old.status = 'sent'  and new.status in ('approved','declined','superseded'))
+    or (old.status = 'sent'  and new.status in ('approved','declined','superseded','cancelled'))
   ) then
     -- LOUD, and it names both ends. A refused transition that returns quietly is the
     -- "claims that outrun their evidence" defect: the caller reports a state change

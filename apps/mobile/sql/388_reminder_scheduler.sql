@@ -194,6 +194,11 @@ begin
       from public.confirmation_request r
      where r.change_order_id is not null
        and r.superseded_at is null
+       -- …and not WITHDRAWN (421). A cancelled link has `cancelled_at` set and
+       -- `superseded_at` null, so without this the scheduler goes on treating it as the
+       -- live link and reminds a client about a change order the contractor withdrew —
+       -- the exact opposite of what the withdrawal was for.
+       and r.cancelled_at is null
        and now() <= r.expires_at
        and not exists (select 1 from public.confirmation_response x where x.token = r.token)
   ),
@@ -330,6 +335,8 @@ begin
     from public.confirmation_request r
    where r.change_order_id = p_change_order_id
      and r.superseded_at is null
+     -- …and not withdrawn (421). See the note on the other live-link filter above.
+     and r.cancelled_at is null
      and now() <= r.expires_at
      and not exists (select 1 from public.confirmation_response x where x.token = r.token)
    order by r.created_at desc
