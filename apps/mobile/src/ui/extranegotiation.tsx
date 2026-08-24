@@ -254,31 +254,16 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
 
   // The ⋯ nav overflow — the design carries it on this screen. It offers the two acts
   // that are not one-tap on the page itself: revise & resend, and the full history.
-  /**
-   * WITHDRAW JOINS THE OVERFLOW, not the page (421, hadar 2026-08-24).
-   *
-   * It belongs beside Revise for the same reason Revise is there: it is an act, it is
-   * not one-tap, and it is not what he came to this screen to do. Putting it on the page
-   * would make ending the conversation as prominent as continuing it.
-   *
-   * `destructiveButtonIndex` because it kills a live instrument and cannot be undone —
-   * iOS colours it red, which is the one place red is right here: the CHIP stays neutral
-   * because a withdrawal is not a fault, but the button that performs it is a warning.
-   */
+  // The ⋯ nav overflow — the design carries it on this screen. It offers the two acts
+  // that are not one-tap on the page itself: revise & resend, and the full history.
+  //
+  // WITHDRAW IS NOT HERE. It was, briefly; it now sits at the bottom of the page beside
+  // where the draft screen puts its delete — see the note there. One entry point, not
+  // two, so the two cannot disagree about when it is offered.
   const showOverflow = React.useCallback(() => {
-    const withdraw = props.onWithdraw;
-    const options = withdraw
-      ? [t('neg.reviseShort'), t('neg.viewHistory'), t('cancel.action'), t('common.cancel')]
-      : [t('neg.reviseShort'), t('neg.viewHistory'), t('common.cancel')];
     ActionSheetIOS.showActionSheetWithOptions(
-      { options,
-        cancelButtonIndex: withdraw ? 3 : 2,
-        destructiveButtonIndex: withdraw ? 2 : undefined },
-      (i) => {
-        if (i === 0) props.onRevise();
-        else if (i === 1) props.onViewHistory();
-        else if (i === 2 && withdraw) withdraw();
-      },
+      { options: [t('neg.reviseShort'), t('neg.viewHistory'), t('common.cancel')], cancelButtonIndex: 2 },
+      (i) => { if (i === 0) props.onRevise(); else if (i === 1) props.onViewHistory(); },
     );
   }, [props]);
 
@@ -426,6 +411,32 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
               />
             </Card>
           </>
+        )}
+
+        {/**
+          * WITHDRAW, AT THE BOTTOM — the same place and the same shape as "Delete this
+          * extra" on the draft screen (hadar, 2026-08-24: "lets keep consistant and
+          * place it at the bottom of the co").
+          *
+          * It was in the ⋯ overflow. That is where the draft's delete used to live too,
+          * and it was moved out for the reason CLAUDE.md §1 gives: a destructive action
+          * hidden behind a glyph is not discoverable by someone who does not think in
+          * software. The overflow is where a thing goes to be tidy, not to be found.
+          *
+          * A quiet text link, not a filled red button: it must be findable without
+          * competing with Remind and Reply, which are what he is usually here to do.
+          * Nothing is withdrawn by tapping it — `onWithdraw` opens the confirmation that
+          * names both consequences first (mandate #2). 44pt, mandate #3.
+          */}
+        {props.onWithdraw && (
+          <Pressable
+            onPress={props.onWithdraw}
+            accessibilityRole="button"
+            accessibilityLabel={t('cancel.action')}
+            style={({ pressed }) => [st.withdrawBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Text style={st.withdrawLabel}>{t('cancel.action')}</Text>
+          </Pressable>
         )}
 
       </ScrollView>
@@ -1192,6 +1203,12 @@ const st = StyleSheet.create({
   // each card (10) so every section is evenly spaced — the global T.card is 18/10 and
   // its marginBottom made the tab→People gap differ from People→detail.
   cardTight: { borderRadius: 12, marginTop: 10, marginBottom: 0 },
+  /** Deliberately identical to `deleteBtn`/`deleteLabel` on the draft screen: the same
+   *  act at the same place on the next stage should not look like a different kind of
+   *  thing. `marginTop` separates it from the last card so it reads as an action on the
+   *  record rather than the tail of the version row above it. */
+  withdrawBtn: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
+  withdrawLabel: { fontFamily: F.bodySemi, fontSize: 15, color: C.danger },
 
   // The single waiting card (green-tinted), holding disc + title + read-receipt + the
   // Remind button — the design keeps them in one box.
