@@ -32,8 +32,9 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../i18n';
-import { C, F, label as labelStyle } from './theme';
+import { C, F } from './theme';
 import { Icon } from './icon';
+import { Section } from './kit';
 
 export type ScopeStage = 'draft' | 'sent' | 'signed';
 
@@ -81,16 +82,33 @@ export function ScopeBlock({ text, stage, onEdit, missing, pending, pendingLabel
   const waiting = !!pending && !body;
 
   return (
-    <View style={st.wrap}>
-      <View style={st.head}>
-        <Text style={labelStyle}>{t('scope.heading')}</Text>
-        {stage === 'draft' && onEdit && (
-          <Pressable onPress={onEdit} hitSlop={8} style={st.editHit}
-            accessibilityRole="button" accessibilityLabel={t('scope.edit')}>
-            <Text style={st.edit}>{t('scope.edit')}</Text>
-          </Pressable>
-        )}
-      </View>
+    /**
+     * ONE CARD, LIKE EVERY OTHER SECTION (hadar, 2026-08-24: "scope of work is outside
+     * of the section -- it is different [from] the whole design -- we should put that
+     * title inside the section ... like price and raw collection [information]
+     * sections").
+     *
+     * It used to draw its own: a heading sitting on the cream page, and under it a
+     * separate bordered box. Two problems, and the second is the one that mattered.
+     * Cosmetically it was the only section on the screen whose title was not on its
+     * card, so the most important block read as though it belonged to nothing.
+     * Structurally it was a SECOND implementation of a section — which is how it came
+     * to differ at all, and how it would have differed again.
+     *
+     * `Section` now carries the Edit control in its `action` slot, so this block asks
+     * for the standard furniture instead of imitating it, and the body sits directly
+     * on the card rather than in a box inside a box.
+     */
+    <Section
+      title={t('scope.heading')}
+      style={frozen ? st.cardFrozen : undefined}
+      action={stage === 'draft' && onEdit ? (
+        <Pressable onPress={onEdit} hitSlop={8} style={st.editHit}
+          accessibilityRole="button" accessibilityLabel={t('scope.edit')}>
+          <Text style={st.edit}>{t('scope.edit')}</Text>
+        </Pressable>
+      ) : undefined}
+    >
 
       {body ? (
         // A SECTION THAT GROWS, not a window that scrolls (hadar 2026-08-07: "the scope
@@ -107,7 +125,7 @@ export function ScopeBlock({ text, stage, onEdit, missing, pending, pendingLabel
         // A scroll view inside a scroll view is also a gesture fight — a drag that
         // starts here moves the inner box while the page stands still, which reads as a
         // stuck screen. The page scrolls; the document is simply all there.
-        <View style={[st.box, frozen && st.boxFrozen]}>
+        <View style={st.box}>
           {/* HEADINGS BOLD, IN THE RENDER ONLY (hadar 2026-08-07).
               The stored string stays plain text and MUST: `scope_of_work` is frozen
               into `shown_content`, which is the binding instrument, and the same string
@@ -181,32 +199,32 @@ export function ScopeBlock({ text, stage, onEdit, missing, pending, pendingLabel
           two sentences" the draft banner was already trimmed for. */}
       {!!footer && <View style={{ marginTop: 10 }}>{footer}</View>}
 
-    </View>
+    </Section>
   );
 }
 
 const st = StyleSheet.create({
-  wrap: { marginTop: 14 },
-  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   editHit: { minHeight: 32, justifyContent: 'center' },
   edit: { fontFamily: F.bodySemi, fontSize: 14.5, color: C.ink },
-  box: {
-    marginTop: 7,
-    backgroundColor: C.raised,
-    borderWidth: 1, borderColor: C.line, borderRadius: 10,
-    paddingHorizontal: 12, paddingVertical: 10,
-  },
-  // Frozen text sits on the muted surface — the same signal the app uses everywhere
-  // for "this is a record, not a field".
-  boxFrozen: { backgroundColor: C.surfaceMuted },
+  // The document sits DIRECTLY ON THE CARD. It used to be a bordered, differently
+  // tinted box nested inside — a card within a card, which is the thing that made this
+  // section look unlike the others. `Section` owns the frame now; this owns spacing.
+  box: { paddingTop: 10, paddingBottom: 2 },
+  // Frozen text sits on the muted surface — the same signal the app uses everywhere for
+  // "this is a record, not a field". It moves to the CARD, so the whole section reads
+  // as a record instead of one tinted panel inside a cream one.
+  cardFrozen: { backgroundColor: C.surfaceMuted },
   body: { fontFamily: F.body, fontSize: 15, lineHeight: 22, color: C.ink },
   // Bold + a little air above, so the sections read as sections rather than as a wall
   // of sentences that happens to contain capitals.
   bodyHead: { fontFamily: F.bodyBold, marginTop: 10 },
   // Centred, with room to breathe — an empty state is a small poster, not a row.
+  // An INSET WELL, not a card: muted fill and no border, so it reads as a hollow in
+  // the section rather than as a second card competing with the one around it.
   empty: {
     minHeight: 132, alignItems: 'center', justifyContent: 'center',
     gap: 6, paddingHorizontal: 22, paddingVertical: 20,
+    marginTop: 10, marginBottom: 2, borderRadius: 10,
     backgroundColor: C.surfaceMuted,
   },
   emptyTitle: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.ink, textAlign: 'center' },
@@ -215,7 +233,9 @@ const st = StyleSheet.create({
   emptyBody: { fontFamily: F.body, fontSize: 13.5, lineHeight: 19, color: C.muted, textAlign: 'center' },
   // A hairline, full-bleed inside the box's padding, so the footnote is separated from
   // the document without being pushed off it.
-  capRule: { height: 1, backgroundColor: C.line, marginTop: 12, marginHorizontal: -12 },
+  // Full-bleed against the CARD's 14pt gutter (it was -12, for the old inner box's
+  // padding). A rule that stops short of the edge reads as a broken underline.
+  capRule: { height: 1, backgroundColor: C.line, marginTop: 12, marginHorizontal: -14 },
   caption: { fontFamily: F.body, fontSize: 12.5, color: C.muted, marginTop: 8 },
   captionWarn: { color: C.danger, fontFamily: F.bodySemi },
 });

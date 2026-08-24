@@ -243,8 +243,24 @@ const st = {
    * Sentence case, no tracking, and it keeps the label colour so it still reads as a
    * heading rather than as body copy.
    */
+  /**
+   * THE RULE UNDER THE TITLE (hadar, 2026-08-24: "every section should have a title and
+   * a line under it to divide the title from the content").
+   *
+   * The TYPE is deliberately left alone. He set this title to 13.5pt, sentence case, on
+   * 2026-08-23 — "the people involved section title is so small the name of the selected
+   * owner is so big it looks confusing" — so adopting `Section`'s 11.5pt uppercase label
+   * here would undo a decision he made about this exact line. What was missing was the
+   * divider, not the styling, so only the divider is added.
+   *
+   * Full-bleed against T.card's 14pt padding, the same way `sectionTitleIn` runs to the
+   * card edges: a rule that stops short reads as an underlined word.
+   */
   title: { fontSize: 13.5, letterSpacing: 0, textTransform: 'none' as const,
-           color: C.steel, marginBottom: 12 },
+           color: C.steel,
+           paddingBottom: 10, marginBottom: 12,
+           borderBottomWidth: 1, borderBottomColor: C.line,
+           marginHorizontal: -14, paddingHorizontal: 14 },
   group: {},
   groupGap: { marginTop: 14, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12 },
   // The group heading. Quieter than the people under it and louder than the card's

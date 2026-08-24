@@ -59,14 +59,38 @@ export function Card({ children, style }: {
  *  2026-07-30). It used to float above the card; the design draws the card as one
  *  object whose first line names it, and an outside heading also cost a whole line
  *  of vertical space per section. */
-export function Section({ title, children, style }: {
+export function Section({ title, children, style, action }: {
   title: string;
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  /**
+   * An affordance pinned to the RIGHT of the title, on the same rule.
+   *
+   * Added 2026-08-24 so the scope of work could stop drawing its own furniture. It had
+   * a title on the page background above a separate bordered box, because it needed an
+   * Edit control beside the heading and this component had nowhere to put one — so it
+   * copied the idea and diverged from it, which is what hadar saw: "scope of work is
+   * outside of the section -- it is different [from] the whole design ... like price
+   * and raw collection information sections".
+   *
+   * The fix is a slot here rather than a second card style there. One component draws
+   * every section's title and rule, so they cannot drift again.
+   */
+  action?: React.ReactNode;
 }) {
   return (
     <View style={[T.card, st.sectionCard, style]}>
-      <Text style={[labelStyle, st.sectionTitleIn]}>{title}</Text>
+      {action ? (
+        <View style={st.sectionHeadRow}>
+          {/* flex:1 so the title takes the room and the action keeps its size — the
+              rule underneath must run the full width either way, which is why the
+              border lives on the ROW here and on the text in the plain case. */}
+          <Text style={[labelStyle, st.sectionTitleFlush]} numberOfLines={1}>{title}</Text>
+          {action}
+        </View>
+      ) : (
+        <Text style={[labelStyle, st.sectionTitleIn]}>{title}</Text>
+      )}
       {children}
     </View>
   );
@@ -1244,6 +1268,18 @@ const st = StyleSheet.create({
     paddingTop: 12, paddingBottom: 10,
     borderBottomWidth: 1, borderBottomColor: C.line,
     marginBottom: 2, marginHorizontal: -14, paddingHorizontal: 14,
+  },
+  // The same title bar with something on its right. The rule and the full-bleed
+  // negative margin move to the ROW so they still run edge to edge; the text keeps the
+  // type and gives up the border.
+  sectionHeadRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    paddingTop: 12, paddingBottom: 10,
+    borderBottomWidth: 1, borderBottomColor: C.line,
+    marginBottom: 2, marginHorizontal: -14, paddingHorizontal: 14,
+  },
+  sectionTitleFlush: {
+    flex: 1, fontFamily: F.bodySemi, fontSize: 11.5, letterSpacing: 1.4, color: C.muted,
   },
 
   // 56 pressable / 48 static — both clear `touchTargets.minimum`, so adding an

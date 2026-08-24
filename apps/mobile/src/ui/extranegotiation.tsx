@@ -56,10 +56,10 @@ import { PeopleInvolved, rosterOf } from './peopleinvolved';
 import { RecordingsCard } from './recordings';
 import { Icon, type IconName } from './icon';
 import {
-  APP_NAME, BottomSheet, Button, CostBreakdown, MoneyBlock, Card, Chip, PersonRow as PersonRowView, Row,
+  APP_NAME, BottomSheet, Button, CostBreakdown, MoneyBlock, Card, Chip, Section, PersonRow as PersonRowView, Row,
   ScreenHeader, PhotoGrid, StatusBanner, TimelineRow, type PhotoTile,
 } from './kit';
-import { C, F, T, label as labelStyle, money as moneyStyle, tint } from './theme';
+import { C, F, T, money as moneyStyle, tint } from './theme';
 import { radii, shadows, touchTargets } from './tokens';
 
 /** One person on the record. `role` is the already-translated word, never a slug —
@@ -1143,8 +1143,9 @@ function ReplyComposer({ inputRef, onReply, who, onSnapPhoto, onPickPhoto,
  */
 function ClosedThread({ onNewLinkedExtra }: { onNewLinkedExtra?: () => void }) {
   return (
-    <Card>
-      <Text style={labelStyle}>{t('neg.closedTitle')}</Text>
+    // A Card with a hand-drawn title and no rule under it — the same divergence the
+    // scope block had, one screen over. `Section` draws both (hadar 2026-08-24).
+    <Section title={t('neg.closedTitle')}>
       <Text style={[T.bodySteel, st.empty]}>{t('r5b.threadClosed')}</Text>
       {onNewLinkedExtra && (
         <Button
@@ -1155,7 +1156,7 @@ function ClosedThread({ onNewLinkedExtra }: { onNewLinkedExtra?: () => void }) {
           style={st.stacked}
         />
       )}
-    </Card>
+    </Section>
   );
 }
 
