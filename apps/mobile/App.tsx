@@ -3797,6 +3797,62 @@ const checkClientMessages = async () => {
 
   termsRef.current = !!terms;
 
+  /**
+   * LOAD THE TERMS FLAG AT MOUNT, NOT AT THE END OF `refresh()`
+   * (hadar, 2026-08-24: the recording note again, "never show this to me again" —
+   * and the screen's own copy says "You only do this once").
+   *
+   * `terms` is `boolean | null`, where null means NOT LOADED YET. Every gate reads
+   * `if (!terms)`, which cannot tell that apart from `false`. It was only set near the
+   * END of `refresh()` — after the hydrates, the drains and a dozen awaited reads — and
+   * `setReady(true)` deliberately does not wait for `refresh()`. So on a cold start
+   * there is a window where the app is usable and `terms` is still null, and a tap on
+   * record in that window shows the legal screen to a contractor who accepted it weeks
+   * ago, plus fresh mic and location prompts behind it.
+   *
+   * This is code-review finding #8 from 2026-08-23, which I read and did not fix.
+   *
+   * `getTermsAccepted` is one local key/value read. It has no business being queued
+   * behind the network work, and doing it first closes the window to about a frame.
+   */
+  React.useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const ok = await getTermsAccepted(db);
+        if (alive) setTerms(ok);
+      } catch { /* the gate stays closed and `refresh()` will try again */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  /**
+   * ASK THE DATABASE BEFORE ASSUMING HE HAS NOT AGREED.
+   *
+   * The ten gates all read `if (!terms)`, and `terms` is `boolean | null`. Null means
+   * "not read yet", and treating it as "not accepted" is what puts a legal screen in
+   * front of a man who accepted it weeks ago — the mount effect above makes that window
+   * small, and this makes it impossible: an unknown is RESOLVED, never guessed.
+   *
+   * It cannot resolve the other way. A read that throws leaves the gate closed, because
+   * the failure mode of showing the terms once too often is an annoyance and the failure
+   * mode of skipping them is recording audio under terms nobody accepted.
+   */
+  const gateTerms = React.useCallback(async (next: () => void) => {
+    let ok = termsRef.current ? true : terms;
+    if (ok === null || ok === undefined) {
+      try { ok = await getTermsAccepted(db); setTerms(ok); }
+      catch { ok = false; }
+    }
+    if (!ok) { openTermsRef.current?.(next); return; }
+    next();
+  }, [terms]);
+
+  /** `openTerms` is defined below this point; a ref keeps `gateTerms` from depending on
+   *  declaration order, which is how the previous attempt at this file's gates went
+   *  wrong (see `afterTerms`). */
+  const openTermsRef = React.useRef<null | ((next?: () => void) => void)>(null);
+
   const openTerms = React.useCallback((next?: () => void) => {
     afterTerms.current = next ?? null;
     setShowTerms({ jur: null, detecting: true });
@@ -3813,6 +3869,7 @@ const checkClientMessages = async () => {
       setShowTerms((t) => (t ? { ...t, jur, detecting: false } : t));
     })();
   }, []);
+  openTermsRef.current = openTerms;
 
   /**
    * Consume the quick action once the app can actually honour it.
@@ -3825,8 +3882,7 @@ const checkClientMessages = async () => {
   React.useEffect(() => {
     if (!pendingCapture || !ready) return;
     setPendingCapture(false);
-    if (!terms) { openTerms(() => setShowCapture(true)); return; }
-    setShowCapture(true);
+    void gateTerms(() => setShowCapture(true));
   }, [pendingCapture, ready, terms]);
 
   // REQ-SET1/EVID2. Null until the first job exists -- a new user has no jobs, and
@@ -5397,7 +5453,7 @@ const checkClientMessages = async () => {
       // per-job prompt. If the Terms are not yet accepted, open the acceptance screen
       // (once, ever) instead of arming; after I ACCEPT the user taps record again and
       // this gate passes. Mandate #2 is still honoured -- a human explicitly accepts.
-      if (!terms) { setUi({ k: 'idle' }); openTerms(); return; }
+      if (!terms) { setUi({ k: 'idle' }); void gateTerms(() => { /* re-tap to record */ }); return; }
       // REQ-CON1: the answer is ALREADY KNOWN -- decided once at Terms acceptance.
       // This is a LOOKUP, never a prompt. A consent dialog between a man's thumb and
       // the thing he is trying to record is the #1 predicted abandonment point, and it
@@ -6249,8 +6305,7 @@ const checkClientMessages = async () => {
     // The SAME consent gate every capture button passes through. Deliberately does NOT
     // mark the walkthrough seen — backing out of the recorder lands here again, which is
     // the honest place to land when nothing was created.
-    if (!terms) { openTerms(() => setShowCapture(true)); return; }
-    setShowCapture(true);
+    void gateTerms(() => setShowCapture(true));
   };
 
   // `devTools`, not `__DEV__`: the drawer row that sets `forceFirstExtra` is now visible
@@ -6747,7 +6802,7 @@ const checkClientMessages = async () => {
                 await openCreatedJob(id);
                 // The same gate the capture button everywhere else passes through:
                 // recording consent is asked once per job, before anything records.
-                if (!terms) { openTerms(() => setShowCapture(true)); return; }
+                void gateTerms(() => setShowCapture(true));
                 setShowCapture(true);
               })();
             }}>
@@ -7868,6 +7923,10 @@ const checkClientMessages = async () => {
      * which is why only the add-photos path looped. A ref is the fix because it is the
      * one thing that is current at CALL time rather than at render time.
      */
+    // Resolves an unread flag rather than assuming the worst — see `gateTerms`. The
+    // ref alone could not: it mirrors the same `boolean | null` and is false while
+    // unknown, which is the loop this line was written to fix in the first place.
+    if (terms === null) { void gateTerms(() => augmentExtra(changeOrderId)); return; }
     if (!termsRef.current) { openTerms(() => augmentExtra(changeOrderId)); return; }
     setAugmentCoId(changeOrderId);
     // THE FEED RETURN IS CANCELLED FIRST, and without this the camera never opens.
