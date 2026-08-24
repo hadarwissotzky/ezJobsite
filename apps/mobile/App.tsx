@@ -9337,21 +9337,34 @@ const checkClientMessages = async () => {
      * `line` is kept and set to the fill so the shape is unchanged; a filled pill with
      * a contrasting border reads as two shapes.
      */
+    /**
+     * READ OFF THE SHEET, INCLUDING THE PART I GOT WRONG FIRST TIME.
+     *
+     * My first pass at these fills (build 38) made APPROVED a saturated green with white
+     * text. The sheet does not: approved is a LIGHT green fill with dark green text,
+     * while sent is the only saturated one. That is not a detail — it is the hierarchy.
+     * Sent is the state still in motion and it shouts; approved is settled and it sits
+     * quietly. A saturated green makes the finished thing the loudest row in the list.
+     *
+     * So: one saturated fill (sent/blue), two light fills with dark text (approved,
+     * in-review), and the rest keyed to those two shapes.
+     */
     const map: Record<string, { color: string; bg: string; line: string }> = {
-      // Sent and quiet. Blue, as on the sheet.
-      waiting:  { color: '#FFFFFF', bg: '#3E6FBF', line: '#3E6FBF' },
-      // The client asked something. Amber — it wants him, but nothing is wrong.
-      needs:    { color: '#3A2E12', bg: '#F0B93B', line: '#F0B93B' },
-      approved: { color: '#FFFFFF', bg: '#2F8F55', line: '#2F8F55' },
-      // NOT SENT. The one he asked for by name: it is the state that is waiting on HIM,
-      // so it gets the ochre the rest of the app uses for "something needs you" rather
-      // than the grey it had, which said "nothing here".
-      draft:    { color: '#3A2E12', bg: '#E8C77A', line: '#E8C77A' },
-      declined: { color: '#FFFFFF', bg: '#A8503F', line: '#A8503F' },
-      // Withdrawn: ended, by him, and not a fault. Solid so it is still findable at a
-      // glance, neutral so it does not read as an alarm — the same call the record
-      // screen's banner makes.
-      cancelled: { color: '#FFFFFF', bg: '#8A837B', line: '#8A837B' },
+      // Sent and waiting. The one saturated fill, because it is the one still moving.
+      waiting:  { color: '#FFFFFF', bg: '#5B7FC7', line: '#5B7FC7' },
+      // The client asked something — "In Review" on the sheet. Amber, dark text.
+      needs:    { color: '#5C4310', bg: '#E9A93C', line: '#E9A93C' },
+      // Light fill, dark text. Settled, and it should read that way.
+      approved: { color: '#2E6B36', bg: '#CDE8CE', line: '#CDE8CE' },
+      // NOT SENT — the one he asked for by name. It is waiting on HIM, so it takes the
+      // amber family rather than the grey it had, which said "nothing here". Lighter
+      // than `needs` so the two warm states are not the same colour at a glance.
+      draft:    { color: '#5C4310', bg: '#F5DFA8', line: '#EBCE8C' },
+      // Refused by the client. The one red in the set, kept light like the others so it
+      // reports rather than alarms — a decline is a fact he has to act on, not a fault.
+      declined: { color: '#8B3A2C', bg: '#F3D3CD', line: '#F3D3CD' },
+      // Withdrawn: ended, by him. Neutral, same weight as the rest.
+      cancelled: { color: '#4A4A46', bg: '#E2DED6', line: '#E2DED6' },
     };
     const c = map[st] ?? map.draft;
     // "Not sent" rather than "Created" for a draft: what a draft needs to say on a row

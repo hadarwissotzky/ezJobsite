@@ -231,9 +231,11 @@ const st = StyleSheet.create({
 
   top: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   kicker: { flexShrink: 0, fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#2F5233' },
+  // SIZED LIKE THE SHEET'S. 11pt in a 7x3 box is a tag; the reference draws a pill you
+  // can read across a room, and the status is the thing being scanned for.
   chip: { flexShrink: 1, marginLeft: 'auto', borderRadius: 999, borderWidth: 1,
-    paddingHorizontal: 7, paddingVertical: 3 },
-  chipT: { fontFamily: 'Inter_600SemiBold', fontSize: 11, letterSpacing: 0.1 },
+    paddingHorizontal: 12, paddingVertical: 5 },
+  chipT: { fontFamily: 'Inter_600SemiBold', fontSize: 12.5, letterSpacing: 0.1 },
 
   // The supporting lines carry the facts somebody actually scans for — which extra,
   // when, how long, how much. They were 10.5-12pt against an 18pt title, which read as
