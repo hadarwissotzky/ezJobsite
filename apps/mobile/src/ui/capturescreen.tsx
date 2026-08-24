@@ -40,7 +40,7 @@
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import React from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Dimensions, ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 
 import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, useAudioRecorderState } from '../recorder';
@@ -112,6 +112,15 @@ function Wave({ level, active }: { level: number; active: boolean }) {
 }
 
 type Shot = { uri: string; atMs: number; fromLibrary: boolean };
+
+/**
+ * The size the stamped photo is rendered at before `captureRef` snapshots it.
+ *
+ * The screen's own dimensions, because that is what the bake view used to fill and the
+ * stamp's type sizes were tuned against it. Read once at module scope: a rotation
+ * mid-bake would otherwise resize the view between the `onLoad` and the snapshot.
+ */
+const BAKE = Dimensions.get('window');
 
 export function FusedCapture({
   projectName, onCapture, onClose, resolveLabel, db, ownerId, coachPrompts,
@@ -476,10 +485,32 @@ export function FusedCapture({
           layout relied on the full-bleed camera to cover it, and the camera is no
           longer full-bleed. */}
       {bakeShot && (
-        <View ref={bakeRef} collapsable={false} style={st.fill}>
-          <Image source={{ uri: bakeShot.uri }} style={st.fill} resizeMode="cover"
-            onLoad={() => bakeResolve.current?.()} />
-          <StampBlock place={place} now={bakeShot.atMs} />
+        /**
+         * OFF-SCREEN, NOT COVERED (hadar, 2026-08-24: "it still opens a white splash
+         * screen ... it should open the location screen immediately").
+         *
+         * This view exists only to be photographed: `captureRef` snapshots it to bake
+         * the GPS stamp into the JPEG. It used to be drawn at full size ON the screen,
+         * which is why a fully opaque "Saving N photos" overlay had to sit on top of it
+         * — the white flash he is describing.
+         *
+         * IT IS MOVED, NOT HIDDEN, AND THE DIFFERENCE IS THE WHOLE HISTORY OF THIS
+         * BLOCK. Hiding it with `opacity: 0.01` is what produced photos baked at 1%
+         * opacity — near-white JPEGs with a ghost of the scene — because captureRef
+         * snapshots the view AS RENDERED and opacity is part of rendering. Position is
+         * not: the view still renders at full size, still composites normally, and is
+         * simply somewhere the screen does not reach. Explicit width/height because an
+         * absolutely-positioned child needs them once it is no longer filling a parent.
+         */
+        <View pointerEvents="none"
+          style={{ position: 'absolute', left: -BAKE.width * 2, top: 0,
+                   width: BAKE.width, height: BAKE.height }}>
+          <View ref={bakeRef} collapsable={false}
+            style={{ width: BAKE.width, height: BAKE.height }}>
+            <Image source={{ uri: bakeShot.uri }} style={st.fill} resizeMode="cover"
+              onLoad={() => bakeResolve.current?.()} />
+            <StampBlock place={place} now={bakeShot.atMs} />
+          </View>
         </View>
       )}
 
@@ -747,11 +778,16 @@ export function FusedCapture({
         </View>
       </Modal>
 
-      {/* OPAQUE on purpose — see the bake-view note above. */}
+      {/**
+        * A QUIET BAR, NOT A SCREEN. It no longer has to be opaque — the bake view it
+        * used to hide is off-screen now — so the last thing he sees before the job
+        * picker is the walk he just took, dimmed, rather than a white page with a
+        * spinner on it. The wait is the same; the flash is gone.
+        */}
       {saving && (
-        <View style={st.savingOverlay}>
-          <ActivityIndicator color={C.brand} size="large" />
-          <Text style={st.savingT}>{T({ k: 'cap.savingN', p: { n: shots.length } })}</Text>
+        <View style={st.savingBar} pointerEvents="none">
+          <ActivityIndicator color={C.card} />
+          <Text style={st.savingBarT}>{T({ k: 'cap.savingN', p: { n: shots.length } })}</Text>
         </View>
       )}
     </View>
@@ -900,9 +936,12 @@ const st = StyleSheet.create({
   zoomCloseT: { fontFamily: F.dispSemi, fontSize: 17, letterSpacing: 1.2,
     textTransform: 'uppercase', color: C.ink },
 
-  savingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: C.paper,
-    alignItems: 'center', justifyContent: 'center' },
-  savingT: { fontFamily: F.bodySemi, fontSize: 17, color: C.ink, marginTop: 16 },
+  savingBar: {
+    position: 'absolute', left: 0, right: 0, bottom: 0, paddingBottom: 34,
+    paddingTop: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 10, backgroundColor: 'rgba(23,22,21,0.86)',
+  },
+  savingBarT: { fontFamily: F.bodySemi, fontSize: 16, color: C.card },
   // ── the guided flow's prompt strip ──
   coachStrip: { position: 'absolute', left: 0, right: 0, bottom: 208,
     paddingHorizontal: 16 },
