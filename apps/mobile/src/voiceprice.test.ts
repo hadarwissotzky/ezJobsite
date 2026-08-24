@@ -377,3 +377,56 @@ test('ONE priced segment among several is not the price of the job', () => {
   assert.equal(reading?.amountCents, 50000, 'he should still SEE what was read');
   assert.equal(writable, false, 'a partial total was auto-written as the price of the job');
 });
+
+// ── Codex, adversarial review 2026-08-24: one figure is not one price ────────────
+
+test("CODEX: a SEGMENT price is not written as the whole job's price", () => {
+  // His counterexample, verbatim in shape. One currency figure in the transcript, four
+  // segments of work, and the figure plainly buys only the first of them. Writing $500
+  // here under-quotes the contractor and puts a number nobody said in front of a
+  // client's signature.
+  const { reading, writable } = draftPrice(
+    FIREPLACE_SEGMENTS,
+    'Demo the fireplace for $500, then rebuild and tile the face.',
+    parse);
+  assert.equal(reading?.amountCents, 50000, 'he should still SEE what was read');
+  assert.equal(writable, false,
+    'a segment price was auto-written as the price of the whole job');
+});
+
+test('a stated whole-job total still writes', () => {
+  // The case this fallback exists for must survive the fix.
+  for (const line of [
+    'It will cost, all in all, about $1,200.',
+    'Call it $1,200 for the whole thing.',
+    'The total comes to $1,200.',
+    'Altogether $1,200.',
+  ]) {
+    const { writable } = draftPrice(FIREPLACE_SEGMENTS, line, parse);
+    assert.equal(writable, true, `"${line}" no longer fills the price`);
+  }
+});
+
+test('a ONE-SEGMENT job needs no cue — there is nowhere else for the price to belong', () => {
+  const { reading, writable } = draftPrice(
+    [{ title: 'Replace the face', priceWords: null, scope: 'Replace the fireplace face.' }],
+    'Replacing the face runs $1,200.', parse);
+  assert.equal(reading?.amountCents, 120000);
+  assert.equal(writable, true);
+});
+
+test('no segments at all is treated as one job, not as many', () => {
+  // An empty task list is what a low-confidence structuring returns. There is no
+  // segment for the figure to be a part OF, so the single figure is the job.
+  const { writable } = draftPrice([], 'The job is $1,200.', parse);
+  assert.equal(writable, true);
+});
+
+test('the cue must be in the clause the FIGURE came from', () => {
+  // Guards against a cue anywhere in a long transcript licensing an unrelated figure.
+  const { writable } = draftPrice(
+    FIREPLACE_SEGMENTS,
+    'We will do everything on the list. Demo the fireplace for $500.',
+    parse);
+  assert.equal(writable, false, 'a cue in another sentence licensed a segment price');
+});

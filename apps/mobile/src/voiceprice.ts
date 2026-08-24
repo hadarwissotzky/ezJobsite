@@ -427,6 +427,42 @@ export function nteClause(
 }
 
 /**
+ * PHRASES THAT MEAN "THIS FIGURE COVERS THE WHOLE JOB".
+ *
+ * Codex, adversarial review 2026-08-24, on the transcript fallback: "Demo the fireplace
+ * for $500, then rebuild and tile the face" contains exactly ONE currency figure, so
+ * `extractPrice` reads it confidently and the fallback wrote $500 as the price of a job
+ * that also includes a rebuild and tiling. The contractor undercharges himself and the
+ * client signs a number nobody quoted.
+ *
+ * ONE FIGURE IS NOT THE SAME CLAIM AS ONE PRICE. `extractPrice` answers "how many
+ * figures did he say", which is the wrong question for a total; the right question is
+ * whether he said this one covers everything. Only he can say that, and when he does he
+ * says it in these words.
+ *
+ * The list is deliberately narrow. A cue that fires too easily is worse than one that
+ * misses: missing means the figure is SHOWN and he taps to confirm it (mandate #6's
+ * read-back, which is the behaviour before any of this existed), while a false positive
+ * writes an under-quote onto a document a client signs.
+ */
+const WHOLE_JOB_CUES = [
+  'all in all', 'all told', 'altogether', 'all together', 'in total', 'in all',
+  'the whole thing', 'the whole job', 'the whole lot', 'the entire job',
+  'for everything', 'everything included', 'all of it', 'all up',
+  'out the door', 'grand total', 'total comes to', 'total of', 'total is',
+  'comes to', 'comes out to', 'call it',
+  // es-419, same register as i18n.ts.
+  'en total', 'todo incluido', 'todo junto', 'el trabajo completo', 'todo el trabajo',
+];
+
+/** Did he say this figure covers the job, in the clause the figure came from? */
+function saysWholeJob(heard: string | null): boolean {
+  if (!heard) return false;
+  const f = fold(heard);
+  return WHOLE_JOB_CUES.some((c) => f.includes(c));
+}
+
+/**
  * THE PRICE TO PREFILL A DRAFT EXTRA WITH — the two readings, and which may be written.
  *
  * hadar, 2026-08-23, fireplace extra: he finished the recording with "all in all,
@@ -473,10 +509,30 @@ export function draftPrice(
     };
   }
   const whole = transcript ? extractPrice(transcript, parse) : null;
+
+  /**
+   * ONE FIGURE IN THE TRANSCRIPT IS NOT PROOF IT IS THE TOTAL (Codex, 2026-08-24).
+   *
+   * The figure is always SHOWN — he can read it back and tap, which is what happened
+   * before any auto-write existed. What is gated here is writing it without asking, and
+   * that needs one of two things to be true:
+   *
+   *   · THE JOB HAS ONE PART. A single-segment job has nowhere else for a price to
+   *     belong, so the only figure spoken is the job's figure.
+   *   · HE SAID SO. "all in all, about $1,200" is a claim about the whole job;
+   *     "demo the fireplace for $500, then rebuild and tile" is not, and it is the
+   *     second shape that silently under-quoted.
+   *
+   * Everything else shows the reading and waits for a tap. A missed cue costs one
+   * touch; a false one puts an under-quote in front of a client's signature.
+   */
+  const oneSegment = tasks.length <= 1;
   return {
     reading: whole,
-    // `breakdown.length === 0` is what distinguishes a whole-job figure from a summed
-    // one; extractPrice never populates a breakdown, so this is belt-and-braces.
-    writable: !!whole && whole.prefill && whole.amountCents !== null && whole.breakdown.length === 0,
+    writable: !!whole && whole.prefill && whole.amountCents !== null
+      // extractPrice never populates a breakdown; belt-and-braces against a summed
+      // reading arriving down this branch.
+      && whole.breakdown.length === 0
+      && (oneSegment || saysWholeJob(whole.heard)),
   };
 }

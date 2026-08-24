@@ -10,7 +10,8 @@ import { runOnce, type Job } from './worker.ts';
  * nothing is outstanding. Those are the parts that cost money or lose work when
  * they are wrong.
  */
-function fakeClient(job: Job | null, transcriptRows: any[] = [{ text: 'work at 14 Elm St' }]) {
+function fakeClient(job: Job | null,
+  transcriptRows: any[] = [{ text: 'work at 14 Elm St', engine: 'deepgram' }]) {
   const calls: Array<{ fn: string; args: any }> = [];
   const sb: any = {
     calls,
@@ -23,18 +24,37 @@ function fakeClient(job: Job | null, transcriptRows: any[] = [{ text: 'work at 1
       return Promise.resolve({ data: null, error: null });
     },
     from(table: string) {
+      /**
+       * The transcript read is now FILTERED BY ENGINE IN SQL rather than windowed and
+       * sorted in JS (Codex 2026-08-24 — a LIMIT applied before the ranking let eight
+       * on-device retries hide the cloud row). So the fake has to honour `.like` and
+       * `.not(...)` the way PostgREST does, or these tests pass against a query shape
+       * the database would never return.
+       *
+       * `transcriptRows` stays ONE list in newest-first order, exactly as the table
+       * holds it; the fake splits it the way the server would.
+       */
+      const build = (onDevice: boolean | null) => {
+        const rows = onDevice === null ? transcriptRows
+          : transcriptRows.filter((r: any) => {
+              const e = String(r.engine ?? '');
+              return onDevice ? e.endsWith('ondevice') : !e.endsWith('ondevice');
+            });
+        const node: any = {
+          like: () => build(true),
+          not: () => build(false),
+          order: () => ({ limit: () => (calls.push({ fn: 'select', args: table }),
+            Promise.resolve({ data: rows, error: null })) }),
+          single: () => (calls.push({ fn: 'select', args: table }),
+            Promise.resolve({ data: { payload: 'k/a.m4a', media_mime_type: 'audio/m4a' },
+                              error: null })),
+        };
+        return node;
+      };
       return {
         insert: (row: any) => (calls.push({ fn: 'insert', args: row }),
                                Promise.resolve({ error: null })),
-        select: () => ({
-          eq: () => ({
-            single: () => (calls.push({ fn: 'select', args: table }),
-              Promise.resolve({ data: { payload: 'k/a.m4a', media_mime_type: 'audio/m4a' },
-                                error: null })),
-            order: () => ({ limit: () => (calls.push({ fn: 'select', args: table }),
-              Promise.resolve({ data: transcriptRows, error: null })) }),
-          }),
-        }),
+        select: () => ({ eq: () => build(null) }),
       };
     },
     storage: {
@@ -295,4 +315,66 @@ test('a transcript naming two jobs resolves to neither', async () => {
   assert.equal(ins.args.candidate_project_id, null);
   assert.equal(ins.args.matched_on, 'ambiguous');
   assert.equal(ins.args.confidence, 'none');
+});
+
+// ── Codex, adversarial review 2026-08-24: three ways cloud-first went wrong ──────
+
+test('CODEX: an EMPTY cloud transcript does not beat a device one that heard words', () => {
+  // This one LOSES A CAPTURE. deepgram.ts treats '' as a real answer meaning silence,
+  // and preferring any cloud row over any device row meant "replace damaged subfloor"
+  // was thrown away for a '' that arrived after it. Preferring the cloud is about
+  // accuracy between two readings of the same speech; when one contains no speech there
+  // is nothing to be more accurate about.
+  const sb = fakeClient(job({ steps: ['resolve_project'] }), [
+    { text: '', engine: 'deepgram' },
+    { text: 'work at 14 Elm St', engine: 'ios-ondevice' },
+  ]);
+  return runOnce(sb, 'w1').then(() => {
+    const ins = sb.calls.find((c: any) => c.fn === 'insert');
+    assert.match(ins.args.from_transcript, /14 Elm St/,
+      'a capture with words in it was structured as silence');
+  });
+});
+
+test('CODEX: many device retries cannot hide the cloud row', async () => {
+  // The LIMIT used to apply before the ranking, so a contractor re-recording on a bad
+  // morning pushed Deepgram out of the window and cloud-first stopped working —
+  // silently, and exactly on the captures most likely to need it.
+  const sb = fakeClient(job({ steps: ['resolve_project'] }), [
+    ...Array.from({ length: 8 }, (_, i) => ({ text: `attempt ${i}`, engine: 'ios-ondevice' })),
+    { text: 'work at 14 Elm St', engine: 'deepgram' },
+  ]);
+  await runOnce(sb, 'w1');
+
+  const ins = sb.calls.find((c: any) => c.fn === 'insert');
+  assert.match(ins.args.from_transcript, /14 Elm St/,
+    'eight device retries buried the cloud transcript');
+});
+
+test('CODEX: a future on-device engine does not get treated as cloud', async () => {
+  // The first version asked `engine !== 'ios-ondevice'`, so every other string counted
+  // as cloud — android-ondevice, manual, imported. Ranking by "is not the one name I
+  // remembered" is the fall-through shape extrabucket.ts exists to kill.
+  const sb = fakeClient(job({ steps: ['resolve_project'] }), [
+    { text: 'a phone guess', engine: 'android-ondevice' },
+    { text: 'work at 14 Elm St', engine: 'deepgram' },
+  ]);
+  await runOnce(sb, 'w1');
+
+  const ins = sb.calls.find((c: any) => c.fn === 'insert');
+  assert.match(ins.args.from_transcript, /14 Elm St/,
+    'android-ondevice outranked Deepgram');
+});
+
+test('silence heard by BOTH still reports silence, not "not transcribed yet"', async () => {
+  // The distinction the callers depend on: '' means the recorder heard nothing and the
+  // step is finished; null means nothing has been transcribed and the step must park.
+  // Collapsing them turns a silent recording into a job that retries forever.
+  const sb = fakeClient(job({ steps: ['resolve_project'] }), [
+    { text: '', engine: 'deepgram' },
+    { text: '', engine: 'ios-ondevice' },
+  ]);
+  const r = await runOnce(sb, 'w1');
+  assert.notEqual(r.blocked, 'needs_api_key',
+    'a heard-nothing recording parked as though it had never been transcribed');
 });

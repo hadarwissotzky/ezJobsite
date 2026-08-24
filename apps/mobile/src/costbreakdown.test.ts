@@ -87,3 +87,43 @@ test('the stored row is never rewritten — the parser only reads', () => {
   assert.equal((got[0] as unknown as { extra: string }).extra, 'keep me',
     'the reader stripped a field it did not recognise');
 });
+
+// ── Codex, adversarial review 2026-08-24: a partial breakdown must not be frozen ──
+
+test('CODEX: a breakdown that lost a row is withheld entirely', async () => {
+  const { intactLineItems } = await import('./changeorder.ts');
+  // Three stored rows, one corrupt. Freezing the surviving two beside the real total
+  // puts two numbers in front of a signer that do not add up to the one they sign —
+  // permanently, because the instrument's tamper guard refuses UPDATE.
+  const raw = JSON.stringify([
+    { description: 'Permit', qty: 1, unit_cents: 40000, total_cents: 40000 },
+    { description: 'Panel', qty: 1, unit_cents: 125000 },            // no total_cents
+    { description: 'Install', qty: 2, unit_cents: 37500, total_cents: 75000 },
+  ]);
+  assert.deepEqual(intactLineItems(raw, 240000), []);
+});
+
+test('CODEX: a breakdown that does not add up to the signed amount is withheld', async () => {
+  const { intactLineItems } = await import('./changeorder.ts');
+  const raw = JSON.stringify([
+    { description: 'Permit', qty: 1, unit_cents: 40000, total_cents: 40000 },
+  ]);
+  assert.deepEqual(intactLineItems(raw, 240000), [],
+    'a $400 breakdown was frozen beside a $2,400 signature');
+});
+
+test('an intact breakdown that adds up still travels', async () => {
+  const { intactLineItems } = await import('./changeorder.ts');
+  const raw = JSON.stringify([
+    { description: 'Permit', qty: 1, unit_cents: 40000, total_cents: 40000 },
+    { description: 'Install', qty: 2, unit_cents: 37500, total_cents: 75000 },
+  ]);
+  assert.equal(intactLineItems(raw, 115000).length, 2);
+});
+
+test('no breakdown at all is not an error', async () => {
+  const { intactLineItems } = await import('./changeorder.ts');
+  for (const raw of [null, '[]', 'corrupt']) {
+    assert.deepEqual(intactLineItems(raw, 120000), []);
+  }
+});

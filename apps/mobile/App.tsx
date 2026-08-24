@@ -272,7 +272,7 @@ import { applyLocalApproval, centsFromInput, createChangeOrder, createLinkedExtr
          ensureChangeOrderSchema, hydrateChangeOrders, ledger, lineTotal, linesSum, makeLine, redriveParked,
          createdLabel, markLocalSent, money, moneyWhole, parseMoney, validateLines,
          CO_AUTHOR_JOIN, CO_PHOTO_SUBQUERY,
-         type LineItem, type LedgerRow, parseLineItems, priceDraftExtra, setDraftFlowFields, rehomeDraftExtra,
+         type LineItem, type LedgerRow, intactLineItems, priceDraftExtra, setDraftFlowFields, rehomeDraftExtra,
          shortDate,
          type BillingTiming, type ScheduleEffect,
 } from './src/changeorder';
@@ -2823,7 +2823,11 @@ const sendPricedApproval = async (
     // here, and a page that shows one figure with nothing behind it makes a total
     // assembled from three quoted pieces look like a number somebody typed
     // (hadar 2026-08-24). Empty on the extras priced as one figure, which is most.
-    lineItems: parseLineItems(c.line_items),
+    // ALL OF IT OR NONE OF IT. `intactLineItems` withholds a breakdown that lost a
+    // row or that does not add up to the figure being signed — freezing a partial one
+    // beside the real total puts two numbers in front of a client that contradict each
+    // other, permanently (Codex, 2026-08-24).
+    lineItems: intactLineItems(c.line_items, c.amount_cents),
     // Flow terms (375): they ride into the frozen instrument. Null on extras
     // that predate them — renderCard omits the line rather than inventing one.
     billingTiming: c.billing_timing, scheduleEffect: c.schedule_effect,

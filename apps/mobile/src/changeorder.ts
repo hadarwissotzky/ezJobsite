@@ -512,6 +512,41 @@ export function parseLineItems(raw: string | null | undefined): LineItem[] {
     && Number.isFinite((l as LineItem).total_cents));
 }
 
+/**
+ * THE BREAKDOWN TO FREEZE INTO A CLIENT'S INSTRUMENT — all of it, or none of it.
+ *
+ * Codex, adversarial review 2026-08-24: `parseLineItems` drops a malformed row and
+ * returns the rest, and the send path fed that straight into the frozen instrument while
+ * `amount_cents` stayed what it always was. A three-line draft with one corrupt row
+ * freezes a TWO-line breakdown beside a three-line total — permanently, under a
+ * signature, on a document whose entire purpose is that both parties agree what was
+ * bought. The client reads two numbers that do not add up to the one they are signing.
+ *
+ * This is the same rule `priceFromTasks` already follows for a different reason: "the
+ * sum of the parts we CAN read is not the price of the job... showing it with one
+ * segment silently missing is worse than showing nothing." A total with no breakdown is
+ * an honest document. A total with a breakdown that contradicts it is not.
+ *
+ * Returns [] rather than throwing: the extra still has a price and a scope and must
+ * still be sendable. What it loses is the itemisation, which `validateLines` has always
+ * treated as optional.
+ */
+export function intactLineItems(raw: string | null | undefined, amountCents: number | null): LineItem[] {
+  const items = parseLineItems(raw);
+  if (!items.length) return [];
+  // Did anything get dropped on the way through? A shorter list than the stored array
+  // means a row was unreadable, and we cannot know what it was worth.
+  let storedCount = -1;
+  try { const p = JSON.parse(raw ?? '[]'); if (Array.isArray(p)) storedCount = p.length; }
+  catch { return []; }
+  if (storedCount !== items.length) return [];
+  // And do they actually add up to the figure being signed? validateLines is the same
+  // check the composer runs before saving; a stored row that fails it now is one that
+  // was written before the check, or by a different version.
+  if (amountCents === null || validateLines(items, amountCents)) return [];
+  return items;
+}
+
 /** qty x unit, in integer cents. The one place this multiplication happens. */
 export function lineTotal(qty: number, unitCents: number): number {
   return Math.round(qty * unitCents);

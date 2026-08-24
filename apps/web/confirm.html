@@ -2148,7 +2148,24 @@ function costBand(d) {
       return `<tr><td>${esc(l.description)}${qty}</td><td>${esc(usd(l.total_cents))}</td></tr>`;
     });
   if (!rows.length) return '';
-  if (d.amount_cents != null) {
+  /**
+   * NO "TOTAL" ROW ON A CAPPED DOCUMENT (Codex, adversarial review 2026-08-24).
+   *
+   * On a not-to-exceed change order `amount_cents` and `nte_cents` are different numbers
+   * and the Approve button signs the CAP. A row labelled "Total" showing amount_cents
+   * would sit a few inches above a button reading "Approve $2,500" and state a different
+   * figure, on the one page where a person is deciding whether to agree to a number.
+   *
+   * The parts are still listed — they are what the work is made of and that does not
+   * change. What is withheld is a total this page is not the right place to assert:
+   * `nteBand` states the cap in words, and the headline states the figure.
+   *
+   * NOTE, and NOT fixed here because it predates this band and changes how every capped
+   * document has read for months: the headline shows `amount_cents` under the label "Not
+   * to exceed" while the button signs `nte_cents`. That is the same disagreement one
+   * level up. Flagged to hadar rather than changed unilaterally.
+   */
+  if (d.amount_cents != null && d.nte_cents == null) {
     rows.push(`<tr class="tot"><td>Total</td><td>${esc(usd(d.amount_cents))}</td></tr>`);
   }
   return `<div class="band"><div class="bandh">What it costs, by part</div>

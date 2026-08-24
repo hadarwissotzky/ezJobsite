@@ -140,7 +140,38 @@ create or replace function public.confirmation_create(
   -- total_cents}; null when the extra carries no parts.
   p_line_items jsonb default null
 ) returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_sum bigint;
 begin
+  /*
+   * THE FROZEN BREAKDOWN MUST ADD UP TO THE FROZEN AMOUNT [2026-08-24, Codex review].
+   *
+   * `p_line_items` arrives as free-form jsonb and nothing here checked its shape or its
+   * arithmetic, so this function would happily freeze three $300 rows beside a $1,000
+   * signed total. The device runs `validateLines` before it ever gets here, and that is
+   * exactly the problem: it is the ONLY check, it lives on the client, and this is a
+   * SECURITY DEFINER function that any authenticated caller can invoke directly.
+   *
+   * A change order is a document two parties are meant to agree about. Freezing one that
+   * contradicts itself -- permanently, under a signature, with no path to correct it
+   * because the tamper guard refuses UPDATE -- is worse than refusing to send.
+   *
+   * Refuses rather than repairs. Silently dropping a bad breakdown would send a document
+   * the contractor believes is itemised and the client sees as a bare figure.
+   */
+  if p_line_items is not null then
+    if jsonb_typeof(p_line_items) <> 'array' then
+      raise exception 'line_items must be a JSON array';
+    end if;
+    if p_amount_cents is null then
+      raise exception 'a breakdown cannot be frozen without an amount to check it against';
+    end if;
+    select coalesce(sum((v->>'total_cents')::bigint), 0) into v_sum
+      from jsonb_array_elements(p_line_items) v;
+    if v_sum <> p_amount_cents then
+      raise exception 'breakdown adds up to % but the change order says %', v_sum, p_amount_cents;
+    end if;
+  end if;
+
   insert into public.confirmation_request (token, decision_id, project_id, owner_id, kind,
     shown_content, shown_sha256, counterparty_label, channel, destination,
     amount_cents, nte_cents, scope_title, company_name, job_label,

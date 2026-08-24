@@ -242,8 +242,18 @@ export async function runStep(
   return { ok: false, reason: 'needs_api_key' };
 }
 
-/** The phone's own recogniser. Its rows are a fast partial, never the final reading. */
-const ON_DEVICE_ENGINE = 'ios-ondevice';
+/**
+ * THE ON-DEVICE RECOGNISERS. Their rows are a fast partial, never the final reading.
+ *
+ * A LIST, AND MATCHED BY PREFIX, because Codex found the first version tested
+ * `engine !== 'ios-ondevice'` and therefore treated EVERY other string as cloud: a
+ * future `android-ondevice`, a `manual` correction, an `imported` transcript, all of
+ * them would have silently outranked Deepgram. Ranking by "is not the one name I
+ * remembered" is the same fall-through shape `extrabucket.ts` was written to kill.
+ */
+const ON_DEVICE_ENGINES = ['ios-ondevice', 'android-ondevice', 'ondevice'];
+const isOnDevice = (engine: string | null): boolean =>
+  !!engine && ON_DEVICE_ENGINES.some((e) => engine === e || engine.endsWith('-ondevice'));
 
 /**
  * THE CURRENT READING OF ONE CAPTURE — the cloud engine outranks the phone.
@@ -273,18 +283,62 @@ const ON_DEVICE_ENGINE = 'ios-ondevice';
 async function currentTranscript(
   sb: SupabaseClient, captureId: string,
 ): Promise<{ error: string | null; text: string | null }> {
-  // A handful, not one: a capture can carry several readings and the newest cloud one
-  // has to be reachable past however many on-device rows landed after it.
-  const { data, error } = await sb
-    .from('capture_transcript').select('text, engine')
-    .eq('capture_id', captureId)
-    .order('created_at', { ascending: false }).limit(8);
-  if (error) return { error: error.message, text: null };
-  const rows = (data ?? []) as { text: string | null; engine: string | null }[];
-  if (!rows.length) return { error: null, text: null };
-  const cloud = rows.find((r) => r.engine !== ON_DEVICE_ENGINE);
-  const row = cloud ?? rows[0];
-  return { error: null, text: typeof row.text === 'string' ? row.text : null };
+  /**
+   * ASK THE DATABASE FOR THE CLOUD ROW, rather than fetching a window and hoping one is
+   * in it (Codex, 2026-08-24).
+   *
+   * The first version took the newest 8 rows and looked for a cloud one among them. The
+   * LIMIT applies before the ranking, so eight on-device attempts — a contractor
+   * re-recording on a bad-signal morning — push the Deepgram row out of the window and
+   * cloud-first quietly stops working. The whole point of this function is that the
+   * outcome does not depend on how many times the phone tried.
+   */
+  const q = (onDevice: boolean) => {
+    let sel = sb.from('capture_transcript').select('text, engine').eq('capture_id', captureId);
+    // `like`/`not.like` is the SQL half of `isOnDevice`; the JS half re-checks below, so
+    // a name that slips past the pattern still cannot be mistaken for cloud.
+    sel = onDevice ? sel.like('engine', '%ondevice') : sel.not('engine', 'like', '%ondevice');
+    return sel.order('created_at', { ascending: false }).limit(4);
+  };
+
+  const cloud = await q(false);
+  if (cloud.error) return { error: cloud.error.message, text: null };
+
+  /**
+   * AN EMPTY CLOUD TRANSCRIPT DOES NOT BEAT A DEVICE ONE THAT HEARD SOMETHING.
+   *
+   * Also Codex, and this one loses a capture. deepgram.ts treats '' as a real answer
+   * meaning silence, and the first version preferred any cloud row over any device row —
+   * so a device transcript saying "replace damaged subfloor" was discarded in favour of
+   * a cloud '' and the capture structured as though nothing had been said. Mandate #1 is
+   * about not losing what a contractor recorded, and words on the device are still words
+   * he recorded.
+   *
+   * Preferring the cloud is about ACCURACY between two readings of the same speech. When
+   * one of them contains no speech there is nothing to be more accurate about.
+   */
+  const useful = (rows: { text: string | null; engine: string | null }[]) =>
+    rows.find((r) => typeof r.text === 'string' && r.text.trim() !== '' && !isOnDevice(r.engine));
+
+  const cloudRows = (cloud.data ?? []) as { text: string | null; engine: string | null }[];
+  const best = useful(cloudRows);
+  if (best) return { error: null, text: best.text };
+
+  const device = await q(true);
+  if (device.error) return { error: device.error.message, text: null };
+  const deviceRows = (device.data ?? []) as { text: string | null; engine: string | null }[];
+  const heard = deviceRows.find((r) => typeof r.text === 'string' && r.text.trim() !== '');
+  if (heard) return { error: null, text: heard.text };
+
+  /**
+   * NOTHING USEFUL ANYWHERE — but an EMPTY transcript and NO transcript are different
+   * answers and both callers depend on the difference. An empty string means silence was
+   * heard and the step is finished; null means nothing has been transcribed and the step
+   * should park. Prefer the cloud's verdict on silence over the phone's.
+   */
+  const anyRow = cloudRows[0] ?? deviceRows[0];
+  if (!anyRow) return { error: null, text: null };
+  return { error: null, text: typeof anyRow.text === 'string' ? anyRow.text : null };
 }
 
 
