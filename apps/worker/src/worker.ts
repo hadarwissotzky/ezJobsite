@@ -243,6 +243,106 @@ export async function runStep(
 }
 
 /**
+ * THE ON-DEVICE RECOGNISERS. Their rows are a fast partial, never the final reading.
+ *
+ * A LIST, AND MATCHED BY PREFIX, because Codex found the first version tested
+ * `engine !== 'ios-ondevice'` and therefore treated EVERY other string as cloud: a
+ * future `android-ondevice`, a `manual` correction, an `imported` transcript, all of
+ * them would have silently outranked Deepgram. Ranking by "is not the one name I
+ * remembered" is the same fall-through shape `extrabucket.ts` was written to kill.
+ */
+const ON_DEVICE_ENGINES = ['ios-ondevice', 'android-ondevice', 'ondevice'];
+const isOnDevice = (engine: string | null): boolean =>
+  !!engine && ON_DEVICE_ENGINES.some((e) => engine === e || engine.endsWith('-ondevice'));
+
+/**
+ * THE CURRENT READING OF ONE CAPTURE — the cloud engine outranks the phone.
+ *
+ * hadar, 2026-08-23: "the latest co that was created it is stack on writing it up".
+ * It was not stuck. Both engines had run and BOTH had written a row, 302ms apart:
+ * Deepgram's 1,537 characters at 18:25:11.458, then the on-device recogniser's 34
+ * ("All right, we're gonna do a client") at 18:25:11.760. This read took the newest,
+ * so a four-word fragment became the whole recording, `structure` answered
+ * `confidence: none` on it — correctly, there is nothing in four words — and the
+ * extra kept its "still being written up" placeholder forever. Nothing errored, no
+ * job was blocked, and every diagnostic said the pipeline was healthy.
+ *
+ * WHY NEWEST-WINS IS THE WRONG RULE HERE. It is right for a RE-transcribe of the
+ * same engine, which is what it was written for. It is wrong across engines, because
+ * the two are not competing versions of one reading — the on-device pass is a fast
+ * partial that exists so the phone has something to show offline, and the cloud pass
+ * is the accurate one. Which arrives last is a race, and a race is not evidence.
+ *
+ * The device view `capture_transcript_current` (sql/150) now ranks the same way, so
+ * the phone and the worker read the same words. This is the worker's half: the view
+ * is a view, and none of these call sites ever selected from it.
+ *
+ * Returns `{ text: null }` for NO ROW — which the callers keep distinct from an empty
+ * string, because heard-nothing is an answer and not-yet-transcribed is not.
+ */
+async function currentTranscript(
+  sb: SupabaseClient, captureId: string,
+): Promise<{ error: string | null; text: string | null }> {
+  /**
+   * ASK THE DATABASE FOR THE CLOUD ROW, rather than fetching a window and hoping one is
+   * in it (Codex, 2026-08-24).
+   *
+   * The first version took the newest 8 rows and looked for a cloud one among them. The
+   * LIMIT applies before the ranking, so eight on-device attempts — a contractor
+   * re-recording on a bad-signal morning — push the Deepgram row out of the window and
+   * cloud-first quietly stops working. The whole point of this function is that the
+   * outcome does not depend on how many times the phone tried.
+   */
+  const q = (onDevice: boolean) => {
+    let sel = sb.from('capture_transcript').select('text, engine').eq('capture_id', captureId);
+    // `like`/`not.like` is the SQL half of `isOnDevice`; the JS half re-checks below, so
+    // a name that slips past the pattern still cannot be mistaken for cloud.
+    sel = onDevice ? sel.like('engine', '%ondevice') : sel.not('engine', 'like', '%ondevice');
+    return sel.order('created_at', { ascending: false }).limit(4);
+  };
+
+  const cloud = await q(false);
+  if (cloud.error) return { error: cloud.error.message, text: null };
+
+  /**
+   * AN EMPTY CLOUD TRANSCRIPT DOES NOT BEAT A DEVICE ONE THAT HEARD SOMETHING.
+   *
+   * Also Codex, and this one loses a capture. deepgram.ts treats '' as a real answer
+   * meaning silence, and the first version preferred any cloud row over any device row —
+   * so a device transcript saying "replace damaged subfloor" was discarded in favour of
+   * a cloud '' and the capture structured as though nothing had been said. Mandate #1 is
+   * about not losing what a contractor recorded, and words on the device are still words
+   * he recorded.
+   *
+   * Preferring the cloud is about ACCURACY between two readings of the same speech. When
+   * one of them contains no speech there is nothing to be more accurate about.
+   */
+  const useful = (rows: { text: string | null; engine: string | null }[]) =>
+    rows.find((r) => typeof r.text === 'string' && r.text.trim() !== '' && !isOnDevice(r.engine));
+
+  const cloudRows = (cloud.data ?? []) as { text: string | null; engine: string | null }[];
+  const best = useful(cloudRows);
+  if (best) return { error: null, text: best.text };
+
+  const device = await q(true);
+  if (device.error) return { error: device.error.message, text: null };
+  const deviceRows = (device.data ?? []) as { text: string | null; engine: string | null }[];
+  const heard = deviceRows.find((r) => typeof r.text === 'string' && r.text.trim() !== '');
+  if (heard) return { error: null, text: heard.text };
+
+  /**
+   * NOTHING USEFUL ANYWHERE — but an EMPTY transcript and NO transcript are different
+   * answers and both callers depend on the difference. An empty string means silence was
+   * heard and the step is finished; null means nothing has been transcribed and the step
+   * should park. Prefer the cloud's verdict on silence over the phone's.
+   */
+  const anyRow = cloudRows[0] ?? deviceRows[0];
+  if (!anyRow) return { error: null, text: null };
+  return { error: null, text: typeof anyRow.text === 'string' ? anyRow.text : null };
+}
+
+
+/**
  * Which job do these words point at? (170)
  *
  * WRITES THE SIGNAL EVEN WHEN IT MATCHES NOTHING. 'none' is a real, useful
@@ -256,15 +356,10 @@ export async function runStep(
  * jobs.
  */
 async function resolveProject(sb: SupabaseClient, job: Job): Promise<StepOutcome> {
-  // Newest transcript wins: 150 is append-only, so a re-transcribe is a NEW row
-  // and the latest is the current reading.
-  const { data: tr, error: trErr } = await sb
-    .from('capture_transcript').select('text')
-    .eq('capture_id', job.capture_id)
-    .order('created_at', { ascending: false }).limit(1);
-  if (trErr) return { ok: false, reason: 'needs_connection', error: trErr.message };
+  const read = await currentTranscript(sb, job.capture_id);
+  if (read.error) return { ok: false, reason: 'needs_connection', error: read.error };
 
-  const text = tr?.[0]?.text;
+  const text = read.text;
   // No transcript yet means the step is out of order, not that it failed. Park
   // it rather than writing a 'none' signal derived from nothing — a signal that
   // says "matched nothing" when nothing was READ is a lie about evidence.
@@ -388,11 +483,7 @@ export function serviceClient(): SupabaseClient {
  * the work.
  */
 async function extraTranscript(sb: SupabaseClient, captureId: string): Promise<string> {
-  const one = async (id: string) => {
-    const { data } = await sb.from('capture_transcript').select('text')
-      .eq('capture_id', id).order('created_at', { ascending: false }).limit(1);
-    return (data?.[0]?.text ?? '').trim();
-  };
+  const one = async (id: string) => ((await currentTranscript(sb, id)).text ?? '').trim();
   // Which decision is this capture part of?
   const { data: mine } = await sb.from('decision_version').select('decision_id')
     .eq('capture_id', captureId).limit(1);

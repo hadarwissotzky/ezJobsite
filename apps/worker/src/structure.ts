@@ -146,10 +146,13 @@ const TASK_SCHEMA = {
   additionalProperties: false,
   required: ['title', 'scope', 'materials', 'price_words', 'time_words', 'start_words'],
   properties: {
-    title: { type: 'string', description: 'Short name for this task, <=60 characters.' },
+    title: {
+      type: 'string',
+      description: 'Short name for this SEGMENT of the work, <=60 characters. A segment is one area or one stage the owner would recognise as a separable piece — "Kitchen ceiling", "Rewire the hall", "Patch and paint after". Not a material, not a line item, not a price.',
+    },
     scope: {
       type: 'string',
-      description: 'Clear 1-3 sentence description of this task for the owner. No prices.',
+      description: 'Clear 1-3 sentence description of THIS SEGMENT for the owner: what gets done here, in plain words, naming the materials the contractor named. Describe ONLY this segment — the other segments have their own entries. Never a price: the money lives in price_words and nowhere else.',
     },
     materials: {
       type: 'array', items: { type: 'string' },
@@ -157,7 +160,7 @@ const TASK_SCHEMA = {
     },
     price_words: {
       anyOf: [{ type: 'string' }, { type: 'null' }],
-      description: 'The VERBATIM transcript span where a price for this task was spoken, e.g. "about eighteen fifty". Null when no price was mentioned. Never rewrite, round, or convert it.',
+      description: 'The VERBATIM transcript span where a price for THIS SEGMENT was spoken, e.g. "about eighteen fifty". Attribute a figure to a segment ONLY when the contractor tied it to that segment. A single figure covering the whole job belongs to no segment — leave every segment null and let the total stand alone. Null when no price was mentioned for this one. Never rewrite, round, convert, or split a figure across segments.',
     },
     time_words: {
       anyOf: [{ type: 'string' }, { type: 'null' }],
@@ -249,7 +252,7 @@ export const STRUCTURE_SCHEMA = {
     },
     tasks: {
       type: 'array', items: TASK_SCHEMA,
-      description: 'One entry per distinct task the narration describes, each with ITS OWN elements grouped. A single-task narration is an array of one. Empty only when confidence is none.',
+      description: 'The work split into SEGMENTS — one entry per area or stage the owner would recognise as a separable piece of the job, each with its own scope, materials and price span grouped under it. IN CHRONOLOGICAL ORDER: the sequence the work happens on site, which is usually the order the contractor walked and described it. A homeowner should be able to read these top to bottom and follow the job. A single-segment narration is an array of one. Empty only when confidence is none.',
     },
   },
 } as const;
@@ -268,16 +271,25 @@ Rules, in order of importance:
 
 4. VERBATIM SPANS. price_words, time_words and start_words must be EXACT copies from the transcript — "eighteen fifty" stays "eighteen fifty". Never rewrite, round, convert or normalise. Null when absent. Never guess.
 
+4a. NEVER CHANGE WHICH THING IS BEING WORKED ON. If he says the EXISTING mantel, the EXISTING facing, the ORIGINAL trim, the SALVAGED door — say existing, existing, original, salvaged. Do not write "the new X" for a thing he called existing, and do not write "the existing X" for something he is having made. On a remodel these are different objects with different work, different risk and different cost: sanding and staining a 1910 piece somebody owns is not the same job as finishing new millwork, and a document that swaps them describes work nobody agreed to. When a sentence would read better with the word dropped, keep the word.
+
 5. SECTIONS — the scope of work, and the most important thing you produce. It becomes the binding text the owner signs.
    background — WHY. What was found on site or what the owner asked for, and what makes it extra work rather than part of the original job. 1-3 sentences. Null only when the transcript truly gives no reason.
    steps — WHAT and HOW, in the order the work happens, one clear sentence each, naming the materials he named. This is where his rambling becomes a sequence. Do not pad: three real steps beat eight invented ones.
    included — what the owner GETS for this. What he would otherwise have to ask about: cleanup, haul-away, patching back, matching the finish, protecting adjacent surfaces, permits when he mentioned them.
+     BUT A COST HE PUT OUTSIDE THE PRICE IS EXCLUDED, NOT INCLUDED, AND THIS OUTRANKS THE STANDARD-ITEM LICENCE IN RULE 2. "five hundred PLUS all the disposal fees", "on top of that", "that's separate", "not counting", "over and above", "billed at cost" — every one of those puts the thing outside what he quoted. Haul-away is a standard inclusion right up until he says it is extra; then it belongs in excluded and putting it in included gives away work the price never covered. Read every "plus" and "separate" as a boundary, and when it is not clear which side of the boundary something sits, put it nowhere rather than inside.
    excluded — WHERE IT STOPS. Anything he said is separate, plus the standard exclusions for this work under rule 2. This section is why the document is worth signing.
    assumptions — what this depends on and what would change it: conditions he voiced, access or timing he needs, standard dependencies for this work.
 
 6. TERMS. Report only what he SAID. schedule_effect null and "not_sure" are different answers: null means he never addressed the schedule, not_sure means he said he does not know yet. Same for billing_timing — do not assume a default, because a clause nobody chose ends up in a document somebody signs.
 
-7. TASKS. When the narration describes more than one distinct piece of work, produce one task entry per piece and group each task's own materials, price mention, time mention and start mention with THAT task. A mention that clearly belongs to one task must not leak onto another. When ambiguous, attach it to the task discussed nearest to it.
+7. TASKS ARE SEGMENTS OF THE JOB, AND THEY ARE HOW THE OWNER UNDERSTANDS IT. Split the work into the pieces a homeowner would recognise as separable — by AREA ("the hall bath", "the kitchen ceiling") or by STAGE ("open up and assess", "rebuild", "patch and paint back"). Group each segment's own materials, price mention, time mention and start mention under THAT segment. A mention belonging to one segment must not leak onto another; when genuinely ambiguous, attach it to the segment discussed nearest to it.
+
+   ORDER THEM CHRONOLOGICALLY — the sequence the work happens on site, which is usually the order he walked and described it. The owner should read them top to bottom and follow the job. Do not order by price or by importance.
+
+   A SEGMENT IS NOT A LINE ITEM. "Two sheets of drywall" is a material and belongs in that segment's materials; "Repair the ceiling where the leak came through" is a segment. Do not split one piece of work into a segment per material, and do not merge two rooms into one segment because they share a trade.
+
+   PRICES ATTACH TO SEGMENTS ONLY WHEN HE TIED THEM THERE. "The bathroom's about twelve hundred, the hall another four" is two segment prices. "Call it three grand for the whole thing" is ONE price for the whole job — in that case leave every segment's price_words null, because a total split across segments is a number nobody said. Never divide a figure yourself.
 
 8. subject: a short title naming the work overall (e.g. "Subfloor rot repair under tub"), 60 characters or fewer. Several tasks: name the dominant work.
 
