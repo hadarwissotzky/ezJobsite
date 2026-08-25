@@ -30,7 +30,7 @@ import { checkMembers, type QuotaKind } from '../quota';
 import { LockCrown } from './usagecard';
 import { Icon, type IconName } from './icon';
 import { QuotaModal } from './quotamodal';
-import { C, F, T as TH, label, tint } from './theme';
+import { C, F, T as TH, tint } from './theme';
 import { shadows } from './tokens';
 import { BottomSheet } from './kit';
 import { TRADES, type Profile } from '../profile';
@@ -106,7 +106,6 @@ export function SettingsScreen(props: {
   const [lhName, setLhName] = React.useState('');
   const [lhAddress, setLhAddress] = React.useState('');
   const [lhLicense, setLhLicense] = React.useState('');
-  const [lhSaved, setLhSaved] = React.useState(false);
   const [lhErr, setLhErr] = React.useState<string | null>(null);
 
   // Notification permission is an OS truth, not ours to fake. We reflect it and offer
@@ -169,7 +168,8 @@ export function SettingsScreen(props: {
    * changing his trade never loses his place — the same reason the message sheet exists
    * on the record screen rather than a pane.
    */
-  const [editing, setEditing] = React.useState<null | 'name' | 'work' | 'trade' | 'lang' | 'join'>(null);
+  const [editing, setEditing] = React.useState<null | 'name' | 'work' | 'trade' | 'lang' | 'join'
+                                        | 'coName' | 'coAddress' | 'coLicence'>(null);
   const [draft, setDraft] = React.useState('');
 
   /**
@@ -220,6 +220,42 @@ export function SettingsScreen(props: {
       .catch(() => { if (live) setSeatsLocked(false); });   // unknown -> do not crown
     return () => { live = false; };
   }, [db, co]);
+
+  /**
+   * SAVE ONE LETTERHEAD FIELD, then re-read what the server actually kept.
+   *
+   * The re-read is not caution for its own sake: `save_company_letterhead_v1` trims,
+   * collapses blanks to null and refuses to blank the name, so echoing what he typed
+   * would show a letterhead the server does not hold — on the one record a client reads
+   * at the top of every change order.
+   *
+   * IT NEEDS SIGNAL, and the artboard says so under the card. This is the one place in
+   * the app where that is true: the letterhead lives on the company row rather than in
+   * this device's outbox, so there is no local write to fall back on.
+   */
+  const saveLhField = async (over: Partial<{ name: string; address: string; license: string }>) => {
+    if (!co || busy) return;
+    setBusy(true); setLhErr(null);
+    const next = {
+      name: over.name ?? lhName, address: over.address ?? lhAddress,
+      license: over.license ?? lhLicense,
+    };
+    const r = await saveLetterhead(supabase, { companyId: co.id, ...next });
+    setBusy(false);
+    if (!r.ok) { setLhErr(r.reason); return; }
+    const back = await readLetterhead(supabase, co.id);
+    if (back.ok) {
+      setLh(back.letterhead);
+      setLhName(back.letterhead.name);
+      setLhAddress(back.letterhead.address ?? '');
+      setLhLicense(back.letterhead.license ?? '');
+      // WHAT THE SERVER HOLDS, not what he typed — the same reason this re-reads at
+      // all. Caching the echo would print a letterhead on his documents that the
+      // server would disagree with.
+      void cacheLetterhead(db, back.letterhead);
+    }
+    setEditing(null);
+  };
 
   const invite = async () => {
     if (!co) return;
@@ -272,8 +308,7 @@ export function SettingsScreen(props: {
   };
 
   const roleLabel = (r: string) => t(('set.role.' + r) as any);
-  const initials = (name.trim() || props.profile.name || '?')
-    .split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
+  const initials = initialsOf(name.trim() || props.profile.name);
   const identityLine = isSolo
     ? t('set.solo')
     // Empty-state PROMPT, not a fake company literally named "Company" (review 2026-07-25).
@@ -334,17 +369,25 @@ export function SettingsScreen(props: {
           </View>
         </View>
       ) : (
-        <View style={{ ...TH.card, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: C.ink,
-            alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontFamily: F.dispSemi, fontSize: 20, color: '#fff' }}>{initials}</Text>
+        // THE BUSINESS IS THE SUBJECT of this screen, so it sits on the page like the
+        // person does in profile mode — not on a card among the settings. The logo
+        // stands in for the identity here, which is why the tile is a rounded SQUARE:
+        // a circle reads as a person, and this is a company.
+        <View style={ss.hero}>
+          <View style={ss.heroTile}>
+            {props.logoUri
+              ? <Image source={{ uri: props.logoUri }} style={{ width: '100%', height: '100%' }}
+                       resizeMode="contain" />
+              : <Icon name="image" size={26} color={C.muted} />}
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontFamily: F.dispSemi, fontSize: 18, color: C.ink }}>
-              {name.trim() || props.profile.name || t('set.you')}
+          <View style={{ flexGrow: 1, flexShrink: 1 }}>
+            <Text style={ss.heroName} numberOfLines={2}>
+              {lhName.trim() || co?.name || t('set.businessTitle')}
             </Text>
-            <Text style={{ ...TH.bodySteel, fontSize: 13 }}>
-              {identityLine}{co ? '  ·  ' + roleLabel(co.role) : ''}
+            <Text style={ss.heroSub} numberOfLines={2}>
+              {co ? roleLabel(co.role) : identityLine}
+              {members.length > 0
+                ? '  ·  ' + t({ k: 'set.crewCount', p: { n: members.length } }) : ''}
             </Text>
           </View>
         </View>
@@ -412,186 +455,118 @@ export function SettingsScreen(props: {
           every change order. The team is internal; the letterhead is the company's
           face. */}
       {props.mode === 'company' && (
-      <View style={{ ...TH.card, marginTop: 14 }}>
-        <Text style={label}>{t('set.letterhead')}</Text>
-        <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 4 }}>
-          {t('set.letterheadWhy')}
-        </Text>
-
-        {/* THE LOGO AND THE NAME, SIDE BY SIDE — the shape of the thing being edited,
-            so he can see the letterhead rather than infer it from three text fields. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14 }}>
-          <Pressable
-            onPress={props.onLogoPress}
-            disabled={!props.onLogoPress}
-            accessibilityRole={props.onLogoPress ? 'button' : undefined}
-            accessibilityLabel={t(props.logoUri ? 'logo.change' : 'logo.add')}
-            style={{
-              width: 72, height: 72, borderRadius: 10, borderWidth: 1,
-              borderColor: C.line, backgroundColor: C.surfaceMuted,
-              alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-            }}>
-            {props.logoUri
-              ? <Image source={{ uri: props.logoUri }} style={{ width: '100%', height: '100%' }}
-                       resizeMode="contain" />
-              : <Icon name="image" size={24} color={C.muted} />}
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            {/* The affordance is SPELLED OUT, not left to a tap-the-picture guess —
-                CLAUDE.md §1: a hidden gesture may as well not exist for someone who
-                does not think in software. */}
-            {!!props.onLogoPress && (
-              <Pressable onPress={props.onLogoPress} accessibilityRole="button"
-                style={{ minHeight: 44, justifyContent: 'center' }}>
-                <Text style={{ fontFamily: F.bodySemi, fontSize: 14.5, color: C.brand }}>
-                  {t(props.logoUri ? 'logo.change' : 'logo.add')}
-                </Text>
-              </Pressable>
-            )}
-            <Text style={{ ...TH.bodySteel, fontSize: 12 }}>{t('logo.note')}</Text>
-          </View>
-        </View>
-
-        {/* Could not be read: say so instead of drawing empty fields over a saved
+      <>
+        <SectionLabel>{t('set.secClients')}</SectionLabel>
+        {/* Could not be read: say so instead of drawing empty rows over a saved
             letterhead he would then overwrite with blanks. */}
         {lhErr !== null && lh === null ? (
-          <Text style={{ ...TH.bodySteel, fontSize: 13, marginTop: 14, color: C.danger }}>
-            {t('set.letterheadOffline')}
-          </Text>
+          <RowCard>
+            <ValueRow first label={t('set.letterheadOffline')} />
+          </RowCard>
         ) : (
-        <>
-          <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 16, marginBottom: 6 }}>
-            {t('fr.companyName')}
-          </Text>
-          <TextInput style={inputStyle} value={lhName} onChangeText={setLhName}
-            editable={lh?.isOwner !== false}
-            placeholder={t('fr.companyName')} placeholderTextColor="#8c959f" />
-
-          <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 12, marginBottom: 6 }}>
-            {t('set.companyAddress')}
-          </Text>
-          <TextInput style={{ ...inputStyle, minHeight: 64 }} value={lhAddress}
-            onChangeText={setLhAddress} multiline
-            editable={lh?.isOwner !== false}
-            placeholder={t('set.companyAddressHint')} placeholderTextColor="#8c959f" />
-
+        <RowCard>
+          {/* THE LOGO IS FIRST and its affordance is SPELLED OUT — CLAUDE.md §1: a
+              tap-the-picture guess may as well not exist for someone who does not
+              think in software. The thumbnail sits in the value slot so the row still
+              reads as a question with an answer. */}
+          <ValueRow
+            first icon="image" label={t('set.logoRow')}
+            onPress={props.onLogoPress}
+            right={
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                {props.logoUri
+                  ? <Image source={{ uri: props.logoUri }} style={ss.logoThumb}
+                           resizeMode="contain" />
+                  : <Text style={ss.addT}>{t('logo.add')}</Text>}
+                {!!props.onLogoPress
+                  && <Icon name={'chevRight' as IconName} size={18} color={C.muted} />}
+              </View>
+            } />
+          <ValueRow icon={'ntCompany' as IconName} label={t('fr.companyName')}
+            value={lhName || t('set.notSet')}
+            onPress={lh?.isOwner === false ? undefined : () => setEditing('coName')} />
+          <ValueRow icon="mapPin" label={t('set.companyAddress')}
+            value={lhAddress || t('set.notSet')}
+            onPress={lh?.isOwner === false ? undefined : () => setEditing('coAddress')} />
           {/* OPTIONAL, and labelled so (hadar). An unlicensed handyman doing $800 of
               work is a real user; a required field would either stop him or teach him
               to type junk into a document a client relies on. */}
-          <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 12, marginBottom: 6 }}>
-            {t('set.companyLicense')}
-          </Text>
-          <TextInput style={inputStyle} value={lhLicense} onChangeText={setLhLicense}
-            editable={lh?.isOwner !== false}
-            autoCapitalize="characters"
-            placeholder={t('set.companyLicenseHint')} placeholderTextColor="#8c959f" />
-
-          {lh?.isOwner === false ? (
-            // A crew member sees the letterhead and cannot edit it — same bar the
-            // server sets. A disabled Save with no explanation reads as broken.
-            <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 12 }}>
-              {t('set.letterheadOwnerOnly')}
-            </Text>
-          ) : (
-            <Pressable
-              onPress={async () => {
-                if (!co || busy) return;
-                setBusy(true); setLhErr(null);
-                const r = await saveLetterhead(supabase, {
-                  companyId: co.id, name: lhName, address: lhAddress, license: lhLicense,
-                });
-                setBusy(false);
-                if (!r.ok) { setLhErr(r.reason); return; }
-                setLhSaved(true);
-                setTimeout(() => setLhSaved(false), 1800);
-                // Re-read rather than assume: the server trims, collapses blanks to
-                // null, and refuses to blank the name. Echoing what we sent would show
-                // him a letterhead the server does not actually hold.
-                const back = await readLetterhead(supabase, co.id);
-                if (back.ok) {
-                  setLh(back.letterhead);
-                  setLhName(back.letterhead.name);
-                  setLhAddress(back.letterhead.address ?? '');
-                  setLhLicense(back.letterhead.license ?? '');
-                  // What the SERVER holds, not what he typed — the same reason this
-                  // re-reads at all. Caching the echo would put a letterhead on his
-                  // documents that the server would disagree with.
-                  void cacheLetterhead(db, back.letterhead);
-                }
-              }}
-              style={saveBtn}>
-              <Text style={saveBtnT}>{lhSaved ? t('set.saved') : t('set.save')}</Text>
-            </Pressable>
-          )}
-          {!!lhErr && lh !== null && (
-            <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 8, color: C.danger }}>
-              {lhErr}
-            </Text>
-          )}
-        </>
+          <ValueRow icon="doc" label={t('set.companyLicense')}
+            value={lhLicense || t('set.notSet')}
+            onPress={lh?.isOwner === false ? undefined : () => setEditing('coLicence')} />
+        </RowCard>
         )}
-      </View>
+        <Text style={ss.foot}>{t('set.letterheadPrints')}</Text>
+        {/* The ONE not-offline-safe thing on this screen, said out loud rather than
+            discovered as a failure on a jobsite with no bars. */}
+        <Text style={ss.foot}>{t('set.letterheadSignal')}</Text>
+        {lh?.isOwner === false && (
+          // A crew member sees the letterhead and cannot edit it — the same bar the
+          // server sets. Rows that simply do not respond read as broken.
+          <Text style={ss.foot}>{t('set.letterheadOwnerOnly')}</Text>
+        )}
+        {!!lhErr && lh !== null && (
+          <Text style={{ ...ss.foot, color: C.danger }}>{lhErr}</Text>
+        )}
+      </>
       )}
 
       {/* ---- Team (members + invite) ---- company mode only. Managing the roster is
           a company setting; only the owner opens this screen. */}
       {props.mode === 'company' && (
-      <View style={{ ...TH.card, marginTop: 14 }}>
-        <Text style={label}>{t('set.team')}</Text>
+      <>
+        <SectionLabel>{t('set.team')}</SectionLabel>
         {co ? (
           <>
-            <Text style={{ ...TH.bodySteel, fontSize: 13, marginTop: 4 }}>
-              {t({ k: 'set.teamOf', p: { company: co.name } } as any)}
-            </Text>
-            {members.map((m) => (
-              <View key={m.memberId} style={{ flexDirection: 'row', alignItems: 'center',
-                justifyContent: 'space-between', marginTop: 10 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: '#EFEBE3',
-                    alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ fontFamily: F.dispSemi, color: C.steel }}>{m.isMe ? '★' : '•'}</Text>
-                  </View>
-                  <View>
-                    <Text style={{ fontFamily: F.bodySemi, fontSize: 14.5, color: C.ink }}>
-                      {m.name ? (m.isMe ? `${m.name} (${t('set.you')})` : m.name)
-                        : (m.isMe ? t('set.you') : t('set.teammate'))}
-                    </Text>
-                    <Text style={{ ...TH.bodySteel, fontSize: 12 }}>{roleLabel(m.role)}</Text>
-                  </View>
-                </View>
-                {co.isOwner && !m.isMe && (
-                  <Pressable onPress={() => revoke(m)} disabled={busy} hitSlop={10}
-                    style={{ minHeight: 44, paddingHorizontal: 12, justifyContent: 'center' }}>
-                    <Text style={{ color: C.danger, fontFamily: F.bodySemi, fontSize: 14 }}>{t('set.remove')}</Text>
-                  </Pressable>
-                )}
-              </View>
-            ))}
+            <RowCard>
+              {members.map((m, i) => (
+                <ValueRow
+                  key={m.memberId} first={i === 0}
+                  label={m.name ? (m.isMe ? `${m.name} (${t('set.you')})` : m.name)
+                                : (m.isMe ? t('set.you') : t('set.teammate'))}
+                  right={
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Text style={ss.rowValue} numberOfLines={1}>{roleLabel(m.role)}</Text>
+                      {co.isOwner && !m.isMe && (
+                        // 44pt of target on a row that REMOVES somebody's access. Small
+                        // and destructive is the worst pair on a gloved thumb.
+                        <Pressable onPress={() => revoke(m)} disabled={busy} hitSlop={10}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${t('set.remove')} ${m.name ?? ''}`.trim()}
+                          style={ss.removeHit}>
+                          <Text style={ss.removeT}>{t('set.remove')}</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  } />
+              ))}
+            </RowCard>
             {co.isOwner && (
               <>
-                {/* CROWNED WHEN THE SEAT IS NOT INCLUDED (Handoff's pattern, 2026-08-04).
-                    The button is SHOWN, not hidden: hiding it teaches the owner nothing
-                    and they never learn a bigger team is possible. Crowned, it is an
-                    advertisement they can act on — and tapping still runs checkMembers,
-                    so the modal explains the cap rather than the button lying about it. */}
-                <Pressable onPress={invite} disabled={busy}
-                  style={{ ...saveBtn, backgroundColor: C.ink, flexDirection: 'row', gap: 10 }}>
-                  <Text style={saveBtnT}>{t('set.invite')}</Text>
-                  {seatsLocked && <LockCrown size={16} />}
+                {/* DASHED, like the join row: nothing is stored until somebody accepts,
+                    and a solid card would claim a teammate this company does not have.
+                    CROWNED WHEN THE SEAT IS NOT INCLUDED (Handoff's pattern, 2026-08-04)
+                    — shown rather than hidden, because a hidden button teaches the owner
+                    nothing and they never learn a bigger crew is possible. Tapping still
+                    runs checkMembers, so the modal explains the cap rather than the
+                    button lying about it. */}
+                <Pressable onPress={invite} disabled={busy} accessibilityRole="button"
+                  style={({ pressed }) => [ss.joinRow, pressed ? { opacity: 0.6 } : null]}>
+                  <Icon name={'personAdd' as IconName} size={18} color={C.steel} />
+                  <Text style={ss.joinT}>{t('set.invite')}</Text>
+                  {seatsLocked
+                    ? <LockCrown size={16} />
+                    : <Icon name={'chevRight' as IconName} size={18} color={C.muted} />}
                 </Pressable>
-                {seatsLocked && (
-                  <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 6, textAlign: 'center' }}>
-                    {t('set.seatsLocked')}
-                  </Text>
-                )}
+                {seatsLocked && <Text style={ss.foot}>{t('set.seatsLocked')}</Text>}
               </>
             )}
           </>
         ) : (
-          <Text style={{ ...TH.bodySteel, fontSize: 13, marginTop: 4 }}>{t('set.noCompany')}</Text>
+          <RowCard><ValueRow first label={t('set.noCompany')} /></RowCard>
         )}
-        {note && <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 10, color: C.inkSoft }}>{note}</Text>}
-      </View>
+        {!!note && <Text style={ss.foot}>{note}</Text>}
+      </>
       )}
 
       {/* ---- Join a company ---- profile mode: a crew member joins by code HERE, so
@@ -643,151 +618,129 @@ export function SettingsScreen(props: {
       </>
       )}
 
-      {/* ---- Preferences ---- profile mode (notifications are personal). */}
-      {props.mode === 'profile' && (
-      <View style={{ ...TH.card, marginTop: 14 }}>
-        <Text style={label}>{t('set.prefs')}</Text>
-        <Row
-          title={t('set.notif')}
-          value={notif === 'granted' ? t('set.notifOn')
-            : notif === 'denied' ? t('set.notifDenied')
-            : notif === 'unknown' ? t('set.notifUnknown') : t('set.notifOff')}
-          // 'undetermined' → in-app request works; 'denied'/'unknown' → the request
-          // would no-op (blocked, or the module is unavailable), so route to the OS
-          // Settings app where it can actually be changed (review 2026-07-25).
-          action={notif === 'granted' ? undefined
-            : notif === 'undetermined' ? { label: t('set.notifEnable'), onPress: enableNotif }
-            : { label: t('set.openSystem'), onPress: () => Linking.openSettings().catch(() => {}) }}
-        />
-      </View>
-      )}
+      {/* ---- Plan and billing ---- company mode only: the plan belongs to the company
+          and only the owner (who is the only one this screen opens for) changes it.
 
-      {/* ---- Subscription ---- company mode only: the plan belongs to the company and
-          only the owner (who is the only one this screen opens for) changes it. */}
+          ONE SECTION, not two (the business artboard, 2026-08-25). The plan is what you
+          are on and the invoices are what you were charged; they were two cards saying
+          one thing, and the second only makes sense after the first anyway.
+
+          THE OWNER CHECK IS THE SERVER'S. This renders whatever `billingHistory`
+          returns and `not_owner` is one of the answers — a crew member is told it is
+          the owner's screen rather than shown an empty list to misread. Gating the row
+          on a local flag instead would be a client deciding who may see money. */}
       {props.mode === 'company' && (
-      <View style={{ ...TH.card, marginTop: 14 }}>
-        <Text style={label}>{t('set.plan')}</Text>
-        <Row title={t('set.planName')} value={t('set.planPilot')} />
-        <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 8 }}>{t('set.planNote')}</Text>
-        <Pressable onPress={props.onOpenPlans}
-          style={{ ...saveBtn, backgroundColor: C.ink, marginTop: 12 }}>
-          <Text style={saveBtnT}>{t('quota.seePlans')}</Text>
-        </Pressable>
-      </View>
-      )}
+      <>
+        <SectionLabel>{t('set.secPlan')}</SectionLabel>
+        <RowCard>
+          <ValueRow first icon={'payment' as IconName} label={t('set.planName')}
+            right={
+              <View style={ss.pill}>
+                <Text style={ss.pillT}>{t('set.planPilotPill')}</Text>
+              </View>
+            } />
+          <ValueRow icon={'layers' as IconName} label={t('quota.seePlans')}
+            onPress={props.onOpenPlans} />
+          {/* THE PURCHASES SIT BEHIND A ROW, not open on the page: a pilot account has
+              none, and a permanently empty list under a heading reads as broken. The
+              tap is also the ASK — nothing is fetched until he wants it. */}
+          <ValueRow icon={'ntHistory' as IconName} label={t('set.billing')}
+            value={billingBusy ? t('set.billingLoading') : undefined}
+            onPress={() => { if (billing === null) void loadBilling(); else setBilling(null); }} />
+        </RowCard>
 
-      {/* ---- Billing ---- company mode, OWNER ONLY (hadar, 2026-08-18: "billing section
-          for the one that owns the account — display all the invoices").
-
-          BELOW the plan card on purpose: the plan is what you are on, this is what you
-          were charged, and the second only makes sense after the first.
-
-          THE OWNER CHECK IS THE SERVER'S. This renders whatever `billingHistory` returns
-          and `not_owner` is one of the answers — a crew member is told it is the owner's
-          screen rather than shown an empty list to misread. Gating the CARD on a local
-          flag instead would be a client deciding who may see money. */}
-      {props.mode === 'company' && (
-      <View style={{ ...TH.card, marginTop: 14 }}>
-        <Text style={label}>{t('set.billing')}</Text>
-
-        {billing === null ? (
-          // NOT ASKED YET — never "no invoices". The button is the ask.
-          <>
-            <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 4 }}>
-              {t('set.billingWhat')}
-            </Text>
-            <Pressable onPress={() => void loadBilling()} disabled={billingBusy}
-              style={{ ...saveBtn, backgroundColor: C.ink, marginTop: 12 }}>
-              <Text style={saveBtnT}>
-                {billingBusy ? t('set.billingLoading') : t('set.billingShow')}
+        {billing !== null && (
+        <View style={[ss.card, { marginTop: 10, paddingVertical: 12 }]}>
+          {!billing.ok ? (
+            <>
+              <Text style={{ ...TH.bodySteel, fontSize: 13, lineHeight: 19 }}>
+                {t(billing.reason === 'not_owner' ? 'set.billingOwnerOnly'
+                  : billing.reason === 'no_company' ? 'set.billingNoCompany'
+                  : 'set.billingUnavailable')}
               </Text>
-            </Pressable>
-          </>
-        ) : !billing.ok ? (
-          <>
-            <Text style={{ ...TH.bodySteel, fontSize: 13, marginTop: 4, lineHeight: 19 }}>
-              {t(billing.reason === 'not_owner' ? 'set.billingOwnerOnly'
-                : billing.reason === 'no_company' ? 'set.billingNoCompany'
-                : 'set.billingUnavailable')}
+              {/* Retry only where retrying could help. "Owner only" is not a transient
+                  failure and a Try again under it would be a lie. */}
+              {billing.reason === 'unavailable' && (
+                <Pressable onPress={() => void loadBilling()} disabled={billingBusy}
+                  style={{ ...saveBtn, backgroundColor: C.ink, marginTop: 12 }}>
+                  <Text style={saveBtnT}>
+                    {billingBusy ? t('set.billingLoading') : t('set.billingRetry')}
+                  </Text>
+                </Pressable>
+              )}
+            </>
+          ) : billing.invoices.length === 0 ? (
+            <Text style={{ ...TH.bodySteel, fontSize: 13, lineHeight: 19 }}>
+              {t('set.billingNone')}
             </Text>
-            {/* Retry only where retrying could help. "Owner only" is not a transient
-                failure and a Try again under it would be a lie. */}
-            {billing.reason === 'unavailable' && (
-              <Pressable onPress={() => void loadBilling()} disabled={billingBusy}
-                style={{ ...saveBtn, backgroundColor: C.ink, marginTop: 12 }}>
-                <Text style={saveBtnT}>
-                  {billingBusy ? t('set.billingLoading') : t('set.billingRetry')}
+          ) : (
+            <>
+              {/* SAY SO WHEN THE LIST IS SHORT BY OUR OWN ADMISSION. Half a billing
+                  history rendered as the whole of it is the failure this screen cannot
+                  have. */}
+              {billing.partial && (
+                <Text style={{ ...TH.bodySteel, fontSize: 12.5, color: C.caution }}>
+                  {t('set.billingPartial')}
                 </Text>
-              </Pressable>
-            )}
-          </>
-        ) : billing.invoices.length === 0 ? (
-          <Text style={{ ...TH.bodySteel, fontSize: 13, marginTop: 4, lineHeight: 19 }}>
-            {t('set.billingNone')}
-          </Text>
-        ) : (
-          <>
-            {/* SAY SO WHEN THE LIST IS SHORT BY OUR OWN ADMISSION. Half a billing
-                history rendered as the whole of it is the failure this screen cannot
-                have. */}
-            {billing.partial && (
-              <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 4,
-                color: C.caution }}>
-                {t('set.billingPartial')}
-              </Text>
-            )}
-            {billing.invoices.map((iv: Invoice) => {
-              const amount = invoiceAmount(iv);
-              const url = receiptUrlFor(iv);
-              const refunded = isRefunded(iv);
-              return (
-                <View key={iv.id} style={{ borderTopWidth: 1, borderTopColor: C.line,
-                  paddingVertical: 11 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink,
-                      flex: 1 }} numberOfLines={1}>
-                      {iv.product}
-                    </Text>
-                    {/* No amount = NO LINE, never "$0.00" — see invoiceAmount. */}
-                    {!!amount && (
-                      <Text style={{ fontFamily: F.dispSemi, fontSize: 16,
-                        color: refunded ? C.muted : C.ink,
-                        textDecorationLine: refunded ? 'line-through' : 'none' }}>
-                        {amount}
+              )}
+              {billing.invoices.map((iv: Invoice, i: number) => {
+                const amount = invoiceAmount(iv);
+                const url = receiptUrlFor(iv);
+                const refunded = isRefunded(iv);
+                return (
+                  <View key={iv.id} style={{
+                    borderTopWidth: i === 0 && !billing.partial ? 0 : 1,
+                    borderTopColor: C.line, paddingVertical: 11 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink,
+                        flex: 1 }} numberOfLines={1}>
+                        {iv.product}
                       </Text>
+                      {/* No amount = NO LINE, never "$0.00" — see invoiceAmount. */}
+                      {!!amount && (
+                        <Text style={{ fontFamily: F.dispSemi, fontSize: 16,
+                          color: refunded ? C.muted : C.ink,
+                          textDecorationLine: refunded ? 'line-through' : 'none' }}>
+                          {amount}
+                        </Text>
+                      )}
+                    </View>
+                    <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 2 }}>
+                      {[
+                        iv.atMs ? new Date(iv.atMs).toLocaleDateString() : null,
+                        t(iv.kind === 'subscription' ? 'set.billingSub' : 'set.billingPack'),
+                        refunded ? t('set.billingRefunded') : null,
+                      ].filter(Boolean).join(' · ')}
+                    </Text>
+                    {/* An App Store receipt is APPLE'S and lives in his Apple account. We
+                        cannot render or email it, so this is a destination, not a
+                        document. Web purchases already got a Stripe receipt by email. */}
+                    {!!url && (
+                      <Pressable onPress={() => void Linking.openURL(url).catch(() => {})}
+                        style={{ marginTop: 6 }}>
+                        <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.ink,
+                          textDecorationLine: 'underline' }}>
+                          {t('set.billingReceipt')}
+                        </Text>
+                      </Pressable>
                     )}
                   </View>
-                  <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 2 }}>
-                    {[
-                      iv.atMs ? new Date(iv.atMs).toLocaleDateString() : null,
-                      t(iv.kind === 'subscription' ? 'set.billingSub' : 'set.billingPack'),
-                      refunded ? t('set.billingRefunded') : null,
-                    ].filter(Boolean).join(' · ')}
-                  </Text>
-                  {/* An App Store receipt is APPLE'S and lives in his Apple account. We
-                      cannot render or email it, so this is a destination, not a
-                      document. Web purchases already got a Stripe receipt by email. */}
-                  {!!url && (
-                    <Pressable onPress={() => void Linking.openURL(url).catch(() => {})}
-                      style={{ marginTop: 6 }}>
-                      <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.ink,
-                        textDecorationLine: 'underline' }}>
-                        {t('set.billingReceipt')}
-                      </Text>
-                    </Pressable>
-                  )}
-                </View>
-              );
-            })}
-            <Pressable onPress={() => void loadBilling()} disabled={billingBusy}
-              style={{ marginTop: 12, minHeight: 40, alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.steel }}>
-                {billingBusy ? t('set.billingLoading') : t('set.billingRefresh')}
-              </Text>
-            </Pressable>
-          </>
+                );
+              })}
+              <Pressable onPress={() => void loadBilling()} disabled={billingBusy}
+                style={{ marginTop: 6, minHeight: 40, alignItems: 'center',
+                  justifyContent: 'center' }}>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.steel }}>
+                  {billingBusy ? t('set.billingLoading') : t('set.billingRefresh')}
+                </Text>
+              </Pressable>
+            </>
+          )}
+        </View>
         )}
-      </View>
+
+        <Text style={ss.foot}>{t('set.planNote')}</Text>
+      </>
       )}
 
       {/* Support (Contact / Feedback) and About (version, Terms, Privacy, Sign out)
@@ -819,6 +772,53 @@ export function SettingsScreen(props: {
         placeholder={t('fr.yourName')} placeholderTextColor="#8c959f"
         returnKeyType="done"
         onSubmitEditing={async () => { await commit({ name: draft }); setEditing(null); }} />
+    </BottomSheet>
+
+    {/* THE THREE LETTERHEAD SHEETS.
+        Unlike the profile sheets, these cannot auto-save on change: each one is a
+        network write to the company row, and firing it per keystroke would hammer the
+        server and — offline — fail three times while he typed. So they keep a button,
+        `saveLhField` re-reads what the server actually kept, and the sheet stays open
+        if the write fails so the error lands where he can still see what he typed. */}
+    <BottomSheet visible={editing === 'coName'} title={t('fr.companyName')}
+      onClose={() => setEditing(null)}
+      footer={
+        <Pressable onPress={() => void saveLhField({ name: lhName })} disabled={busy}
+          style={saveBtn} accessibilityRole="button">
+          <Text style={saveBtnT}>{busy ? t('set.saving') : t('set.save')}</Text>
+        </Pressable>}>
+      <TextInput style={inputStyle} value={lhName} onChangeText={setLhName} autoFocus
+        placeholder={t('fr.companyName')} placeholderTextColor="#8c959f"
+        returnKeyType="done"
+        onSubmitEditing={() => void saveLhField({ name: lhName })} />
+      {!!lhErr && <Text style={{ ...ss.foot, color: C.danger }}>{lhErr}</Text>}
+    </BottomSheet>
+
+    <BottomSheet visible={editing === 'coAddress'} title={t('set.companyAddress')}
+      onClose={() => setEditing(null)}
+      footer={
+        <Pressable onPress={() => void saveLhField({ address: lhAddress })} disabled={busy}
+          style={saveBtn} accessibilityRole="button">
+          <Text style={saveBtnT}>{busy ? t('set.saving') : t('set.save')}</Text>
+        </Pressable>}>
+      <TextInput style={{ ...inputStyle, minHeight: 74 }} value={lhAddress}
+        onChangeText={setLhAddress} multiline autoFocus
+        placeholder={t('set.companyAddressHint')} placeholderTextColor="#8c959f" />
+      {!!lhErr && <Text style={{ ...ss.foot, color: C.danger }}>{lhErr}</Text>}
+    </BottomSheet>
+
+    <BottomSheet visible={editing === 'coLicence'} title={t('set.companyLicense')}
+      onClose={() => setEditing(null)}
+      footer={
+        <Pressable onPress={() => void saveLhField({ license: lhLicense })} disabled={busy}
+          style={saveBtn} accessibilityRole="button">
+          <Text style={saveBtnT}>{busy ? t('set.saving') : t('set.save')}</Text>
+        </Pressable>}>
+      <TextInput style={inputStyle} value={lhLicense} onChangeText={setLhLicense} autoFocus
+        autoCapitalize="characters" returnKeyType="done"
+        placeholder={t('set.companyLicenseHint')} placeholderTextColor="#8c959f"
+        onSubmitEditing={() => void saveLhField({ license: lhLicense })} />
+      {!!lhErr && <Text style={{ ...ss.foot, color: C.danger }}>{lhErr}</Text>}
     </BottomSheet>
 
     <BottomSheet visible={editing === 'work'} title={t('set.howYouWork')}
@@ -874,24 +874,11 @@ export function SettingsScreen(props: {
   );
 }
 
-/** A settings row: title on the left, a value + optional inline action on the right. */
-function Row(props: { title: string; value?: string; action?: { label: string; onPress: () => void } }) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-      paddingVertical: 10, minHeight: 44 }}>
-      <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink, flex: 1 }}>{props.title}</Text>
-      {props.value && <Text style={{ ...TH.bodySteel, fontSize: 14 }}>{props.value}</Text>}
-      {props.action && (
-        <Pressable onPress={props.action.onPress} hitSlop={8}
-          style={{ marginLeft: 12, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9, backgroundColor: C.ink }}>
-          <Text style={{ color: '#fff', fontFamily: F.bodySemi, fontSize: 13 }}>{props.action.label}</Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
-/* ── The profile screen's design language (hadar's artboard, 2026-08-25) ───────────
+/* ── This screen's design language (hadar's artboards, 2026-08-25) ─────────────────
+ *
+ * BOTH MODES, one vocabulary. Profile came first; the business artboard arrived the
+ * same day using the same parts, so Your business is built from these and not from a
+ * second set that would drift.
  *
  * The screen it replaces was a FORM: a name field, two toggle pairs, a row of trade
  * chips and a Save button, all on one card. Everything was editable at once and nothing
@@ -909,6 +896,12 @@ function Row(props: { title: string; value?: string; action?: { label: string; o
  */
 
 /** A section heading — condensed small-caps, the artboard's 12/1.6 treatment. */
+/** Two letters, or '?'. One rule, so a teammate's avatar matches the hero's. */
+function initialsOf(name: string | null | undefined): string {
+  return (name?.trim() || '?')
+    .split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
+}
+
 function SectionLabel({ children }: { children: string }) {
   return <Text style={ss.sectionLabel}>{children}</Text>;
 }
@@ -1024,6 +1017,23 @@ const ss = StyleSheet.create({
     backgroundColor: tint('approved').soft, borderWidth: 1, borderColor: tint('approved').line,
   },
   pillT: { fontFamily: F.bodySemi, fontSize: 12.5, color: tint('approved').ink },
+  // A rounded SQUARE, not a circle: a circle reads as a person and this is a company.
+  heroTile: {
+    width: 64, height: 64, borderRadius: 12, backgroundColor: C.surfaceMuted,
+    borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0, overflow: 'hidden',
+  },
+  logoThumb: { width: 36, height: 36, borderRadius: 6 },
+  addT: { fontFamily: F.bodySemi, fontSize: 15, color: C.brand },
+  // The quiet line UNDER a card that explains what the card is for. Deliberately not a
+  // row: it is not a setting, and putting it inside the card would make it look like one.
+  foot: { fontFamily: F.body, fontSize: 12.5, color: C.muted, lineHeight: 18,
+          marginTop: 8, paddingHorizontal: 2 },
+  // Destructive, so it gets 44pt of target — small and destructive is the worst pair
+  // on a gloved thumb. Muted brick rather than alarm red: removing a teammate is an
+  // ordinary act of running a crew, not an emergency.
+  removeHit: { minHeight: 44, justifyContent: 'center', paddingLeft: 8 },
+  removeT: { fontFamily: F.bodySemi, fontSize: 14, color: '#8B5148' },
   sheetPad: { paddingBottom: 8 },
 });
 

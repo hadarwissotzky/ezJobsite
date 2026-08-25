@@ -1068,6 +1068,18 @@ const EN: Record<string, string> = {
   'set.companyLicense': 'License number (optional)',
   'set.companyLicenseHint': 'e.g. CSLB 1043210',
   'set.letterheadOwnerOnly': 'Only the company owner can change the letterhead.',
+  // The business artboard (2026-08-25) names the letterhead card for its READER rather
+  // than for the printing term: a contractor does not know what a letterhead is, but he
+  // knows exactly what his clients see.
+  'set.secClients': 'What your clients see',
+  'set.logoRow': 'Logo',
+  'set.letterheadPrints': 'This prints at the top of every change order your clients open.',
+  // Said OUT LOUD because it is the one thing on this screen that is not offline-safe.
+  // Everything else he changes lands in the outbox; the letterhead is a company row.
+  'set.letterheadSignal': 'Kept on your account, not just this phone — changing it needs signal.',
+  'set.crewCount': '{n} on the crew',
+  'set.secPlan': 'Plan and billing',
+  'set.planPilotPill': 'Pilot · free',
   'set.letterheadOffline': 'Could not load your letterhead. Check your connection and try again — nothing has been changed.',
   'set.profile': 'Your profile',
   'set.trade': 'Trade (optional)',
@@ -1079,6 +1091,7 @@ const EN: Record<string, string> = {
   'set.secCompany': 'Your company',
   'set.howYouWork': 'How you work',
   'set.notSet': 'Not set',
+  'set.saving': 'Saving…',
   'set.savedAsYouGo': 'Saved as you change it. Works with no signal.',
   'set.companyWhy': 'Logo, address and licence live here — it is what your client sees at the top of every change order.',
   'set.openCompany': 'Open Company',
@@ -3083,6 +3096,13 @@ const ES: Record<string, string> = {
   'set.companyLicense': 'Número de licencia (opcional)',
   'set.companyLicenseHint': 'ej. CSLB 1043210',
   'set.letterheadOwnerOnly': 'Solo el dueño de la compañía puede cambiar el membrete.',
+  'set.secClients': 'Lo que ven sus clientes',
+  'set.logoRow': 'Logo',
+  'set.letterheadPrints': 'Esto se imprime arriba de cada orden de cambio que abren sus clientes.',
+  'set.letterheadSignal': 'Se guarda en su cuenta, no solo en este teléfono: cambiarlo necesita señal.',
+  'set.crewCount': '{n} en la cuadrilla',
+  'set.secPlan': 'Plan y facturación',
+  'set.planPilotPill': 'Piloto · gratis',
   'set.letterheadOffline': 'No se pudo cargar su membrete. Revise su conexión e intente de nuevo — no se ha cambiado nada.',
   'set.profile': 'Tu perfil',
   'set.trade': 'Oficio (opcional)',
@@ -3091,6 +3111,7 @@ const ES: Record<string, string> = {
   'set.secCompany': 'Su empresa',
   'set.howYouWork': 'Cómo trabaja',
   'set.notSet': 'Sin definir',
+  'set.saving': 'Guardando…',
   'set.savedAsYouGo': 'Se guarda al cambiarlo. Funciona sin señal.',
   'set.companyWhy': 'El logo, la dirección y la licencia viven aquí — es lo que su cliente ve arriba de cada orden de cambio.',
   'set.openCompany': 'Abrir empresa',
