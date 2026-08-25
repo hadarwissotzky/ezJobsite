@@ -265,6 +265,7 @@ export function RecordScreen(props: RecordScreenProps) {
           // kicker carries kind + job only. A number invented here would be the
           // first place two screens could disagree about which extra this is.
           extraNo={null}
+          version={lifecycle.version}
           readiness={lifecycle.readiness}
           proc={lifecycle.proc}
           priceMode={lifecycle.priceMode}

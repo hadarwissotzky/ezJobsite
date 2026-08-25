@@ -69,6 +69,16 @@ const OWNER_LINE = '#E9D5A6';
 const OWNER_MARK = '#C8901E';
 
 const st = StyleSheet.create({
+  /**
+   * The revised-draft line. Caution ink on the caution wash — the tone that means "read
+   * this before you tap", never the brick that means something broke. Nothing broke: he
+   * revised on purpose, and this is the consequence he has not been told about yet.
+   */
+  revisedNote: {
+    fontFamily: F.body, fontSize: 13.5, lineHeight: 19, color: CAUTION.ink,
+    backgroundColor: CAUTION.soft, borderWidth: 1, borderColor: CAUTION.line, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12,
+  },
   // Full-bleed (the page pads 18 and this cancels it), closed by a hairline and a
   // shadow so the form below reads as UNDER the header rather than next in a list.
   // Same values as the negotiation and locked screens' — one header, three stages.
@@ -251,6 +261,12 @@ export type ExtraDraftProps = {
   extraNo: number | null;
   /** REQ-LC11's single readiness authority, computed by the caller from the same
    *  row this screen renders. Never recomputed here, and never second-guessed. */
+  /**
+   * Which version this row is (1 = the original). >1 means it REPLACED a version the
+   * client already had, so the line below has something to say. Derived from the
+   * supersession lineage, never stored.
+   */
+  version?: number;
   readiness: SendReadiness;
   /** The weakest pipeline state across the extra's captures (`extraProcState`). */
   proc: ProcState;
@@ -549,7 +565,29 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
           */}
         <View style={{ marginTop: isDraft ? 0 : 14 }}>
           {isDraft
-            ? null
+            ? (
+              /**
+               * A REVISED DRAFT SAYS THE CLIENT IS IN THE DARK (hadar, 2026-08-25:
+               * "raise a message let the user know that they need to resend -- this way
+               * the contractor has the agency").
+               *
+               * Revising retires the client's link the moment the new price is
+               * confirmed, and the new version lands here as a draft. Between those two
+               * moments the client can open NOTHING, and the app said so nowhere — so a
+               * contractor could revise, put the phone down, and believe the change had
+               * been communicated.
+               *
+               * A LINE, NOT A BANNER. The draft banner was removed from this slot
+               * because it restated what the header already said; this is a different
+               * fact, and it earns one line rather than a box. Sending stays his call —
+               * the sentence tells him, it does not nag or act.
+               *
+               * Only on a REVISION: a first draft has no client waiting on anything.
+               */
+              (props.version ?? 1) > 1
+                ? <Text style={st.revisedNote}>{t('draft.revisedNeedsSend')}</Text>
+                : null
+            )
             : (
               // Never the draft banner over a row that is not a draft: the state
               // line is the one thing on this screen a contractor acts on.

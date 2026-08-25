@@ -1334,6 +1334,16 @@ const EN: Record<string, string> = {
   'co.qExcluded': 'What’s NOT included? (optional)',
   'co.exclPh': 'e.g. drywall repair, paint outside the area, permit fees',
   'co.revisingNote': 'This replaces the version you already sent. The old link stops working when you confirm the new price.',
+  /**
+   * THE THING NOBODY WAS TOLD (hadar, 2026-08-25: "raise a message let the user know
+   * that they need to resend -- this way the contractor has the agency").
+   *
+   * Revising retires the client's link the moment the new price is confirmed, and the
+   * new version lands as a draft. So between revising and sending there is a window in
+   * which the client can open NOTHING — and the app said so nowhere. He would think the
+   * change was communicated. Sending stays his decision; being told is not optional.
+   */
+  'draft.revisedNeedsSend': 'They can no longer open the version you sent. Send this one when you are ready.',
   'co.supersedeRefused': 'The client already answered the old version — her answer stands. The new price is saved as a separate extra.',
   'r4.photosAttached': '{n} photos are on the client’s page',
   'r4.photosCapped': '{n} photos sent — 8 is the most one extra can carry',
@@ -1359,7 +1369,15 @@ const EN: Record<string, string> = {
   'r5b.priceNeedsRevision': 'A new price only counts once you revise it and they approve. Agreeing here is not an approval.',
   'r5b.pushTitle': 'Question about {scope}',
   'r5b.replyPlaceholder': 'Answer their question…',
-  'r5b.revise': 'Revise & resend',
+  /**
+   * IT DOES NOT RESEND (hadar, 2026-08-25). The action creates a new version as a
+   * DRAFT, retires the old link and sends nothing — `revision.ts` states it outright:
+   * "a revision creates a row and supersedes, and sends nothing". Two buttons promised
+   * a resend that never happens, which is worse than a vague label: a contractor who
+   * does not want to auto-send a client avoids the one control that would let him
+   * change the price, and one who does press it may believe the client has been told.
+   */
+  'r5b.revise': 'Revise',
   'r5b.revisedFrom': 'Revised: {prior} → {next}',
   'r5b.send': 'Send reply',
   'r5b.sending': 'Sending…',
@@ -1796,7 +1814,7 @@ const EN: Record<string, string> = {
   'neg.trayContact': 'Contact',
   'neg.tabActivity': 'Activity',
   'neg.remindShort': 'Remind',
-  'neg.reviseShort': 'Revise & resend',
+  'neg.reviseShort': 'Revise',
   // Both mechanisms in one line. It replaces a paragraph under each button: the
   // distinction still cannot be missed (REQ-LC21/22), it just is not the page.
   'neg.mechanismBoth': 'Remind uses the same link. Revising sends a new one and kills the old.',
@@ -3245,6 +3263,7 @@ const ES: Record<string, string> = {
   'co.qExcluded': '¿Qué NO incluye? (opcional)',
   'co.exclPh': 'p. ej. resane de tablaroca, pintura fuera del área, permisos',
   'co.revisingNote': 'Esto reemplaza la versión que ya enviaste. El enlace anterior deja de servir al confirmar el nuevo precio.',
+  'draft.revisedNeedsSend': 'Ya no pueden abrir la versión que envió. Envíe esta cuando esté listo.',
   'co.supersedeRefused': 'El cliente ya contestó la versión anterior — su respuesta manda. El nuevo precio queda como un extra aparte.',
   'r4.photosAttached': '{n} fotos están en la página del cliente',
   'r4.photosCapped': '{n} fotos enviadas — 8 es el máximo por cada extra',
@@ -3269,7 +3288,7 @@ const ES: Record<string, string> = {
   'r5b.priceNeedsRevision': 'Un precio nuevo solo cuenta cuando usted lo revisa y el cliente lo aprueba. Estar de acuerdo aquí no es una aprobación.',
   'r5b.pushTitle': 'Pregunta sobre {scope}',
   'r5b.replyPlaceholder': 'Responda su pregunta…',
-  'r5b.revise': 'Revisar y reenviar',
+  'r5b.revise': 'Revisar',
   'r5b.revisedFrom': 'Revisado: {prior} → {next}',
   'r5b.send': 'Enviar respuesta',
   'r5b.sending': 'Enviando…',
@@ -3632,7 +3651,7 @@ const ES: Record<string, string> = {
   'neg.trayContact': 'Contacto',
   'neg.tabActivity': 'Actividad',
   'neg.remindShort': 'Recordar',
-  'neg.reviseShort': 'Revisar y reenviar',
+  'neg.reviseShort': 'Revisar',
   'neg.mechanismBoth': 'Recordar usa el mismo enlace. Revisar manda uno nuevo y anula el anterior.',
   'neg.people': 'Cliente y equipo',
   'neg.viewAll': 'Ver todo',
