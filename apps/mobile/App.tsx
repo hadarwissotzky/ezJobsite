@@ -6583,7 +6583,12 @@ const checkClientMessages = async () => {
         setPJoining(true); setPInviteErr(null);
         const r = await acceptInvite(db, connector.client, pInvite, pName);
         setPJoining(false);
-        if (!r.ok) { setPInviteErr(T('set.joinFailed') + ' ' + r.reason); return; }
+        if (!r.ok) {
+          // Msg when recognised, raw string otherwise — joinRefusal in company.ts.
+          setPInviteErr(T('set.joinFailed') + ' '
+            + (typeof r.reason === 'string' ? r.reason : T(r.reason)));
+          return;
+        }
         // The name comes back from the server; it is the one that goes on documents.
         setPCompany(r.companyName);
         setPSub('how');

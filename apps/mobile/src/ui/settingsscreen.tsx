@@ -277,7 +277,13 @@ export function SettingsScreen(props: {
     setBusy(true); setNote(null);
     const r = await acceptInvite(db, supabase, tok, props.profile.name);
     setBusy(false);
-    if (!r.ok) { setNote(t('set.joinFailed') + ' ' + r.reason); return; }
+    // `reason` is a Msg when the server's refusal is one we recognise, a raw string
+    // when it is not — see joinRefusal in company.ts.
+    if (!r.ok) {
+      setNote(t('set.joinFailed') + ' '
+        + (typeof r.reason === 'string' ? r.reason : t(r.reason)));
+      return;
+    }
     setJoinToken('');
     setNote(t({ k: 'set.joined', p: { company: r.companyName } } as any));
     await loadTeam();

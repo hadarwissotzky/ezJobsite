@@ -26,6 +26,14 @@
  */
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
+// `msg` returns a deferred {k,p} the UI translates — the same shape projects.ts uses
+// to hand a reason out of a non-UI module. See joinRefusal below.
+//
+// THE '.ts' IS LOAD-BEARING. This is a VALUE import, so `node --test` resolves it at
+// runtime, and its ESM resolver does not guess extensions — extensionless, it throws
+// ERR_MODULE_NOT_FOUND and takes down every suite that reaches this file. `projects.ts`
+// writes './i18n.ts' for the same reason. Type-only imports are erased and never care.
+import { msg, type Msg } from './i18n.ts';
 
 export type MemberRole = 'owner' | 'crew' | 'sub';
 
@@ -307,6 +315,33 @@ export async function createInvite(
 }
 
 /**
+ * WHY A JOIN WAS REFUSED, IN THE READER'S OWN LANGUAGE.
+ *
+ * Every refusal from `accept_company_invite` used to reach the screen as the raw
+ * Postgres message — English, lower-case, written for a developer — and sql/424 added
+ * two more of them. That is now the first thing a Spanish-speaking crew member can see
+ * in this app, on the setup screen, at the moment they are trying to get in. Mandate #5
+ * says each user reads in their own language; a dead end is exactly the wrong place to
+ * stop honouring it.
+ *
+ * MATCHED ON THE MESSAGE, not the errcode, and that is not laziness: the RPC raises
+ * `22023` for BOTH "expired" and "already used", so the code cannot tell them apart.
+ * The strings are our own literals in sql/424 — this matches our constants, not
+ * Postgres's — but the two files are coupled and must move together. Anything
+ * unrecognised falls through to the raw text rather than a generic "something went
+ * wrong": an unfamiliar reason the user can read to somebody beats a friendly one that
+ * says nothing.
+ */
+function joinRefusal(message: string): Msg | string {
+  const m = (message ?? '').toLowerCase();
+  if (m.includes('already used')) return msg('join.used');
+  if (m.includes('no longer valid')) return msg('join.removed');
+  if (m.includes('expired')) return msg('join.expired');
+  if (m.includes('not found')) return msg('join.notFound');
+  return message;
+}
+
+/**
  * Accept an invite (typed code) → join the company, AND MAKE IT THE ACTIVE ONE.
  *
  * THE SECOND HALF USED TO BE MISSING (review 2026-08-25), and joining did not actually
@@ -331,13 +366,13 @@ export async function acceptInvite(
   db: AbstractPowerSyncDatabase, supabase: SupabaseClient,
   token: string, memberName?: string | null
 ): Promise<{ ok: true; companyId: string; role: MemberRole; companyName: string }
-         | { ok: false; reason: string }> {
+         | { ok: false; reason: Msg | string }> {
   const clean = token.trim();
-  if (!clean) return { ok: false, reason: 'no token' };
+  if (!clean) return { ok: false, reason: msg('join.noCode') };
   const { data, error } = await supabase.rpc('accept_company_invite', {
     p_token: clean, p_display_name: memberName || null,
   });
-  if (error) return { ok: false, reason: error.message };
+  if (error) return { ok: false, reason: joinRefusal(error.message) };
   const companyId = (data as any)?.company_id as string;
   // The company he just chose to join is the company he means to work in. Also
   // remembered as the tenant id, so this survives the `company` bucket not arriving —
