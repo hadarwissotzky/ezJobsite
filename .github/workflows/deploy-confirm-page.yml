@@ -65,3 +65,45 @@ jobs:
           path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      # ── PROVE THE DEPLOY LANDED, DO NOT ASSUME IT ────────────────────────────
+      #
+      # This workflow reported SUCCESS for three days while the live page was a
+      # different file entirely (2026-08-25). GitHub Pages was configured for
+      # legacy branch publishing from `gh-pages`, so `deploy-pages` uploaded an
+      # artifact that Pages ignored, and the branch held a copy of confirm.html
+      # with the placeholders never substituted. Every client approval link
+      # opened to "Invalid supabaseUrl" and stuck on Loading.
+      #
+      # Nothing failed. The run was green, the artifact was real, the Variables
+      # were correct, and the page was dead. A deploy that cannot tell you it
+      # deployed is not a deploy — so this asks the live URL what it is serving.
+      #
+      # It checks the two things that were actually wrong: that the placeholder
+      # is gone, and that ewa.js is reachable (an EWA link fails closed without
+      # it). Retries because Pages propagation is not instant.
+      - name: Verify the live page
+        run: |
+          URL="https://approve.ezchangeorders.com"
+          for i in 1 2 3 4 5 6 7 8; do
+            sleep 15
+            BODY="$(curl -fsSL "$URL/confirm.html" || true)"
+            case "$BODY" in
+              *__SUPABASE_URL__*|*__ANON_KEY__*)
+                echo "attempt $i: still serving unsubstituted placeholders"; continue;;
+              "") echo "attempt $i: no response"; continue;;
+            esac
+            case "$BODY" in
+              *"const SUPABASE_URL = 'https://"*) ;;
+              *) echo "attempt $i: SUPABASE_URL is not an https URL"; continue;;
+            esac
+            JS="$(curl -o /dev/null -s -w '%{http_code}' "$URL/ewa.js")"
+            [ "$JS" = "200" ] || { echo "attempt $i: ewa.js returned $JS"; continue; }
+            echo "live page verified: config substituted, ewa.js 200"
+            exit 0
+          done
+          echo "::error::The deploy was green but $URL is not serving this build."
+          echo "Most likely cause: Pages is on LEGACY branch publishing and ignoring"
+          echo "this workflow's artifact. Check:  gh api repos/OWNER/REPO/pages"
+          echo "It must report build_type: workflow — not legacy."
+          exit 1

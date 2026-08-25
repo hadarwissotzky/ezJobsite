@@ -59,7 +59,16 @@ upload() {   # $1 = filename, $2 = content type
 # STATED PRECISELY, so this is not read as a bigger fix than it is: the LIVE deploy is
 # `.github/workflows/deploy-confirm-page.yml` (GitHub Pages), and that workflow has
 # copied ewa.js since it was written -- Supabase Storage refuses to serve HTML, which
-# is why Pages exists at all. So the production path was never broken. THIS script is
+# is why Pages exists at all.
+#
+# CORRECTION [2026-08-25]: the line that used to sit here said "So the production path
+# was never broken." It was broken, for three days, and in a way this note would have
+# sent someone looking in the wrong place. Pages was set to LEGACY branch publishing
+# from `gh-pages`, so the workflow's artifact was ignored and the branch served a
+# confirm.html whose placeholders had never been substituted -- every client approval
+# link opened to "Invalid supabaseUrl". The workflow was green throughout. Pages is now
+# `build_type: workflow` and the workflow verifies the live URL after deploying.
+# THIS script is
 # the second, hand-run path to the `public-web` bucket, and it was still shipping a
 # page whose EWA renderer could not be there. Two deploy paths that disagree about
 # what a deploy contains is the same one-object-two-owners problem the SQL checker
