@@ -195,6 +195,7 @@ import { loadPricing, purchaseUrl, type PricingConfig } from './src/pricingconfi
 // reach the contractor with the phone in his pocket, with no provider behind it.
 import { ensureNotifySchema, notifyPermissionStatus, requestNotifyPermission,
          runNotifications } from './src/notifystore';
+import { opensConversation } from './src/notify';
 // R8: Remind is not Resend. Resend mints a NEW token and retires the one already in
 // the client's messages; a reminder must go via the SAME link (R8) or the nudge
 // breaks the thing it is nudging about.
@@ -1620,8 +1621,27 @@ const closeFeed = () => { feedOpenRef.current = false; setShowFeed(false); };
 React.useEffect(() => {
   let sub: { remove: () => void } | undefined;
   const openCo = (resp: any) => {
-    const coId = resp?.notification?.request?.content?.data?.changeOrderId;
-    if (coId) void openRecord(String(coId));
+    const data = resp?.notification?.request?.content?.data;
+    const coId = data?.changeOrderId;
+    if (!coId) return;
+    /**
+     * A MESSAGE NOTIFICATION LANDS ON THE MESSAGE (hadar, 2026-08-25: "when i click on
+     * a notification that is a new message, not only it should take me to the CO but it
+     * should open the message tab").
+     *
+     * Every push already carries `kind`, and 414's own comment says "`kind` is what the
+     * tap handler routes on" — but this handler only ever read `changeOrderId`, so all
+     * four kinds landed identically on the record and the client's question, which is
+     * the entire reason the phone buzzed, was another tap away behind a sheet.
+     *
+     * Only 'question' is a message. 'opened', 'reminder_failed' and 'review_request'
+     * are ABOUT the record and belong on it, so they are deliberately unchanged.
+     *
+     * A counter, not a flag: two questions in a row must open the sheet twice, and a
+     * boolean that is already true the second time would do nothing.
+     */
+    if (opensConversation(data?.kind)) setOpenMessagesNonce((n) => n + 1);
+    void openRecord(String(coId));
   };
   void (async () => {
     try {
@@ -3637,6 +3657,9 @@ const checkClientMessages = async () => {
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transition?.ids?.[0]]);
+  /** Bumped when a tap on a client-message push should land on the conversation, not
+   *  just on the record. Read by the negotiation screen; see `openCo`. */
+  const [openMessagesNonce, setOpenMessagesNonce] = React.useState(0);
   const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
   // extra id -> weakest state across its captures. Absent means "not computed
   // yet", which the gate treats as NOT ready: an unknown answer must never open
@@ -8532,6 +8555,7 @@ const checkClientMessages = async () => {
       {clientSheet}
       {sheets}
       <RecordScreen
+        openMessages={openMessagesNonce}
         rec={record}
         db={db}
         // The stage layer. Null while its read is in flight (or after it failed) —

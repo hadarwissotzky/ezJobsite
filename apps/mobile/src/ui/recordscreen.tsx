@@ -105,6 +105,13 @@ export type RecordLifecycle = {
 };
 
 export type RecordScreenProps = {
+  /**
+   * A COUNTER THAT MEANS "LAND ON THE CONVERSATION" (2026-08-25). Bumped by App when a
+   * client-message push is tapped, so the record opens with the message sheet already
+   * up. A counter rather than a boolean because two questions in a row must open it
+   * twice; passed straight through to the negotiation screen, which owns the sheet.
+   */
+  openMessages?: number;
   rec: ExtraRecord;
   /** R6b item 3 reads stored actor facts. Local SQLite only — see recordfacts.tsx
    *  for why the read lives in a hook here and not in the caller. */
@@ -352,6 +359,7 @@ export function RecordScreen(props: RecordScreenProps) {
         undelivered={props.undelivered}
         remind={lifecycle.remind}
         linkUrl={lifecycle.linkUrl ?? null}
+        openMessages={props.openMessages}
         formatAt={createdLabel}
         onBack={props.onBack}
         onReply={props.onReply}

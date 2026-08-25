@@ -157,6 +157,12 @@ export type ExtraNegotiationProps = {
    *  available — an approved or declined extra is past withdrawing. */
   onWithdraw?: () => void;
   /**
+   * OPEN ON THE CONVERSATION (2026-08-25). A counter bumped by App when the record was
+   * reached by tapping a client-message push, so the sheet is already up rather than
+   * one tap behind the thing the phone buzzed about. Undefined or 0 changes nothing.
+   */
+  openMessages?: number;
+  /**
    * THE LIVE CLIENT LINK, so he can copy it and email it himself (hadar 2026-08-24).
    *
    * Read from `co_live_link`, which holds exactly one live token per extra — copying
@@ -260,6 +266,22 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
       (globalThis as any).__msgSheet = (on?: boolean) => setMsgOpen(on !== false);
     }
   }, []);
+
+  /**
+   * ARRIVED FROM A MESSAGE NOTIFICATION — open the sheet.
+   *
+   * Compared against what this screen has ALREADY acted on, not against a boolean:
+   * the record stays mounted while the props change, so a flag would either fire on
+   * every open or refuse to fire twice for two consecutive questions. Starting the
+   * ref at 0 and the counter at 0 is what keeps an ordinary open silent.
+   */
+  const actedOnMsgNonce = React.useRef(0);
+  React.useEffect(() => {
+    const n = props.openMessages ?? 0;
+    if (n === 0 || n === actedOnMsgNonce.current) return;
+    actedOnMsgNonce.current = n;
+    setMsgOpen(true);
+  }, [props.openMessages]);
 
   // The ⋯ nav overflow — the design carries it on this screen. It offers the two acts
   // that are not one-tap on the page itself: revise & resend, and the full history.

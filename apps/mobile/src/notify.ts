@@ -90,3 +90,29 @@ export function planNotifications(o: {
     blocked: null,
   };
 }
+
+/**
+ * WHICH PUSH LANDS ON THE CONVERSATION, and which lands on the record.
+ *
+ * hadar, 2026-08-25: "when i click on a notification that is a new message, not only it
+ * should take me to the CO but it should open the message tab".
+ *
+ * Every push carries a `kind`, and 414's own comment calls it "what the tap handler
+ * routes on" — but the handler only ever read `changeOrderId`, so all four kinds landed
+ * identically on the record and a client's question, the entire reason the phone buzzed,
+ * sat one tap away behind a sheet.
+ *
+ * A LIST, NOT A NEGATION. Written as `kind === 'question'` this would be one string
+ * comparison; written as `kind !== 'opened'` it would silently pull in every kind added
+ * later. Naming the ones that ARE conversation means a new kind defaults to the record,
+ * which is the safe direction: landing on the record when a message was meant costs a
+ * tap, landing on a sheet when there is nothing to read is a dead end.
+ *
+ * The other three are ABOUT the record and belong on it: 'opened' (the client viewed
+ * it), 'reminder_failed' (a text did not go), 'review_request'.
+ */
+const CONVERSATION_KINDS: readonly string[] = ['question'];
+
+export function opensConversation(kind: unknown): boolean {
+  return typeof kind === 'string' && CONVERSATION_KINDS.includes(kind);
+}

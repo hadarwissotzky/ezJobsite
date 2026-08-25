@@ -61,3 +61,30 @@ test('both languages have the green-light wording', () => {
   const n = approvalNotificationFor({ changeOrderId: 'co-2', ...A });
   assert.equal(t(n.title, 'es'), 'Aprobado: Vanity height');
 });
+
+// ── Where a tapped push lands (hadar, 2026-08-25) ────────────────────────────────
+
+test('a client message opens the conversation', async () => {
+  const { opensConversation } = await import('./notify.ts');
+  assert.equal(opensConversation('question'), true,
+    'the one push that IS a message did not open the message sheet');
+});
+
+test('the other kinds land on the record, not on a sheet', async () => {
+  const { opensConversation } = await import('./notify.ts');
+  // 'opened' = the client viewed it, 'reminder_failed' = a text did not go,
+  // 'review_request'. All three are ABOUT the record; none has anything to read.
+  for (const k of ['opened', 'reminder_failed', 'review_request']) {
+    assert.equal(opensConversation(k), false, `${k} opened an empty conversation`);
+  }
+});
+
+test('an UNKNOWN kind defaults to the record', async () => {
+  const { opensConversation } = await import('./notify.ts');
+  // The safe direction, and the reason this is a list rather than `kind !== 'opened'`:
+  // landing on the record when a message was meant costs one tap; landing on a sheet
+  // with nothing in it is a dead end. A kind added later must not silently opt in.
+  for (const k of ['brand_new_kind', '', undefined, null, 42, {}]) {
+    assert.equal(opensConversation(k), false, `${String(k)} was treated as a message`);
+  }
+});
