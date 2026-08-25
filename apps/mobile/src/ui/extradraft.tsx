@@ -563,51 +563,14 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
 
         </View>
 
-        {/* WHO IS ON THIS, DIRECTLY UNDER THE STATE — the same slot the negotiation and
-            sealed screens give it (hadar, 2026-08-14: "same location"). It sat below
-            the scope AND the price here, so the same section appeared in a different
-            place on each of the three stages of one record.
-            It reads correctly in this slot as well as consistently: on a draft the
-            client is the gap that decides whether any of the work below can be sent at
-            all, and it used to be found only by scrolling past it. */}
-        <PeopleSection {...props} />
-
-        {/* 391 — THE SCOPE OF WORK LEADS, above the price.
-            It rendered 620px down the screen, below the money, the blocker banner and
-            the raw-capture card, clipped at five lines behind "Show more" — measured
-            on a real screenshot, not guessed. A scope you have to scroll to and then
-            tap to read is a scope nobody proofreads before it goes to a client, which
-            is exactly how 15 change orders reached an average scope length of 27
-            characters. And a price above the work reads as a bill rather than a
-            request: the owner cannot judge $2,400 until he knows what it buys.
-            Same component and same position on all three lifecycle screens. */}
-        <ScopeBlock
-          // THE PLACEHOLDER IS NOT A SCOPE. Passing it through rendered "Untitled extra
-          // — still being written up" in the box as if a person had written it there,
-          // under a caption telling him it was too short. Null hands ScopeBlock the
-          // honest input and lets it draw the waiting state.
-          text={scopeWritten ? rec.scopeOfWork : null}
-          stage="draft"
-          onEdit={props.onEditDescription}
-          missing={props.readiness.blockers.includes('no_description')}
-          // NOT YET WRITTEN vs WRITTEN BADLY are different facts and now read
-          // differently: "Too short to send" over a scope the AI has not produced yet
-          // is the app blaming the contractor for its own unfinished work.
-          pending={needsGenerate}
-          pendingLabel={!hasEvidence ? t('draft.noEvidenceHere')
-            : notProcessed ? t(procWhyKey(props.proc))
-            : t('draft.notWrittenUp')}
-          // Nothing is coming, so do not draw the hourglass: this is a gap to type
-          // into, not a wait to sit out.
-          pendingIsWait={hasEvidence}
-          // THE WAY OUT LIVES INSIDE THE BLOCK IT IS ABOUT (hadar 2026-08-06: "it just
-          // needs to be an integral part of the scope section"). It was a second card
-          // further down the page, under the price — so the screen stated the problem
-          // in one place and offered the fix in another, with a dollar figure between
-          // them. One object: the heading, the state, the reason, the buttons.
-          footer={isDraft && hasEvidence && !scopeWritten ? <StuckBlock {...props} /> : null}
-        />
-
+        {/* THE PRICE SITS UNDER THE TITLE, like it does on the other two stages
+            (hadar, 2026-08-24: "i am missing the price under the title").
+            It was below People AND the scope here, so the money — the thing the whole
+            document turns on — was the one element that moved when a record changed
+            stage: directly under the title on a sent extra and on a signed one, and
+            three sections down on a draft. He asked for that consistency once already
+            (2026-08-14, "the sequence of the information needs to be the same") and
+            this screen was the one that still broke it. */}
         {props.kind === 'extra'
           ? (
             /* A SECTION, NOT A FIGURE ON THE PAGE (hadar 2026-08-14: "the price section
@@ -641,6 +604,59 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
         {!rec.synced && (
           <Text style={[T.bodySteel, { fontSize: 12, marginTop: 8 }]}>{t('erec.onPhone')}</Text>
         )}
+
+        {/* WHO IS ON THIS, DIRECTLY UNDER THE STATE — the same slot the negotiation and
+            sealed screens give it (hadar, 2026-08-14: "same location"). It sat below
+            the scope AND the price here, so the same section appeared in a different
+            place on each of the three stages of one record.
+            It reads correctly in this slot as well as consistently: on a draft the
+            client is the gap that decides whether any of the work below can be sent at
+            all, and it used to be found only by scrolling past it. */}
+        <PeopleSection {...props} />
+
+        {/* 391 — THE SCOPE OF WORK IS NEAR THE TOP AND NEVER TRUNCATED.
+            (It used to say "LEADS, above the price". It no longer leads — the price
+            moved above it on 2026-08-24 to match the other two stages — but everything
+            below is why it sits high and open, and that still holds.)
+            It rendered 620px down the screen, below the money, the blocker banner and
+            the raw-capture card, clipped at five lines behind "Show more" — measured
+            on a real screenshot, not guessed. A scope you have to scroll to and then
+            tap to read is a scope nobody proofreads before it goes to a client, which
+            is exactly how 15 change orders reached an average scope length of 27
+            characters.
+            The rest of that note said a price above the work "reads as a bill rather
+            than a request", and on that reasoning the money was pushed below the scope
+            HERE ONLY — the negotiation and sealed screens have always put it directly
+            under the title. So the claim that followed it, "same position on all three
+            lifecycle screens", was never true of the price and is corrected here
+            (2026-08-24). It remains true of THIS component: the scope is the same
+            block, in the same place, at every stage. */}
+        <ScopeBlock
+          // THE PLACEHOLDER IS NOT A SCOPE. Passing it through rendered "Untitled extra
+          // — still being written up" in the box as if a person had written it there,
+          // under a caption telling him it was too short. Null hands ScopeBlock the
+          // honest input and lets it draw the waiting state.
+          text={scopeWritten ? rec.scopeOfWork : null}
+          stage="draft"
+          onEdit={props.onEditDescription}
+          missing={props.readiness.blockers.includes('no_description')}
+          // NOT YET WRITTEN vs WRITTEN BADLY are different facts and now read
+          // differently: "Too short to send" over a scope the AI has not produced yet
+          // is the app blaming the contractor for its own unfinished work.
+          pending={needsGenerate}
+          pendingLabel={!hasEvidence ? t('draft.noEvidenceHere')
+            : notProcessed ? t(procWhyKey(props.proc))
+            : t('draft.notWrittenUp')}
+          // Nothing is coming, so do not draw the hourglass: this is a gap to type
+          // into, not a wait to sit out.
+          pendingIsWait={hasEvidence}
+          // THE WAY OUT LIVES INSIDE THE BLOCK IT IS ABOUT (hadar 2026-08-06: "it just
+          // needs to be an integral part of the scope section"). It was a second card
+          // further down the page, under the price — so the screen stated the problem
+          // in one place and offered the fix in another, with a dollar figure between
+          // them. One object: the heading, the state, the reason, the buttons.
+          footer={isDraft && hasEvidence && !scopeWritten ? <StuckBlock {...props} /> : null}
+        />
 
         <RawSection {...props} />
         <ScopeSection {...props} />
