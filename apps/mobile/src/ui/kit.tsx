@@ -928,9 +928,9 @@ export function ScreenHeader({ title, onBack, backLabel, right, kicker, kickerRi
               : (
                 <Text
                   style={[display(22), st.headerTitle, { flex: 1 }]}
-                  numberOfLines={2}
+                  numberOfLines={3}
                   adjustsFontSizeToFit
-                  minimumFontScale={0.45}
+                  minimumFontScale={0.6}
                 >{title}</Text>
               )
           )}
@@ -974,9 +974,9 @@ function EditableTitle({ title, onChange }: {
       >
         <Text
           style={[display(22), st.headerTitle]}
-          numberOfLines={2}
+          numberOfLines={3}
           adjustsFontSizeToFit
-          minimumFontScale={0.45}
+          minimumFontScale={0.6}
         >{title}</Text>
       </Pressable>
     );
@@ -1509,15 +1509,27 @@ const st = StyleSheet.create({
    * Two lines is what makes the larger type mean something. The shrink-to-fit stays as
    * the backstop for a title too long even for two.
    *
-   * 56 -> 73 (a further 30%, hadar 2026-08-25), and the FLOOR came down with it:
-   * `minimumFontScale` 0.6 -> 0.45. Those two move together or the change is a
-   * regression. `adjustsFontSizeToFit` shrinks until the text fits and then truncates,
-   * so the size a long title actually renders at is base x floor, not base. At 56 x 0.6
-   * that was ~34pt, which is about what two lines of a 30-character title can hold on a
-   * phone. Raising the base to 73 without touching the floor would have set that same
-   * title at ~44pt — too big to fit, so it would have been CLIPPED instead of enlarged.
-   * 73 x 0.45 is ~33pt: a long title renders about as it did, and every title short
-   * enough to fit gets the full 30%. The increase lands where there is room for it.
+   * 56 -> 73 (hadar asked for a further 30%, 2026-08-25).
+   *
+   * THE NUMBER THAT DECIDES THE RENDERED SIZE IS base x minimumFontScale, NOT base.
+   * `adjustsFontSizeToFit` shrinks until the text fits, so a long title lands on the
+   * floor and stays there. Getting this wrong is not theoretical — I did it, and hadar
+   * caught it the moment he opened the app:
+   *
+   *     40 x 0.6  = 24pt   1 line
+   *     56 x 0.6  = 34pt   2 lines
+   *     73 x 0.45 = 33pt   2 lines   <- the "+30%" that was actually -2%
+   *
+   * I had lowered the floor so a bigger base could not clip a long title. It could not
+   * clip because it never got bigger; the two changes cancelled, and every real title
+   * — the structuring step writes ~60-character subjects — rendered a hair SMALLER.
+   *
+   * TWO LINES WAS THE REAL CEILING. About 30 characters over two lines on a phone is
+   * ~33pt of type however large the base is, so no base alone could move it. The third
+   * line is what buys the room: the same title over three lines fits at ~44pt, which is
+   * the 30% he asked for, and the floor goes back to 0.6 so it can be reached.
+   *
+   * If this needs to grow again, the lever is LINES, not points.
    */
   headerTitle: {
     fontFamily: F.disp, fontSize: 73, lineHeight: 76,
