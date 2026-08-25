@@ -610,8 +610,6 @@ const EN: Record<string, string> = {
   'how.foot': 'Everything you record is saved on this phone first, so nothing is lost when the signal is not there.',
   // Split for the empty state, and the instruction is dropped: the way out is a button
   // now, not a sentence telling him to go press something else.
-  'home.emptyFilterTitle': 'Nothing here right now',
-  'home.emptyFilterBody': 'Your other change orders are still here — this filter just has none in it.',
   'home.noAddress': 'No address',
   'home.captures': '{n} captures',
   'home.notPinned': 'not pinned',
@@ -2702,8 +2700,6 @@ const ES: Record<string, string> = {
   'how.s3': 'Envíalo para aprobación',
   'how.s3sub': 'Tu cliente recibe un mensaje, lo abre en su teléfono y firma. Te avisamos en cuanto lo haga.',
   'how.foot': 'Todo lo que grabas se guarda primero en este teléfono, así no se pierde nada cuando no hay señal.',
-  'home.emptyFilterTitle': 'Nada por aquí ahora',
-  'home.emptyFilterBody': 'Sus otras órdenes de cambio siguen aquí — este filtro no tiene ninguna.',
   'home.noAddress': 'Sin dirección',
   'home.captures': '{n} capturas',
   'home.notPinned': 'sin ubicación',

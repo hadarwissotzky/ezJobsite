@@ -3969,8 +3969,6 @@ const checkClientMessages = async () => {
   // every section; a value shows only that one, and tapping the live chip clears it.
   // Opens on 'needs' (hadar 2026-08-05): what needs YOU is the reason to open the app,
   // so it is selected by default; tapping the live chip still clears to every section.
-  const [homeFilter, setHomeFilter] =
-    React.useState<null | 'needs' | 'waiting' | 'approved' | 'closed'>('needs');
   /**
    * "Learn how it works", from the first-run Home. It exists because the design put a
    * link there and A LINK THAT OPENS NOTHING IS THE WORST CONTROL ON A FIRST SCREEN —
@@ -10080,45 +10078,15 @@ const shortJob = (name: string): string => {
               Tapping one filters the sections below IN PLACE; the live chip is ringed
               and tapping it again clears. Never navigates. */}
           {!homeEmpty && (<>
-          {/* THE JOB SCREEN'S PILLS (hadar, 2026-08-18: "change the home change orders
-              filters to look like the ones in the job section").
-
-              THE SAME STYLES, NOT A COPY OF THEM. `s.jsPill*` is reused verbatim, so the
-              two screens cannot drift apart the next time either is touched — which is
-              the entire point of the request. A second set of near-identical chip styles
-              is how they diverged in the first place.
-
-              NO COUNTS AND NO "ALL" (hadar, 2026-08-18, after seeing it on the device).
-              Three labels, nothing else. The counts were already on screen in the
-              sections below, so the pills were repeating them in a smaller font; and the
-              job screen's "All" earns its place there because that screen is ONE FLAT
-              LIST that genuinely needs an unfiltered state, while Home is already three
-              labelled sections — "all" is just the sections, unfiltered.
-
-              SO THESE TOGGLE. With no All pill, tapping the live one is the way back to
-              everything, and it is the only way — which is exactly why it must stay a
-              toggle here even though the job screen's pills set. Same look, different
-              screen, different job. */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.homePills}>
-            {([
-              { k: 'needs',    label: T('act.chipNeeds') },
-              { k: 'waiting',  label: T('act.chipWaiting') },
-              { k: 'approved', label: T('act.chipApproved') },
-              { k: 'closed',   label: T('home.closedChip') },
-            ] as const).map((f) => {
-              const on = homeFilter === f.k;
-              return (
-                <Pressable key={f.k}
-                  style={[s.jsPill, on && s.jsPillOn]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                  onPress={() => setHomeFilter((cur) => (cur === f.k ? null : f.k))}>
-                  <Text style={[s.jsPillT, on && s.jsPillTOn]}>{f.label}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          {/* THE FILTER PILLS ARE GONE (hadar's home artboard, 2026-08-25, and his
+              screenshot of them still sitting there).
+              They sorted by STATUS, and so did the five sections they steered. Both are
+              replaced by "Needs you first" / "Everything else", which answers the
+              question a contractor actually opens the phone with. Keeping the pills on
+              top of the new grouping was the worst of both: his screenshot shows "Needs
+              you" selected and his one extra hidden behind it, on a screen whose whole
+              job is showing him what is outstanding. A filter that can hide everything
+              needs a reason to exist, and the two sections took it. */}
 
           {/* Status sections in the mockup's order (waiting out first, then what needs
               you, the running win, and finally your own drafts). Header is an uppercase
@@ -10127,25 +10095,14 @@ const shortJob = (name: string): string => {
           {(() => {
             // A filter hides the other sections. "See all" focuses this one; while
             // focused the link flips to "Show all" and clears — both in place.
-            type HomeF = 'needs' | 'waiting' | 'approved' | 'closed';
-            const bucket = (labelKey: string, f: HomeF | null, list: Extra[],
-              /** The filters this section CONTAINS, when it holds more than one status.
-               *  Without it a chip for "approved" would hide the only section its rows
-               *  live in — the section would be excluded for not BEING that filter. */
-              holds?: HomeF[]) => {
+            const bucket = (labelKey: string, list: Extra[]) => {
               if (!list.length) return null;
-              const mine = holds ?? (f ? [f] : []);
-              if (homeFilter && !mine.includes(homeFilter)) return null;
-              const focused = homeFilter === f;
               return (
                 <React.Fragment key={labelKey}>
                   <View style={s.secHead}>
+                    {/* The heading alone now. The "See all" link set the filter that no
+                        longer exists, and the artboard leaves this slot empty. */}
                     <Text style={s.secLab}>{T(labelKey)}</Text>
-                    {f && (
-                      <Pressable onPress={() => setHomeFilter(focused ? null : f)} hitSlop={8}>
-                        <Text style={s.seeAll}>{focused ? T('home.showAll') : T('home.seeAll')}</Text>
-                      </Pressable>
-                    )}
                   </View>
                   {/* THE ROWS CARRY THEIR OWN BORDER NOW, so the section no longer
                       draws one round them (2026-08-13). `exGroup` was a single quiet
@@ -10159,7 +10116,6 @@ const shortJob = (name: string): string => {
             // A filter that matches nothing would otherwise paint a blank page — and
             // 'needs' is now the DEFAULT, so that is the common case for a user with
             // extras but nothing awaiting them. Say so, and say how to get out.
-            const shown = { needs, waiting: waitingList, approved: approvedList, closed: closedList };
             /**
              * TWO SECTIONS, NOT FIVE (hadar's home artboard, 2026-08-25).
              *
@@ -10173,23 +10129,21 @@ const shortJob = (name: string): string => {
              * sent extras where the client has asked something. Nothing about the
              * derivation changes; only how many headings sit over it.
              *
-             * THE FILTER CHIPS STILL WORK. `bucket` refuses a list that the active
-             * filter excludes, and "Everything else" declares its own three so a chip
-             * for waiting, approved or closed still narrows to it.
+             * AND THE FILTER PILLS ARE GONE WITH THEM. They sorted by the same status
+             * vocabulary; keeping them on top of this grouping let "Needs you" hide the
+             * account's only extra, which is what hadar photographed.
              */
             const rest = [...waitingList, ...approvedList, ...closedList]
               .sort((a, b) => b.created_at_ms - a.created_at_ms);
             return (<>
-              {bucket('home.needsYouFirst', 'needs', needs)}
-              {bucket('home.everythingElse', null, rest, ['waiting', 'approved', 'closed'])}
+              {bucket('home.needsYouFirst', needs)}
+              {bucket('home.everythingElse', rest)}
               {/* SHOW ALL — the artboard's footer.
                   Home holds the most recent extras; this is the way to the full list
                   across every job, which is what `openFeed` already is. Only when there
                   is more to see than is on screen: a button offering "show all 3" under
-                  three rows is furniture, not a way out. And never while a filter is
-                  active — there the way out is clearing the filter, which the empty
-                  state below already offers. */}
-              {!homeFilter && homeExtras.length > needs.length + rest.length && (
+                  three rows is furniture, not a way out. */}
+              {homeExtras.length > needs.length + rest.length && (
                 <Pressable onPress={() => void openFeed()} accessibilityRole="button"
                   style={({ pressed }) => [s.showAllBtn, pressed ? { opacity: 0.6 } : null]}>
                   <Text style={s.showAllBtnT}>
@@ -10197,28 +10151,9 @@ const shortJob = (name: string): string => {
                   </Text>
                 </Pressable>
               )}
-              {homeFilter && shown[homeFilter].length === 0 && homeExtras.length > 0 && (
-                // A FILTERED empty, so the copy must not claim the account is empty —
-                // there ARE change orders, just none in this bucket. The way out is a
-                // BUTTON rather than the old sentence telling him to tap the chip again:
-                // an instruction to go press something else is not a way out, it is
-                // homework, and this is a gloved thumb outdoors.
-                <EmptyState
-                  title={T('home.emptyFilterTitle')} body={T('home.emptyFilterBody')}
-                  action={
-                    <Pressable onPress={() => setHomeFilter(null)}
-                      accessibilityRole="button"
-                      style={({ pressed }) => [{
-                        minHeight: 46, paddingHorizontal: 22, borderRadius: 12,
-                        borderWidth: 1.5, borderColor: C.ink,
-                        alignItems: 'center', justifyContent: 'center' },
-                        pressed && { opacity: 0.7 }]}>
-                      <Text style={{ fontFamily: F.bodyBold, fontSize: 15.5, color: C.ink }}>
-                        {T('home.showAll')}
-                      </Text>
-                    </Pressable>
-                  } />
-              )}
+              {/* The FILTERED-empty state is gone with the filters. There is no longer a
+                  way to reach a screen that has change orders but shows none, so an
+                  empty state explaining that state would be unreachable code. */}
             </>);
           })()}
           </>)}
@@ -12688,7 +12623,6 @@ const s = StyleSheet.create({
   },
   showAllBtnT: { fontFamily: 'Inter_600SemiBold', fontSize: 14.5, color: '#3d3733' },
   secLab: { fontFamily: 'Oswald_600SemiBold', fontSize: 15, color: '#6b625b', textTransform: 'uppercase', letterSpacing: 0.8 },
-  seeAll: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#285791' },  // sky-700
   secBadge: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center',
     justifyContent: 'center', paddingHorizontal: 6 },
   secBadgeWarn: { backgroundColor: '#F59E0B' },
@@ -13148,8 +13082,6 @@ const s = StyleSheet.create({
    * Adding `paddingHorizontal` to `jsPills` itself would have fixed Home and shifted the
    * job screen by 12pt at the same time.
    */
-  homePills: { flexDirection: 'row', gap: 7, paddingVertical: 10,
-    paddingLeft: 16, paddingRight: 16 },
   jsPill: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 15, borderRadius: 999,
     borderWidth: 1, borderColor: '#D6D2C7', backgroundColor: 'transparent' },
   jsPillOn: { backgroundColor: '#2F4F2A', borderColor: '#2F4F2A' },
