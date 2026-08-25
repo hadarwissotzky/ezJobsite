@@ -1322,8 +1322,19 @@ const st = StyleSheet.create({
   // BOLD (hadar, 2026-07-31): the row's label is the name of the thing — Description,
   // Cost, Payment timing — and it carries the row. Was medium (500), which read as
   // body copy beside its own value.
-  rowLabel: { fontFamily: F.bodyBold, fontSize: 13.5, color: C.ink },
-  rowSub: { fontFamily: F.body, fontSize: 12, color: C.muted, marginTop: 1, lineHeight: 16 },
+  /**
+   * SECTION CONTENT, 15% up (hadar, 2026-08-25: "make all co detail section content
+   * font size 15% larger"). 13.5 -> 15.5, 12 -> 14, 13 -> 15.
+   *
+   * These three are what a section card is MADE of — every "Cost / $1,200", "Impact on
+   * schedule / No change", "Not included / …" row on the draft, sent and sealed screens
+   * is a `Row`, so the label, its sub-line and its value are the section content.
+   *
+   * `rowSub`'s line height moves with it (16 -> 18) for the same reason the scope's did:
+   * a sub-line that wraps is prose, and raising size without leading tightens it.
+   */
+  rowLabel: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.ink },
+  rowSub: { fontFamily: F.body, fontSize: 14, color: C.muted, marginTop: 1, lineHeight: 18 },
   // 58%, not 46%: at the tighter cap a normal value ("View previous versions") wrapped
   // its ROW to two lines, which is what made the locked screen twice as tall as the
   // design. The label side still wins the remaining space.
@@ -1331,7 +1342,7 @@ const st = StyleSheet.create({
   // its room and RN broke it mid-word ("Descriptio / n"); the value is the side that
   // can afford to wrap.
   rowValue: {
-    fontFamily: F.body, fontSize: 13, textAlign: 'right',
+    fontFamily: F.body, fontSize: 15, textAlign: 'right',
     flexShrink: 1, maxWidth: '52%',
   },
   chev: { fontFamily: F.body, fontSize: 19, color: C.muted, marginLeft: 2 },
