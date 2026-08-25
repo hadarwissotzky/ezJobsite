@@ -1547,10 +1547,25 @@ const st = StyleSheet.create({
    * line is what buys the room: the same title over three lines fits at ~44pt, which is
    * the 30% he asked for, and the floor goes back to 0.6 so it can be reached.
    *
-   * If this needs to grow again, the lever is LINES, not points.
+   * 73 -> 51 (hadar asked for 30% smaller, 2026-08-25). Three lines and the 0.6 floor
+   * both STAY: with the smaller base a long title needs about 31pt, which two lines
+   * could have held, but leaving the third available costs nothing — `numberOfLines` is
+   * a maximum, so a title that fits in one still uses one — and it is what keeps a very
+   * long subject from hitting the floor and truncating.
+   *
+   * The full run, so the shape of it is visible at a glance:
+   *
+   *     40 x 0.6 = 24pt   1 line
+   *     56 x 0.6 = 34pt   2 lines
+   *     73 x 0.45= 33pt   2 lines   (asked +30%, delivered -2%)
+   *     73 x 0.6 = 44pt   3 lines
+   *     51 x 0.6 = 31pt   3 lines   <- here
+   *
+   * If this needs to change again, move POINTS to change the size and LINES to change
+   * the ceiling. Moving both at once is what produced the -2%.
    */
   headerTitle: {
-    fontFamily: F.disp, fontSize: 73, lineHeight: 76,
+    fontFamily: F.disp, fontSize: 51, lineHeight: 53,
     textTransform: 'uppercase', letterSpacing: 0.2,
   },
   // While editing: a quiet underline so the field is visibly live without the title
