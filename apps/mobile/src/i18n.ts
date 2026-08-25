@@ -490,6 +490,14 @@ const EN: Record<string, string> = {
   'home.closedSec': 'Closed \u2014 declined or withdrawn',
   'home.closedChip': 'Closed',
   'home.approvedSec': 'Approved',
+  /* The home artboard (hadar, 2026-08-25). FIVE buckets became TWO. The old set —
+     waiting / needs a response / approved / closed — sorted by STATUS, which is the
+     app's vocabulary, not a contractor's. He has one question on opening the phone:
+     what do I have to do. So: what needs him, then everything else, and the status
+     pill on each row still says which is which. */
+  'home.needsYouFirst': 'Needs you first',
+  'home.everythingElse': 'Everything else',
+  'home.showAllN': 'Show all {n} change orders',
   'home.clientQuestion': 'Client question',
   'home.sentAgo': 'Sent {ago}',
   'home.navHome': 'Home',
@@ -2612,6 +2620,9 @@ const ES: Record<string, string> = {
   'home.closedSec': 'Cerradas \u2014 rechazadas o retiradas',
   'home.closedChip': 'Cerradas',
   'home.approvedSec': 'Aprobado',
+  'home.needsYouFirst': 'Requiere su atención',
+  'home.everythingElse': 'Todo lo demás',
+  'home.showAllN': 'Ver las {n} órdenes de cambio',
   'home.clientQuestion': 'Pregunta del cliente',
   'home.sentAgo': 'Enviado {ago}',
   'home.navHome': 'Inicio',

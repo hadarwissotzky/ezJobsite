@@ -10112,10 +10112,15 @@ const shortJob = (name: string): string => {
           {(() => {
             // A filter hides the other sections. "See all" focuses this one; while
             // focused the link flips to "Show all" and clears — both in place.
-            const bucket = (labelKey: string,
-              f: 'needs' | 'waiting' | 'approved' | 'closed' | null, list: Extra[]) => {
+            type HomeF = 'needs' | 'waiting' | 'approved' | 'closed';
+            const bucket = (labelKey: string, f: HomeF | null, list: Extra[],
+              /** The filters this section CONTAINS, when it holds more than one status.
+               *  Without it a chip for "approved" would hide the only section its rows
+               *  live in — the section would be excluded for not BEING that filter. */
+              holds?: HomeF[]) => {
               if (!list.length) return null;
-              if (homeFilter && homeFilter !== f) return null;
+              const mine = holds ?? (f ? [f] : []);
+              if (homeFilter && !mine.includes(homeFilter)) return null;
               const focused = homeFilter === f;
               return (
                 <React.Fragment key={labelKey}>
@@ -10140,11 +10145,43 @@ const shortJob = (name: string): string => {
             // 'needs' is now the DEFAULT, so that is the common case for a user with
             // extras but nothing awaiting them. Say so, and say how to get out.
             const shown = { needs, waiting: waitingList, approved: approvedList, closed: closedList };
+            /**
+             * TWO SECTIONS, NOT FIVE (hadar's home artboard, 2026-08-25).
+             *
+             * It was waiting / needs a response / approved / closed — a sort by STATUS,
+             * which is the app's vocabulary rather than a contractor's. He opens the
+             * phone with one question: what do I have to do. So the screen answers that
+             * question first and puts the rest under one heading, with each row's status
+             * pill still saying which is which.
+             *
+             * `needs` is already exactly "needs you first" — drafts he has not sent, and
+             * sent extras where the client has asked something. Nothing about the
+             * derivation changes; only how many headings sit over it.
+             *
+             * THE FILTER CHIPS STILL WORK. `bucket` refuses a list that the active
+             * filter excludes, and "Everything else" declares its own three so a chip
+             * for waiting, approved or closed still narrows to it.
+             */
+            const rest = [...waitingList, ...approvedList, ...closedList]
+              .sort((a, b) => b.created_at_ms - a.created_at_ms);
             return (<>
-              {bucket('home.waitingForYes', 'waiting', waitingList)}
-              {bucket('home.needsResponse', 'needs', needs)}
-              {bucket('home.approvedSec', 'approved', approvedList)}
-              {bucket('home.closedSec', 'closed', closedList)}
+              {bucket('home.needsYouFirst', 'needs', needs)}
+              {bucket('home.everythingElse', null, rest, ['waiting', 'approved', 'closed'])}
+              {/* SHOW ALL — the artboard's footer.
+                  Home holds the most recent extras; this is the way to the full list
+                  across every job, which is what `openFeed` already is. Only when there
+                  is more to see than is on screen: a button offering "show all 3" under
+                  three rows is furniture, not a way out. And never while a filter is
+                  active — there the way out is clearing the filter, which the empty
+                  state below already offers. */}
+              {!homeFilter && homeExtras.length > needs.length + rest.length && (
+                <Pressable onPress={() => void openFeed()} accessibilityRole="button"
+                  style={({ pressed }) => [s.showAllBtn, pressed ? { opacity: 0.6 } : null]}>
+                  <Text style={s.showAllBtnT}>
+                    {T({ k: 'home.showAllN', p: { n: homeExtras.length } })}
+                  </Text>
+                </Pressable>
+              )}
               {homeFilter && shown[homeFilter].length === 0 && homeExtras.length > 0 && (
                 // A FILTERED empty, so the copy must not claim the account is empty —
                 // there ARE change orders, just none in this bucket. The way out is a
@@ -12623,6 +12660,15 @@ const s = StyleSheet.create({
   // fill. A saturated dot on solid ink reads as something gone wrong.
   secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 18,
     marginTop: 10, marginBottom: 10 },
+  // The artboard's full-width footer button: outlined and white, so it reads as a way
+  // ONWARD rather than as another record. It carries no colour — nothing here is an
+  // action on money.
+  showAllBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 6, marginHorizontal: 16, minHeight: 48,
+    borderWidth: 1, borderColor: '#e2dbd4', borderRadius: 12, backgroundColor: '#ffffff',
+  },
+  showAllBtnT: { fontFamily: 'Inter_600SemiBold', fontSize: 14.5, color: '#3d3733' },
   secLab: { fontFamily: 'Oswald_600SemiBold', fontSize: 15, color: '#6b625b', textTransform: 'uppercase', letterSpacing: 0.8 },
   seeAll: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#285791' },  // sky-700
   secBadge: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center',
