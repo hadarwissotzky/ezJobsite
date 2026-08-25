@@ -380,18 +380,25 @@ test('ONE priced segment among several is not the price of the job', () => {
 
 // ── Codex, adversarial review 2026-08-24: one figure is not one price ────────────
 
-test("CODEX: a SEGMENT price is not written as the whole job's price", () => {
-  // His counterexample, verbatim in shape. One currency figure in the transcript, four
-  // segments of work, and the figure plainly buys only the first of them. Writing $500
-  // here under-quotes the contractor and puts a number nobody said in front of a
-  // client's signature.
-  const { reading, writable } = draftPrice(
-    FIREPLACE_SEGMENTS,
-    'Demo the fireplace for $500, then rebuild and tile the face.',
-    parse);
-  assert.equal(reading?.amountCents, 50000, 'he should still SEE what was read');
-  assert.equal(writable, false,
-    'a segment price was auto-written as the price of the whole job');
+test('a single figure he said IS the price, whatever words surround it', () => {
+  // REVERSED 2026-08-25 by hadar: "we are not writing a price that was not given by the
+  // user -- we just extracting it."
+  //
+  // This test used to assert the opposite. It was written for Codex's counterexample —
+  // "$500" on a four-part job — and the gate it protected refused these too, which is
+  // why it had to go: a man stating his price plainly, and the field left blank because
+  // his wording missed a list. Codex's case is accepted knowingly; see draftPrice.
+  for (const line of [
+    'It will cost $1,200.',
+    'Probably around $1,200.',
+    'I would say $1,200.',
+    '$1,200.',
+    'This one runs $1,200.',
+  ]) {
+    const { reading, writable } = draftPrice(FIREPLACE_SEGMENTS, line, parse);
+    assert.equal(reading?.amountCents, 120000, `did not read ${line}`);
+    assert.equal(writable, true, `refused a price he plainly stated: ${line}`);
+  }
 });
 
 test('a stated whole-job total still writes', () => {
@@ -422,11 +429,15 @@ test('no segments at all is treated as one job, not as many', () => {
   assert.equal(writable, true);
 });
 
-test('the cue must be in the clause the FIGURE came from', () => {
-  // Guards against a cue anywhere in a long transcript licensing an unrelated figure.
+test('AMBIGUITY still refuses — two figures means the app would be choosing', () => {
+  // Unchanged and load-bearing. Reading one number he said is extraction; picking
+  // between two is authoring, which is the line mandate #6 actually draws.
   const { writable } = draftPrice(
-    FIREPLACE_SEGMENTS,
-    'We will do everything on the list. Demo the fireplace for $500.',
-    parse);
-  assert.equal(writable, false, 'a cue in another sentence licensed a segment price');
+    FIREPLACE_SEGMENTS, 'The demo is $400 and then the tile runs $900.', parse);
+  assert.equal(writable, false);
+});
+
+test('a BARE number still refuses — "four fifty" is why', () => {
+  const { writable } = draftPrice(FIREPLACE_SEGMENTS, 'It will be 750 probably.', parse);
+  assert.equal(writable, false, 'a number with no currency marker was treated as a price');
 });
