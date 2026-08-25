@@ -279,19 +279,56 @@ export function StepLanguage(props: {
 
 /* ────────────────────────────── 2. tell us about you ────────────────────────── */
 
+/**
+ * How this person works. THREE answers, not two (review 2026-08-25).
+ *
+ * The screen used to ask "I work solo" or "I have a company", and a crew member handed
+ * a code by their boss can answer neither truthfully — they do not work solo and they
+ * do not HAVE a company, they work FOR one. There was no third option and nowhere to
+ * put the code, so the only path in was: finish setup as one of the two wrong answers,
+ * then find Settings → Profile → Join a company on your own. For a user this product
+ * defines as someone who does not think in software, that is not a path.
+ *
+ * It was worse than a missing option. Answering either way mints this person their OWN
+ * company on the next launch (`ensure_billing_tenant`), and "I have a company" invites
+ * them to type their employer's name into it — so the crew member ends up OWNER of a
+ * ghost company wearing his boss's name. Then `listMyCompanies` sorts owned-first, so
+ * even after joining the real one the app keeps defaulting him back to the ghost.
+ *
+ * Joining HERE, before the profile is saved, closes all of it: the mint is a no-op
+ * until a profile has a name, and by the time it runs this person already has a real
+ * membership — which `ensure_billing_tenant` returns instead of creating anything.
+ */
+export type Work = 'solo' | 'company' | 'invited';
+
 export function StepProfile(props: {
   name: string;
   onName: (v: string) => void;
-  isSolo: boolean | null;
-  onSolo: (v: boolean) => void;
+  work: Work | null;
+  onWork: (v: Work) => void;
   company: string;
   onCompany: (v: string) => void;
+  /** The invite code, when `work` is 'invited'. */
+  invite: string;
+  onInvite: (v: string) => void;
+  /** Set by the caller when the code was refused, so the reason lands under the field
+   *  instead of on a screen this person has already left. */
+  inviteError?: string | null;
+  /** The join RPC is in flight — the CTA must not be tappable twice. */
+  joining?: boolean;
   onContinue: () => void;
   art?: ArtSource;
 }) {
   // Company NAME stays optional (hadar 2026-07-20): picking Company and leaving the
   // name blank must not block setup. Only the name and the arrangement gate.
-  const canGo = props.name.trim().length > 0 && props.isSolo !== null;
+  //
+  // THE CODE IS NOT OPTIONAL, though, and that asymmetry is deliberate: a blank company
+  // name costs a letterhead line that Settings can fix later, while a blank code means
+  // this person did not actually join anything and finishes setup stranded in exactly
+  // the state this option exists to prevent.
+  const canGo = props.name.trim().length > 0 && props.work !== null
+    && (props.work !== 'invited' || props.invite.trim().length > 0)
+    && !props.joining;
 
   return (
     <Chrome step={1} art={props.art ?? null}
@@ -322,11 +359,16 @@ export function StepProfile(props: {
         </View>
 
         <ChoiceRow icon="person" label={t('fr.solo')} sub={t('su.soloSub')}
-          selected={props.isSolo === true} onPress={() => props.onSolo(true)} />
+          selected={props.work === 'solo'} onPress={() => props.onWork('solo')} />
         <ChoiceRow icon="people" label={t('fr.company')} sub={t('su.companySub')}
-          selected={props.isSolo === false} onPress={() => props.onSolo(false)} />
+          selected={props.work === 'company'} onPress={() => props.onWork('company')} />
+        {/* LAST, deliberately. The two owner answers stay where they have always been,
+            so nothing moves under the thumb of the contractor this app was built for;
+            the invited crew member is the newcomer and reads down to find himself. */}
+        <ChoiceRow icon="personAdd" label={t('su.invited')} sub={t('su.invitedSub')}
+          selected={props.work === 'invited'} onPress={() => props.onWork('invited')} />
 
-        {props.isSolo === false && (
+        {props.work === 'company' && (
           <TextInput value={props.company} onChangeText={props.onCompany}
             placeholder={t('fr.companyName')} placeholderTextColor={C.steel}
             autoCapitalize="words" textContentType="organizationName"
@@ -336,8 +378,31 @@ export function StepProfile(props: {
               fontFamily: F.body, fontSize: 18, color: C.ink,
             }} />
         )}
+
+        {props.work === 'invited' && (
+          <>
+            {/* autoCapitalize/autoCorrect OFF for the same reason as the Settings join
+                field: the token is 32 hex characters, which is exactly what iOS
+                "helpfully" rewrites, and a rewritten token fails as "invite not found"
+                with nothing on screen to explain why. */}
+            <TextInput value={props.invite} onChangeText={props.onInvite}
+              placeholder={t('su.invitePlaceholder')} placeholderTextColor={C.steel}
+              autoCapitalize="none" autoCorrect={false}
+              style={{
+                backgroundColor: C.raised,
+                borderColor: props.inviteError ? C.danger : C.line, borderWidth: 1,
+                borderRadius: 14, minHeight: 62, paddingHorizontal: 14,
+                fontFamily: F.body, fontSize: 18, color: C.ink,
+              }} />
+            <Text style={{ fontFamily: F.body, fontSize: 14.5, marginTop: 8,
+              color: props.inviteError ? C.danger : C.steel }}>
+              {props.inviteError || t('su.inviteHint')}
+            </Text>
+          </>
+        )}
       </View>
-      <Cta label={t('fr.continue')} tone="accent" disabled={!canGo} onPress={props.onContinue} />
+      <Cta label={props.joining ? t('su.joining') : t('fr.continue')}
+        tone="accent" disabled={!canGo} onPress={props.onContinue} />
     </Chrome>
   );
 }

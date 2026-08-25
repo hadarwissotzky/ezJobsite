@@ -40,6 +40,8 @@ import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sha256 } from 'js-sha256';
 import { msg, type Msg } from './i18n.ts';
+// The tenant a new job files under. See createProject for why it is THIS resolver.
+import { billingTenantId } from './company.ts';
 
 /**
  * NO app-owned project table and NO project outbox.
@@ -186,16 +188,48 @@ export async function createProject(
     return { ok: false, reason: msg('job.needsUser') };
   }
 
+  /**
+   * WHICH COMPANY THIS JOB BELONGS TO — the column that makes a team a team.
+   *
+   * THIS WAS MISSING ENTIRELY (review 2026-08-25), and it silently disabled every
+   * team feature in the product. `company_id` was added to `project` by sql/376,
+   * which backfilled the rows that existed that day and left the INSERT here
+   * untouched — so every job created since carries NULL, and NULL is the value all
+   * three consumers test against:
+   *   · RLS `project_company_read` requires `company_id is not null` (376),
+   *   · the sync rule is `WHERE company_id IN my_companies` (sync-config.yaml),
+   *   · `notif_recipients` reaches the crew by joining through it (sql/416).
+   * A crew member could accept an invite, appear on the roster, and still open an
+   * empty app — the company-wide visibility this project chose in July has never
+   * actually shipped. sql/416 even calls `company_id IS NULL` a legacy condition;
+   * it was the current one.
+   *
+   * `billingTenantId`, NOT `myCompany`: on a device whose `company` bucket has not
+   * arrived the local tables are empty while the server holds a real membership, and
+   * `myCompany` answers null there — the exact gap that broke the drawer's invite
+   * button (App.tsx) and hid the paid plan. The remembered server-supplied id is the
+   * fallback, and for a person in more than one company `myCompany` still wins first,
+   * so the device's ACTIVE choice decides. That matters: only the device knows which
+   * hat this person is wearing right now.
+   *
+   * NULL IS STILL A LEGAL OUTCOME and is left alone deliberately — a first job created
+   * offline before any company has synced has nothing truthful to file under. Rule 2 at
+   * the top of this file governs: a wrong auto-file is worse than an unresolved one.
+   * sql/423's INSERT trigger fills exactly this case server-side, and only when the
+   * owner's membership is unambiguous.
+   */
+  const companyId = await billingTenantId(db, o.ownerId).catch(() => null);
+
   const now = Date.now();
   const id = `prj-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   try {
     // REQ-PROC7: works with no signal. The row lands locally now; PowerSync's
     // ps_crud carries it up whenever there is a connection. No outbox of ours.
     await db.execute(
-      `INSERT INTO project (id, owner_id, name, address, lat, lng, geofence_m,
+      `INSERT INTO project (id, owner_id, company_id, name, address, lat, lng, geofence_m,
          client_ref, status, created_at_ms, last_used_ms)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      [id, o.ownerId, name, o.address ?? null, o.lat ?? null, o.lng ?? null, 150,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [id, o.ownerId, companyId, name, o.address ?? null, o.lat ?? null, o.lng ?? null, 150,
        o.clientRef ?? null, 'active', now, now]
     );
   } catch (e: any) {

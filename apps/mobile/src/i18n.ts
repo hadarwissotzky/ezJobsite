@@ -320,6 +320,15 @@ const EN: Record<string, string> = {
   'su.nameLabel': 'What should we call you?',
   'su.soloSub': 'Just me',
   'su.companySub': '2 or more people',
+  // The third answer on the who-are-you step (review 2026-08-25). Worded from the
+  // crew member's side — "someone invited me", not "join an organisation" — and the
+  // subtitle names the thing he is holding, because that is what tells him this row
+  // is his.
+  'su.invited': 'Someone invited me',
+  'su.invitedSub': 'I have a code from my boss',
+  'su.invitePlaceholder': 'Paste your code',
+  'su.inviteHint': 'Your boss sent this to you by text.',
+  'su.joining': 'Joining…',
   'su.h1t': 'Capture',
   'su.h1b': 'Record voice, add photos and details.',
   'su.h2t': 'Review',
@@ -1114,7 +1123,6 @@ const EN: Record<string, string> = {
   'set.joined': 'Joined {company} ✓',
   'set.joinFailed': 'Could not join:',
   'set.inviteFailed': 'Could not create invite:',
-  'set.inviteMsg': 'Join {company} on EZChangeOrders — tap the link to get set up:',
   'set.inviteMsgCode': 'Join {company} on EZChangeOrders. Open the app → Settings → Join a company, and enter this code: {code}',
   'set.solo': 'Working solo',
   'set.company': 'Company',
@@ -2525,6 +2533,11 @@ const ES: Record<string, string> = {
   'su.nameLabel': '¿Cómo te llamamos?',
   'su.soloSub': 'Solo yo',
   'su.companySub': '2 o más personas',
+  'su.invited': 'Alguien me invitó',
+  'su.invitedSub': 'Tengo un código de mi jefe',
+  'su.invitePlaceholder': 'Pega tu código',
+  'su.inviteHint': 'Tu jefe te lo envió por mensaje.',
+  'su.joining': 'Uniéndote…',
   'su.h1t': 'Captura',
   'su.h1b': 'Graba tu voz, añade fotos y detalles.',
   'su.h2t': 'Revisa',
@@ -3142,7 +3155,6 @@ const ES: Record<string, string> = {
   'set.joined': 'Te uniste a {company} ✓',
   'set.joinFailed': 'No se pudo unir:',
   'set.inviteFailed': 'No se pudo crear la invitación:',
-  'set.inviteMsg': 'Únete a {company} en EZChangeOrders — toca el enlace para configurarte:',
   'set.inviteMsgCode': 'Únete a {company} en EZChangeOrders. Abre la app → Ajustes → Únete a una empresa, e ingresa este código: {code}',
   'set.solo': 'Trabajas por tu cuenta',
   'set.company': 'Empresa',

@@ -12,8 +12,20 @@
  * create/join and synced down, so the roster reads by name (falling back to "you"/
  * "teammate" only when a member has no name yet).
  */
-import { AbstractPowerSyncDatabase } from '@powersync/react-native';
-import { SupabaseClient } from '@supabase/supabase-js';
+/**
+ * TYPE-ONLY, both of them — and it has to stay that way (2026-08-25).
+ *
+ * Neither name is used as a value anywhere in this file; they were plain imports only
+ * because nothing had ever imported this module from a testable one. `projects.ts` now
+ * does, for `billingTenantId`, and a VALUE import of `@powersync/react-native` loads
+ * React Native itself — whose `index.js.flow` is Flow, not JavaScript — into the
+ * `node --test` loader, taking down every test file that transitively reaches here.
+ * That cost four suites and 29 tests the moment the import landed. A type import is
+ * erased at compile time and costs nothing. Same rule, same reason, as the headers in
+ * `firstrun.ts` and `projects.ts`.
+ */
+import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type MemberRole = 'owner' | 'crew' | 'sub';
 
@@ -262,13 +274,28 @@ export async function ensureBillingTenant(
 }
 
 /**
- * Owner mints an invite. Returns the token, the invitee-facing link, and the raw
- * token for the manual "enter a code" fallback (the link needs the join page hosted;
- * the token always works typed in). Reuses the same base as the approval links.
+ * Owner mints an invite. Returns the TOKEN — the thing the invitee types into
+ * Settings → Join a company — and the company's name for the message.
+ *
+ * NO LINK, DELIBERATELY (review 2026-08-25). This used to also return
+ * `${linkBase}/join?token=…`, built on the approval-link base, and both callers
+ * PREFERRED that link over the code whenever it was non-empty. `EXPO_PUBLIC_CONFIRM_BASE`
+ * is set in every configured build, so the link always won — and no such page exists:
+ * `apps/web/` is `confirm.html` + `ewa.js`, which is also all `scripts/deploy-web.sh`
+ * uploads, and the app has no `ezjobsite://join` deep-link case either (App.tsx's
+ * handler takes `capture` and the auth callback, nothing else). So every invite this
+ * app has ever sent said "tap the link to get set up" and pointed at a 404, while the
+ * message that actually works could never fire. An owner tapping Invite had no path at
+ * all to a teammate holding a code.
+ *
+ * A page that could accept the invite is not a small addition, either: the RPC is
+ * granted to `authenticated` and revoked from `anon` (376), so a browser cannot join a
+ * company — it could only display the code and point at the store. Until something is
+ * actually hosted there, the honest thing to hand a contractor is the code.
  */
 export async function createInvite(
-  supabase: SupabaseClient, companyId: string, role: 'crew' | 'sub', linkBase: string
-): Promise<{ ok: true; token: string; url: string; companyName: string }
+  supabase: SupabaseClient, companyId: string, role: 'crew' | 'sub'
+): Promise<{ ok: true; token: string; companyName: string }
          | { ok: false; reason: string }> {
   const { data, error } = await supabase.rpc('create_company_invite', {
     p_company_id: companyId, p_role: role,
@@ -276,14 +303,33 @@ export async function createInvite(
   if (error) return { ok: false, reason: error.message };
   const token = (data as any)?.token as string;
   if (!token) return { ok: false, reason: 'no token returned' };
-  const base = (linkBase && !linkBase.startsWith('/')) ? linkBase.replace(/\/+$/, '') : '';
-  const url = base ? `${base}/join?token=${token}` : '';
-  return { ok: true, token, url, companyName: (data as any)?.company_name ?? '' };
+  return { ok: true, token, companyName: (data as any)?.company_name ?? '' };
 }
 
-/** Accept an invite (link tap or typed token) → join the company. */
+/**
+ * Accept an invite (typed code) → join the company, AND MAKE IT THE ACTIVE ONE.
+ *
+ * THE SECOND HALF USED TO BE MISSING (review 2026-08-25), and joining did not actually
+ * move anybody. `setActiveCompany` had exactly one caller in the whole app — the
+ * drawer's manual switcher — so a successful join left the device with no stored
+ * choice, `myCompany` fell through to `all[0]`, and `listMyCompanies` sorts OWNED
+ * FIRST. A crew member who already had a company of his own (which, before the setup
+ * flow gained its 'invited' option, was everybody) joined the real one and stayed
+ * filed under his own. His jobs, his letterhead and his plan all stayed on the wrong
+ * tenant, and the only way out was a switcher he had no reason to know about.
+ *
+ * Doing it HERE rather than at the call sites is the point: this is the one place a
+ * membership is created on a device, so it is the one place that can be sure. It is
+ * the same reasoning `createProject` now follows for `company_id` — the fix belongs at
+ * the single door, not at each of the rooms behind it.
+ *
+ * The write is best-effort. A join that succeeded on the server must not be reported
+ * as failed because a local preference row would not write; the worst case is the old
+ * behaviour, which is a default, not a loss.
+ */
 export async function acceptInvite(
-  supabase: SupabaseClient, token: string, memberName?: string | null
+  db: AbstractPowerSyncDatabase, supabase: SupabaseClient,
+  token: string, memberName?: string | null
 ): Promise<{ ok: true; companyId: string; role: MemberRole; companyName: string }
          | { ok: false; reason: string }> {
   const clean = token.trim();
@@ -292,8 +338,16 @@ export async function acceptInvite(
     p_token: clean, p_display_name: memberName || null,
   });
   if (error) return { ok: false, reason: error.message };
+  const companyId = (data as any)?.company_id as string;
+  // The company he just chose to join is the company he means to work in. Also
+  // remembered as the tenant id, so this survives the `company` bucket not arriving —
+  // the gap that hid the roster, the plan and the invite button on a real device.
+  if (companyId) {
+    await setActiveCompany(db, companyId).catch(() => {});
+    await rememberTenantId(db, companyId).catch(() => {});
+  }
   return {
-    ok: true, companyId: (data as any)?.company_id, role: (data as any)?.role,
+    ok: true, companyId, role: (data as any)?.role,
     companyName: (data as any)?.company_name ?? '',
   };
 }

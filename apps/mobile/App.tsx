@@ -20,7 +20,7 @@ import { buildLine, useOta } from './src/otaclient';
 import { inFlight } from './src/ota';
 import { Onboarding } from './src/ui/onboarding';
 import { RecordConsent } from './src/ui/recordconsent';
-import { SETUP_ART, StepHowItWorks, StepLanguage, StepProfile } from './src/ui/setupflow';
+import { SETUP_ART, StepHowItWorks, StepLanguage, StepProfile, type Work } from './src/ui/setupflow';
 import { FirstExtra } from './src/ui/firstextra';
 import { GuidedCoach } from './src/ui/guidedcoach';
 import { StepDone, StepGaps, StepReview, StepTranscript,
@@ -115,7 +115,7 @@ import { sendReadiness, UNTITLED_SCOPE } from './src/sendreadiness';
 import { mergeTimeline, openCount, type MergedEvent } from './src/eventtimeline';
 import { SettingsScreen } from './src/ui/settingsscreen';
 import { extraState, extraBucket, isClosed } from './src/extrabucket';
-import { billingTenantId, createInvite, ensureBillingTenant, ensureOwnCompany,
+import { acceptInvite, billingTenantId, createInvite, ensureBillingTenant, ensureOwnCompany,
          listMembers, listMyCompanies, myCompany, resolveMyCompany, setActiveCompany,
          type Member } from './src/company';
 import { closeMyAccount } from './src/closeaccount';
@@ -1586,9 +1586,33 @@ const openSettings = async (
 ) => {
   setSettingsFrom(from);
   const p = (await getProfile(db)) ?? { name: '', isSolo: true, company: null, trade: null };
+  /**
+   * PROMOTE ONLY SOMEBODY WHO BELONGS NOWHERE (review 2026-08-25).
+   *
+   * `ensureOwnCompany` calls `create_company`, and that RPC's idempotence check is
+   * `where owner_id = uid` — OWNERSHIP, not membership (sql/376). A crew member owns
+   * nothing, so it does not return his company; it CREATES one and makes him its owner.
+   * The condition above is true for exactly that person: the setup flow's 'invited'
+   * answer saves `isSolo: false` with his employer's name, so opening Settings once
+   * would have handed him a ghost company wearing his boss's name — the same ghost the
+   * new onboarding step exists to prevent, re-minted through a different door.
+   *
+   * It was reachable before that step existed, too: anyone who answered "I have a
+   * company" and then joined a real one hit it just the same.
+   *
+   * `resolveMyCompany`, not `myCompany`, because a device whose `company` bucket has
+   * not arrived answers null locally while the server holds a real membership — and
+   * null here is what triggers the mint. Asking the server is the whole point; it also
+   * caches what it learns, so this costs one round-trip once.
+   */
   if (!p.isSolo && (p.company ?? '').trim()) {
-    try { await ensureOwnCompany(connector.client, (p.company as string).trim(), p.name); await refresh(); }
-    catch { /* offline — the promote retries next time Settings opens */ }
+    try {
+      const existing = await resolveMyCompany(db, connector.client, OWNER);
+      if (!existing) {
+        await ensureOwnCompany(connector.client, (p.company as string).trim(), p.name);
+        await refresh();
+      }
+    } catch { /* offline — the promote retries next time Settings opens */ }
   }
   setSettingsProfile(p);
   setSettingsMode(mode);
@@ -2343,7 +2367,7 @@ const inviteFromSend = async () => {
     }
     const q = await checkMembers(db, companyId);
     if (!q.ok) { setQuota({ kind: 'members', limit: q.limit }); return; }
-    const r = await createInvite(connector.client, companyId, 'crew', CONFIRM_BASE);
+    const r = await createInvite(connector.client, companyId, 'crew');
     if (!r.ok) {
       // ROUTED TO `ack`, NOT `filed`. `filed` is write-only — nothing in this file
       // renders it — so the previous version of this failed in total silence, which is
@@ -2351,9 +2375,18 @@ const inviteFromSend = async () => {
       setAck({ kind: 'no', title: T('r5c.inviteFailedH'), detail: r.reason });
       return;
     }
-    const msg = r.url
-      ? T({ k: 'set.inviteMsg', p: { company: co?.name ?? '' } } as any) + '\n\n' + r.url
-      : T({ k: 'set.inviteMsgCode', p: { company: co?.name ?? '', code: r.token } } as any);
+    /**
+     * THE CODE, ALWAYS. The link branch that used to sit here pointed at an unhosted
+     * /join page and always won — see createInvite's header in company.ts.
+     *
+     * THE NAME COMES FROM THE SERVER FIRST. `co` is null on exactly the device this
+     * whole branch exists for — the one whose `company` table never synced, which is
+     * why `companyId` is read from `billingTenantId` above — so `co?.name ?? ''` sent
+     * "Join  on EZChangeOrders" to the one teammate it was supposed to convince.
+     * `create_company_invite` already returns the name; use it.
+     */
+    const msg = T({ k: 'set.inviteMsgCode',
+      p: { company: r.companyName || co?.name || '', code: r.token } } as any);
     try { await Share.share({ message: msg }); } catch { /* dismissed */ }
   } catch (e: any) {
     setAck({ kind: 'no', title: T('r5c.inviteFailedH'), detail: String(e?.message ?? e) });
@@ -4159,8 +4192,17 @@ const checkClientMessages = async () => {
   const [hasProfileState, setHasProfile] = React.useState(false);
   const [pSub, setPSub] = React.useState<'lang' | 'who' | 'how'>('lang');
   const [pName, setPName] = React.useState('');
-  const [pSolo, setPSolo] = React.useState<boolean | null>(null);
+  /**
+   * THREE answers now (review 2026-08-25), not a boolean. 'invited' is the crew member
+   * holding a code from their boss, who could previously answer only by lying — and
+   * whose lie minted them a ghost company they then defaulted into forever. See
+   * `StepProfile` in ui/setupflow.tsx for the full account.
+   */
+  const [pWork, setPWork] = React.useState<Work | null>(null);
   const [pCompany, setPCompany] = React.useState('');
+  const [pInvite, setPInvite] = React.useState('');
+  const [pInviteErr, setPInviteErr] = React.useState<string | null>(null);
+  const [pJoining, setPJoining] = React.useState(false);
   // Resolved from the session at startup. Nothing that syncs may be written with a
   // placeholder: the server's types are the contract, and a string that cannot be
   // a UUID is not a user.
@@ -6500,7 +6542,7 @@ const checkClientMessages = async () => {
     /**
      * THE THREE SETUP SCREENS (hadar 2026-08-19, from the mockups) — language, then
      * who you are, then what the app does. They live in `ui/setupflow.tsx`; this is
-     * only the wiring, because the state they edit (`pName`, `pSolo`, `pCompany`,
+     * only the wiring, because the state they edit (`pName`, `pWork`, `pCompany`,
      * `lang`) is owned here and threading it out is the whole job.
      *
      * The old two-step green form is gone, and with it the trade grid: asking a
@@ -6510,13 +6552,41 @@ const checkClientMessages = async () => {
     if (step === 'profile') {
       const saveAndGo = async () => {
         await saveProfile(connector, db, {
-          name: pName, isSolo: pSolo === true,
-          company: pSolo === false ? pCompany : null,
+          name: pName, isSolo: pWork === 'solo',
+          // 'invited' carries a company name too — the REAL one, as the server returned
+          // it from the join below, not something this person typed. That is what puts
+          // his employer on the letterhead instead of a blank.
+          company: pWork === 'solo' ? null : pCompany,
           trade: null,   // asked later, in Settings — see setupflow.tsx header
         // The language picked one screen earlier travels with the account, so a
         // reinstall does not put a Spanish speaker back into English.
         }, lang);
         setHasProfile(true);
+      };
+
+      /**
+       * LEAVING THE "WHO" SCREEN — and, for an invited crew member, JOINING FROM IT.
+       *
+       * The join happens HERE rather than after setup, and the ordering is the whole
+       * fix. `ensureBillingTenant` is a no-op until a profile has a name, and the
+       * profile is not saved until `saveAndGo` two screens later — so a membership
+       * created now is already in place when the mint finally runs, and
+       * `ensure_billing_tenant` returns THAT instead of creating a company of this
+       * person's own. No ghost tenant, nothing to switch away from afterwards.
+       *
+       * A REFUSED CODE KEEPS HIM ON THIS SCREEN. Advancing on failure would strand him
+       * in exactly the state this option exists to prevent, and he would have no idea
+       * it had happened — the whole reason the old flow was a trap.
+       */
+      const leaveWho = async () => {
+        if (pWork !== 'invited') { setPSub('how'); return; }
+        setPJoining(true); setPInviteErr(null);
+        const r = await acceptInvite(db, connector.client, pInvite, pName);
+        setPJoining(false);
+        if (!r.ok) { setPInviteErr(T('set.joinFailed') + ' ' + r.reason); return; }
+        // The name comes back from the server; it is the one that goes on documents.
+        setPCompany(r.companyName);
+        setPSub('how');
       };
 
       if (pSub === 'lang') {
@@ -6531,9 +6601,11 @@ const checkClientMessages = async () => {
         return (
           <StepProfile art={SETUP_ART.setup}
             name={pName} onName={setPName}
-            isSolo={pSolo} onSolo={setPSolo}
+            work={pWork} onWork={(w) => { setPWork(w); setPInviteErr(null); }}
             company={pCompany} onCompany={setPCompany}
-            onContinue={() => setPSub('how')} />
+            invite={pInvite} onInvite={(v) => { setPInvite(v); setPInviteErr(null); }}
+            inviteError={pInviteErr} joining={pJoining}
+            onContinue={() => void leaveWho()} />
         );
       }
 
@@ -9704,7 +9776,7 @@ const checkClientMessages = async () => {
       <>
       <SettingsScreen
         db={db} supabase={connector.client} userId={OWNER} profile={settingsProfile}
-        lang={lang} mode={settingsMode} confirmBase={CONFIRM_BASE}
+        lang={lang} mode={settingsMode}
         // The letterhead card draws the logo and hands the tap back here — App.tsx
         // owns the picker, the upload and the local cache (companylogo.ts), and a
         // second copy of that flow inside Settings is a second place for it to break.

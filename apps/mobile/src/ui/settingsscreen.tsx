@@ -54,7 +54,6 @@ export function SettingsScreen(props: {
    *  'company' = company settings (team, plan) — the caller only opens this for the
    *  company OWNER; the drawer hides the entry point for everyone else. */
   mode: 'profile' | 'company';
-  confirmBase: string;
   /** The company logo as a LOCAL file path, or null. Drawn in the letterhead card so
    *  the contractor sees what a client sees. */
   logoUri?: string | null;
@@ -263,12 +262,12 @@ export function SettingsScreen(props: {
     const q = await checkMembers(db, co.id);
     if (!q.ok) { setQuotaHit({ kind: 'members', limit: q.limit }); return; }
     setBusy(true); setNote(null);
-    const r = await createInvite(supabase, co.id, 'crew', props.confirmBase);
+    const r = await createInvite(supabase, co.id, 'crew');
     setBusy(false);
     if (!r.ok) { setNote(t('set.inviteFailed') + ' ' + r.reason); return; }
-    const msg = r.url
-      ? t({ k: 'set.inviteMsg', p: { company: co.name } } as any) + '\n\n' + r.url
-      : t({ k: 'set.inviteMsgCode', p: { company: co.name, code: r.token } } as any);
+    // THE CODE, ALWAYS. The link branch that used to sit here pointed at an unhosted
+    // /join page and always won — see createInvite's header in company.ts.
+    const msg = t({ k: 'set.inviteMsgCode', p: { company: co.name, code: r.token } } as any);
     try { await Share.share({ message: msg }); } catch { /* user dismissed */ }
   };
 
@@ -276,7 +275,7 @@ export function SettingsScreen(props: {
     const tok = joinToken.trim();
     if (!tok) return;
     setBusy(true); setNote(null);
-    const r = await acceptInvite(supabase, tok, props.profile.name);
+    const r = await acceptInvite(db, supabase, tok, props.profile.name);
     setBusy(false);
     if (!r.ok) { setNote(t('set.joinFailed') + ' ' + r.reason); return; }
     setJoinToken('');
@@ -865,8 +864,14 @@ export function SettingsScreen(props: {
         </Pressable>}>
       {/* In a sheet, so the field sits ABOVE the keyboard. On the page it sat under it
           — hadar hit exactly that on this screen earlier today. */}
+      {/* autoCorrect OFF, added 2026-08-25 with the invite-message fix. This field is
+          now the ONLY way into a company — the dead /join link is gone — so it is
+          load-bearing in a way it was not when it was the fallback. The token is 32
+          hex characters, which is precisely the shape iOS autocorrect mangles, and a
+          mangled token fails as "invite not found" with nothing on screen to explain
+          why. `autoCapitalize` was already right; this closes the other half. */}
       <TextInput style={inputStyle} value={joinToken} onChangeText={setJoinToken}
-        autoCapitalize="none" autoFocus
+        autoCapitalize="none" autoCorrect={false} autoFocus
         placeholder={t('set.joinPlaceholder')} placeholderTextColor="#8c959f" />
       {!!note && <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 10 }}>{note}</Text>}
     </BottomSheet>
