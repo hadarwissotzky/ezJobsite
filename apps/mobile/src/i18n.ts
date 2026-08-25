@@ -383,8 +383,27 @@ const EN: Record<string, string> = {
   // one digit apart, on a different line, in grey.
   //
   // So the job leads on the cross-job lists and the number qualifies it.
-  'job.coNoOn': '{job} · #{n}',
-  'job.coNo': 'Change Order #{n}',
+  /**
+   * THE RECORD'S NUMBER LEADS (hadar, 2026-08-25: "the first field is jobsite # --
+   * that should be CO-# not the street or jobsite name").
+   *
+   * `coNoOn` used to read "{job} · #{n}", putting the address first. That came from
+   * 2026-08-24, when Home mixed jobs and two cards both read "Change Order #2" — the
+   * number is per PROJECT, so it does not identify a row on a screen that spans
+   * projects, and the fix then was to lead with the job.
+   *
+   * Both facts still have to be on the line; only the order changes. The number goes
+   * first because it is the record's NAME — the thing printed on the client's document
+   * and the thing he says on the phone — and the job follows to keep two "CO-2"s apart,
+   * which is what yesterday's change was actually for.
+   *
+   * "CO-{n}" IS NOT TRANSLATED, in Spanish either. It is an identifier that appears on
+   * a signed instrument, like an invoice number; a record called CO-2 in English and
+   * OC-2 in Spanish is one record with two names, and the client holding the paperwork
+   * cannot see which language the app was set to.
+   */
+  'job.coNoOn': 'CO-{n} · {job}',
+  'job.coNo': 'CO-{n}',
   'job.coNoNumber': 'Change order',
   'job.initiated': 'Initiated {d}',
   // See `feed.raisedByLab`. A job's person is who ASKED for the work; the feed's is who
@@ -2491,8 +2510,8 @@ const ES: Record<string, string> = {
   'job.chipNeeds': 'Necesita aprobación',
   'job.chipWaiting': 'Esperando al cliente',
   'job.chipApproved': 'Aprobado',
-  'job.coNoOn': '{job} · #{n}',
-  'job.coNo': 'Orden de cambio #{n}',
+  'job.coNoOn': 'CO-{n} · {job}',
+  'job.coNo': 'CO-{n}',
   'job.coNoNumber': 'Orden de cambio',
   'job.initiated': 'Iniciada {d}',
   'job.requestedByLab': 'Pedida por',
