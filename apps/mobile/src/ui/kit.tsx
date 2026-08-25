@@ -1559,13 +1559,18 @@ const st = StyleSheet.create({
    *     56 x 0.6 = 34pt   2 lines
    *     73 x 0.45= 33pt   2 lines   (asked +30%, delivered -2%)
    *     73 x 0.6 = 44pt   3 lines
-   *     51 x 0.6 = 31pt   3 lines   <- here
+   *     51 x 0.6 = 31pt   3 lines
+   *     41 x 0.6 = 25pt   3 lines   <- here
+   *
+   * Which is, to within a point, where it started at 40 x 0.6 = 24pt — except on three
+   * lines instead of one, so a long subject is now READ rather than cut off mid-word.
+   * The size went round in a circle; the truncation is what actually got fixed.
    *
    * If this needs to change again, move POINTS to change the size and LINES to change
    * the ceiling. Moving both at once is what produced the -2%.
    */
   headerTitle: {
-    fontFamily: F.disp, fontSize: 51, lineHeight: 53,
+    fontFamily: F.disp, fontSize: 41, lineHeight: 43,
     textTransform: 'uppercase', letterSpacing: 0.2,
   },
   // While editing: a quiet underline so the field is visibly live without the title
