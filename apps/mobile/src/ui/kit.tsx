@@ -928,7 +928,7 @@ export function ScreenHeader({ title, onBack, backLabel, right, kicker, kickerRi
               : (
                 <Text
                   style={[display(22), st.headerTitle, { flex: 1 }]}
-                  numberOfLines={1}
+                  numberOfLines={2}
                   adjustsFontSizeToFit
                   minimumFontScale={0.6}
                 >{title}</Text>
@@ -974,7 +974,7 @@ function EditableTitle({ title, onChange }: {
       >
         <Text
           style={[display(22), st.headerTitle]}
-          numberOfLines={1}
+          numberOfLines={2}
           adjustsFontSizeToFit
           minimumFontScale={0.6}
         >{title}</Text>
@@ -1494,8 +1494,23 @@ const st = StyleSheet.create({
    * `lineHeight` tracks it at 1.05: this face is condensed and set in caps, and a wider
    * leading on a two-line title opens a gap that reads as two separate headings.
    */
+  /**
+   * THE EXTRA'S TITLE, 40% LARGER (hadar, 2026-08-24: "need to make the title of the CO
+   * inside the details by 40%"). 40 -> 56, and the line height keeps its 1.05 ratio.
+   *
+   * THE SIZE ALONE WOULD HAVE MADE IT WORSE, which is why `numberOfLines` moved with it.
+   * The title is drawn with `adjustsFontSizeToFit` and `minimumFontScale={0.6}` on ONE
+   * line, so a real title — "Panel upgrade — code required", or the ~60-character
+   * subjects the structuring step writes — was already shrinking to the 0.6 floor and
+   * then truncating. Raising the base raises the floor (24 -> 33.6, the 40% he asked
+   * for) but fits FEWER characters at that size, so on its own this change would have
+   * bought a bigger word and lost the rest of the sentence.
+   *
+   * Two lines is what makes the larger type mean something. The shrink-to-fit stays as
+   * the backstop for a title too long even for two.
+   */
   headerTitle: {
-    fontFamily: F.disp, fontSize: 40, lineHeight: 42,
+    fontFamily: F.disp, fontSize: 56, lineHeight: 58,
     textTransform: 'uppercase', letterSpacing: 0.2,
   },
   // While editing: a quiet underline so the field is visibly live without the title
