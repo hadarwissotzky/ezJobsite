@@ -157,6 +157,15 @@ export type ExtraNegotiationProps = {
    *  available — an approved or declined extra is past withdrawing. */
   onWithdraw?: () => void;
   /**
+   * HOW MANY MESSAGES HE HAS NOT SEEN on this record, for the badge on the Messages
+   * tab (hadar, 2026-08-25: "the message tab should have an indicator with the number
+   * of new messages like the notification icon on the top right"). 0 renders nothing.
+   */
+  unreadMessages?: number;
+  /** Called the first time the conversation is actually opened, so the badge above can
+   *  stop claiming something is waiting once he has seen it. */
+  onMessagesSeen?: () => void;
+  /**
    * OPEN ON THE CONVERSATION (2026-08-25). A counter bumped by App when the record was
    * reached by tapping a client-message push, so the sheet is already up rather than
    * one tap behind the thing the phone buzzed about. Undefined or 0 changes nothing.
@@ -275,6 +284,14 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
    * every open or refuse to fire twice for two consecutive questions. Starting the
    * ref at 0 and the counter at 0 is what keeps an ordinary open silent.
    */
+  // Opening the conversation IS seeing it. Fires on the transition to open, not on
+  // every render while it is open.
+  const wasMsgOpen = React.useRef(false);
+  React.useEffect(() => {
+    if (msgOpen && !wasMsgOpen.current) props.onMessagesSeen?.();
+    wasMsgOpen.current = msgOpen;
+  }, [msgOpen, props]);
+
   const actedOnMsgNonce = React.useRef(0);
   React.useEffect(() => {
     const n = props.openMessages ?? 0;
@@ -393,7 +410,7 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
 
         </View>
 
-        <TabBar active={tab}
+        <TabBar active={tab} unreadMessages={props.unreadMessages ?? 0}
           onChange={(k) => {
             if (k === 'messages') setMsgOpen(true);
             // ONE history popup, not two. This briefly had its own Activity sheet
@@ -738,7 +755,9 @@ function SyncedPill() {
 }
 
 type NegTab = 'info' | 'messages' | 'activity';
-function TabBar({ active, onChange }: { active: NegTab; onChange: (t: NegTab) => void }) {
+function TabBar({ active, onChange, unreadMessages = 0 }: {
+  active: NegTab; onChange: (t: NegTab) => void; unreadMessages?: number;
+}) {
   // Text-only tabs — the design's segmented control carries no icons.
   const tabs: { key: NegTab; label: string }[] = [
     { key: 'info', label: t('neg.tabInfo') },
@@ -756,8 +775,18 @@ function TabBar({ active, onChange }: { active: NegTab; onChange: (t: NegTab) =>
             onPress={() => onChange(tb.key)}
             accessibilityRole="button"
             accessibilityState={{ selected: on }}
+            // The badge is a shape; VoiceOver needs the fact said.
+            accessibilityLabel={tb.key === 'messages' && unreadMessages > 0
+              ? `${tb.label}, ${unreadMessages} new` : tb.label}
           >
             <Text style={[st.tabT, on && st.tabTOn]}>{tb.label}</Text>
+            {/* The count rides ON the tab, not beside it, so it moves with the label
+                and cannot drift out of the segment when the tracking changes. */}
+            {tb.key === 'messages' && unreadMessages > 0 && (
+              <View style={st.tabBadge}>
+                <Text style={st.tabBadgeT}>{unreadMessages > 99 ? '99+' : unreadMessages}</Text>
+              </View>
+            )}
           </Pressable>
         );
       })}
@@ -1407,6 +1436,19 @@ const st = StyleSheet.create({
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 6, minHeight: 40, borderRadius: 9,
   },
+  /**
+   * THE UNREAD COUNT ON THE MESSAGES TAB. Same red as the header bell's badge and the
+   * card's dot (#cf222e) — one colour for "something is waiting", wherever it is said.
+   *
+   * A count here and a dot on the card is not an inconsistency: a card answers "is
+   * anything waiting on this record", and by the time he is looking at the tab he has
+   * already chosen the record, so the useful question becomes "how many".
+   */
+  tabBadge: {
+    minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5,
+    backgroundColor: '#cf222e', alignItems: 'center', justifyContent: 'center',
+  },
+  tabBadgeT: { color: '#fff', fontSize: 11, fontFamily: F.bodyBold },
   // A RAISED PILL, NOT A GREEN ONE. The selected tab was filled `C.brand`, which put a
   // second solid green on a screen whose state band is already green (hadar,
   // 2026-08-14). A light pill lifted off the muted track is iOS's own segmented

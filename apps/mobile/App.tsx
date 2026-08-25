@@ -215,7 +215,8 @@ import { DraftRecoveryCard } from './src/ui/draftrecovery';
 // shown_content. In a dispute they would each be reading a different document and
 // neither would know it.
 import { ensureEventLogSchema, readEventLog, withEventLog, type ApprovalPanel } from './src/eventlog';
-import { unreadByChangeOrder, unreadCount, unreadIds, type ActivityRow } from './src/activity';
+import { unreadByChangeOrder, unreadCount, unreadIds, unreadMessageIdsFor,
+         unreadMessagesByChangeOrder, type ActivityRow } from './src/activity';
 import { buildApprovalDoc, shareApprovalDoc } from './src/approvalrecordshare';
 import { ApprovalDocSheet } from './src/ui/approvaldocsheet';
 import { useFonts } from 'expo-font';
@@ -3667,6 +3668,9 @@ const checkClientMessages = async () => {
    * same rows for one answer.
    */
   const unreadRecords = React.useMemo(() => unreadByChangeOrder(activity), [activity]);
+  /** Unseen MESSAGES per record, for the badge on the open record's Messages tab.
+   *  Narrower than `unreadRecords`: see `unreadMessagesByChangeOrder`. */
+  const unreadMsgs = React.useMemo(() => unreadMessagesByChangeOrder(activity), [activity]);
   const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
   // extra id -> weakest state across its captures. Absent means "not computed
   // yet", which the gate treats as NOT ready: an unknown answer must never open
@@ -8563,6 +8567,18 @@ const checkClientMessages = async () => {
       {sheets}
       <RecordScreen
         openMessages={openMessagesNonce}
+        unreadMessages={record ? (unreadMsgs.get(record.id) ?? 0) : 0}
+        /* Opening the conversation is seeing it. Without this the badge would still
+           claim a message was waiting after he had just read it — and a count that does
+           not clear trains the reader to ignore it, which would cost the header bell
+           its meaning too, since they share a colour. */
+        onMessagesSeen={async () => {
+          if (!record) return;
+          const ids = unreadMessageIdsFor(activity, record.id);
+          if (!ids.length) return;
+          await markRead(db, ids);
+          await refresh();          // rebuilds `activity` with the new read-state
+        }}
         rec={record}
         db={db}
         // The stage layer. Null while its read is in flight (or after it failed) —

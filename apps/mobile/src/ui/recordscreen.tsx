@@ -112,6 +112,10 @@ export type RecordScreenProps = {
    * twice; passed straight through to the negotiation screen, which owns the sheet.
    */
   openMessages?: number;
+  /** Unseen messages on this record, for the badge on the Messages tab (2026-08-25). */
+  unreadMessages?: number;
+  /** Mark this record's unseen messages read once the conversation is opened. */
+  onMessagesSeen?: () => void;
   rec: ExtraRecord;
   /** R6b item 3 reads stored actor facts. Local SQLite only — see recordfacts.tsx
    *  for why the read lives in a hook here and not in the caller. */
@@ -360,6 +364,8 @@ export function RecordScreen(props: RecordScreenProps) {
         remind={lifecycle.remind}
         linkUrl={lifecycle.linkUrl ?? null}
         openMessages={props.openMessages}
+        unreadMessages={props.unreadMessages}
+        onMessagesSeen={props.onMessagesSeen}
         formatAt={createdLabel}
         onBack={props.onBack}
         onReply={props.onReply}

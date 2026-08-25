@@ -221,3 +221,53 @@ test('an UNPRICED record carries null, never zero', async () => {
   assert.ok(rows.length > 0);
   for (const r of rows) assert.equal(r.amountCents, null, `${r.kind} invented a figure`);
 });
+
+// ── The count on the Messages tab (hadar, 2026-08-25) ────────────────────────────
+
+test('the tab counts MESSAGES, not every unseen thing', async () => {
+  const { unreadMessagesByChangeOrder, unreadByChangeOrder } = await import('./activity.ts');
+  // An approval is unseen news and belongs on the card's dot, but it was never said in
+  // the conversation — counting it would send someone to Messages to find nothing.
+  const rows: any[] = [
+    { id: 'q1', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 1, read: false },
+    { id: 'q2', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 2, read: false },
+    { id: 'ap', kind: 'approved', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 3, read: false },
+  ];
+  assert.equal(unreadMessagesByChangeOrder(rows).get('co1'), 2, 'the approval was counted as a message');
+  // The card still marks the record for all three — the two answer different questions.
+  assert.equal(unreadByChangeOrder(rows).has('co1'), true);
+});
+
+test('a read message is not counted', async () => {
+  const { unreadMessagesByChangeOrder } = await import('./activity.ts');
+  const rows: any[] = [
+    { id: 'q1', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 1, read: true },
+  ];
+  assert.equal(unreadMessagesByChangeOrder(rows).get('co1'), undefined);
+});
+
+test('records are counted separately', async () => {
+  const { unreadMessagesByChangeOrder } = await import('./activity.ts');
+  const rows: any[] = [
+    { id: 'a', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 1, read: false },
+    { id: 'b', kind: 'question', changeOrderId: 'co2', scope: '', jobName: '', amountCents: null, detail: null, atMs: 2, read: false },
+    { id: 'c', kind: 'question', changeOrderId: 'co2', scope: '', jobName: '', amountCents: null, detail: null, atMs: 3, read: false },
+  ];
+  const m = unreadMessagesByChangeOrder(rows);
+  assert.equal(m.get('co1'), 1);
+  assert.equal(m.get('co2'), 2);
+});
+
+test('marking the conversation seen touches only THIS record, and only messages', async () => {
+  const { unreadMessageIdsFor } = await import('./activity.ts');
+  const rows: any[] = [
+    { id: 'q1', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 1, read: false },
+    { id: 'q2', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 2, read: true },
+    // An approval on the same record must survive: it was not said in the conversation,
+    // so opening the conversation is not seeing it.
+    { id: 'ap', kind: 'approved', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 3, read: false },
+    // Another record's message must not be cleared by opening this one.
+    { id: 'q3', kind: 'question', changeOrderId: 'co2', scope: '', jobName: '', amountCents: null, detail: null, atMs: 4, read: false },
+  ];
+  assert.deepEqual(unreadMessageIdsFor(rows, 'co1'), ['q1']);
+});

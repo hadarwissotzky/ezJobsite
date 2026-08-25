@@ -190,6 +190,48 @@ export function unreadByChangeOrder(rows: ActivityRow[]): Set<string> {
   return out;
 }
 
+/**
+ * HOW MANY UNSEEN MESSAGES EACH RECORD HAS.
+ *
+ * hadar, 2026-08-25: "when entering a change order with new messages that havenot been
+ * seen yet, the message tab should have an indicator with the number of new messages
+ * like the notification icon on the top right".
+ *
+ * MESSAGES ONLY — `kind === 'question'`. Narrower than `unreadByChangeOrder`, which
+ * marks a card for anything unseen including an approval or a decline, and narrower on
+ * purpose: this number sits on a tab labelled Messages, so counting a verdict in it
+ * would send someone to the conversation to find something that was never said there.
+ *
+ * A COUNT, not a flag, because he asked for the number and the tab has room for it —
+ * unlike a card, where the answer only has to be "yes or no".
+ */
+export function unreadMessagesByChangeOrder(rows: ActivityRow[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const r of rows) {
+    if (r.read || r.kind !== 'question') continue;
+    out.set(r.changeOrderId, (out.get(r.changeOrderId) ?? 0) + 1);
+  }
+  return out;
+}
+
+/**
+ * The unread MESSAGE rows on one record, for marking them seen when the conversation is
+ * actually opened.
+ *
+ * Without this the badge lies in the other direction: he opens the sheet, reads the
+ * question, closes it, and the tab still claims one is waiting. A count that does not
+ * clear when the thing is done is worse than no count — it trains the reader to ignore
+ * it, which costs the header bell its meaning too, since they share a colour.
+ *
+ * Only the messages, matching what the badge counted. An approval on the same record
+ * stays unread until it is opened on its own terms.
+ */
+export function unreadMessageIdsFor(rows: ActivityRow[], changeOrderId: string): string[] {
+  return rows
+    .filter((r) => !r.read && r.kind === 'question' && r.changeOrderId === changeOrderId)
+    .map((r) => r.id);
+}
+
 /** Rows whose read-state would change. Used so marking read writes once, not N times. */
 export function unreadIds(rows: ActivityRow[]): string[] {
   return rows.filter((r) => !r.read).map((r) => r.id);
