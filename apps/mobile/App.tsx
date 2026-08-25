@@ -10135,18 +10135,41 @@ const shortJob = (name: string): string => {
              */
             const rest = [...waitingList, ...approvedList, ...closedList]
               .sort((a, b) => b.created_at_ms - a.created_at_ms);
+
+            /**
+             * HOME IS A SUMMARY, NOT THE ARCHIVE (hadar, 2026-08-25: "nor there i a
+             * continues load").
+             *
+             * The artboard shows one card under "Needs you first", three under
+             * "Everything else", and then "Show all 8 change orders" — so the screen
+             * holds back the tail and offers the way to it. Home rendered EVERY
+             * non-superseded extra instead, which is why the footer button never
+             * appeared: its condition compared the total against the two lists, and
+             * those two lists ARE the total. It could not fire.
+             *
+             * WHAT NEEDS HIM IS NEVER TRUNCATED. Only the rest is capped. Hiding a
+             * draft he has not sent, or a client question he has not answered, behind a
+             * "show all" would be the app deciding his backlog is too long to mention —
+             * on the screen whose whole job is telling him what is outstanding.
+             */
+            const REST_ON_HOME = 3;
+            const restShown = rest.slice(0, REST_ON_HOME);
+            const hiddenCount = rest.length - restShown.length;
             return (<>
               {bucket('home.needsYouFirst', needs)}
-              {bucket('home.everythingElse', rest)}
+              {bucket('home.everythingElse', restShown)}
               {/* SHOW ALL — the artboard's footer.
                   Home holds the most recent extras; this is the way to the full list
                   across every job, which is what `openFeed` already is. Only when there
                   is more to see than is on screen: a button offering "show all 3" under
                   three rows is furniture, not a way out. */}
-              {homeExtras.length > needs.length + rest.length && (
+              {hiddenCount > 0 && (
                 <Pressable onPress={() => void openFeed()} accessibilityRole="button"
                   style={({ pressed }) => [s.showAllBtn, pressed ? { opacity: 0.6 } : null]}>
                   <Text style={s.showAllBtnT}>
+                    {/* The TOTAL, as the artboard has it — "show all 8", not "show 4
+                        more". He is choosing to see everything, and the number that
+                        makes that worth tapping is how much there is. */}
                     {T({ k: 'home.showAllN', p: { n: homeExtras.length } })}
                   </Text>
                 </Pressable>
