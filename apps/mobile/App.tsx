@@ -9606,6 +9606,9 @@ const checkClientMessages = async () => {
         // `settingsFrom` is left as it is): he is still inside that journey, and closing
         // Plans should land where it began rather than inventing a new origin.
         onOpenPlans={() => { setShowSettings(false); void openPaywall(settingsFrom); }}
+        // The artboard's "Open Company" pointer. Same entry the drawer uses, so there
+        // is one way into that screen rather than a second that could drift.
+        onOpenCompany={() => setSettingsMode('company')}
         onBack={() => {
           setShowSettings(false);
           // Back into the menu he stepped out of — but only when that is where he was.

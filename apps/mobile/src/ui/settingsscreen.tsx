@@ -19,7 +19,8 @@
  * is a server RPC (company.ts) — the client is never the authority on membership.
  */
 import React from 'react';
-import { Alert, Image, Linking, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Linking, Pressable, ScrollView, Share, StyleSheet, Text, TextInput,
+         View } from 'react-native';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { t } from '../i18n';
@@ -27,9 +28,11 @@ import type { Lang } from '../i18n';
 import { registerPushToken } from '../push';
 import { checkMembers, type QuotaKind } from '../quota';
 import { LockCrown } from './usagecard';
-import { Icon } from './icon';
+import { Icon, type IconName } from './icon';
 import { QuotaModal } from './quotamodal';
-import { C, F, T as TH, label } from './theme';
+import { C, F, T as TH, label, tint } from './theme';
+import { shadows } from './tokens';
+import { BottomSheet } from './kit';
 import { TRADES, type Profile } from '../profile';
 import {
   resolveMyCompany, listMembers, createInvite, acceptInvite, revokeMember,
@@ -61,6 +64,10 @@ export function SettingsScreen(props: {
   onSaveProfile: (p: Profile) => Promise<void>;
   onSetLang: (l: Lang) => Promise<void>;
   onOpenPlans: () => void;
+  /** Open the company screen — the artboard's "Open Company" pointer. Absent where the
+   *  caller has no company screen to show (a solo account), and the card hides itself
+   *  in that case anyway. */
+  onOpenCompany?: () => void;
   onBack: () => void;
 }) {
   const { db, supabase, userId } = props;
@@ -71,7 +78,6 @@ export function SettingsScreen(props: {
   const [company] = React.useState(props.profile.company ?? '');
   const [trade, setTrade] = React.useState<string | null>(props.profile.trade);
   const [lang, setLang] = React.useState<Lang>(props.lang);
-  const [saved, setSaved] = React.useState(false);
 
   const [co, setCo] = React.useState<MyCompany | null>(null);
   /**
@@ -156,18 +162,38 @@ export function SettingsScreen(props: {
 
   React.useEffect(() => { void loadTeam(); void loadNotif(); }, [loadTeam, loadNotif]);
 
-  const save = async () => {
+  /**
+   * WHICH SHEET IS OPEN, and the text being typed into it.
+   *
+   * One sheet, one field. The screen behind stays exactly as it was, so a contractor
+   * changing his trade never loses his place — the same reason the message sheet exists
+   * on the record screen rather than a pane.
+   */
+  const [editing, setEditing] = React.useState<null | 'name' | 'work' | 'trade' | 'lang' | 'join'>(null);
+  const [draft, setDraft] = React.useState('');
+
+  /**
+   * SAVE THE PROFILE AS IT CHANGES, taking the one field that moved.
+   *
+   * The Save button is gone with the form, so every choice commits itself. The
+   * overrides are passed in rather than read from state because `setState` has not
+   * landed by the time this runs — saving "the current state" here would save the
+   * value BEFORE the tap, which is the classic version of this bug and silently writes
+   * the wrong answer.
+   */
+  const commit = async (over: Partial<{ name: string; isSolo: boolean; trade: string | null }>) => {
+    const next = {
+      name: (over.name ?? name).trim(),
+      isSolo: over.isSolo ?? isSolo,
+      trade: 'trade' in over ? over.trade! : trade,
+    };
+    setName(next.name); setIsSolo(next.isSolo); setTrade(next.trade);
     await props.onSaveProfile({
-      name: name.trim(), isSolo,
-      // PRESERVED, never re-derived. This screen no longer EDITS the company name, but
-      // it still saves the profile — and writing null here would silently erase a name
-      // that `ensureBillingTenant` and the SMS sender still read. Solo clears it, which
-      // is a real statement ("I do not have one"), not a side effect.
-      company: isSolo ? null : company.trim(), trade,
+      ...next,
+      // Preserved, never re-derived — see `save` below for why writing null here would
+      // erase a name other code still reads.
+      company: next.isSolo ? null : company.trim(),
     });
-    if (lang !== props.lang) await props.onSetLang(lang);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
   };
 
   const enableNotif = async () => {
@@ -274,7 +300,8 @@ export function SettingsScreen(props: {
      * the keyboard is up, rather than being spent dismissing it — the field and its
      * button sit on the same row, and one wasted tap on a two-tap job is most of it.
      */
-    <ScrollView style={{ flex: 1, backgroundColor: '#fff' }}
+    <>
+    <ScrollView style={{ flex: 1, backgroundColor: C.paper }}
       automaticallyAdjustKeyboardInsets
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
@@ -289,70 +316,89 @@ export function SettingsScreen(props: {
         </Text>
       </View>
 
-      {/* ---- Identity header ---- */}
-      <View style={{ ...TH.card, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-        <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: C.ink,
-          alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ fontFamily: F.dispSemi, fontSize: 20, color: '#fff' }}>{initials}</Text>
+      {/* ---- Identity header ----
+           NO CARD in profile mode (the artboard, 2026-08-25): the person is not one of
+           the settings, they are who the settings are ABOUT, so they sit on the page
+           and everything else sits on cards below. Company mode keeps its card — that
+           screen is about the business, and the hero there is one item among several. */}
+      {props.mode === 'profile' ? (
+        <View style={ss.hero}>
+          <View style={ss.heroAvatar}><Text style={ss.heroInitials}>{initials}</Text></View>
+          <View style={{ flexGrow: 1, flexShrink: 1 }}>
+            <Text style={ss.heroName} numberOfLines={2}>
+              {name.trim() || props.profile.name || t('set.you')}
+            </Text>
+            <Text style={ss.heroSub} numberOfLines={2}>
+              {identityLine}{co ? '  ·  ' + roleLabel(co.role) : ''}
+            </Text>
+          </View>
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontFamily: F.dispSemi, fontSize: 18, color: C.ink }}>
-            {name.trim() || props.profile.name || t('set.you')}
-          </Text>
-          <Text style={{ ...TH.bodySteel, fontSize: 13 }}>
-            {identityLine}{co ? '  ·  ' + roleLabel(co.role) : ''}
-          </Text>
+      ) : (
+        <View style={{ ...TH.card, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: C.ink,
+            alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontFamily: F.dispSemi, fontSize: 20, color: '#fff' }}>{initials}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontFamily: F.dispSemi, fontSize: 18, color: C.ink }}>
+              {name.trim() || props.profile.name || t('set.you')}
+            </Text>
+            <Text style={{ ...TH.bodySteel, fontSize: 13 }}>
+              {identityLine}{co ? '  ·  ' + roleLabel(co.role) : ''}
+            </Text>
+          </View>
         </View>
-      </View>
+      )}
 
       {/* ---- Profile (personal) ---- profile mode only */}
       {props.mode === 'profile' && (
-      <View style={{ ...TH.card, marginTop: 14 }}>
-        <Text style={label}>{t('set.profile')}</Text>
-        <TextInput style={inputStyle} value={name} onChangeText={setName}
-          placeholder={t('fr.yourName')} placeholderTextColor="#8c959f" />
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-          <Toggle on={isSolo} onPress={() => setIsSolo(true)} label={t('fr.solo')} />
-          <Toggle on={!isSolo} onPress={() => setIsSolo(false)} label={t('fr.company')} />
+      <>
+        <SectionLabel>{t('set.secYou')}</SectionLabel>
+        <RowCard>
+          <ValueRow first label={t('fr.yourName')}
+            value={name.trim() || props.profile.name}
+            onPress={() => { setDraft(name); setEditing('name'); }} />
+          <ValueRow label={t('set.howYouWork')}
+            value={isSolo ? t('fr.solo') : t('fr.company')}
+            onPress={() => setEditing('work')} />
+          <ValueRow label={t('set.trade')}
+            value={trade ? t(('trade.' + trade) as any) : t('set.notSet')}
+            onPress={() => setEditing('trade')} />
+        </RowCard>
+        {/* IT SAVES ON CHANGE, and says so. The Save button is gone: on a list of four
+            facts about yourself, a Save button is a way to lose a change by walking
+            away. Mandate #7 earns the second sentence — none of this needs signal. */}
+        <View style={ss.savedNote}>
+          <Icon name={'ntCheck' as IconName} size={14} color={C.muted} />
+          <Text style={ss.savedNoteT}>{t('set.savedAsYouGo')}</Text>
         </View>
-        {/* THE COMPANY-NAME FOLLOW-UP IS GONE (hadar, 2026-08-18).
-            
-            It asked the same question the Company screen asks, and the two wrote to
-            DIFFERENT stores: this one to `profile_company` in device_settings, the
-            other through `save_company_letterhead_v1` to `company.name` on the server.
-            The second is the authoritative one — it is what `confirmation_company_v1`
-            prints at the top of every change order a homeowner opens — so a contractor
-            who renamed his company here saw the old name on the document he sent, with
-            nothing on either screen explaining why.
-            
-            One field, one owner. The toggle stays because it still means something
-            (it gates the roster and the team surfaces); only the duplicate input goes,
-            and a pointer replaces it so the answer is DIRECTED rather than merely
-            missing — a user who does not think in software must not have to go
-            looking. */}
-        {!isSolo && (
-          <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 8, lineHeight: 18 }}>
-            {t('set.companyLivesInCompany')}
-          </Text>
-        )}
-        <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 12, marginBottom: 6 }}>{t('set.trade')}</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          {TRADES.map((tr) => (
-            <Pressable key={tr} onPress={() => setTrade(trade === tr ? null : tr)}
-              style={[chip, trade === tr && chipOn]}>
-              <Text style={[chipT, trade === tr && chipTOn]}>{t(('trade.' + tr) as any)}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 14, marginBottom: 6 }}>{t('set.language')}</Text>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Toggle on={lang === 'en'} onPress={() => setLang('en')} label="English" />
-          <Toggle on={lang === 'es'} onPress={() => setLang('es')} label="Español" />
-        </View>
-        <Pressable onPress={save} style={saveBtn}>
-          <Text style={saveBtnT}>{saved ? t('set.saved') : t('set.save')}</Text>
-        </Pressable>
-      </View>
+
+        <SectionLabel>{t('set.secApp')}</SectionLabel>
+        <RowCard>
+          <ValueRow first icon={'ntChat' as IconName} label={t('set.language')}
+            value={lang === 'es' ? 'Español' : 'English'}
+            onPress={() => setEditing('lang')} />
+          <ValueRow icon={'ntAttention' as IconName} label={t('set.notif')}
+            /* A PILL WHEN IT IS ON, A TAP WHEN IT IS NOT. Granted is a state and there
+               is nothing to do about it here; every other value is a thing he can act
+               on, so it keeps the chevron and the action it already had. */
+            right={notif === 'granted' ? (
+              <View style={ss.pill}>
+                <Icon name={'ntCheck' as IconName} size={13} color={tint('approved').ink} />
+                <Text style={ss.pillT}>{t('set.notifOn')}</Text>
+              </View>
+            ) : undefined}
+            value={notif === 'granted' ? undefined
+              : notif === 'denied' ? t('set.notifDenied')
+              : notif === 'unknown' ? t('set.notifUnknown') : t('set.notifOff')}
+            onPress={notif === 'granted' ? undefined
+              // 'undetermined' -> the in-app request still works. 'denied' or
+              // 'unknown' -> asking would no-op, so route to the OS Settings app where
+              // it can actually be changed (the same split the old Row made).
+              : notif === 'undetermined' ? enableNotif
+              : () => { Linking.openSettings().catch(() => {}); }} />
+        </RowCard>
+      </>
       )}
 
       {/* ---- Company letterhead ---- company mode only.
@@ -551,20 +597,50 @@ export function SettingsScreen(props: {
       {/* ---- Join a company ---- profile mode: a crew member joins by code HERE, so
           joining is never locked behind the owner-only company screen. */}
       {props.mode === 'profile' && (
-      <View style={{ ...TH.card, marginTop: 14 }}>
-        <Text style={label}>{t('set.joinTitle')}</Text>
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-          <TextInput style={{ ...inputStyle, flex: 1, marginTop: 0 }} value={joinToken}
-            onChangeText={setJoinToken} autoCapitalize="none"
-            placeholder={t('set.joinPlaceholder')} placeholderTextColor="#8c959f" />
-          <Pressable onPress={join} disabled={busy || !joinToken.trim()}
-            style={{ paddingHorizontal: 18, minHeight: 48, borderRadius: 10, backgroundColor: C.ink,
-              alignItems: 'center', justifyContent: 'center', opacity: joinToken.trim() ? 1 : 0.4 }}>
-            <Text style={{ color: '#fff', fontFamily: F.bodySemi }}>{t('set.joinBtn')}</Text>
-          </Pressable>
-        </View>
-        {note && <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 10, color: C.inkSoft }}>{note}</Text>}
-      </View>
+      <>
+        {/* ---- Your company: a POINTER, not an editor ----
+             The letterhead lives on the Company screen and is written by
+             `save_company_letterhead_v1`; duplicating any of it here is how a
+             contractor renames his company in one place and watches the old name print
+             on the document he just sent (the reason the name field was removed on
+             2026-08-18). So this card states what is there and shows the way. */}
+        {co && (
+          <>
+            <SectionLabel>{t('set.secCompany')}</SectionLabel>
+            <View style={[ss.card, { paddingVertical: 14 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={ss.coTile}>
+                  {props.logoUri
+                    ? <Image source={{ uri: props.logoUri }} style={{ width: 36, height: 36 }} resizeMode="cover" />
+                    : <Icon name={'ntCompany' as IconName} size={18} color={C.muted} />}
+                </View>
+                <Text style={ss.coName} numberOfLines={1}>{co.name || t('set.businessTitle')}</Text>
+                <Text style={ss.coRole}>{roleLabel(co.role)}</Text>
+              </View>
+              <Text style={ss.coWhy}>{t('set.companyWhy')}</Text>
+              <Pressable onPress={() => props.onOpenCompany?.()} accessibilityRole="button"
+                style={({ pressed }) => [ss.coOpen, pressed ? { opacity: 0.6 } : null]}>
+                <Text style={ss.coOpenT}>{t('set.openCompany')}</Text>
+                <Icon name={'chevRight' as IconName} size={18} color={C.brand} />
+              </Pressable>
+            </View>
+          </>
+        )}
+
+        {/* ---- Join a company ----
+             DASHED, because it is an invitation rather than a setting: nothing is
+             stored here until a code is typed, and a solid card would claim otherwise.
+             It opens a SHEET, which also puts the field above the keyboard instead of
+             under it — the bug hadar hit on this screen earlier today. */}
+        <Pressable onPress={() => { setJoinToken(''); setNote(null); setEditing('join'); }}
+          accessibilityRole="button"
+          style={({ pressed }) => [ss.joinRow, pressed ? { opacity: 0.6 } : null]}>
+          <Icon name={'ntProfile' as IconName} size={20} color={C.steel} />
+          <Text style={ss.joinT}>{t('set.joinTitle')}</Text>
+          <Icon name={'chevRight' as IconName} size={18} color={C.muted} />
+        </Pressable>
+        {!!note && <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 10, color: C.inkSoft }}>{note}</Text>}
+      </>
       )}
 
       {/* ---- Preferences ---- profile mode (notifications are personal). */}
@@ -725,6 +801,76 @@ export function SettingsScreen(props: {
           onSeePlans={() => { setQuotaHit(null); props.onOpenPlans(); }} />
       )}
     </ScrollView>
+
+    {/* ── The edit sheets ────────────────────────────────────────────────────────
+        ONE FIELD PER SHEET, and the screen behind it does not move. Every choice
+        commits itself and closes: there is no Save here either, and a sheet that
+        asked twice would reintroduce the button the list just removed. */}
+    <BottomSheet visible={editing === 'name'} title={t('fr.yourName')}
+      onClose={() => setEditing(null)}
+      footer={
+        <Pressable onPress={async () => { await commit({ name: draft }); setEditing(null); }}
+          style={saveBtn} accessibilityRole="button">
+          <Text style={saveBtnT}>{t('set.save')}</Text>
+        </Pressable>}>
+      {/* The one sheet that KEEPS a button: text has no moment of choosing, so
+          something has to say "I am finished typing". */}
+      <TextInput style={inputStyle} value={draft} onChangeText={setDraft} autoFocus
+        placeholder={t('fr.yourName')} placeholderTextColor="#8c959f"
+        returnKeyType="done"
+        onSubmitEditing={async () => { await commit({ name: draft }); setEditing(null); }} />
+    </BottomSheet>
+
+    <BottomSheet visible={editing === 'work'} title={t('set.howYouWork')}
+      onClose={() => setEditing(null)}>
+      <View style={ss.sheetPad}>
+        <ChoiceRow first label={t('fr.solo')} on={isSolo}
+          onPress={async () => { await commit({ isSolo: true }); setEditing(null); }} />
+        <ChoiceRow label={t('fr.company')} on={!isSolo}
+          onPress={async () => { await commit({ isSolo: false }); setEditing(null); }} />
+      </View>
+    </BottomSheet>
+
+    <BottomSheet visible={editing === 'trade'} tall title={t('set.trade')}
+      onClose={() => setEditing(null)}>
+      <View style={ss.sheetPad}>
+        {TRADES.map((tr, i) => (
+          <ChoiceRow key={tr} first={i === 0} label={t(('trade.' + tr) as any)}
+            on={trade === tr}
+            /* Tapping the current trade CLEARS it. Trade is skippable by design, and a
+               list with no way back out would trap someone who picked wrong. */
+            onPress={async () => { await commit({ trade: trade === tr ? null : tr }); setEditing(null); }} />
+        ))}
+      </View>
+    </BottomSheet>
+
+    <BottomSheet visible={editing === 'lang'} title={t('set.language')}
+      onClose={() => setEditing(null)}>
+      <View style={ss.sheetPad}>
+        <ChoiceRow first label="English" on={lang === 'en'}
+          onPress={async () => { setLang('en'); await props.onSetLang('en'); setEditing(null); }} />
+        <ChoiceRow label="Español" on={lang === 'es'}
+          onPress={async () => { setLang('es'); await props.onSetLang('es'); setEditing(null); }} />
+      </View>
+    </BottomSheet>
+
+    <BottomSheet visible={editing === 'join'} title={t('set.joinTitle')}
+      onClose={() => setEditing(null)}
+      footer={
+        <Pressable onPress={async () => { await join(); setEditing(null); }}
+          disabled={busy || !joinToken.trim()}
+          style={[saveBtn, { opacity: joinToken.trim() && !busy ? 1 : 0.4 }]}
+          accessibilityRole="button">
+          <Text style={saveBtnT}>{t('set.joinBtn')}</Text>
+        </Pressable>}>
+      {/* In a sheet, so the field sits ABOVE the keyboard. On the page it sat under it
+          — hadar hit exactly that on this screen earlier today. */}
+      <TextInput style={inputStyle} value={joinToken} onChangeText={setJoinToken}
+        autoCapitalize="none" autoFocus
+        placeholder={t('set.joinPlaceholder')} placeholderTextColor="#8c959f" />
+      {!!note && <Text style={{ ...TH.bodySteel, fontSize: 12.5, marginTop: 10 }}>{note}</Text>}
+    </BottomSheet>
+    </>
   );
 }
 
@@ -745,26 +891,146 @@ function Row(props: { title: string; value?: string; action?: { label: string; o
   );
 }
 
-function Toggle({ on, onPress, label: lbl }: { on: boolean; onPress: () => void; label: string }) {
+/* ── The profile screen's design language (hadar's artboard, 2026-08-25) ───────────
+ *
+ * The screen it replaces was a FORM: a name field, two toggle pairs, a row of trade
+ * chips and a Save button, all on one card. Everything was editable at once and nothing
+ * was legible at a glance — a contractor opening it to check which trade he was under
+ * had to read a form to find out.
+ *
+ * The artboard is a LIST OF ANSWERS. Each row states a question and its current answer;
+ * tapping one opens a sheet to change it. That reads at arm's length, it survives a
+ * value getting longer, and it matches every other list in this app.
+ *
+ * AND IT SAVES ON CHANGE. The Save button is gone, which the design says out loud
+ * underneath the card: "Saved as you change it. Works with no signal." A Save button on
+ * a settings list is a way to lose a change by walking away, and this is the one screen
+ * whose whole content is four facts about the person using it.
+ */
+
+/** A section heading — condensed small-caps, the artboard's 12/1.6 treatment. */
+function SectionLabel({ children }: { children: string }) {
+  return <Text style={ss.sectionLabel}>{children}</Text>;
+}
+
+/** The card the rows sit on. Rows separate themselves with hairlines. */
+function RowCard({ children }: { children: React.ReactNode }) {
+  return <View style={ss.card}>{children}</View>;
+}
+
+/**
+ * One question and its answer. `onPress` makes it tappable and draws the chevron;
+ * without it the row is a statement (the notifications pill uses `right` instead).
+ */
+function ValueRow({ icon, label: lab, value, right, onPress, first }: {
+  icon?: IconName; label: string; value?: string;
+  right?: React.ReactNode; onPress?: () => void; first?: boolean;
+}) {
+  const Body = (
+    <View style={ss.row}>
+      {icon && <Icon name={icon} size={20} color={C.steel} />}
+      <Text style={ss.rowLabel} numberOfLines={1}>{lab}</Text>
+      {right ?? (
+        <>
+          {/* The VALUE gives way, never the label: a long trade name may wrap or
+              ellipsize, but "Trade" must stay readable or the row says nothing. */}
+          {!!value && <Text style={ss.rowValue} numberOfLines={1}>{value}</Text>}
+          {onPress && <Icon name={'chevRight' as IconName} size={18} color={C.muted} />}
+        </>
+      )}
+    </View>
+  );
   return (
-    <Pressable onPress={onPress} style={[chip, { flex: 1, alignItems: 'center', paddingVertical: 12 }, on && chipOn]}>
-      <Text style={[chipT, on && chipTOn]}>{lbl}</Text>
-    </Pressable>
+    <>
+      {!first && <View style={ss.hair} />}
+      {onPress
+        ? <Pressable onPress={onPress} accessibilityRole="button"
+            accessibilityLabel={value ? `${lab}, ${value}` : lab}
+            style={({ pressed }) => pressed ? { opacity: 0.6 } : null}>{Body}</Pressable>
+        : Body}
+    </>
   );
 }
+
+/** One choice inside an edit sheet. The current answer carries the tick. */
+function ChoiceRow({ label: lab, on, onPress, first }: {
+  label: string; on: boolean; onPress: () => void; first?: boolean;
+}) {
+  return (
+    <>
+      {!first && <View style={ss.hair} />}
+      <Pressable onPress={onPress} accessibilityRole="button"
+        accessibilityState={{ selected: on }}
+        style={({ pressed }) => [ss.row, pressed ? { opacity: 0.6 } : null]}>
+        <Text style={[ss.rowLabel, { flexGrow: 1 }]}>{lab}</Text>
+        {on && <Icon name={'ntCheck' as IconName} size={18} color={C.brand} />}
+      </Pressable>
+    </>
+  );
+}
+
+const ss = StyleSheet.create({
+  sectionLabel: {
+    fontFamily: F.dispSemi, fontSize: 12, color: C.steel,
+    textTransform: 'uppercase', letterSpacing: 1.6, marginTop: 24, marginBottom: 8,
+  },
+  card: {
+    backgroundColor: C.raised, borderWidth: 1, borderColor: C.line,
+    borderRadius: 18, paddingHorizontal: 14, ...shadows.card,
+  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 58, paddingVertical: 12 },
+  rowLabel: { flexGrow: 1, flexShrink: 1, fontFamily: F.bodySemi, fontSize: 15.5, color: C.ink },
+  rowValue: { flexShrink: 1, fontFamily: F.body, fontSize: 15, color: C.steel },
+  hair: { height: 1, backgroundColor: C.line },
+  // The reassurance under the You card. It replaces a Save button, so it has to be
+  // believed: the tick is what makes it read as a statement of fact rather than a hope.
+  savedNote: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, paddingLeft: 2 },
+  savedNoteT: { fontFamily: F.body, fontSize: 12.5, color: C.muted },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 24, marginTop: 4 },
+  heroAvatar: {
+    width: 64, height: 64, borderRadius: 32, backgroundColor: C.ink,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  heroInitials: { fontFamily: F.dispSemi, fontSize: 24, color: '#fff' },
+  heroName: { fontFamily: F.bodyBold, fontSize: 24, letterSpacing: -0.2, color: C.ink, lineHeight: 28 },
+  heroSub: { fontFamily: F.body, fontSize: 14.5, color: C.steel, lineHeight: 20, marginTop: 2 },
+  // The company pointer: a tile, the name, and the role as a quiet chip.
+  coTile: {
+    width: 36, height: 36, borderRadius: 8, backgroundColor: C.surfaceMuted,
+    borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0, overflow: 'hidden',
+  },
+  coName: { flexGrow: 1, fontFamily: F.bodySemi, fontSize: 16, color: C.ink },
+  coRole: {
+    backgroundColor: C.surfaceMuted, borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4,
+    fontFamily: F.dispSemi, fontSize: 11, textTransform: 'uppercase',
+    letterSpacing: 0.6, color: C.steel,
+  },
+  coWhy: { fontFamily: F.body, fontSize: 13, color: C.steel, lineHeight: 19, marginTop: 10 },
+  coOpen: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, minHeight: 44 },
+  coOpenT: { fontFamily: F.bodySemi, fontSize: 15, color: C.brand },
+  // Dashed, because it is an invitation rather than a setting: nothing is stored here
+  // until a code is typed, and a solid card would claim otherwise.
+  joinRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20, minHeight: 52,
+    borderWidth: 1, borderStyle: 'dashed', borderColor: C.line, borderRadius: 14,
+    paddingHorizontal: 14,
+  },
+  joinT: { flexGrow: 1, fontFamily: F.bodySemi, fontSize: 15, color: C.steel },
+  // The notifications pill — a state, not a control, when it is already on.
+  pill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999,
+    paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: tint('approved').soft, borderWidth: 1, borderColor: tint('approved').line,
+  },
+  pillT: { fontFamily: F.bodySemi, fontSize: 12.5, color: tint('approved').ink },
+  sheetPad: { paddingBottom: 8 },
+});
 
 const inputStyle = {
   marginTop: 10, borderWidth: 1, borderColor: C.line, borderRadius: 10,
   paddingHorizontal: 12, paddingVertical: 12, fontFamily: F.body, fontSize: 15.5, color: C.ink,
 } as const;
-const chip = {
-  // minHeight meets the 44pt touch floor for gloves-on selection (CLAUDE.md mandate #3).
-  borderWidth: 1, borderColor: C.line, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10,
-  minHeight: 44, justifyContent: 'center',
-} as const;
-const chipOn = { backgroundColor: C.ink, borderColor: C.ink } as const;
-const chipT = { fontFamily: F.bodySemi, fontSize: 13.5, color: C.steel } as const;
-const chipTOn = { color: '#fff' } as const;
 const saveBtn = {
   marginTop: 16, minHeight: 50, borderRadius: 12, backgroundColor: C.orange,
   alignItems: 'center', justifyContent: 'center',
