@@ -318,6 +318,21 @@ const LAST_PROJECT_KEY = 'last_project_id';
 // reaching the cloud, silently, with the app still saying "saved ✓".
 const OWNER_FALLBACK = 'owner-local';
 
+/**
+ * HOW CLOSE "YOU ARE STANDING ON IT" IS ALLOWED TO MEAN, in metres.
+ *
+ * The job picker's closest-job card says that sentence out loud, and it is a claim
+ * about the physical world made from a phone fix. A consumer GPS fix is good to
+ * roughly 5-20 m in the open and worse between buildings, so 30 m is about the
+ * tightest radius the hardware can actually support. Outside it the card still shows
+ * the distance — it just stops narrating where he is.
+ *
+ * Deliberately NOT the project's `geofence_m`: that fence decides what auto-files,
+ * and a contractor who set a 200 m fence around a large site did not thereby agree to
+ * be told he is standing on a building he can barely see.
+ */
+const STANDING_ON_M = 30;
+
 /** How long the splash may cover a first sync before the Home takes over and says
  *  what it actually knows. See `holdExpired` for why a bound is mandatory. */
 const FIRST_SYNC_SPLASH_MS = 8_000;
@@ -748,6 +763,22 @@ export default function App() {
   // R1: the Send-to prefill for the walk being filed. Null until prepareSendTo has
   // read the fix; the card renders nothing rather than guessing meanwhile.
   const [sendTo, setSendTo] = React.useState<SendToPrefill | null>(null);
+  /**
+   * WHERE HE IS STANDING, in words, for the job picker.
+   *
+   * The artboard's create-a-job row says "Pre-filled with 1155 Stanyan St" — it names
+   * the address before he taps rather than after, so the row is a promise he can read
+   * instead of a surprise on the next screen. That needs the reverse geocode resolved
+   * while the picker is up, not inside the tap handler.
+   *
+   * `undefined` = not asked yet, `null` = asked and there is no answer (no fix, or no
+   * network for the lookup). The row falls back to its generic subtitle on null, and
+   * `newJobHere` still does its own lookup — this is a nicety, never the source of
+   * truth for what the new job gets named.
+   */
+  const [hereAddr, setHereAddr] = React.useState<string | null | undefined>(undefined);
+  /** Which fix `hereAddr` was looked up for — see the picker's use of it. */
+  const hereAddrKey = React.useRef<string | null>(null);
   const [sendToId, setSendToId] = React.useState<string | null>(null);
   // R8: the bell. `activity` is the list; the bell now NAVIGATES to the notifications
   // screen rather than opening a sheet — `activityOverlay` was a second, older
@@ -2072,6 +2103,7 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
     await fileCapture(db, { captureId: id, projectId: projId, by: OWNER });
   }
   setAssign(null); setAssignQ(''); setFiled(null);
+  setHereAddr(undefined); hereAddrKey.current = null;
   setProjectId(projId);
   const anchorCoId = done?.anchorCoId ?? a.anchorCoId;
   const anchorCapId = done?.anchorCaptureId ?? a.anchorCaptureId ?? null;
@@ -5826,10 +5858,14 @@ const checkClientMessages = async () => {
     // A REFUSAL MUST STILL REACH HIM, and now it has to travel further: the sheet is
     // already up, so the failure takes it down again rather than appearing behind it.
     commit.catch((e: any) => {
-      setAssign(null);
+      setAssign(null); setHereAddr(undefined); hereAddrKey.current = null;
       setUi({ k: 'refused', why: e?.message ?? String(e) });
     });
 
+    // CLEARED BEFORE THE PICKER OPENS, not after it closes: this walk has its own fix,
+    // and showing the last walk's street under "Pre-filled with" would be a promise
+    // about the wrong address.
+    setHereAddr(undefined); hereAddrKey.current = null;
     setAssign({
       ready: commit,
       lat: a.stamp.lat, lng: a.stamp.lng,
@@ -7719,6 +7755,7 @@ const checkClientMessages = async () => {
                 <Pressable style={s.trFile} onPress={() => {
                   const ids = t.ids, coId = t.coId, anchor = t.anchorCaptureId;
                   setTransition(null);
+                  setHereAddr(undefined); hereAddrKey.current = null;
                   setAssign({ ids, lat: null, lng: null, uris: [], secs: 0,
                               anchorCoId: coId, anchorCaptureId: anchor });
                 }}>
@@ -7810,7 +7847,24 @@ const checkClientMessages = async () => {
       void prepareSendTo(db, { lat: assign.lat, lng: assign.lng })
         .then((pf) => { setSendTo(pf); setSendToId(pf.selectedId ?? null); });
     }
+    // Resolved ONCE while the picker is up, so the create-a-job row can name the
+    // address it would pre-fill instead of promising one in the abstract.
+    //
+    // ASKED ONCE PER FIX, guarded by a ref rather than by the state it sets: this runs
+    // in the render body, so keying off `hereAddr` alone would re-fire the lookup on
+    // every render until the promise came back — and the no-fix branch would be a
+    // setState during render, which React is entitled to complain about. The key is
+    // the fix itself, so a different walk at a different corner asks again.
+    const hereKey = `${assign.lat ?? ''},${assign.lng ?? ''}`;
+    if (hereAddrKey.current !== hereKey) {
+      hereAddrKey.current = hereKey;
+      const { lat, lng } = assign;
+      void (lat != null && lng != null ? addressFor(lat, lng) : Promise.resolve(null))
+        .then((a) => setHereAddr(a)).catch(() => setHereAddr(null));
+    }
     const q = assignQ.trim().toLowerCase();
+    const matches = (p: { name: string; address: string | null }) =>
+      !q || p.name.toLowerCase().includes(q) || (p.address ?? '').toLowerCase().includes(q);
     const candidates = projects
       .filter((p) => p.id !== INBOX_ID)
       .map((p) => ({
@@ -7819,7 +7873,7 @@ const checkClientMessages = async () => {
           ? distanceM({ lat: assign.lat, lng: assign.lng }, { lat: p.lat, lng: p.lng })
           : null,
       }))
-      .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.address ?? '').toLowerCase().includes(q))
+      .filter(matches)
       .sort((a, b) => (a.distM ?? Infinity) - (b.distM ?? Infinity));
     // Picking an existing job and creating a new one now share ONE path (fileWalkTo):
     // file the captures, rehome the draft, then start the processing screen.
@@ -7831,36 +7885,53 @@ const checkClientMessages = async () => {
       // carries a name + address the user should SEE and can correct before it
       // exists (mandate #2). `assign` stays set while that screen is up, so the
       // create handler files this walk's captures to the new job once confirmed.
-      const addr = assign.lat != null && assign.lng != null
-        ? await addressFor(assign.lat, assign.lng) : null;
+      //
+      // `hereAddr` is REUSED when it has already resolved — the row above promised
+      // that exact address, and looking it up again could return a different one and
+      // make the promise false. Falls back to its own lookup when the row never got
+      // an answer to show.
+      const addr = hereAddr ?? (assign.lat != null && assign.lng != null
+        ? await addressFor(assign.lat, assign.lng) : null);
       setNewJob({ name: addr ?? '', address: addr ?? '', lat: assign.lat, lng: assign.lng });
     };
-    // SAME dark world as the capture screen — this is step two of the SAME workflow,
-    // not a different app. It opens with the receipt of the walk just taken (green
-    // check, thumbnails, duration), then asks the one remaining question.
-    // THE DESIGN hadar supplied 2026-08-07: a light, calm picker, not the dark
-    // capture world. This is the first screen after a change order is saved, and its
-    // job is one question — which job is this for — so the receipt block, the
-    // thumbnails and the duration are gone. They described the walk he had just taken,
-    // which he had just taken and did not need told back to him.
+    // THE DESIGN hadar supplied 2026-08-07, revised 2026-08-25: a light, calm picker,
+    // not the dark capture world. This is the first screen after a change order is
+    // saved, and its job is one question — which job is this for.
     //
-    // GPS SUGGESTS, IT NEVER DECIDES (mandate #8). "Jobs near you" is ORDERING, not
-    // selection: nothing is pre-picked, every row needs a tap. That is the same rule
-    // the old SendToCard enforced with a "Detected" marker, expressed as a section
-    // heading instead of a card — one fewer control between him and the answer.
+    // GPS SUGGESTS, IT NEVER DECIDES (mandate #8). The closest job is PROMOTED to a
+    // card at the top of the screen — the answer is usually the ground he is standing
+    // on, and making him read three section headings to find it was work he should not
+    // have had to do. But the card is still only an offer: nothing is pre-selected,
+    // and "File it to this job" is a deliberate tap like every other row. The moment
+    // that button files anything on its own, this screen has broken the mandate.
     const fmtDist = (m: number) => m < 950 ? `${Math.round(m)} m` : `${(m / 1609.34).toFixed(1)} mi`;
-    const near = candidates.filter((p) => p.distM != null).slice(0, 3);
-    const nearIds = new Set(near.map((p) => p.id));
+    const located = candidates.filter((p) => p.distM != null);
+    // THE HERO IS THE NEAREST PINNED JOB, and only when there IS one. No fix, no
+    // pinned jobs, or a search query narrowing things down — all fall back to the
+    // plain list, which never claimed to know where he was.
+    const hero = !q && located.length > 0 ? located[0] : null;
+    const heroDist = hero?.distM ?? null;
+    const rest = candidates.filter((p) => p.id !== hero?.id).slice(0, 4);
+    const restIds = new Set(rest.map((p) => p.id));
     const recent = [...projects]
-      .filter((p) => p.id !== INBOX_ID && !nearIds.has(p.id))
-      .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.address ?? '').toLowerCase().includes(q))
+      .filter((p) => p.id !== INBOX_ID && p.id !== hero?.id && !restIds.has(p.id))
+      .filter(matches)
       .sort((a, b) => (b.last_used_ms ?? 0) - (a.last_used_ms ?? 0))
       .slice(0, 3)
       // Recent rows carry no distance — they are remembered, not located — so the
       // shape is completed with a null rather than the row type being widened.
       .map((p) => ({ ...p, distM: null as number | null }));
-    const jobRow = (p: typeof candidates[number], showDist: boolean) => (
-      <Pressable key={p.id} style={s.jpRow} onPress={() => fileAll(p.id)}>
+    const others = [...rest, ...recent];
+    const pickable = projects.filter((p) => p.id !== INBOX_ID).length;
+    // The rule only earns its space when there IS something else behind it. With one
+    // job on the account it would announce alternatives that do not exist — and the
+    // search box below would then need the margin the rule was carrying.
+    const showOr = !!hero && (others.length > 0 || pickable > 1);
+    const jobRow = (p: typeof candidates[number]) => (
+      <Pressable key={p.id} style={s.jpRow} onPress={() => fileAll(p.id)}
+        accessibilityRole="button"
+        accessibilityLabel={[p.address || p.name, p.distM != null ? fmtDist(p.distM) : null]
+          .filter(Boolean).join(', ')}>
         <View style={{ flex: 1 }}>
           {/* THE ADDRESS LEADS. A contractor standing on a street recognises where he
               is, not what somebody typed in the name field three weeks ago. The job
@@ -7870,7 +7941,7 @@ const checkClientMessages = async () => {
             <Text style={s.jpName} numberOfLines={1}>{p.name}</Text>
           )}
         </View>
-        {showDist && p.distM != null && (
+        {p.distM != null && (
           <View style={s.jpDist}>
             <Icon name="mapPin" size={15} color="#4E6243" />
             <Text style={s.jpDistT}>{fmtDist(p.distM)}</Text>
@@ -7905,49 +7976,81 @@ const checkClientMessages = async () => {
             */}
           <Text style={s.flowStep}>{T({ k: 'flow.stepOf', p: { n: '2', of: '4' } } as any)}</Text>
           <Text style={s.jpTitle}>{T('assign.title')}</Text>
-          <Text style={s.jpSub}>{T('jobpick.sub')}</Text>
 
-          <View style={s.jpSearchWrap}>
+          {hero ? (
+            <View style={s.jpHero}>
+              <View style={s.jpHeroEyebrow}>
+                <Icon name="mapPin" size={15} color="#4E6243" />
+                <Text style={s.jpHeroEyebrowT}>
+                  {T('jobpick.closest')} · {T('jobpick.usingGps')}
+                </Text>
+              </View>
+              <Text style={s.jpHeroAddr} numberOfLines={2}>{hero.address || hero.name}</Text>
+              {!!hero.address && !!hero.name && hero.name !== hero.address && (
+                <Text style={s.jpHeroName} numberOfLines={1}>{hero.name}</Text>
+              )}
+              {heroDist != null && (
+                <View style={s.jpHeroPill}>
+                  <Icon name="mapPin" size={14} color="#4E6243" />
+                  {/* "You are standing on it" is a CLAIM ABOUT THE WORLD, so it is made
+                      only inside a distance a phone fix can support. Outside it the
+                      pill says how far and stops talking. */}
+                  <Text style={s.jpHeroPillT}>
+                    {T({ k: heroDist <= STANDING_ON_M ? 'jobpick.standingOn' : 'jobpick.away',
+                         p: { d: fmtDist(heroDist) } } as any)}
+                  </Text>
+                </View>
+              )}
+              <Pressable style={s.jpHeroBtn} onPress={() => fileAll(hero.id)}
+                accessibilityRole="button">
+                <Text style={s.jpHeroBtnT}>{T('jobpick.fileHere')}</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={s.jpSub}>{T('jobpick.sub')}</Text>
+          )}
+
+          {/* THE ESCAPE HATCH IS NAMED. Under a card that answers the question for him,
+              a bare search box reads as "there is nothing else"; the rule saying "not
+              this one?" is what tells him the rest of the screen is still his. */}
+          {showOr && (
+            <View style={s.jpOrWrap}>
+              <View style={s.jpOrLine} />
+              <Text style={s.jpOrT}>{T('jobpick.notThisOne')}</Text>
+              <View style={s.jpOrLine} />
+            </View>
+          )}
+
+          <View style={[s.jpSearchWrap, showOr ? { marginTop: 0 } : null]}>
             <Icon name="search" size={18} color="#6b625b" />
             <TextInput style={s.jpSearch} value={assignQ} onChangeText={setAssignQ}
-              placeholder={T('jobpick.search')} placeholderTextColor="#8c959f" />
+              placeholder={pickable > 1
+                ? T({ k: 'jobpick.searchN', p: { n: pickable } } as any)
+                : T('jobpick.search')}
+              placeholderTextColor="#8c959f" />
           </View>
 
-          {/* DASHED, and above the lists: creating a job here always succeeds, offline
-              included, so this screen can never dead-end on a job that does not exist
-              yet. Dashed because it makes a thing rather than choosing one. */}
-          <Pressable style={s.jpNew} onPress={newJobHere}>
+          {others.map((p) => jobRow(p))}
+
+          {/* DASHED because it MAKES a thing rather than choosing one. Below the list
+              now (the artboard, 2026-08-25): it used to sit above every job, which put
+              "create a new one" in front of a man whose job was almost always already
+              on the screen. Creating here still always succeeds, offline included, so
+              this screen can never dead-end on a job that does not exist yet. */}
+          <Pressable style={s.jpNew} onPress={newJobHere} accessibilityRole="button">
             <View style={s.jpNewPlus}><Text style={s.jpNewPlusT}>+</Text></View>
             <View style={{ flex: 1 }}>
               <Text style={s.jpNewT}>{T('assign.newHere')}</Text>
-              <Text style={s.jpNewSub}>{T('jobpick.newSub')}</Text>
+              <Text style={s.jpNewSub} numberOfLines={2}>
+                {hereAddr
+                  ? T({ k: 'jobpick.newPrefilled', p: { addr: hereAddr } } as any)
+                  : T('jobpick.newSub')}
+              </Text>
             </View>
             <Text style={s.jpChev}>›</Text>
           </Pressable>
 
-          {near.length > 0 && (
-            <>
-              <View style={s.jpSecHead}>
-                <Icon name="mapPin" size={17} color="#4E6243" />
-                <Text style={s.jpSecT}>{T('jobpick.near')}</Text>
-                <View style={s.jpGps}><Text style={s.jpGpsT}>{T('jobpick.usingGps')}</Text></View>
-              </View>
-              <Text style={s.jpSecSub}>{T('jobpick.nearSub')}</Text>
-              {near.map((p) => jobRow(p, true))}
-            </>
-          )}
-
-          {recent.length > 0 && (
-            <>
-              <View style={[s.jpSecHead, { marginTop: 22 }]}>
-                <Icon name="clock" size={17} color="#6b625b" />
-                <Text style={s.jpSecT}>{T('jobpick.recent')}</Text>
-              </View>
-              {recent.map((p) => jobRow(p, false))}
-            </>
-          )}
-
-          {!near.length && !recent.length && (
+          {!hero && !others.length && (
             <Text style={s.jpEmpty}>{T('jobpick.none')}</Text>
           )}
 
@@ -12844,6 +12947,27 @@ const s = StyleSheet.create({
   jobsWrap: { flex: 1, paddingHorizontal: 18, paddingTop: 4 },
   // ── job picker (hadar's design, 2026-08-07) — light, calm, one question ──────
   jpC: { flex: 1, backgroundColor: '#faf7f3', paddingTop: 54 },
+  jpHero: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2dbd4',
+    borderRadius: 14, padding: 16, marginTop: 16 },
+  jpHeroEyebrow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  jpHeroEyebrowT: { fontFamily: 'Inter_600SemiBold', fontSize: 12, letterSpacing: 1.1,
+    textTransform: 'uppercase', color: '#4E6243' },
+  jpHeroAddr: { fontFamily: 'Inter_700Bold', fontSize: 24, lineHeight: 29,
+    letterSpacing: -0.4, color: '#131110', marginTop: 10 },
+  jpHeroName: { fontFamily: 'Inter_400Regular', fontSize: 15, color: '#6b625b', marginTop: 3 },
+  jpHeroPill: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12,
+    alignSelf: 'flex-start', backgroundColor: '#e7ece2', borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 5 },
+  jpHeroPillT: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#4E6243' },
+  // 54pt, because this is the button the whole screen exists to offer and it is
+  // pressed with a glove on.
+  jpHeroBtn: { minHeight: 54, borderRadius: 8, backgroundColor: '#2F4F2A',
+    alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+  jpHeroBtnT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#ffffff' },
+  jpOrWrap: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 26,
+    marginBottom: 16 },
+  jpOrLine: { height: 1, backgroundColor: '#e2dbd4', flexGrow: 1 },
+  jpOrT: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#6b625b' },
   jpTitle: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 36, color: '#131110' },
   jpSub: { fontFamily: 'Inter_400Regular', fontSize: 15.5, color: '#6b625b', marginTop: 4 },
   jpSearchWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16,
@@ -12858,11 +12982,6 @@ const s = StyleSheet.create({
   jpNewPlusT: { fontFamily: 'Inter_400Regular', fontSize: 20, color: '#4E6243', lineHeight: 24 },
   jpNewT: { fontFamily: 'Inter_700Bold', fontSize: 17, color: '#3d5236' },
   jpNewSub: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#5d6b56', marginTop: 1 },
-  jpSecHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 24 },
-  jpSecT: { fontFamily: 'Inter_700Bold', fontSize: 19, color: '#131110' },
-  jpGps: { backgroundColor: '#e7ece2', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  jpGpsT: { fontFamily: 'Inter_600SemiBold', fontSize: 12.5, color: '#4E6243' },
-  jpSecSub: { fontFamily: 'Inter_400Regular', fontSize: 14.5, color: '#6b625b', marginTop: 2, marginLeft: 25 },
   jpRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10,
     backgroundColor: '#fdfbf9', borderColor: '#e9e2db', borderWidth: 1, borderRadius: 12,
     paddingVertical: 14, paddingHorizontal: 14 },
