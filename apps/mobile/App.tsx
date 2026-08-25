@@ -10540,6 +10540,19 @@ const shortJob = (name: string): string => {
                         </Text>
                       </View>
                       <View style={s.ntRight}>
+                        {/* HOW MUCH IS AT STAKE (hadar, 2026-08-25: "it reports on the
+                            level or urgency"). A question on a $12,000 extra and one on
+                            a $200 extra were the same row and had to be opened to be
+                            told apart — on the one list whose whole job is deciding
+                            what to deal with first.
+                            Omitted, not zeroed, when the extra has no figure yet: a
+                            draft the pipeline has not priced is a real state, and "$0"
+                            would tell the reader the work is free. */}
+                        {a.amountCents != null && (
+                          <Text style={s.ntAmt} numberOfLines={1}>
+                            {moneyWhole(a.amountCents)}
+                          </Text>
+                        )}
                         <Text style={s.ntWhen}>{stamp(a.atMs)}</Text>
                         {/* Unread is a filled dot, read is a hollow grey one — the row
                             never loses its trailing mark, so the column stays aligned
@@ -12864,6 +12877,13 @@ const s = StyleSheet.create({
   ntBody: { fontFamily: 'Inter_400Regular', fontSize: 13.5, lineHeight: 18.5,
     color: '#5f5a53', marginTop: 2 },
   ntRight: { alignItems: 'flex-end', gap: 8 },
+  /**
+   * The amount on a notification row. Bold and in ink, ABOVE the timestamp — it is the
+   * thing being scanned for, and the time is the qualifier. Same brand green and weight
+   * the card uses for a price (`extracard`'s `amt`), so a figure means the same thing
+   * wherever it appears.
+   */
+  ntAmt: { fontFamily: 'Inter_700Bold', fontSize: 14, color: '#2F5233', letterSpacing: -0.3 },
   ntWhen: { fontFamily: 'Inter_400Regular', fontSize: 12.5, color: '#8c959f' },
   ntDot: { width: 9, height: 9, borderRadius: 5 },
   ntDotUnread: { backgroundColor: '#2F5233' },

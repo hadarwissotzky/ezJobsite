@@ -14,7 +14,7 @@ import {
 
 const src = (o: Partial<ActivitySource> & { changeOrderId: string }): ActivitySource => ({
   scope: 'Subfloor rot', jobName: '41 Alder', status: 'sent', signedBy: null,
-  createdAtMs: 1000, questions: [], ...o,
+  amountCents: 120000, createdAtMs: 1000, questions: [], ...o,
 });
 
 test('AC: an unanswered question is the FIRST row and the bell counts it', () => {
@@ -73,9 +73,9 @@ test("a 'sent' row would be listed but never badged — he did it himself", () =
   // something starts producing them — stated rather than left as a silent no-op.
   const rows: ActivityRow[] = [
     { id: 'sent:a', kind: 'sent', changeOrderId: 'a', scope: 'Subfloor rot',
-      jobName: '41 Alder', detail: null, atMs: 1000, read: false },
+      jobName: '41 Alder', amountCents: 120000, detail: null, atMs: 1000, read: false },
     { id: 'q:1', kind: 'question', changeOrderId: 'b', scope: 'Panel',
-      jobName: '41 Alder', detail: '?', atMs: 2000, read: false },
+      jobName: '41 Alder', amountCents: null, detail: '?', atMs: 2000, read: false },
   ];
   assert.equal(unreadCount(rows), 1, 'badging a man for his own action is furniture');
   // …but "mark all read" must still be able to clear its dot, which is why the
@@ -159,9 +159,9 @@ test('a normal extra produces no unpriced row', () => {
 test('a card is marked unread by the SAME rule the header badge counts', async () => {
   const { unreadByChangeOrder, unreadCount } = await import('./activity.ts');
   const rows: any[] = [
-    { id: 'a', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', detail: null, atMs: 1, read: false },
-    { id: 'b', kind: 'approved', changeOrderId: 'co2', scope: '', jobName: '', detail: null, atMs: 2, read: true },
-    { id: 'c', kind: 'question', changeOrderId: 'co3', scope: '', jobName: '', detail: null, atMs: 3, read: false },
+    { id: 'a', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 1, read: false },
+    { id: 'b', kind: 'approved', changeOrderId: 'co2', scope: '', jobName: '', amountCents: null, detail: null, atMs: 2, read: true },
+    { id: 'c', kind: 'question', changeOrderId: 'co3', scope: '', jobName: '', amountCents: null, detail: null, atMs: 3, read: false },
   ];
   const marked = unreadByChangeOrder(rows);
   // The bell and the dots must never disagree — that is the whole point of sharing
@@ -175,7 +175,7 @@ test('a SENT row never marks a card — the same exclusion the bell makes', asyn
   // 'sent' is the contractor's own act. Badging a card because HE did something would
   // make the dot mean "you have news" and "you did a thing" at once.
   const rows: any[] = [
-    { id: 'a', kind: 'sent', changeOrderId: 'co1', scope: '', jobName: '', detail: null, atMs: 1, read: false },
+    { id: 'a', kind: 'sent', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 1, read: false },
   ];
   assert.equal(unreadByChangeOrder(rows).size, 0);
 });
@@ -183,8 +183,8 @@ test('a SENT row never marks a card — the same exclusion the bell makes', asyn
 test('two unread rows on one record mark it once', async () => {
   const { unreadByChangeOrder } = await import('./activity.ts');
   const rows: any[] = [
-    { id: 'a', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', detail: null, atMs: 1, read: false },
-    { id: 'b', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', detail: null, atMs: 2, read: false },
+    { id: 'a', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 1, read: false },
+    { id: 'b', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', amountCents: null, detail: null, atMs: 2, read: false },
   ];
   assert.deepEqual([...unreadByChangeOrder(rows)], ['co1']);
 });
@@ -192,4 +192,32 @@ test('two unread rows on one record mark it once', async () => {
 test('nothing unread marks nothing', async () => {
   const { unreadByChangeOrder } = await import('./activity.ts');
   assert.equal(unreadByChangeOrder([]).size, 0);
+});
+
+// ── The price on a notification row (hadar, 2026-08-25) ──────────────────────────
+
+test('every row carries what the record is worth', async () => {
+  const { buildActivity } = await import('./activity.ts');
+  // A question, an approval and a sent row all come off the same source, and the
+  // triage list shows all three — so the figure has to ride on each, not just one.
+  const rows = buildActivity([src({
+    changeOrderId: 'co1', amountCents: 1200000, status: 'approved', signedBy: 'Sarah',
+    questions: [{ id: 'q1', body: 'does this include grout?', atMs: 500 }],
+  })], new Set());
+  assert.ok(rows.length >= 2, 'expected a question row and a verdict row');
+  for (const r of rows) {
+    assert.equal(r.amountCents, 1200000, `${r.kind} lost the amount`);
+  }
+});
+
+test('an UNPRICED record carries null, never zero', async () => {
+  const { buildActivity } = await import('./activity.ts');
+  // A draft the pipeline has not priced yet is a real state. Zero would tell a
+  // contractor — and the eye scanning for urgency — that the work is free.
+  const rows = buildActivity([src({
+    changeOrderId: 'co2', amountCents: null,
+    questions: [{ id: 'q2', body: 'when can you start?', atMs: 600 }],
+  })], new Set());
+  assert.ok(rows.length > 0);
+  for (const r of rows) assert.equal(r.amountCents, null, `${r.kind} invented a figure`);
 });

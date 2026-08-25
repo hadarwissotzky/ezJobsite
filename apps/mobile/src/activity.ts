@@ -46,6 +46,19 @@ export type ActivityRow = {
   jobName: string;
   /** Free text the row shows under the title (the question, the signer's name). */
   detail: string | null;
+  /**
+   * WHAT THE RECORD IS WORTH (hadar, 2026-08-25: "need to add price value to the record
+   * as well -- it is important to know how much because it reports on the level or
+   * urgency").
+   *
+   * A notification said WHAT happened and on which job, never how much was at stake, so
+   * a question on a $12,000 extra and one on a $200 extra were the same row and had to
+   * be opened to be told apart. Triage is the whole job of this list.
+   *
+   * Null when the extra carries no figure yet — which is a real state (a draft the
+   * pipeline has not priced), and rendering a 0 there would claim the work is free.
+   */
+  amountCents: number | null;
   atMs: number;
   read: boolean;
 };
@@ -54,6 +67,8 @@ export type ActivitySource = {
   changeOrderId: string;
   scope: string;
   jobName: string;
+  /** Carried onto every row this source produces. Null when unpriced. */
+  amountCents: number | null;
   status: string;
   signedBy: string | null;
   createdAtMs: number;
@@ -85,7 +100,7 @@ export function buildActivity(
     for (const q of s.questions) {
       rows.push({
         id: `q:${q.id}`, kind: 'question', changeOrderId: s.changeOrderId,
-        scope: s.scope, jobName: s.jobName, detail: q.body, atMs: q.atMs,
+        scope: s.scope, jobName: s.jobName, amountCents: s.amountCents, detail: q.body, atMs: q.atMs,
         read: readIds.has(`q:${q.id}`),
       });
     }
@@ -101,7 +116,7 @@ export function buildActivity(
     if (s.unpricedSince != null) {
       rows.push({
         id: `unpriced:${s.changeOrderId}`, kind: 'unpriced',
-        changeOrderId: s.changeOrderId, scope: s.scope, jobName: s.jobName,
+        changeOrderId: s.changeOrderId, scope: s.scope, jobName: s.jobName, amountCents: s.amountCents,
         detail: null, atMs: s.unpricedSince,
         read: readIds.has(`unpriced:${s.changeOrderId}`),
       });
@@ -110,7 +125,7 @@ export function buildActivity(
       rows.push({
         id: `${s.status}:${s.changeOrderId}`,
         kind: s.status as ActivityKind,
-        changeOrderId: s.changeOrderId, scope: s.scope, jobName: s.jobName,
+        changeOrderId: s.changeOrderId, scope: s.scope, jobName: s.jobName, amountCents: s.amountCents,
         detail: s.signedBy, atMs: s.createdAtMs,
         read: readIds.has(`${s.status}:${s.changeOrderId}`),
       });

@@ -105,7 +105,7 @@ export async function runLoopCheck(
     const rows = await ledger(db, projectId);
     const acts = buildActivity(rows.map((r) => ({
       changeOrderId: r.id, scope: r.scope, jobName: 'loop', status: r.status,
-      signedBy: r.signed_by, createdAtMs: r.created_at_ms,
+      amountCents: r.amount_cents, signedBy: r.signed_by, createdAtMs: r.created_at_ms,
       questions: r.id === coId ? [{ id: `${tag}-q`, body: 'can it wait?', atMs: Date.now() }] : [],
     })), new Set());
     const first = acts[0];

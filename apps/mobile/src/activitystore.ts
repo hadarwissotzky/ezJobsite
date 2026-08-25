@@ -45,10 +45,10 @@ export async function activityFor(
   unpricedSince: Record<string, number> = {}
 ): Promise<ActivityRow[]> {
   const cos = await db.getAll<{
-    id: string; scope: string; status: string;
+    id: string; scope: string; status: string; amount_cents: number | null;
     signed_by: string | null; created_at_ms: number;
   }>(
-    `SELECT id, scope, status, signed_by, created_at_ms
+    `SELECT id, scope, status, signed_by, created_at_ms, amount_cents
        FROM change_order WHERE project_id = ? ORDER BY created_at_ms DESC LIMIT 200`,
     [projectId]
   );
@@ -73,7 +73,7 @@ export async function activityFor(
   );
 
   const sources: ActivitySource[] = cos.map((c) => ({
-    changeOrderId: c.id, scope: c.scope, jobName,
+    changeOrderId: c.id, scope: c.scope, jobName, amountCents: c.amount_cents,
     status: c.status, signedBy: c.signed_by, createdAtMs: c.created_at_ms,
     questions: msgs.filter((m) => m.change_order_id === c.id)
       .map((m) => ({ id: m.id, body: m.body, atMs: m.at_ms })),
