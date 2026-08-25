@@ -1492,6 +1492,11 @@ const EN: Record<string, string> = {
   'r2.priceHeardFixed': 'One price in the recording. It is filled in below as a fixed price.',
   'r2.priceHeardNte': 'One amount in the recording, said as a cap. It is filled in below as a not-to-exceed.',
   'r2.priceAmbiguous': '{n} amounts in the recording. Nothing was filled in — type the one you are sending.',
+  // The read-back for a self-correction (2026-08-25). It names BOTH figures on purpose:
+  // mandate #6's read-back is what makes an automatic number safe, and a price that
+  // quietly replaced another is worse here than no price at all. He can see which one
+  // was dropped and correct us if we took the wrong one.
+  'r2.priceCorrected': 'You said {from}, then changed it to {to}. We used {to}.',
   /**
    * THE SUM, offered for confirmation (hadar, 2026-08-21). Still a read-back, not an
    * applied figure: mandate #6 is satisfied by what he CHECKS, and the breakdown
@@ -3394,6 +3399,7 @@ const ES: Record<string, string> = {
   'r2.priceHeardFixed': 'Un solo precio en la grabación. Ya está puesto abajo como precio fijo.',
   'r2.priceHeardNte': 'Una sola cantidad en la grabación, dicha como tope. Ya está puesta abajo como tope máximo.',
   'r2.priceAmbiguous': '{n} cantidades en la grabación. No se llenó nada — escriba la que va a enviar.',
+  'r2.priceCorrected': 'Dijo {from} y luego lo cambió a {to}. Usamos {to}.',
   'r2.priceSummed': '{n} partes con precio en la grabación. Sumadas abajo — revise cada parte antes de enviar.',
   'r2.priceSegmentUnclear': '{n} de {of} partes tenían un precio que no pudimos leer bien. No se llenó nada — revise la grabación y escriba el total.',
   'r2.priceSummedNte': '{n} partes con precio en la grabación, una es un tope. Sumadas abajo como no-exceder — revise cada parte antes de enviar.',

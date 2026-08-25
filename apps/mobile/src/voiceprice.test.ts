@@ -470,3 +470,60 @@ test('a BARE number still refuses — "four fifty" is why', () => {
   const { writable } = draftPrice(FIREPLACE_SEGMENTS, 'It will be 750 probably.', parse);
   assert.equal(writable, false, 'a number with no currency marker was treated as a price');
 });
+
+// ── He changed his mind mid-recording (hadar, 2026-08-25) ────────────────────────
+
+test('a corrected price takes the figure he changed it TO', () => {
+  // His example, verbatim in shape. Before this the two figures refused, so the most
+  // ordinary thing a man does while talking through a job — say a number, think again,
+  // say the real one — produced an empty price box.
+  for (const [line, want] of [
+    ['Initially the price would be $500. The price will actually be $600.', 60000],
+    ['It is $500. Sorry, the price is $600.', 60000],
+    ['Call it $500 — no wait, make that $600.', 60000],
+    ['I said $500, I meant $650.', 65000],
+    ['$500. On second thought, $700.', 70000],
+  ] as [string, number][]) {
+    const r = extractPrice(line, parse);
+    assert.equal(r.amountCents, want, `wrong figure for: ${line}`);
+    assert.equal(r.prefill, true, `refused a plain correction: ${line}`);
+    assert.equal(r.reasonKey, 'r2.priceCorrected');
+  }
+});
+
+test('the read-back names BOTH figures, so a silent overwrite is impossible', () => {
+  // Mandate #6's read-back is what makes an automatic number safe. A price that quietly
+  // replaced another would be worse here than no price: he could not tell it happened.
+  const r = extractPrice('It would be $500. Actually, $600.', parse);
+  assert.equal(r.reasonParams.to, '$600');
+  assert.equal(r.reasonParams.from, '$500');
+});
+
+test('TWO PRICES FOR TWO THINGS is not a correction', () => {
+  // The line this must not cross. Nothing here says one figure replaces the other, so
+  // taking the later one would silently drop half the job.
+  const r = extractPrice('The demo is $400 and the tile runs $900.', parse);
+  assert.equal(r.prefill, false);
+  assert.equal(r.reasonKey, 'r2.priceAmbiguous');
+});
+
+test('a rate and a cap is still refused, not read as a correction', () => {
+  // "$95 an hour, not to exceed $2,000" — the shape the ambiguity rule was written for.
+  // Getting the rate and the cap the wrong way round is the highest-risk error there is.
+  const r = extractPrice('$95 an hour, not to exceed $2,000.', parse);
+  assert.equal(r.prefill, false);
+});
+
+test('a cue in an EARLIER clause cannot hijack a later price', () => {
+  // The cue is matched only in the clause of the LAST figure. Otherwise "actually the
+  // tiles are his" twenty seconds earlier would rewrite a legitimate price.
+  const r = extractPrice("Actually the tiles are the homeowner's. The price is $500.", parse);
+  assert.equal(r.amountCents, 50000);
+  assert.equal(r.reasonKey, 'r2.priceHeardFixed', 'a single price was reported as a correction');
+});
+
+test('three figures ending in a correction take the last', () => {
+  const r = extractPrice('Maybe $400. Or $500. Actually make it $700.', parse);
+  assert.equal(r.amountCents, 70000);
+  assert.equal(r.prefill, true);
+});

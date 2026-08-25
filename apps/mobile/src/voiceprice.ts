@@ -104,6 +104,44 @@ export type VoicePriceReading = {
 const NUMBER_WORDS =
   /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|teen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|veinte|treinta|cuarenta|cincuenta|cien|ciento|mil)\b/;
 
+/**
+ * PHRASES THAT REPLACE THE FIGURE BEFORE THEM.
+ *
+ * hadar, 2026-08-25: "you need to protect from a case where the user change their mind
+ * during the transcription -- 'initially the price would be $500', later 'the price
+ * will actually be $600' -- we need to identify these changes and extract the correct
+ * one."
+ *
+ * A man talking through a job out loud CORRECTS HIMSELF. That is not ambiguity, it is
+ * the most ordinary thing in a recording, and the two-figure refusal treated it as the
+ * worst case: he states a price, thinks again, states the real one — and the app,
+ * seeing two numbers, hands him an empty box. The one shape most likely to appear in
+ * real speech got the least help.
+ *
+ * A CORRECTION IS DIRECTIONAL, which is what makes it safe to act on where a bare
+ * second figure is not. "$400 for the demo and $900 for the tile" is two prices for two
+ * things and must still refuse. "$500... actually $600" is one price, said twice, and
+ * the second one wins — he said so.
+ *
+ * Kept deliberately narrow, and matched only in the clause of the LATER figure: a cue
+ * that fires loosely turns two legitimate prices into a silent overwrite of the first.
+ */
+const CORRECTION_CUES = [
+  'actually', 'correction', 'i meant', 'i mean', 'make that', 'make it',
+  'scratch that', 'strike that', 'let me correct', 'let me redo', 'no wait', 'wait no',
+  'on second thought', 'second thought', 'change that to', 'changed my mind',
+  'instead of', 'rather than that', 'sorry, ', 'sorry it', 'sorry the',
+  "let's say", 'lets say', 'revised to', 'update that to', 'now it is', 'now its',
+  // es-419, same register as i18n.ts.
+  'en realidad', 'mejor dicho', 'perdon', 'quise decir', 'cambio', 'que sean',
+];
+
+/** Does this clause announce that it REPLACES an earlier figure? */
+function saysCorrection(clause: string): boolean {
+  const f = fold(clause);
+  return CORRECTION_CUES.some((c) => f.includes(c));
+}
+
 const NTE_CUES = [
   'not to exceed', 'not exceed', 'no more than', 'no higher than', 'not over',
   'up to', 'cap at', 'capped at', 'cap of', 'max of', 'maximum',
@@ -200,9 +238,38 @@ export function extractPrice(transcript: string, parse: MoneyParser): VoicePrice
     };
   }
 
+  /**
+   * HE CHANGED HIS MIND — take the figure he changed it TO [2026-08-25].
+   *
+   * Only when the LAST figure's own clause announces the correction. Checking the last
+   * one specifically is what keeps this narrow: a cue anywhere in a long recording would
+   * let "actually, the tiles are his" silently overwrite a legitimate first price twenty
+   * seconds earlier.
+   *
+   * It reports itself as a correction (`reasonKey`) carrying BOTH numbers, so the
+   * read-back mandate #6 requires says what was dropped as well as what was kept. A
+   * price that quietly replaced another is the one thing worse here than no price.
+   */
+  if (found.length > 1) {
+    const last = found[found.length - 1];
+    const prior = found[found.length - 2];
+    if (saysCorrection(last.clause)) {
+      return {
+        amountCents: last.cents,
+        prefill: true,
+        mode: last.nte ? 'nte' : 'fixed',
+        modeHeard: last.nte,
+        heard: last.clause,
+        reasonKey: 'r2.priceCorrected',
+        reasonParams: { from: prior.matched ?? '', to: last.matched ?? '' },
+        breakdown: [],
+      };
+    }
+  }
+
   if (found.length > 1) {
     /**
-     * TWO OR MORE FIGURES: PREFILL NOTHING, AND SAY SO.
+     * TWO OR MORE FIGURES AND NO CORRECTION: PREFILL NOTHING, AND SAY SO.
      *
      * The tempting rule — "if one of them sits in an NTE clause, that one is the cap
      * and the other is the price" — is rejected on purpose. It resolves the real T&M
