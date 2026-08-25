@@ -1571,7 +1571,8 @@ const st = StyleSheet.create({
    *     73 x 0.45= 33pt   2 lines   (asked +30%, delivered -2%)
    *     73 x 0.6 = 44pt   3 lines
    *     51 x 0.6 = 31pt   3 lines
-   *     41 x 0.6 = 25pt   3 lines   <- here
+   *     41 x 0.6 = 25pt   3 lines
+   *     37 x 0.6 = 22pt   3 lines   <- here
    *
    * Which is, to within a point, where it started at 40 x 0.6 = 24pt — except on three
    * lines instead of one, so a long subject is now READ rather than cut off mid-word.
@@ -1581,7 +1582,7 @@ const st = StyleSheet.create({
    * the ceiling. Moving both at once is what produced the -2%.
    */
   headerTitle: {
-    fontFamily: F.disp, fontSize: 41, lineHeight: 43,
+    fontFamily: F.disp, fontSize: 37, lineHeight: 39,
     textTransform: 'uppercase', letterSpacing: 0.2,
   },
   // While editing: a quiet underline so the field is visibly live without the title
