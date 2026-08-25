@@ -156,6 +156,19 @@ export async function runStep(
       if (noneErr) return { ok: false, reason: 'needs_connection', error: noneErr.message };
       return { ok: true };
     }
+    /**
+     * TIME THE CALL (302). R2 targets 15s and nothing was measuring it: the column
+     * exists, the view exists, and 53 proposals carried a NULL because the worker never
+     * reported the number. A target nobody measures is a sentence in a document — the
+     * pipeline could drift to 90s and the only symptom would be contractors quietly
+     * giving up on the review card.
+     *
+     * Around the MODEL CALL only, not the surrounding writes: `step_ms` is the number
+     * the worker actually controls, and 302 keeps it apart from `wait_ms` (enqueue to
+     * row, what the contractor feels) precisely so a queueing problem cannot hide
+     * behind a fast model, or the reverse.
+     */
+    const t0 = Date.now();
     let s: StructureResult | null;
     try {
       s = await structureTranscript(text);
@@ -238,6 +251,10 @@ export async function runStep(
       engine: 'worker-claude',
       engine_model: STRUCTURE_MODEL,
       from_transcript: text,
+      // Written in the SAME insert as the proposal it describes — 302's rule, and the
+      // reason it holds: `structured_append_only` forbids the UPDATE, so a duration
+      // cannot be revised after the fact into one that looks better.
+      structure_ms: Date.now() - t0,
     });
     if (error) return { ok: false, reason: 'needs_connection', error: error.message };
 

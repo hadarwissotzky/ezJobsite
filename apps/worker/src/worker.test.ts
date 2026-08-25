@@ -43,6 +43,11 @@ function fakeClient(job: Job | null,
         const node: any = {
           like: () => build(true),
           not: () => build(false),
+          // `.eq(...).limit(...)` with no order — the decision_version lookup in
+          // extraTranscript. Returns nothing, which is the "capture belongs to no
+          // decision" case and makes the step fall back to this capture alone.
+          limit: () => (calls.push({ fn: 'select', args: table }),
+            Promise.resolve({ data: [], error: null })),
           order: () => ({ limit: () => (calls.push({ fn: 'select', args: table }),
             Promise.resolve({ data: rows, error: null })) }),
           single: () => (calls.push({ fn: 'select', args: table }),
@@ -377,4 +382,40 @@ test('silence heard by BOTH still reports silence, not "not transcribed yet"', a
   const r = await runOnce(sb, 'w1');
   assert.notEqual(r.blocked, 'needs_api_key',
     'a heard-nothing recording parked as though it had never been transcribed');
+});
+
+// ── The structure step must report how long it took (302) ────────────────────────
+
+test('a structured proposal carries its own duration', async () => {
+  // 302 added `structure_ms`, its view reads it, and the worker never wrote it: 53
+  // proposals and 27 latency rows, every one NULL. R2 targets 15s and nothing in the
+  // product could say whether it was met — the pipeline could drift to 90s and the only
+  // symptom would be contractors quietly giving up on the review card.
+  //
+  // Driven through the path where the model answers but the parser REJECTS the body:
+  // `structureTranscript` returns null, the step still writes a proposal (confidence
+  // 'none'), and that write must carry the duration like any other. Testing this shape
+  // rather than a happy-path model reply keeps the test about the timing instead of
+  // about the schema, which has its own tests.
+  process.env.ANTHROPIC_API_KEY = 'test-key';
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    id: 'msg_1', type: 'message', role: 'assistant', model: 'test',
+    stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 },
+    content: [{ type: 'text', text: 'not the json this parser wants' }],
+  }), { status: 200, headers: { 'content-type': 'application/json' } })) as any;
+  try {
+    const sb = fakeClient(job({ steps: ['structure'] }));
+    await runOnce(sb, 'w1');
+
+    const ins = sb.calls.find((c: any) => c.fn === 'insert' && 'confidence' in (c.args ?? {}));
+    assert.ok(ins, 'no proposal was written at all');
+    // The point of the test: a number, whatever the wall clock happened to be.
+    assert.equal(typeof ins.args.structure_ms, 'number',
+      'the proposal went in without a duration — 302s view stays empty and the 15s target unmeasurable');
+    assert.ok(ins.args.structure_ms >= 0);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.ANTHROPIC_API_KEY;
+  }
 });
