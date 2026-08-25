@@ -366,16 +366,45 @@ test('segment prices outrank the transcript', () => {
   assert.equal(reading?.breakdown.length, 2);
 });
 
-test('ONE priced segment among several is not the price of the job', () => {
-  // The unchanged guard, restated at its new home: he priced one segment, not the
-  // job, so that figure must be shown and never written.
+test('ONE priced segment is his price when he said only one number', () => {
+  // REVERSED 2026-08-25, and the evidence was the database rather than an argument.
+  // This asserted that one priced segment among several must never be written. Run
+  // against the five real change orders, that refused FOUR of them — and in every case
+  // the transcript held exactly ONE unambiguous figure equal to the segment reading.
+  // Three had a single segment, so "among several" was not even true; the model had
+  // attached his one price to the only part there was.
+  //
+  // The question is not which segment a figure was pinned to. It is whether he said
+  // more than one number, and the transcript answers that.
   const { reading, writable } = draftPrice(
     [{ title: 'Demo', priceWords: '$500', scope: 'Demo the face.' },
      { title: 'Tile', priceWords: null, scope: 'Tile the face.' },
      { title: 'Stain', priceWords: null, scope: 'Stain it.' }],
     'demo is $500', parse);
-  assert.equal(reading?.amountCents, 50000, 'he should still SEE what was read');
-  assert.equal(writable, false, 'a partial total was auto-written as the price of the job');
+  assert.equal(reading?.amountCents, 50000);
+  assert.equal(writable, true, 'refused the only figure he said');
+});
+
+test('but TWO figures still refuse, whichever path found them', () => {
+  // The line that did not move: choosing between two numbers is authoring.
+  const { writable } = draftPrice(
+    [{ title: 'Demo', priceWords: '$500', scope: 'Demo.' },
+     { title: 'Tile', priceWords: null, scope: 'Tile.' }],
+    'demo is $500 and the tile is another $900', parse);
+  assert.equal(writable, false);
+});
+
+test('an UNREADABLE span still poisons the whole reading', () => {
+  // The most important guard in this file, and the one that must survive every
+  // relaxation: he priced parts, one span cannot be read, so the sum of what we CAN
+  // read is not the price of the job. It must not fall through to the transcript and
+  // write the single figure that happened to parse.
+  const { reading, writable } = draftPrice(
+    [{ title: 'Demo', priceWords: '$400', scope: 'Demo.' },
+     { title: 'Tile', priceWords: 'four teen hundred', scope: 'Tile.' }],
+    'demo four hundred dollars, tile four teen hundred', parse);
+  assert.equal(writable, false, 'an unreadable segment price was papered over');
+  assert.equal(reading?.amountCents, null, 'a partial total was offered as the price');
 });
 
 // ── Codex, adversarial review 2026-08-24: one figure is not one price ────────────

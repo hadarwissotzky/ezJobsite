@@ -466,12 +466,42 @@ export function draftPrice(
   parse: MoneyParser,
 ): { reading: VoicePriceReading | null; writable: boolean } {
   const seg = priceFromTasks(tasks, parse);
-  if (seg) {
-    return {
-      reading: seg,
-      writable: seg.prefill && seg.amountCents !== null && seg.breakdown.length > 1,
-    };
+
+  /**
+   * A SUMMED reading — two or more segments he priced separately. This is the grid
+   * case, and it is the one place a total is ARITHMETIC rather than a figure he said,
+   * so it keeps its own rule: more than one priced segment, every span readable.
+   */
+  if (seg && seg.breakdown.length > 1) {
+    return { reading: seg, writable: seg.prefill && seg.amountCents !== null };
   }
+
+  /**
+   * A POISONED reading — he priced parts and one span could not be read ("4 teen
+   * $100"). `priceFromTasks` returns the reading with NO total for exactly this, and it
+   * must NOT fall through to the transcript below: the transcript would find the one
+   * figure that did parse and write it as the price of the whole job, which is the
+   * under-quote the poisoning rule exists to prevent. Refuse, and show what was read.
+   */
+  if (seg && seg.amountCents === null) {
+    return { reading: seg, writable: false };
+  }
+
+  /**
+   * ONE PRICED SEGMENT falls through to the transcript on purpose [2026-08-25].
+   *
+   * It used to be refused here, on the reasoning that "one priced segment among four
+   * means he priced a segment, not the job". Run against the five real change orders in
+   * the database, that rule refused FOUR of them — and in every case the whole
+   * transcript held exactly one unambiguous figure, equal to the segment reading. Three
+   * of the four had only ONE segment, so the premise did not even hold; the model had
+   * simply attached his single price to the only part there was.
+   *
+   * So the question is not which segment a figure was pinned to, it is whether he said
+   * more than one number. The transcript answers that, and `extractPrice` already
+   * refuses when the answer is two. Same rule as the no-segments case below, reached
+   * from a different direction — hadar, 2026-08-25: "we just extracting it".
+   */
   const whole = transcript ? extractPrice(transcript, parse) : null;
 
   /**
