@@ -124,7 +124,8 @@ export function Section({ title, children, style, action }: {
  * pushing its footer off-screen. Same `behavior` split as authscreen.tsx — one
  * keyboard strategy in the app, not two.
  */
-export function BottomSheet({ visible, title, onClose, children, footer, tall, bottomAnchored }: {
+export function BottomSheet({ visible, title, onClose, children, footer, tall, bottomAnchored,
+                             stickToEnd }: {
   visible: boolean;
   /** Already translated. Names the ONE thing this sheet edits. */
   title: string;
@@ -143,7 +144,18 @@ export function BottomSheet({ visible, title, onClose, children, footer, tall, b
    * upwards from the reply box. Content still scrolls once it outgrows the space.
    */
   bottomAnchored?: boolean;
+  /**
+   * Open on the END of the content and stay there as it grows — for a conversation,
+   * where the newest message is the reason the sheet was opened at all.
+   *
+   * Added 2026-08-25 with the keyboard fix: the message sheet opened at the OLDEST
+   * message, so a contractor tapping a client-question notification landed on the top
+   * of a thread and had to scroll to find what he had been notified about. Opt-in,
+   * because most sheets are a form and jumping them to the bottom would be wrong.
+   */
+  stickToEnd?: boolean;
 }) {
+  const sheetScroll = React.useRef<ScrollView>(null);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
@@ -185,6 +197,12 @@ export function BottomSheet({ visible, title, onClose, children, footer, tall, b
             </Pressable>
           </View>
           <ScrollView
+            ref={sheetScroll}
+            onContentSizeChange={() => {
+              // Covers both cases with one hook: the first layout when the sheet opens,
+              // and every message appended while it is open.
+              if (stickToEnd) sheetScroll.current?.scrollToEnd({ animated: false });
+            }}
             style={st.sheetBody}
             contentContainerStyle={bottomAnchored
               ? { paddingBottom: 8, flexGrow: 1, justifyContent: 'flex-end' }

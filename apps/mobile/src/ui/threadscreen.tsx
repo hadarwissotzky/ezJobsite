@@ -20,7 +20,8 @@
  */
 import React from 'react';
 import * as FS from 'expo-file-system/legacy';
-import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Keyboard, Platform, Pressable, ScrollView,
+         Text, TextInput, View } from 'react-native';
 import { getLang, t } from '../i18n';
 import { dayLabel, groupByDay, messageTime } from '../chatday';
 
@@ -258,11 +259,64 @@ export function ThreadScreen(props: {
     } finally { setBusy(false); }
   };
 
+  /**
+   * THE KEYBOARD COVERED THE CONVERSATION (hadar, 2026-08-25, with a screenshot:
+   * "the co detail messaging has a problem when the keyboard is up. Cannot see the
+   * last text").
+   *
+   * This screen is a full-height View holding a ScrollView with the composer anchored
+   * as its SIBLING underneath. Nothing was told about the keyboard, so iOS simply drew
+   * it over the bottom of the screen: the composer went under it, and with it the
+   * newest message — on the one screen whose entire job is reading the newest message
+   * and answering it. Typing a reply meant typing blind, above a thread you could not
+   * see the end of.
+   *
+   * TWO PARTS, and one alone does not fix it. `KeyboardAvoidingView` shrinks the
+   * container so the composer sits ON the keyboard rather than under it; the scroll
+   * below then keeps the last message above the composer, because a shorter container
+   * with the same scroll offset still shows the middle of the thread.
+   *
+   * `behavior='padding'` on iOS and undefined elsewhere is the same split BottomSheet
+   * and authscreen.tsx use — one keyboard strategy in this app, not three.
+   */
+  const scroll = React.useRef<ScrollView>(null);
+  // Only auto-scroll on a content change while the keyboard is UP. Otherwise opening
+  // the screen would yank a contractor to the bottom of a long thread he may have
+  // opened to read from the top.
+  const kbOpen = React.useRef(false);
+  const toEnd = React.useCallback((animated = true) => {
+    // Deferred a tick: called from the keyboard event, the container has not yet
+    // shrunk, so scrolling immediately lands on the pre-resize bottom.
+    setTimeout(() => scroll.current?.scrollToEnd({ animated }), 60);
+  }, []);
+  React.useEffect(() => {
+    const show = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => { kbOpen.current = true; toEnd(); });
+    const hide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => { kbOpen.current = false; });
+    return () => { show.remove(); hide.remove(); };
+  }, [toEnd]);
+  // A new message must not arrive off-screen either — his own, or the client's.
+  React.useEffect(() => { toEnd(); }, [st.messages.length, toEnd]);
+
   return (
-    <View style={{ flex: 1, backgroundColor: C.paper }}>
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: C.paper }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       {/* Same status-bar clearance fix as the record screen (2026-07-22): the
           back control sat under the iPhone clock. */}
-      <ScrollView contentContainerStyle={{ padding: 18, paddingTop: 54, paddingBottom: 24 }}>
+      <ScrollView
+        ref={scroll}
+        contentContainerStyle={{ padding: 18, paddingTop: 54, paddingBottom: 24 }}
+        // Let a tap on the thread dismiss the keyboard without eating the tap that
+        // reaches a photo or a link.
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        onContentSizeChange={() => { if (kbOpen.current) toEnd(false); }}
+      >
         <Pressable onPress={props.onBack} hitSlop={12}
           style={{ minHeight: 48, justifyContent: 'center', alignSelf: 'flex-start', paddingRight: 24 }}>
           <Text style={{ ...label, fontSize: 15, color: C.orange }}>‹ {t('r5b.back')}</Text>
@@ -413,6 +467,6 @@ export function ThreadScreen(props: {
           <Text style={{ ...T.bodySteel, fontSize: 11.5 }}>{t('r5b.priceNeedsRevision')}</Text>
         </View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }

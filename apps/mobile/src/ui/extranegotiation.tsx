@@ -478,7 +478,7 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
           The composer goes in `footer`, which BottomSheet pins under the scrolling
           content and inside its KeyboardAvoidingView — so the keyboard pushes the
           reply box up instead of covering it. */}
-      <BottomSheet visible={msgOpen} tall bottomAnchored title={t('neg.tabMessages')}
+      <BottomSheet visible={msgOpen} tall bottomAnchored stickToEnd title={t('neg.tabMessages')}
         onClose={() => setMsgOpen(false)}
         footer={thread.canReply
           ? <ReplyComposer inputRef={composerInput} onReply={props.onReply}
