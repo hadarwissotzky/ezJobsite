@@ -175,10 +175,15 @@ app: find the text again, tap the link again, read the whole document again. Eac
 those is a place a non-technical homeowner stops.
 
 Since "negotiate" is by definition more than one message, this made the third of
-hadar's three verbs unreachable. A sent question now **returns to the document** with
-the thread refetched — so the client's own words are on the page, which is the proof
-the terminal screen was really for — and Approve, Decline and Ask all live again. A
-green banner carries the acknowledgement.
+hadar's three verbs unreachable. A sent question then **returned to the document**
+with the thread refetched — so the client's own words were on the page, which is the
+proof the terminal screen was really for — and Approve, Decline and Ask were all live
+again. A green banner carried the acknowledgement.
+
+**That fix left the composer on a screen of its own, and §4.9 removes it.** The
+`askQuestion` full-screen textarea described above no longer exists; the paragraph is
+kept because it is the reason the *terminal* screen went, which is a different defect
+from the one below.
 
 ### 4.4 The conversation was invisible on two of the three documents (DEF-5)
 The thread fetch sat *between* the EWA dispatch and the priced render:
@@ -219,7 +224,8 @@ Verified: a reply lands, the card is replaced and highlighted "New reply", and
 change.
 
 *This is the weaker half of the fix.* The strong half is an SMS, and it is blocked —
-see §7.
+see §7. §4.10 adds the third half: telling them, **on open**, that a reply is already
+waiting.
 
 ### 4.6 A client's question notified nobody (`395_client_portal_loop.sql`, new)
 `notify_on_open` (366) pushes when a client **opens** a link. `notify_on_verdict`
@@ -304,6 +310,102 @@ goes first, and a partial failure leaves the pairing that `ewa.js`'s own fallbac
 written for.
 
 ---
+
+### 4.9 The composer was a different page (hadar, 2026-08-24)
+
+> "missing the messaging section — currently it is a different page, it needs to be on
+> the same page."
+
+The thread rendered on the document. **Writing into it did not.** Every "Message
+&lt;name&gt;" control — the actions band, the sidebar, the EWA's "Ask a question
+instead", the project list's Questions? box — called `askQuestion`, which called
+`screen()` and replaced the entire document with a bare *"What's your question?"*
+textarea.
+
+So at the exact moment a homeowner decided to ask about the price, **the price left
+the screen** — along with the contractor's last message and their own earlier
+question. Those are the three things anybody rereads before pressing send. §4.3 fixed
+where you land *after* sending; it never questioned why sending needed a room of its
+own.
+
+`threadHtml` now carries its own composer and the thread reads as a messenger: their
+words left, yours right, the box at the bottom. `askQuestion` survives as a name only
+— it takes no argument, opens nothing, and puts the cursor in the box that is already
+on the page. It keeps the name because **`ewa.js` calls `h.askQuestion(d)` and is a
+separately uploaded object** (DEF-6, §4.8, is the standing proof the two can be out of
+step on the host).
+
+Three things it deliberately does NOT change:
+
+* **An answered document still draws no composer.** REQ-LC23 closes the thread on the
+  answer and the server has enforced it since 308, so a box there would be a control
+  that cannot work — DEF-4's shape, not repeated.
+* **Only `#thread` is ever replaced**, never the page — for §4.5's reason (the
+  half-typed signature), plus a new one the composer creates: a half-typed *message*
+  is now also something a redraw can destroy. `redrawThread` carries the draft and the
+  focus across the swap by hand. Verified: a reply lands mid-typing and `#name` still
+  holds `"Jane Homeowner"` while `#msgbox` still holds the unsent sentence.
+* **The project list gets no second thread.** The conversation belongs to the
+  document's lineage; two copies of one record at two addresses is a worse answer than
+  a link. `askQuestion` sends that screen to the document's `#thread`.
+
+The mechanism note stays on the card, unchanged and for the unchanged reason: a client
+who negotiates a number in this box has agreed nothing (mandate #2, R5b). Making the
+box easier to reach makes that sentence *more* load-bearing, not less.
+
+### 4.10 Nothing told them a reply was waiting *on open* (hadar, 2026-08-24)
+
+> "when the page open notification need to indicate if there are new messages that are
+> unseen. and should update the page to display new messages (like a messenger, but
+> not 100% real time)."
+
+§4.5 covers a reply that lands **while the page is open**. It had nothing to say about
+the far more common case: the reply landed hours ago, the client taps the SMS link
+again, and the page draws a conversation in which the new message looks exactly like
+the old ones. There is no push, no email and no account, so **the moment the link
+opens is the only moment this product can tell them.**
+
+Three surfaces, one fact:
+
+1. a banner at the top of the page — *"2 new messages from Testapp"* — that scrolls to
+   the thread;
+2. an orange **New** pill on each unread message;
+3. a count on the **Messages** tab, for a reader who has already scrolled past the
+   banner.
+
+**The read state is on the device, and that is a decision, not a shortcut.** A
+server-side read receipt would be the first thing on this page to identify a person
+who was promised they needed no account. So one number lives in `localStorage` under
+`ezjb:seen:<token>`: the timestamp of the newest message this browser has actually had
+**on screen**. What that buys and what it does not:
+
+* On the phone the SMS landed on — the overwhelming majority case — it is exactly
+  right.
+* A different device, or a cleared browser, has no watermark, so every message the
+  contractor ever wrote reads as new. That is the honest answer for a reader who has
+  genuinely never seen them *here*, and it is why the watermark starts at `0` rather
+  than at "now".
+* Private browsing can refuse storage. Every access is wrapped; the page then simply
+  never marks anything new, which is the pre-change behaviour and not a failure.
+
+**None of it is evidence.** It is a reading aid on one device, it is never sent to the
+server, and no part of the project record depends on it.
+
+"Seen" requires a **dwell**, not a paint: the card has to be a quarter visible for
+1.2s before the watermark moves. Marking on render would mean a client who opened the
+link, read the price and closed it without scrolling had "seen" a reply they never
+laid eyes on — and would never be told about it again. Within a visit the pills are
+measured against the watermark **as it stood at load**, so a reply stays marked while
+they read it instead of un-marking itself under their eyes; the stored number decides
+the *next* visit.
+
+**"Not 100% real time" is the specification, not a shortfall.** The poll stays at 25s
+while the page is visible and drops to 8s for three minutes after the client sends
+something — the one window in which a reply is actually likely — then backs off. A
+socket on a homeowner's phone over LTE buys seconds and costs battery on a page whose
+job is to be read once. Change is now detected by **content**, not by count: comparing
+`length` alone meant a thread that gained one message and lost another between polls —
+exactly what a Revise & Resend does to the lineage walk — read as "nothing happened".
 
 ## 5. The security model of the token
 
