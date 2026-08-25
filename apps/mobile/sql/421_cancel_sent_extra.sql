@@ -48,18 +48,54 @@ alter table public.change_order
 alter table public.confirmation_request
   add column if not exists cancelled_at timestamptz;
 
+/*
+ * THE CHANGE ORDER IS THE AUTHORITY, NOT ITS LINK [corrected 2026-08-25].
+ *
+ * This guard read `confirmation_request.cancelled_at` and nothing else, and that column
+ * is only written by `cancel_change_order_v1` below. A change order cancelled by any
+ * other route -- a row that reached `status = 'cancelled'` before this file existed, or
+ * through the device outbox writing the status directly -- left its link with
+ * `cancelled_at` still NULL, and this guard saw nothing to stop.
+ *
+ * That is not hypothetical. Found on hadar's own data on 2026-08-25:
+ * co-cap-mt6hxw50-dqpl67n0 was `status = 'cancelled'` with `cancelled_at` set on the
+ * change order and NULL on its confirmation_request. `confirmation_fetch` served the
+ * link as `open`, and `confirmation_respond` returned `{"status":"recorded"}` -- a
+ * client could sign an instrument the contractor had already taken back, and the
+ * signature would stand in the record.
+ *
+ * Keying off the link was keying off a COPY. The change order's own status is the fact;
+ * `cancelled_at` on the request is a convenience that can be missing. Both are checked
+ * now, so a withdrawal is refused however it was performed.
+ */
 create or replace function public.confirmation_response_not_cancelled() returns trigger
   language plpgsql as $$
-declare c timestamptz;
+declare c timestamptz; co_status text;
 begin
-  select cancelled_at into c
-    from public.confirmation_request where token = new.token;
-  if c is not null then
+  select cr.cancelled_at, c2.status into c, co_status
+    from public.confirmation_request cr
+    left join public.change_order c2 on c2.id = cr.change_order_id
+   where cr.token = new.token;
+  if c is not null or co_status = 'cancelled' then
     raise exception 'this change order was withdrawn by the contractor'
       using errcode = '23514', hint = 'link_cancelled';
   end if;
   return new;
 end $$;
+
+/*
+ * BACKFILL, so the two facts stop disagreeing on rows that already drifted apart.
+ * Idempotent: it only touches requests whose change order is cancelled and whose own
+ * cancelled_at is still NULL. The guard above no longer depends on this being run --
+ * that is deliberate, a repair should not be load-bearing -- but leaving the data
+ * inconsistent means every future reader has to know about the discrepancy.
+ */
+update public.confirmation_request cr
+   set cancelled_at = coalesce(c.cancelled_at, now())
+  from public.change_order c
+ where c.id = cr.change_order_id
+   and c.status = 'cancelled'
+   and cr.cancelled_at is null;
 
 drop trigger if exists confirmation_response_not_cancelled on public.confirmation_response;
 create trigger confirmation_response_not_cancelled before insert on public.confirmation_response

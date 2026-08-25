@@ -819,6 +819,29 @@ async function load() {
 
   if (data.status === 'not_found') { done('⚠️', 'This link is not valid', 'It may have been mistyped. Ask for a new one.'); return; }
   if (data.status === 'expired') { done('⏰', 'This link has expired', 'Ask for a new one — nothing is lost.'); return; }
+  /*
+   * WITHDRAWN — say it plainly, and never render the document [2026-08-25].
+   *
+   * Before this, `cancelled_at` was invisible here: the page drew a live change order
+   * with a working Approve button, and the refusal only arrived from a database trigger
+   * AFTER the client had typed their full name to sign it. The document was already
+   * taken back; the only honest thing this page can do is say so.
+   *
+   * It names the change order and the contractor so the client knows WHICH one was
+   * withdrawn — they may be holding several links — and it does not offer a way to
+   * approve anything. "Ask for a new one" is deliberately absent: nothing is waiting on
+   * the client here, and telling them to chase it would be wrong.
+   */
+  if (data.status === 'cancelled') {
+    // NOT pre-escaped: `done` escapes its arguments, and escaping twice would render
+    // an ampersand in a company name as "&amp;amp;" on the one page that has to look
+    // like it came from a real business.
+    var whoBy = data.company_name || 'The contractor';
+    done('↩︎', 'This change order was withdrawn',
+      whoBy + ' took ' + (data.scope_title ? '“' + data.scope_title + '” ' : 'this ')
+      + 'back, so there is nothing to approve. Nothing is owed and nothing proceeds.');
+    return;
+  }
 
   // Photos are OPTIONAL and their absence is never an error. On a database where
   // 304_approval_photos.sql has not been applied the RPC does not exist and `ph.error`

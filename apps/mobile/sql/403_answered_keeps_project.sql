@@ -85,6 +85,14 @@ begin
        where c.project_id = proj
          and c.status <> 'draft'
          and c.superseded_by is null
+         -- WITHDRAWN ORDERS ARE OFF THE CLIENT'S LIST [2026-08-25, hadar: "it should
+         -- filter change orders that were revoked / canceled by owner"]. The
+         -- contractor took it back and every recipient was told so; leaving it on the
+         -- list the client checks the job against re-offers it, and its row still
+         -- carried a live-looking token. Drafts and superseded versions were already
+         -- excluded for the same reason — this is the third thing that is not a live
+         -- offer, and it was the one still showing.
+         and c.status <> 'cancelled'
     ), '[]'::jsonb),
     'approved_total_cents', coalesce((
       select sum(c.amount_cents) from public.change_order c

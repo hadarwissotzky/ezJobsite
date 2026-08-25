@@ -89,6 +89,36 @@ begin
   select * into r from public.confirmation_request where token = p_token;
   if not found then return jsonb_build_object('status','not_found'); end if;
   if now() > r.expires_at then return jsonb_build_object('status','expired'); end if;
+  /*
+   * A WITHDRAWN CHANGE ORDER IS NOT A DOCUMENT TO SIGN [2026-08-25, hadar: "it should
+   * filter change orders that were revoked / canceled by owner"].
+   *
+   * 421 kills the link when a contractor withdraws a sent extra, and the
+   * `confirmation_response_not_cancelled` trigger refuses the signature. But this
+   * function never looked at `cancelled_at`, so the page still SERVED the instrument as
+   * `open`: a client with the original text message opened it, read a live change
+   * order, typed their full name to sign — and hit a raw database error from the
+   * trigger. The safety net held (no signature was ever recorded against a withdrawn
+   * order) and everything above it was wrong. Being told "no" by a constraint, after
+   * signing, is not the same as being told the offer was taken back.
+   *
+   * Returned as its own status so the page can SAY it, rather than as `not_found`,
+   * which would tell the client they mistyped a link they did not mistype.
+   */
+  -- The change order's own status is checked as well as the link's copy of it: a row
+  -- cancelled by any route other than `cancel_change_order_v1` leaves `cancelled_at`
+  -- NULL here, and this page would serve a withdrawn instrument as a live one. See the
+  -- guard in 421 for the case this was found on.
+  if r.cancelled_at is not null
+     or exists (select 1 from public.change_order c
+                 where c.id = r.change_order_id and c.status = 'cancelled') then
+    return jsonb_build_object(
+      'status', 'cancelled',
+      'kind', r.kind,
+      'scope_title', r.scope_title,
+      'company_name', r.company_name,
+      'job_label', r.job_label);
+  end if;
 
   select * into resp from public.confirmation_response where token = p_token;
   return jsonb_build_object(
