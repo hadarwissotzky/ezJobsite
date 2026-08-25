@@ -254,7 +254,30 @@ export function SettingsScreen(props: {
     : (company.trim() || props.profile.company || t('set.addCompany'));
 
   return (
+    /**
+     * THE KEYBOARD COVERED THE FIELD (hadar, 2026-08-25: "in your profile section, join
+     * a company — when I click on the field the field is blocked by keyboard").
+     *
+     * This screen is a bare ScrollView and had never been told about the keyboard, so
+     * iOS drew it over the bottom of the page. "Join a company" sits well down the
+     * profile, past identity and the company card, which put it squarely under the
+     * keys — a crew member joining by code could not see what he was typing.
+     *
+     * `automaticallyAdjustKeyboardInsets` is the right tool for a SCROLLING FORM, and a
+     * different one from the fix threadscreen.tsx got an hour ago. There, the composer
+     * is pinned outside the scroll and the container itself has to shrink, which is
+     * what KeyboardAvoidingView does. Here every field is inside the scroll, so the
+     * content just needs insetting and iOS brings the focused field into view by
+     * itself. Wrapping this in a KeyboardAvoidingView would fight the scroll instead.
+     *
+     * `keyboardShouldPersistTaps="handled"` so the first tap on Join still lands while
+     * the keyboard is up, rather than being spent dismissing it — the field and its
+     * button sit on the same row, and one wasted tap on a two-tap job is most of it.
+     */
     <ScrollView style={{ flex: 1, backgroundColor: '#fff' }}
+      automaticallyAdjustKeyboardInsets
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
       contentContainerStyle={{ padding: 16, paddingTop: 56, paddingBottom: 48 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
         <Pressable onPress={props.onBack} hitSlop={12} style={{ paddingRight: 12 }}>
