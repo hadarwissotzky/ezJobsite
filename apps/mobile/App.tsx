@@ -11474,7 +11474,17 @@ const shortJob = (name: string): string => {
                   // every list in the app. The person differs — this is who ASKED for
                   // the work, the feed's is who RAISED the record — which is exactly
                   // why the label travels with the name.
-                  person={asked ? { label: T('job.requestedByLab'), name: asked } : null}
+                  /* WHO RAISED IT, like the feed and Home (hadar 2026-08-25: "i cannot
+                     see who created it at the bottom it is missing").
+                     This showed `asked` — who_directed, the person who ASKED for the
+                     work — under "Requested by". Two problems: it is a different fact
+                     from who created the record, and `isNamedClient` returns null for
+                     the "Owner" sentinel, so on most rows the footer had no name at all.
+                     Falls back to the requester when no author row has reached this
+                     device, which is better than an empty footer and still true. */
+                  person={c.created_by
+                    ? { label: T('feed.raisedByLab'), name: c.created_by }
+                    : asked ? { label: T('job.requestedByLab'), name: asked } : null}
                   // Same closing line as the feed. It keeps its "Initiated" word — inside
                   // a job the rows differ by WHICH date this is, and the feed's bare date
                   // sits under a heading that already said so.

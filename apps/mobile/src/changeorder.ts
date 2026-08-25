@@ -980,6 +980,9 @@ export type LedgerRow = {
    *  same rule as extra_type; renderCard simply omits the line. */
   /** The breakdown as STORED (raw JSON text), for the send path to freeze into the
    *  client's instrument. Parsed with `parseLineItems`; never rendered from here. */
+  /** Who RAISED the extra — the first actor on it. Null when no actor row has
+   *  reached this device. Distinct from `who_directed`, who asked for the work. */
+  created_by: string | null;
   line_items: string | null;
   billing_timing: string | null;
   schedule_effect: string | null;
@@ -1115,6 +1118,7 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     created_at_ms: number; pending: number; extra_type: string | null;
     billing_timing: string | null; schedule_effect: string | null;
     schedule_days: number | null; exclusions: string | null; line_items: string | null;
+    created_by: string | null;
     photo_relpath: string | null; co_number: number | null;
   }>(
     `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.scope_of_work,
@@ -1123,8 +1127,17 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
             co.billing_timing, co.schedule_effect, co.schedule_days, co.exclusions,
             co.line_items,
             ${CO_PHOTO_SUBQUERY} AS photo_relpath,
-            EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending
+            EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending,
+            -- WHO RAISED IT (hadar 2026-08-25: "i cannot see who created it at the
+            -- bottom it is missing"). The job screen was the only one of the three card
+            -- lists that never showed the author: it printed who_directed under
+            -- "Requested by", a DIFFERENT person, and null whenever that value is the
+            -- "Owner" sentinel -- so the footer simply had no name in it. Same join the
+            -- feed and Home use, so one extra names one human everywhere.
+            -- (No backticks in here: this is inside a template literal.)
+            fa.name AS created_by
        FROM change_order co
+       LEFT JOIN ${CO_AUTHOR_JOIN} fa ON fa.subject_id = co.id AND fa.rn = 1
       WHERE co.project_id = ?
       ORDER BY co.created_at_ms`,
     [projectId]
@@ -1150,7 +1163,7 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
       extra_type: r.extra_type,
       billing_timing: r.billing_timing, schedule_effect: r.schedule_effect,
       schedule_days: r.schedule_days, exclusions: r.exclusions,
-      line_items: r.line_items,
+      line_items: r.line_items, created_by: r.created_by,
       photo_relpath: r.photo_relpath, co_number: r.co_number,
       // "on this phone" and "in the cloud" are different facts and the sender is
       // entitled to know which one they are looking at.
