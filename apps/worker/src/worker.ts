@@ -24,6 +24,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { isComplete, pendingSteps } from './steps.ts';
 import { hasSttKey, transcribe, type Transcript } from './transcribe.ts';
+import { draftPrice } from './voiceprice.ts';
+import { parseMoney } from './money.ts';
 import { hasLlmKey, structureTranscript, STRUCTURE_MODEL,
          type StructureResult } from './structure.ts';
 
@@ -207,7 +209,31 @@ export async function runStep(
         title: t.title, scope: t.scope, materials: t.materials,
         price_words: t.priceWords, time_words: t.timeWords, start_words: t.startWords,
       })) : null,
-      // proposed_amount_cents stays NULL forever from this step (mandate #6).
+      /**
+       * THE PRICE, READ BY OUR OWN PARSER — not authored by the model [2026-08-25].
+       *
+       * This line used to say `proposed_amount_cents` stays NULL forever from this
+       * step. It cannot, and the reason is a real defect rather than a preference:
+       * the change order is created on the phone at capture time, unpriced, and syncs
+       * immediately. `ingest_change_order_v1` is insert-once by design. So when the
+       * app worked the price out seconds later there was no longer a queued payload
+       * to amend and no path to update the server row — eight change orders on
+       * production, not one of them carrying a price. The figure lived on a single
+       * device, and a reinstall or a second phone lost it.
+       *
+       * MANDATE #6 IS NOT BREACHED, and the distinction is the whole point. The fence
+       * is on the MODEL inventing a number — "four fifty" became $450 at high
+       * confidence, which is why the fence exists. Nothing here asks the model for a
+       * figure: it gives verbatim spans, and `draftPrice` runs the SAME parseMoney the
+       * phone runs, over the same spans, under the same refusals. A bare "750" is
+       * still refused; two figures still refuse; a segment price is still not read as
+       * the whole job. It is the app's arithmetic, executed earlier.
+       *
+       * MANDATE #2 IS NOT BREACHED EITHER: this writes a draft's figure, not a sent
+       * one. `apply_proposal_v1` only touches a draft with no price, the send gate is
+       * still a deliberate human act, and the number is on screen before it can go.
+       */
+      proposed_amount_cents: pricedFromTranscript(s, text),
       confidence: s?.confidence ?? 'none',
       engine: 'worker-claude',
       engine_model: STRUCTURE_MODEL,
@@ -251,6 +277,29 @@ export async function runStep(
  * them would have silently outranked Deepgram. Ranking by "is not the one name I
  * remembered" is the same fall-through shape `extrabucket.ts` was written to kill.
  */
+/**
+ * The figure a structured proposal implies, or null.
+ *
+ * Delegates to `draftPrice` — the app's rule, vendored here — so the worker and the
+ * phone cannot reach different answers about the same recording. It returns a reading
+ * plus whether that reading may be WRITTEN without asking; only the writable ones are
+ * stored, so a figure the app would have shown-but-not-filled is still shown-but-not-
+ * filled, just with the showing done by `price_heard` as before.
+ */
+function pricedFromTranscript(
+  s: { tasks?: { priceWords: string | null; scope: string; title: string }[] } | null,
+  transcript: string,
+): number | null {
+  try {
+    const { reading, writable } = draftPrice(s?.tasks ?? [], transcript, parseMoney);
+    return writable && reading?.amountCents != null ? reading.amountCents : null;
+  } catch {
+    // A parser fault must never cost the write-up. The scope of work is the thing this
+    // step exists to produce; the price is an addition to it.
+    return null;
+  }
+}
+
 const ON_DEVICE_ENGINES = ['ios-ondevice', 'android-ondevice', 'ondevice'];
 const isOnDevice = (engine: string | null): boolean =>
   !!engine && ON_DEVICE_ENGINES.some((e) => engine === e || engine.endsWith('-ondevice'));
