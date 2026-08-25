@@ -930,7 +930,7 @@ export function ScreenHeader({ title, onBack, backLabel, right, kicker, kickerRi
                   style={[display(22), st.headerTitle, { flex: 1 }]}
                   numberOfLines={2}
                   adjustsFontSizeToFit
-                  minimumFontScale={0.6}
+                  minimumFontScale={0.45}
                 >{title}</Text>
               )
           )}
@@ -976,7 +976,7 @@ function EditableTitle({ title, onChange }: {
           style={[display(22), st.headerTitle]}
           numberOfLines={2}
           adjustsFontSizeToFit
-          minimumFontScale={0.6}
+          minimumFontScale={0.45}
         >{title}</Text>
       </Pressable>
     );
@@ -1508,9 +1508,19 @@ const st = StyleSheet.create({
    *
    * Two lines is what makes the larger type mean something. The shrink-to-fit stays as
    * the backstop for a title too long even for two.
+   *
+   * 56 -> 73 (a further 30%, hadar 2026-08-25), and the FLOOR came down with it:
+   * `minimumFontScale` 0.6 -> 0.45. Those two move together or the change is a
+   * regression. `adjustsFontSizeToFit` shrinks until the text fits and then truncates,
+   * so the size a long title actually renders at is base x floor, not base. At 56 x 0.6
+   * that was ~34pt, which is about what two lines of a 30-character title can hold on a
+   * phone. Raising the base to 73 without touching the floor would have set that same
+   * title at ~44pt — too big to fit, so it would have been CLIPPED instead of enlarged.
+   * 73 x 0.45 is ~33pt: a long title renders about as it did, and every title short
+   * enough to fit gets the full 30%. The increase lands where there is room for it.
    */
   headerTitle: {
-    fontFamily: F.disp, fontSize: 56, lineHeight: 58,
+    fontFamily: F.disp, fontSize: 73, lineHeight: 76,
     textTransform: 'uppercase', letterSpacing: 0.2,
   },
   // While editing: a quiet underline so the field is visibly live without the title
