@@ -92,6 +92,38 @@ BEGIN
           OR exclusions IS NULL OR extra_type IS NULL);
   IF FOUND THEN v_hit := true; END IF;
 
+  /*
+   * THE PRICE, ONTO THE SERVER'S OWN ROW [2026-08-25].
+   *
+   * Until now no path existed. The change order is created on the phone at capture
+   * time with no price and syncs immediately; `ingest_change_order_v1` is insert-once
+   * by design; and the figure was worked out on the device seconds later, by which
+   * point there was no queued payload left to amend. Result, verified against
+   * production: eight change orders, none of them carrying a price. Every figure lived
+   * on exactly one device, and a reinstall or a second phone lost all of them.
+   *
+   * This is the same door the scope of work already comes through, and it is guarded
+   * the same way -- `status = 'draft'` and only when there is no figure yet:
+   *   - a SENT or SIGNED extra is never touched, so nothing frozen can move;
+   *   - `amount_cents IS NULL` means the app never argues with a number a human typed.
+   *     The device's own auto-fill carries `onlyIfUnpriced` for the same reason, so
+   *     whichever arrives second does nothing.
+   *
+   * The figure itself is NOT the model's. `proposed_amount_cents` is written by the
+   * worker running the app's own parseMoney over the verbatim spans the model quoted
+   * (see worker.ts). Mandate #6 forbids the model authoring a number; it does not
+   * forbid our parser reading one earlier than it used to.
+   */
+  IF v_prop.proposed_amount_cents IS NOT NULL THEN
+    UPDATE change_order
+       SET amount_cents = v_prop.proposed_amount_cents,
+           -- The confirmation stamp moves with the figure: a price with no moment
+           -- attached is the state 050's ingest refuses outright.
+           numbers_confirmed_at = COALESCE(numbers_confirmed_at, now())
+     WHERE id = v_co AND status = 'draft' AND amount_cents IS NULL;
+    IF FOUND THEN v_hit := true; END IF;
+  END IF;
+
   -- THE SPOKEN COST, once. COALESCE so a quote a human corrected is never rewritten.
   SELECT btrim(t.value ->> 'price_words') INTO v_words
     FROM jsonb_array_elements(COALESCE(v_prop.proposed_tasks, '[]'::jsonb)) AS t(value)
