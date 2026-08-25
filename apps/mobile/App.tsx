@@ -856,7 +856,10 @@ export default function App() {
     co_number: number | null;
     /** 1 when any capture behind this extra is still in the outbox — the row then says
      *  so in steel-blue. SQLite's EXISTS returns an integer, not a boolean. */
-    pending_upload: number }>>([]);
+    pending_upload: number;
+    /** The change order ITSELF is still in this device's outbox — a different
+     *  question from whether its media has uploaded. */
+    record_pending: number }>>([]);
   // The funnel ABOVE change orders — a walkthrough IS an extra in the making, and the
   // Extras tab must show the whole pipeline, not only the signed paperwork at the end.
   const [captured, setCaptured] = React.useState<Array<{
@@ -4274,6 +4277,13 @@ const checkClientMessages = async () => {
                   co.signed_by, co.co_number,
                   ${CO_PHOTO_SUBQUERY} AS photo_relpath,
                   fa.name AS created_by,
+                  -- HAS THE RECORD ITSELF REACHED THE SERVER? The EXISTS below asks
+                  -- about its MEDIA, which is a different question: an extra can be
+                  -- fully written and still be sitting in this device's queue. The
+                  -- artboard's "On this phone" line is about the record, and Home had
+                  -- no way to answer it (2026-08-25).
+                  EXISTS (SELECT 1 FROM change_order_outbox co2
+                           WHERE co2.change_order_id = co.id) AS record_pending,
                   -- STILL ON THE PHONE? (hadar, 2026-08-19: "when the change order is in
                   -- the list it should indicate to the user in the record with colour
                   -- that it is not yet processed".)
@@ -9750,7 +9760,12 @@ const shortJob = (name: string): string => {
         conversation={(e.questions ?? 0) > 0 ? T('job.inConversation') : null}
         unread={unreadRecords.has(e.id)}
         // Still on the phone. Steel-blue, stated calmly — see ExtraCard's `pending`.
-        pending={e.pending_upload ? T('home.notProcessed') : null}
+        /* THE RECORD FIRST, THEN ITS MEDIA. "Not sent up yet" is the more
+           fundamental fact: an extra still in this device's queue does not exist
+           anywhere else, and saying only "still processing" about it would describe
+           the smaller problem while the bigger one went unmentioned. */
+        pending={e.record_pending ? T('erec.onPhone')
+          : e.pending_upload ? T('home.notProcessed') : null}
         amount={e.amount_cents != null ? `+${moneyWhole(e.amount_cents)}` : null}
         onPress={() => { setProjectId(e.project_id); void openRecord(e.id); }} />
     );
@@ -11532,6 +11547,9 @@ const shortJob = (name: string): string => {
                   meta={[]}
                   conversation={(questions[c.id] ?? 0) > 0 ? T('job.inConversation') : null}
                   unread={unreadRecords.has(c.id)}
+                  /* `synced` is EXISTS(change_order_outbox) — the ledger has carried it
+                     since it was written and no list ever showed it. */
+                  pending={c.synced ? null : T('erec.onPhone')}
                   amount={c.amount_cents != null ? `+${moneyWhole(c.amount_cents)}` : null}
                   onPress={() => { void openRecord(c.id); }} />
               );
