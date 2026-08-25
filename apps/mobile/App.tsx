@@ -10133,8 +10133,24 @@ const shortJob = (name: string): string => {
              * vocabulary; keeping them on top of this grouping let "Needs you" hide the
              * account's only extra, which is what hadar photographed.
              */
-            const rest = [...waitingList, ...approvedList, ...closedList]
-              .sort((a, b) => b.created_at_ms - a.created_at_ms);
+            /**
+             * FOUR GROUPS (hadar, 2026-08-25, having lived with the artboard's two).
+             *
+             * The artboard drew "Needs you first" and "Everything else". Two proved too
+             * coarse in use: "waiting on client" is the state he checks most often and
+             * can do least about, and folding it into "everything else" buried the money
+             * actually in play under closed and approved records.
+             *
+             * So the split is by WHOSE MOVE IT IS, which is still not the old sort by
+             * status — that had five headings including "Drafts", and drafts belong with
+             * the questions he owes answers to, because both are his move.
+             *
+             *   needs you  -> his move       (drafts, and client questions)
+             *   waiting    -> the client's move
+             *   approved   -> nobody's move, and it is the good news
+             *   everything else -> declined, withdrawn: over
+             */
+            const closedRest = [...closedList].sort((a, b) => b.created_at_ms - a.created_at_ms);
 
             /**
              * HOME IS A SUMMARY, NOT THE ARCHIVE (hadar, 2026-08-25: "nor there i a
@@ -10153,11 +10169,17 @@ const shortJob = (name: string): string => {
              * on the screen whose whole job is telling him what is outstanding.
              */
             const REST_ON_HOME = 3;
-            const restShown = rest.slice(0, REST_ON_HOME);
-            const hiddenCount = rest.length - restShown.length;
+            /** Home is a summary: each of the three non-urgent groups shows its most
+             *  recent few and the footer offers the rest. "Needs you first" is NOT
+             *  capped — see below. */
+            const cap = (l: Extra[]) => l.slice(0, REST_ON_HOME);
+            const hiddenCount = [waitingList, approvedList, closedRest]
+              .reduce((n, l) => n + Math.max(0, l.length - REST_ON_HOME), 0);
             return (<>
               {bucket('home.needsYouFirst', needs)}
-              {bucket('home.everythingElse', restShown)}
+              {bucket('home.waitingOnClient', cap(waitingList))}
+              {bucket('home.approvedSec', cap(approvedList))}
+              {bucket('home.everythingElse', cap(closedRest))}
               {/* SHOW ALL — the artboard's footer.
                   Home holds the most recent extras; this is the way to the full list
                   across every job, which is what `openFeed` already is. Only when there

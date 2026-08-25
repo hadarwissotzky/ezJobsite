@@ -497,6 +497,12 @@ const EN: Record<string, string> = {
      pill on each row still says which is which. */
   'home.needsYouFirst': 'Needs you first',
   'home.everythingElse': 'Everything else',
+  /* FOUR groups, not two (hadar, 2026-08-25, after living with the artboard's two).
+     "Waiting on client" earns its own heading because it is the state he checks most
+     and can do least about — folding it into "everything else" buried the money that
+     is actually in play. The wording matches the card's own pill so the heading and
+     the row agree. */
+  'home.waitingOnClient': 'Waiting on client',
   'home.showAllN': 'Show all {n} change orders',
   'home.clientQuestion': 'Client question',
   'home.sentAgo': 'Sent {ago}',
@@ -2620,6 +2626,7 @@ const ES: Record<string, string> = {
   'home.approvedSec': 'Aprobado',
   'home.needsYouFirst': 'Requiere su atención',
   'home.everythingElse': 'Todo lo demás',
+  'home.waitingOnClient': 'Esperando al cliente',
   'home.showAllN': 'Ver las {n} órdenes de cambio',
   'home.clientQuestion': 'Pregunta del cliente',
   'home.sentAgo': 'Enviado {ago}',
