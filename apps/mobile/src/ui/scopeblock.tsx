@@ -214,7 +214,22 @@ const st = StyleSheet.create({
   // "this is a record, not a field". It moves to the CARD, so the whole section reads
   // as a record instead of one tinted panel inside a cream one.
   cardFrozen: { backgroundColor: C.surfaceMuted },
-  body: { fontFamily: F.body, fontSize: 15, lineHeight: 22, color: C.ink },
+  /**
+   * THE DOCUMENT ITSELF, 10% up (hadar, 2026-08-25): 15 -> 16.5, line height 22 -> 24.
+   *
+   * The proportion is kept because this is prose, not a label: at ~1.45 the lines stay
+   * far enough apart to track across a paragraph of numbered steps and bullet lists,
+   * which is what this block actually holds since 393. Raising the size alone would
+   * tighten the leading and make a long scope harder to read, not easier.
+   *
+   * `bodyHead` deliberately sets no size of its own, so the ALL-CAPS section headings
+   * inside the document scale with the body and the hierarchy holds.
+   *
+   * NOT TRUNCATED AND NOT SCROLLED — see the header. Bigger text simply makes the block
+   * taller, which is the intended trade: the page scrolls, and a scope nobody proofreads
+   * is the failure this component exists to prevent.
+   */
+  body: { fontFamily: F.body, fontSize: 16.5, lineHeight: 24, color: C.ink },
   // Bold + a little air above, so the sections read as sections rather than as a wall
   // of sentences that happens to contain capitals.
   bodyHead: { fontFamily: F.bodyBold, marginTop: 10 },
