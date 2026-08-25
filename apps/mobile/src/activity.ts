@@ -149,6 +149,32 @@ export function unreadCount(rows: ActivityRow[]): number {
   return rows.filter((r) => !r.read && r.kind !== 'sent').length;
 }
 
+/**
+ * WHICH CHANGE ORDERS HAVE SOMETHING UNREAD ON THEM.
+ *
+ * hadar, 2026-08-25: "if there is a new notification on one of the records (CO records)
+ * in any of the lists i would like to see an icon red that let the user know that a
+ * message is waiting for them -- much like the notification on top right icon".
+ *
+ * SAME RULE AS THE HEADER BADGE, deliberately — `!read` and not a `sent` row, exactly
+ * what `unreadCount` counts. He asked for it to work "much like" the bell, and the fast
+ * way to break that promise is to derive the card dot from a different signal: the bell
+ * would read 3 while no card was marked, or a card would sit red with the bell empty,
+ * and neither can be explained to someone holding the phone.
+ *
+ * NOT the same as the card's existing "In conversation" line, which counts OPEN
+ * questions — a question already read but not yet answered. That says "you still owe
+ * them a reply"; this says "something arrived you have not seen". A card can honestly
+ * show one, both, or neither.
+ */
+export function unreadByChangeOrder(rows: ActivityRow[]): Set<string> {
+  const out = new Set<string>();
+  for (const r of rows) {
+    if (!r.read && r.kind !== 'sent') out.add(r.changeOrderId);
+  }
+  return out;
+}
+
 /** Rows whose read-state would change. Used so marking read writes once, not N times. */
 export function unreadIds(rows: ActivityRow[]): string[] {
   return rows.filter((r) => !r.read).map((r) => r.id);

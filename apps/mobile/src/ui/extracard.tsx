@@ -77,6 +77,20 @@ export type ExtraCardProps = {
    *  the client has asked something. Null/omitted hides the row — no placeholder. */
   conversation?: string | null;
   /**
+   * SOMETHING ARRIVED ON THIS RECORD THAT HE HAS NOT SEEN (hadar, 2026-08-25: "i would
+   * like to see an icon red that let the user know that a message is waiting for them
+   * -- much like the notification on top right icon").
+   *
+   * Derived by `unreadByChangeOrder` from the SAME rows the header bell counts, so the
+   * two can never disagree — a bell reading 3 over no marked cards is unexplainable to
+   * the person holding the phone.
+   *
+   * Distinct from `conversation`, which counts OPEN questions: that one says "you owe
+   * them a reply", this says "you have not looked". A card may show either, both or
+   * neither.
+   */
+  unread?: boolean;
+  /**
    * NOT YET OFF THIS PHONE (hadar, 2026-08-19: "when the change order is in the list it
    * should indicate to the user in the record with colour that it is not yet processed").
    *
@@ -103,17 +117,26 @@ export type ExtraCardProps = {
 
 export function ExtraCard({
   kicker, chip, title, photoUri, meta, person, personRight, conversation, pending, amount,
-  onPress, accessibilityLabel,
+  unread, onPress, accessibilityLabel,
 }: ExtraCardProps) {
   const metaLines = meta.filter((m): m is string => !!m);
   return (
     <Pressable style={st.card} onPress={onPress}
-      accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? title}>
+      accessibilityRole="button"
+      // A coloured dot says nothing to VoiceOver. The label carries it instead, first,
+      // because that is the order a sighted reader takes it in.
+      accessibilityLabel={`${unread ? 'Unread. ' : ''}${accessibilityLabel ?? title}`}>
       <View style={st.cardRow}>
-      {photoUri
-        ? <Image source={{ uri: photoUri }} style={st.thumb} resizeMode="cover" />
-        : <View style={[st.thumb, st.thumbEmpty]}>
-            <Icon name={'microphone' as IconName} size={22} color="#8A93A0" /></View>}
+      {/* The thumbnail carries the dot, the way an app icon carries a badge: it is the
+          one fixed-position element on the card, so the mark lands in the same place on
+          every row and the eye can scan a list for it. */}
+      <View>
+        {photoUri
+          ? <Image source={{ uri: photoUri }} style={st.thumb} resizeMode="cover" />
+          : <View style={[st.thumb, st.thumbEmpty]}>
+              <Icon name={'microphone' as IconName} size={22} color="#8A93A0" /></View>}
+        {unread && <View style={st.unreadDot} />}
+      </View>
 
       {/* ONE FLEXIBLE COLUMN, NOT THREE SIDE-BY-SIDE.
           An earlier version was thumb | text | price, and a price block does not shrink
@@ -228,6 +251,21 @@ const st = StyleSheet.create({
   cardRow: { flexDirection: 'row', gap: 9 },
   thumb: { width: 72, height: 72, borderRadius: 6, backgroundColor: '#EFEBE3' },
   thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
+  /**
+   * THE UNREAD DOT. Same red as the header bell's badge (#cf222e in App.tsx's
+   * `hdrBadge`), because it is the same fact said in a second place — a different red
+   * would read as a different kind of alert.
+   *
+   * A DOT, NOT A COUNT. The bell answers "how many things are waiting anywhere"; a card
+   * answers "is anything waiting HERE", and a number on a row is a number the reader
+   * has to do something with. The white ring is what keeps it visible against a
+   * photograph, which is what the thumbnail usually is.
+   */
+  unreadDot: {
+    position: 'absolute', top: -4, right: -4,
+    width: 16, height: 16, borderRadius: 8,
+    backgroundColor: '#cf222e', borderWidth: 2.5, borderColor: '#FBF8F1',
+  },
 
   top: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   kicker: { flexShrink: 0, fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#2F5233' },

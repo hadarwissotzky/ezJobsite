@@ -153,3 +153,43 @@ test('a normal extra produces no unpriced row', () => {
   const rows = buildActivity([src({ changeOrderId: 'x', status: 'approved', signedBy: 'S' })], new Set());
   assert.ok(!rows.some((r) => r.kind === 'unpriced'));
 });
+
+// ── The unread dot on a card (hadar, 2026-08-25) ─────────────────────────────────
+
+test('a card is marked unread by the SAME rule the header badge counts', async () => {
+  const { unreadByChangeOrder, unreadCount } = await import('./activity.ts');
+  const rows: any[] = [
+    { id: 'a', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', detail: null, atMs: 1, read: false },
+    { id: 'b', kind: 'approved', changeOrderId: 'co2', scope: '', jobName: '', detail: null, atMs: 2, read: true },
+    { id: 'c', kind: 'question', changeOrderId: 'co3', scope: '', jobName: '', detail: null, atMs: 3, read: false },
+  ];
+  const marked = unreadByChangeOrder(rows);
+  // The bell and the dots must never disagree — that is the whole point of sharing
+  // the rule rather than writing a second one.
+  assert.equal(marked.size, unreadCount(rows));
+  assert.deepEqual([...marked].sort(), ['co1', 'co3']);
+});
+
+test('a SENT row never marks a card — the same exclusion the bell makes', async () => {
+  const { unreadByChangeOrder } = await import('./activity.ts');
+  // 'sent' is the contractor's own act. Badging a card because HE did something would
+  // make the dot mean "you have news" and "you did a thing" at once.
+  const rows: any[] = [
+    { id: 'a', kind: 'sent', changeOrderId: 'co1', scope: '', jobName: '', detail: null, atMs: 1, read: false },
+  ];
+  assert.equal(unreadByChangeOrder(rows).size, 0);
+});
+
+test('two unread rows on one record mark it once', async () => {
+  const { unreadByChangeOrder } = await import('./activity.ts');
+  const rows: any[] = [
+    { id: 'a', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', detail: null, atMs: 1, read: false },
+    { id: 'b', kind: 'question', changeOrderId: 'co1', scope: '', jobName: '', detail: null, atMs: 2, read: false },
+  ];
+  assert.deepEqual([...unreadByChangeOrder(rows)], ['co1']);
+});
+
+test('nothing unread marks nothing', async () => {
+  const { unreadByChangeOrder } = await import('./activity.ts');
+  assert.equal(unreadByChangeOrder([]).size, 0);
+});

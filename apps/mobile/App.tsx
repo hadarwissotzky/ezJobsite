@@ -215,7 +215,7 @@ import { DraftRecoveryCard } from './src/ui/draftrecovery';
 // shown_content. In a dispute they would each be reading a different document and
 // neither would know it.
 import { ensureEventLogSchema, readEventLog, withEventLog, type ApprovalPanel } from './src/eventlog';
-import { unreadCount, unreadIds, type ActivityRow } from './src/activity';
+import { unreadByChangeOrder, unreadCount, unreadIds, type ActivityRow } from './src/activity';
 import { buildApprovalDoc, shareApprovalDoc } from './src/approvalrecordshare';
 import { ApprovalDocSheet } from './src/ui/approvaldocsheet';
 import { useFonts } from 'expo-font';
@@ -3660,6 +3660,13 @@ const checkClientMessages = async () => {
   /** Bumped when a tap on a client-message push should land on the conversation, not
    *  just on the record. Read by the negotiation screen; see `openCo`. */
   const [openMessagesNonce, setOpenMessagesNonce] = React.useState(0);
+  /**
+   * The records carrying something unread, for the red dot on every card list.
+   * Memoised on `activity` because it is read three times per render pass (feed, home
+   * and the job screen) and rebuilding the Set each time would be three walks of the
+   * same rows for one answer.
+   */
+  const unreadRecords = React.useMemo(() => unreadByChangeOrder(activity), [activity]);
   const [coRows, setCoRows] = React.useState<LedgerRow[]>([]);
   // extra id -> weakest state across its captures. Absent means "not computed
   // yet", which the gate treats as NOT ready: an unknown answer must never open
@@ -9539,6 +9546,7 @@ const checkClientMessages = async () => {
                       personRight={f.createdAtMs > 0 ? shortDate(f.createdAtMs, nowMs) : null}
                       meta={[f.projectName]}
                       conversation={f.openQuestions > 0 ? T('job.inConversation') : null}
+                      unread={unreadRecords.has(f.id)}
                       amount={f.amountCents != null ? `+${moneyWhole(f.amountCents)}` : null}
                       onPress={() => {
                         returnToFeedRef.current = true;
@@ -9721,6 +9729,7 @@ const shortJob = (name: string): string => {
         personRight={e.created_at_ms > 0 ? shortDate(e.created_at_ms) : null}
         meta={[e.pname || null]}
         conversation={(e.questions ?? 0) > 0 ? T('job.inConversation') : null}
+        unread={unreadRecords.has(e.id)}
         // Still on the phone. Steel-blue, stated calmly — see ExtraCard's `pending`.
         pending={e.pending_upload ? T('home.notProcessed') : null}
         amount={e.amount_cents != null ? `+${moneyWhole(e.amount_cents)}` : null}
@@ -11443,6 +11452,7 @@ const shortJob = (name: string): string => {
                   personRight={T({ k: 'job.initiated', p: { d: shortDate(c.created_at_ms) } })}
                   meta={[]}
                   conversation={(questions[c.id] ?? 0) > 0 ? T('job.inConversation') : null}
+                  unread={unreadRecords.has(c.id)}
                   amount={c.amount_cents != null ? `+${moneyWhole(c.amount_cents)}` : null}
                   onPress={() => { void openRecord(c.id); }} />
               );
