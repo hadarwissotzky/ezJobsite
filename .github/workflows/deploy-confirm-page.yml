@@ -1,14 +1,41 @@
-name: Deploy client approval page
+name: Deploy public site
 
-# The no-login approval page the client opens (apps/web/confirm.html). Supabase
-# Storage refuses to serve HTML, so it is published to GitHub Pages instead. The
-# Supabase URL + anon key (public by design) are substituted at build from repo
-# Variables, so a fork never deploys against this project's backend by accident.
+# EVERYTHING SERVED AT approve.ezchangeorders.com. All of it, from one place.
+#
+# The landing page, the two legal pages, the A2P call-to-action page, the support
+# page (website/), and the no-login approval page a client opens from a text
+# (apps/web/confirm.html — Supabase Storage refuses to serve HTML, so it is
+# published here). The Supabase URL + anon key (public by design) are substituted
+# at build from repo Variables, so a fork never deploys against this project's
+# backend by accident.
+#
+# ── WHY THIS SHIPS THE WHOLE SITE AND NOT JUST THE APPROVAL PAGE [2026-08-25] ──
+#
+# It used to copy confirm.html and ewa.js and nothing else. That was survivable
+# only while GitHub Pages was serving the `gh-pages` branch, which scripts/
+# deploy-site.sh filled with all seven files. On 2026-08-25 Pages was switched to
+# build_type=workflow to fix a real outage (the branch held a confirm.html whose
+# __SUPABASE_URL__ placeholders were never substituted, so every approval link
+# opened to "Invalid supabaseUrl" and hung on Loading).
+#
+# A Pages ARTIFACT DEPLOY REPLACES THE ENTIRE SITE. So the moment that switch
+# landed, the four pages this workflow did not know about went to 404 — and
+# index.html started serving a copy of the approval page instead of the landing
+# page. Nothing failed. deploy-site.sh kept running green, pushing all seven
+# files to a branch that nothing serves any more.
+#
+# THE COST WAS NOT FOUR DEAD LINKS. privacy.html, terms.html and sms.html are the
+# URLs filed with the A2P 10DLC campaign. A carrier reviewer who loads them and
+# gets a 404 revokes the campaign, days later, silently, and the app stops being
+# able to text anybody (error 30034 on every send).
+#
+# So: ONE publisher, and it refuses to ship a half-site.
 
 on:
   push:
     branches: [main]
     paths:
+      - 'website/**'
       - 'apps/web/confirm.html'
       - 'apps/web/ewa.js'
       - '.github/workflows/deploy-confirm-page.yml'
@@ -31,9 +58,45 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Substitute Supabase config
+
+      # REFUSE TO PUBLISH A HALF-SITE. A missing file here is a page that 404s for
+      # a carrier reviewer or a homeowner, and the deploy would otherwise "succeed"
+      # quietly — which is exactly how the last four pages disappeared. The list is
+      # hardcoded on purpose: a new page not named here is never published, and
+      # that is a louder failure than a glob that silently ships nothing.
+      - name: Refuse to publish a half-site
+        run: |
+          for f in website/index.html website/privacy.html website/terms.html \
+                   website/sms.html website/support.html \
+                   apps/web/confirm.html apps/web/ewa.js; do
+            [ -f "$f" ] || { echo "::error::missing: $f"; exit 1; }
+          done
+
+      # The three clauses the carriers check. Losing one does not break a page — it
+      # revokes the campaign, days later, silently. Cheaper to fail here than to
+      # find out from a client who never got their change order. (Lifted from
+      # scripts/deploy-site.sh, which is no longer the publisher.)
+      - name: Check the carrier clauses survive
+        run: |
+          for needle in "never shared or sold" "Message frequency" \
+                        "Message and data rates may apply"; do
+            grep -qi "$needle" website/privacy.html \
+              || { echo "::error::privacy.html no longer states: $needle"; exit 1; }
+          done
+
+      - name: Build the site
         run: |
           mkdir -p _site
+          # The public pages, verbatim. index.html is the LANDING PAGE — it used to
+          # be a copy of confirm.html so the bare URL would not 404 while testing,
+          # which quietly replaced the front door with the approval form. Every
+          # approval link is built as /confirm.html?t=… (mobile, worker and the
+          # sms.html samples all agree), so nothing addresses the bare domain.
+          cp website/index.html website/privacy.html website/terms.html \
+             website/sms.html website/support.html _site/
+          # The approval page, WITH its config substituted. This substitution is the
+          # whole reason Pages must stay on build_type=workflow: deploy-site.sh
+          # copied this file raw, placeholders and all.
           sed -e "s|__SUPABASE_URL__|${{ vars.SUPABASE_URL }}|g" \
               -e "s|__ANON_KEY__|${{ vars.SUPABASE_ANON_KEY }}|g" \
               apps/web/confirm.html > _site/confirm.html
@@ -42,8 +105,9 @@ jobs:
           # Extra Work Authorization with "could not load". No substitution here: it
           # holds no keys, only rendering.
           cp apps/web/ewa.js _site/ewa.js
-          # index.html so the bare Pages URL isn't a 404 while testing.
-          cp _site/confirm.html _site/index.html
+          # Stops GitHub treating these as Jekyll sources, which silently drops any
+          # file whose name begins with an underscore.
+          touch _site/.nojekyll
           # CUSTOM DOMAIN, AND THE REASON IS HTTPS, NOT VANITY [2026-07-21].
           #
           # Without this file the repo inherits the user-level Pages domain and serves
@@ -54,11 +118,17 @@ jobs:
           # document; over HTTP anyone on the same wifi can rewrite that number in
           # transit, and the signature would be genuine on a document nobody wrote.
           # Repo-level custom domain — OVERRIDES the account-level capimpact.com that
-          # otherwise hijacks every hadarwissotzky.github.io/* page. It needs ONE DNS
-          # record the owner adds at the ezchangeorders.com registrar:
-          #   approve.ezchangeorders.com  CNAME  hadarwissotzky.github.io
-          # Until that resolves, the deploy is ready and waiting (hadar, 2026-07-24).
+          # otherwise hijacks every hadarwissotzky.github.io/* page.
           echo 'approve.ezchangeorders.com' > _site/CNAME
+          # FAIL IF THE SUBSTITUTION DID NOT HAPPEN, before it can reach a client.
+          # An unset repo Variable leaves the placeholder in place and the page loads
+          # to "Invalid supabaseUrl" — green run, dead page, three days unnoticed.
+          case "$(cat _site/confirm.html)" in
+            *__SUPABASE_URL__*|*__ANON_KEY__*)
+              echo "::error::confirm.html still holds placeholders — is vars.SUPABASE_URL set?"
+              exit 1;;
+          esac
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -79,14 +149,24 @@ jobs:
       # were correct, and the page was dead. A deploy that cannot tell you it
       # deployed is not a deploy — so this asks the live URL what it is serving.
       #
-      # It checks the two things that were actually wrong: that the placeholder
-      # is gone, and that ewa.js is reachable (an EWA link fails closed without
-      # it). Retries because Pages propagation is not instant.
-      - name: Verify the live page
+      # It now checks EVERY page, not just the approval one: the four that went
+      # missing did so without a single red run, and a verifier that only looks at
+      # confirm.html would have stayed green through the whole outage.
+      - name: Verify the live site
         run: |
           URL="https://approve.ezchangeorders.com"
           for i in 1 2 3 4 5 6 7 8; do
             sleep 15
+            ok=yes
+            # Every public page must answer 200. terms/privacy/sms are the A2P
+            # campaign's filed URLs; a 404 here is a revoked campaign later.
+            for p in index.html privacy.html terms.html sms.html support.html \
+                     confirm.html ewa.js; do
+              code="$(curl -o /dev/null -s -w '%{http_code}' "$URL/$p")"
+              [ "$code" = "200" ] || { echo "attempt $i: /$p returned $code"; ok=no; }
+            done
+            [ "$ok" = yes ] || continue
+
             BODY="$(curl -fsSL "$URL/confirm.html" || true)"
             case "$BODY" in
               *__SUPABASE_URL__*|*__ANON_KEY__*)
@@ -97,9 +177,14 @@ jobs:
               *"const SUPABASE_URL = 'https://"*) ;;
               *) echo "attempt $i: SUPABASE_URL is not an https URL"; continue;;
             esac
-            JS="$(curl -o /dev/null -s -w '%{http_code}' "$URL/ewa.js")"
-            [ "$JS" = "200" ] || { echo "attempt $i: ewa.js returned $JS"; continue; }
-            echo "live page verified: config substituted, ewa.js 200"
+            # The front door must be the LANDING page, not a second copy of the
+            # approval form — the exact regression this deploy is fixing.
+            HOME="$(curl -fsSL "$URL/index.html" || true)"
+            case "$HOME" in
+              *"const SUPABASE_URL"*)
+                echo "attempt $i: index.html is serving the approval page"; continue;;
+            esac
+            echo "live site verified: 7/7 pages 200, config substituted, landing page intact"
             exit 0
           done
           echo "::error::The deploy was green but $URL is not serving this build."
