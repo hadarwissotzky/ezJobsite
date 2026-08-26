@@ -316,6 +316,15 @@ const LAST_PROJECT_KEY = 'last_project_id';
 // discarded -- it THREW, tx.complete() never ran, and THE ENTIRE POWERSYNC UPLOAD
 // QUEUE STALLED PERMANENTLY. Jobs, consent and every later PowerSync write stopped
 // reaching the cloud, silently, with the app still saying "saved ✓".
+/**
+ * How long the opening artwork stays up at minimum (hadar, 2026-08-26).
+ *
+ * A FLOOR measured from mount, not a delay added to boot: a launch slower than this
+ * is unaffected, and a launch faster than this is padded out to it so the splash
+ * reads as an opening rather than a flicker.
+ */
+const SPLASH_MIN_MS = 2000;
+
 const OWNER_FALLBACK = 'owner-local';
 
 /**
@@ -898,6 +907,25 @@ export default function App() {
   const [unsent, setUnsent] = React.useState<Array<{
     id: string; subject: string; project_id: string; created_at_ms: number; pname: string }>>([]);
   const [ready, setReady] = React.useState(false);
+  /**
+   * HOLD THE SPLASH FOR A BEAT (hadar, 2026-08-26: "when the app opens i would like
+   * the splashscreen to be visable for 2 seconds or so").
+   *
+   * Boot can finish in a few hundred milliseconds on a warm start, and the artwork
+   * then appeared and vanished as a flicker — which reads as a glitch rather than as
+   * an opening. This is a FLOOR, not a delay: the clock starts at mount and runs
+   * alongside the real boot work, so a launch that takes longer than the floor pays
+   * nothing extra. Only a launch that beats it gets padded.
+   *
+   * It gates the SPLASH ONLY. Every effect, every read, every migration keeps running
+   * underneath — `ready` is untouched, deliberately, because it is what a dozen
+   * effects wait on and delaying it would delay actual work rather than a picture.
+   */
+  const [splashHeld, setSplashHeld] = React.useState(true);
+  React.useEffect(() => {
+    const id = setTimeout(() => setSplashHeld(false), SPLASH_MIN_MS);
+    return () => clearTimeout(id);
+  }, []);
   const [gate, setGate] = React.useState<string | null>(null);
   const [initError, setInitError] = React.useState<string | null>(null);
   // AUTH. `session` undefined = still checking the stored token; null = logged out;
@@ -6428,6 +6456,10 @@ const checkClientMessages = async () => {
   // DEV FIXTURE — pixel-perfect visual work on the draft screen without a camera.
   // Gated on an env flag, so it is inert in every real build. Scaffolding; removed
   // with __fixturedraft.tsx when the screen matches the mockup.
+  // THE SPLASH FLOOR, ahead of every other gate — including the fixtures, so a
+  // fixture build opens the same way the real app does. Boot continues underneath.
+  if (splashHeld) return <SplashScreen />;
+
   if (process.env.EXPO_PUBLIC_FIXTURE === '1') return <FixtureDraft />;
   if (process.env.EXPO_PUBLIC_FIXTURE === '2') return <FixtureNegotiation />;
   if (process.env.EXPO_PUBLIC_FIXTURE === '3') return <FixtureLocked />;

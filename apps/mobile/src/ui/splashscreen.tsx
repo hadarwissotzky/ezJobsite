@@ -5,11 +5,21 @@
  * the product name in the top-left corner, shown for as long as the database takes to
  * open and the fonts take to load. It read as an unfinished screen, because it was one.
  *
- * TWO SCREENS, ONE PICTURE. iOS draws the native launch storyboard first (before any
- * JS exists), then this. Both draw `assets/splash-screen.png` the same way, so the
- * handover is invisible — the artwork does not move at all. The storyboard is
- * `ios/EZjobsite/SplashScreen.storyboard`; if you change one, change the other, or the
- * app will visibly jump at launch.
+ * TWO SCREENS, ONE OF THEM BLANK. iOS draws the native launch storyboard first
+ * (before any JS exists), then this. The storyboard —
+ * `ios/EZjobsite/SplashScreen.storyboard` — is DELIBERATELY JUST CREAM, NO IMAGE: it
+ * drew the artwork once, rendered it top-left at native pixel size, and iOS cached the
+ * stale launch snapshot so edits appeared to do nothing. Its own header tells that
+ * story.
+ *
+ * SO THIS FILE IS THE ONLY THING THAT DRAWS THE ARTWORK, and that has a consequence
+ * worth stating (hadar, 2026-08-26: "is a new build required? because it is not part
+ * of the OTA"): the splash IS part of the OTA. Nothing native has to be rebuilt to
+ * change it. Replace `assets/splash-screen.png`, publish an update, done.
+ *
+ * The cream underneath is the same cream on both sides of the handover, so the artwork
+ * fades in a beat after launch rather than being the literal first frame — an even
+ * trade for a launch screen that cannot misrender.
  *
  * CONTAIN, not cover (hadar, 2026-07-27: "it removed the wrong image ... flip it").
  * The artwork is a whole COMPOSITION — framed wordmark, centred hat, blueprint — with
