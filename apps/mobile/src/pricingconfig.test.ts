@@ -19,7 +19,7 @@ const base: PricingConfig = {
   version: 2,
   freeAllowance: 2,
   packs: [
-    { id: 'credits_3',  credits:  3, web:  1499, iap:  1799 },
+    { id: 'credits_3',  credits:  3, web:  1800, iap:  1800 },
     { id: 'credits_20', credits: 20, web:  7900, iap: 10299 },
     { id: 'credits_50', credits: 50, web: 14900, iap: 19499 },
   ],
@@ -53,9 +53,22 @@ test('thousands are grouped — $1,190 not $1190', () => {
 /* ---------------------------------------------------------------- per credit -- */
 
 test('the per-credit price is what makes a bigger pack obviously better', () => {
-  assert.equal(perCredit(base.packs[0]), '$5');
+  // The ENTRY rung is the dearest per credit, on purpose (2026-08-26). It has to be:
+  // if the small pack matched the next one's unit price, nobody would ever rationally
+  // buy the bigger one, and the ladder would stop being a ladder.
+  assert.equal(perCredit(base.packs[0]), '$6');
   assert.equal(perCredit(base.packs[1]), '$3.95');
   assert.equal(perCredit(base.packs[2]), '$2.98');
+});
+
+test('every rung down the ladder is cheaper per credit than the one above it', () => {
+  // The property the three literals above only sample. A future price change that
+  // breaks the ordering breaks the one reason a bigger pack sells.
+  const unit = (p: typeof base.packs[number]) => p.web / p.credits;
+  for (let i = 1; i < base.packs.length; i++) {
+    assert.ok(unit(base.packs[i]) < unit(base.packs[i - 1]),
+      `pack ${base.packs[i].id} is not cheaper per credit than ${base.packs[i - 1].id}`);
+  }
 });
 
 test('per-credit is computed from the WEB price, not the IAP one', () => {

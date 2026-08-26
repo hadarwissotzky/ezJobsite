@@ -113,9 +113,14 @@ const FALLBACK: Omit<PricingConfig, 'source'> = {
   version: 0,
   freeAllowance: 2,
   packs: [
-    { id: 'credits_3',  credits:  3, web:  1499, iap:  1799 },
-    { id: 'credits_20', credits: 20, web:  7900, iap:  7899 },
-    { id: 'credits_50', credits: 50, web: 14900, iap: 14899 },
+    // ROUND DOLLARS, and it costs nothing: App Store Connect offers $18 / $79 / $149
+    // as price points with IDENTICAL proceeds to $17.99 / $78.99 / $148.99 (checked
+    // against the live price-point list, 2026-08-26). `money()` renders a whole dollar
+    // as "$18" rather than "$18.00", so the paywall reads as a price instead of a
+    // rounding artefact — its own stated rule.
+    { id: 'credits_3',  credits:  3, web:  1800, iap:  1800 },
+    { id: 'credits_20', credits: 20, web:  7900, iap:  7900 },
+    { id: 'credits_50', credits: 50, web: 14900, iap: 14900 },
   ],
   subs: [
     { id: 'core', monthly: 2400, annual: 22900, seats: 3,    creditsPerMonth: null },
