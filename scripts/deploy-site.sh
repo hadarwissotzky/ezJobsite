@@ -22,8 +22,43 @@
 # It uses a temporary WORKTREE rather than switching branches, so it cannot touch or
 # stash whatever you have open. Safe to run with a dirty tree.
 #
-# Usage:  ./scripts/deploy-site.sh
+# ── THIS IS NO LONGER THE PUBLISHER [2026-08-25] ─────────────────────────────
+#
+# GitHub Pages was switched to build_type=workflow. It no longer serves the
+# `gh-pages` branch this script writes, so running it publishes nothing — it just
+# commits and pushes, greenly, to a branch nobody reads. That is the same silent
+# failure this script's own header was written to prevent, one level up.
+#
+# It also copied apps/web/confirm.html RAW, placeholders and all. That file is the
+# reason for the outage that forced the switch: every approval link opened to
+# "Invalid supabaseUrl" and hung on Loading, for three days, with no red run
+# anywhere. Restoring this script as the publisher would restore that bug.
+#
+# The publisher is .github/workflows/deploy-confirm-page.yml, which ships all seven
+# files, substitutes the Supabase config, and verifies the live URLs afterwards.
+# This script is kept for its guards and its history, and refuses to run.
+#
+# To deploy:   gh workflow run "Deploy public site"
+#
+# Usage:  ./scripts/deploy-site.sh   (refuses — see above)
 set -euo pipefail
+
+if [ "${I_KNOW_PAGES_IGNORES_THIS_BRANCH:-}" != "1" ]; then
+  cat >&2 <<'STOP'
+refusing: gh-pages is not served any more.
+
+GitHub Pages is on build_type=workflow. Pushing this branch changes nothing on
+https://approve.ezchangeorders.com and would look like it worked.
+
+Deploy with:   gh workflow run "Deploy public site"
+
+If you genuinely need to write the branch anyway (archival, or you are moving
+Pages back to legacy publishing on purpose), re-run with:
+  I_KNOW_PAGES_IGNORES_THIS_BRANCH=1 ./scripts/deploy-site.sh
+and fix the confirm.html substitution first — this script copies it raw.
+STOP
+  exit 1
+fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BRANCH="gh-pages"
