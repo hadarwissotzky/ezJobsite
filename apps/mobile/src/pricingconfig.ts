@@ -29,16 +29,38 @@
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export type PackId = 'credits_5' | 'credits_20' | 'credits_50';
+/**
+ * THE THREE PACKS THE APP SELLS (hadar, 2026-08-26: "i wil do 3 20 and 50").
+ *
+ * `credits_5` is gone from this list and NOT from RevenueCat — the web/Stripe rail
+ * still carries it and removing the product there would break a checkout that works
+ * today. It is simply no longer offered in the app.
+ *
+ * THREE RUNGS, NOT FOUR, and the reason is the reader: CLAUDE.md §1 says the user does
+ * not think in software, and four rows of prices on a phone is a decision to make
+ * rather than a price to accept.
+ */
+export type PackId = 'credits_3' | 'credits_20' | 'credits_50';
 
 export type Pack = {
   id: PackId;
   /** Signed change orders this purchase grants. */
   credits: number;
-  /** Cents. The real price — external-link purchases carry no Apple commission today. */
+  /** Cents. The web/Stripe rail — external-link purchases carry no Apple commission. */
   web: number;
-  /** Cents. Higher on purpose: it pays Apple's cut, and a cheaper IAP would make the
-   *  rail we do not want the rail everyone uses. */
+  /**
+   * Cents, on the App Store rail. THE PRICE, not a penalty.
+   *
+   * This used to be ~32% above `web`, sized to pay a 30% Apple cut, on the reasoning
+   * that "a cheaper IAP would make the rail we do not want the rail everyone uses".
+   * That reasoning is retired (hadar, 2026-08-26): pay-as-you-go IS the adoption bet,
+   * and the App Store is where a contractor actually completes a purchase — two taps
+   * and Face ID, standing in a client's kitchen, versus a website and a password.
+   *
+   * The cut is also 15%, not 30%, under the Small Business Program. So the markup now
+   * costs conversion on the rail we want and buys nothing. These are near-parity with
+   * `web`, and the difference that remains is the .99 price point, not a surcharge.
+   */
   iap: number;
 };
 
@@ -91,9 +113,9 @@ const FALLBACK: Omit<PricingConfig, 'source'> = {
   version: 0,
   freeAllowance: 2,
   packs: [
-    { id: 'credits_5',  credits:  5, web:  2500, iap:  3299 },
-    { id: 'credits_20', credits: 20, web:  7900, iap: 10299 },
-    { id: 'credits_50', credits: 50, web: 14900, iap: 19499 },
+    { id: 'credits_3',  credits:  3, web:  1499, iap:  1799 },
+    { id: 'credits_20', credits: 20, web:  7900, iap:  7899 },
+    { id: 'credits_50', credits: 50, web: 14900, iap: 14899 },
   ],
   subs: [
     { id: 'core', monthly: 2400, annual: 22900, seats: 3,    creditsPerMonth: null },
@@ -148,7 +170,7 @@ function parseRow(r: Record<string, unknown>): Omit<PricingConfig, 'source'> {
   // paywall whose packs reshuffle between launches looks broken to the person reading
   // it, and the cheapest-per-credit option has to be the last one for the ladder to
   // read as a ladder.
-  const packs: Pack[] = (['credits_5', 'credits_20', 'credits_50'] as PackId[])
+  const packs: Pack[] = (['credits_3', 'credits_20', 'credits_50'] as PackId[])
     .filter((id) => packsRaw[id])
     .map((id) => ({
       id,

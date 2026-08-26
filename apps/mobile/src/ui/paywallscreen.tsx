@@ -13,12 +13,13 @@ import React from 'react';
 import {Linking,ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { t } from '../i18n';
 import { PLANS, PAID_TIERS, offeredTiers, type PlanId } from '../plans';
-import { billingStatus, manageSubscriptionUrl, purchasePlan, restorePurchases } from '../billing';
+import { billingStatus, manageSubscriptionUrl, purchaseCredits, purchasePlan, restorePurchases } from '../billing';
 // Prices come from the server (`pricing_config`), never from this binary — the rail is a
 // court case away from changing and must not need an App Store review.
 import { money as packMoney, perCredit, type Pack } from '../pricingconfig';
-import { Icon } from './icon';
+import { Icon, type IconName } from './icon';
 import { C, F } from './theme';
+import { touchTargets } from './tokens';
 
 // Which feature bullets each tier shows (i18n keys under paywall.f.*).
 //
@@ -118,13 +119,6 @@ export function PaywallScreen(props: {
    * misconfiguration and one fewer option beats a broken one.
    */
   packs?: readonly Pack[];
-  /**
-   * Opens the checkout. NULL when there is no web rail with an address — `purchaseUrl`
-   * returns null without a token or a company id, and a buy button that opens a 404 is
-   * worse than none. The section then shows the prices without a door, which is still
-   * useful: he learns what it costs.
-   */
-  onBuyCredits?: (() => void) | null;
   /** Change orders he can still send. Null = unknown or unlimited; the line is dropped
    *  rather than rendered as zero. */
   creditsLeft?: number | null;
@@ -174,6 +168,45 @@ export function PaywallScreen(props: {
    *   3. `detail` was discarded, so the one string that says WHICH of these happened
    *      (`product_unavailable`, a store error) never reached anybody.
    */
+  /**
+   * WHICH PRICE THIS RAIL CHARGES. `pricingconfig` carries both; the App Store rail
+   * charges `iap`, and rendering `web` beside a button that opens the App Store would
+   * show a number the store will not take (mandate #6). Falls back to `web` only when
+   * no IAP price is configured, which is a misconfiguration rather than a state.
+   */
+  const iapPrice = (p: Pack) => p.iap || p.web;
+
+  /** Which pack's store sheet is open, so the other two dim instead of queueing. */
+  const [busyPack, setBusyPack] = React.useState<string | null>(null);
+  const [packNote, setPackNote] = React.useState<string | null>(null);
+
+  /**
+   * BUY A PACK. The row is the button (see the render), so this is the whole flow.
+   *
+   * IT DOES NOT REPORT A BALANCE. A pack grants virtual currency, which lives in
+   * RevenueCat and reaches the app through the `credits` function — so "you now have
+   * 20" cannot be read off the purchase result, and inventing it here would be a
+   * second source of truth for a number a contractor may dispute. `onPurchased` tells
+   * the caller to re-read; the caller owns what the screen then says.
+   */
+  const buyPack = async (p: Pack) => {
+    if (busyPack) return;
+    setBusyPack(p.id); setPackNote(null);
+    const r = await purchaseCredits(p.id);
+    setBusyPack(null);
+    if (r.ok) {
+      setPackNote(t({ k: 'paywall.payg.bought', p: { n: String(p.credits) } } as any));
+      // Same signal the subscription path uses: the caller re-reads the balance. The
+      // plan has not changed — a pack is not a tier — so the current one is passed back.
+      props.onPurchased?.(props.currentPlan);
+      return;
+    }
+    if (r.reason === 'cancelled') { setPackNote(null); return; }
+    if (r.reason === 'no_tenant') { setPackNote(t('paywall.needProfile')); return; }
+    if (r.reason === 'not_configured') { setPackNote(t('paywall.notLive')); return; }
+    setPackNote(__DEV__ && r.detail ? `${t('paywall.failed')}\n${r.detail}` : t('paywall.failed'));
+  };
+
   const buy = async (plan: PlanId) => {
     // The chosen cycle decides the product. The fallback is not cosmetic: a tier with
     // only one of the two configured must still be buyable rather than silently
@@ -407,16 +440,26 @@ export function PaywallScreen(props: {
                   // orders them by what they grant, so this is a property of the list
                   // rather than a hardcoded id.
                   const best = i === (props.packs!.length - 1);
+                  const buying = busyPack === p.id;
                   return (
-                    <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center',
-                      paddingVertical: 9,
-                      borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.line }}>
+                    <Pressable
+                      key={p.id}
+                      onPress={() => buyPack(p)}
+                      disabled={!!busyPack || !ready}
+                      accessibilityRole="button"
+                      accessibilityLabel={t({ k: 'paywall.payg.buyN',
+                        p: { n: String(p.credits), price: packMoney(iapPrice(p)) } } as any)}
+                      style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center',
+                        paddingVertical: 12, minHeight: touchTargets.minimum,
+                        borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.line },
+                        pressed && { opacity: 0.6 },
+                        !!busyPack && !buying && { opacity: 0.4 }]}>
                       <Text style={{ fontFamily: F.dispSemi, fontSize: 17, color: C.ink,
                         width: 38 }}>{String(p.credits)}</Text>
                       <Text style={{ fontFamily: F.body, fontSize: 14, color: C.steel, flex: 1 }}>
                         {t({ k: 'paywall.payg.each', p: { each: perCredit(p) } } as any)}
                       </Text>
-                      {best && (
+                      {best && !buying && (
                         <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5,
                           color: C.brandDark, backgroundColor: C.brandSoft,
                           paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6,
@@ -424,25 +467,38 @@ export function PaywallScreen(props: {
                           {t('paywall.payg.best')}
                         </Text>
                       )}
-                      <Text style={{ fontFamily: F.dispSemi, fontSize: 17, color: C.ink }}>
-                        {packMoney(p.web)}
-                      </Text>
-                    </View>
+                      {buying
+                        ? <ActivityIndicator color={C.ink} />
+                        : (
+                          <>
+                            {/* THE PRICE IS THE PRICE ON THIS RAIL. It used to render
+                                `p.web` beside a button that opened the App Store — a
+                                number the store would not charge, which is the exact
+                                class of error mandate #6 exists for. */}
+                            <Text style={{ fontFamily: F.dispSemi, fontSize: 17, color: C.ink }}>
+                              {packMoney(iapPrice(p))}
+                            </Text>
+                            <Icon name={'chevRight' as IconName} size={18} color={C.muted} />
+                          </>
+                        )}
+                    </Pressable>
                   );
                 })}
               </View>
 
-              {/* NO DOOR IS BETTER THAN A DOOR TO A 404 — `onBuyCredits` is null when the
-                  web rail has no address. The prices above still stand on their own. */}
-              {props.onBuyCredits && (
-                <Pressable onPress={props.onBuyCredits}
-                  style={({ pressed }) => [{ marginTop: 14, minHeight: 50, borderRadius: 12,
-                    backgroundColor: C.ink, alignItems: 'center', justifyContent: 'center' },
-                    pressed && { opacity: 0.85 }]}>
-                  <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>
-                    {t('paywall.payg.buy')}
-                  </Text>
-                </Pressable>
+              {/* NO SINGLE BUY BUTTON ANY MORE (2026-08-26). It opened a RevenueCat web
+                  checkout where the pack was chosen, which is why three rows could be
+                  inert prices: the decision happened on the next screen.
+
+                  StoreKit has no "choose at checkout" — a purchase is a product — so the
+                  ROW IS THE BUTTON. That is also the better screen: the tap that says
+                  "twenty" is the tap that buys twenty, with no second place to change
+                  your mind about a number you already picked. */}
+              {packNote && (
+                <Text style={{ fontFamily: F.body, fontSize: 13, color: C.steel,
+                  textAlign: 'center', marginTop: 10 }}>
+                  {packNote}
+                </Text>
               )}
               {typeof props.creditsLeft === 'number' && (
                 <Text style={{ fontFamily: F.body, fontSize: 13, color: C.steel,

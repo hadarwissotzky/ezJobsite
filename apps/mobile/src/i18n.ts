@@ -1282,7 +1282,11 @@ const EN: Record<string, string> = {
   'paywall.payg.sub': 'Buy change orders when you need them. They never expire.',
   'paywall.payg.each': '{each} each',
   'paywall.payg.best': 'Best value',
-  'paywall.payg.buy': 'Buy change orders',
+  // Each row is a buy button now (2026-08-26), so the label has to name what the tap
+  // costs and what it grants — a screen reader on a price row otherwise announces a
+  // bare number with no verb.
+  'paywall.payg.buyN': 'Buy {n} change orders for {price}',
+  'paywall.payg.bought': 'Added {n} change orders.',
   'usage.nearingTitle': 'You’re almost at your limit',
   'usage.reachedTitle': 'You’ve used up your free plan',
   'usage.left.changeOrders': '{n} of {limit} change orders left',
@@ -3263,7 +3267,8 @@ const ES: Record<string, string> = {
   'paywall.payg.sub': 'Compre órdenes de cambio cuando las necesite. No vencen.',
   'paywall.payg.each': '{each} cada una',
   'paywall.payg.best': 'Mejor valor',
-  'paywall.payg.buy': 'Comprar órdenes de cambio',
+  'paywall.payg.buyN': 'Compre {n} órdenes de cambio por {price}',
+  'paywall.payg.bought': 'Se agregaron {n} órdenes de cambio.',
   'usage.nearingTitle': 'Ya casi llegas a tu límite',
   'usage.reachedTitle': 'Ya usaste tu plan gratis',
   'usage.left.changeOrders': 'Te quedan {n} de {limit} órdenes de cambio',

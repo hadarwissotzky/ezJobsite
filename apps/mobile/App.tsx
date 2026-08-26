@@ -190,7 +190,7 @@ import { clearHold, ensureSendHoldSchema, heldSends, holdSend, holdsToDrain,
          noteHoldAttempt } from './src/sendhold';
 // Prices and the checkout address come from the server, never from this binary — the
 // rail is a court case away from changing and must not need an App Store review.
-import { loadPricing, purchaseUrl, type PricingConfig } from './src/pricingconfig';
+import { loadPricing, type PricingConfig } from './src/pricingconfig';
 // R8 / R5b push. Local notifications: the green light and a client question
 // reach the contractor with the phone in his pocket, with no provider behind it.
 import { ensureNotifySchema, notifyPermissionStatus, requestNotifyPermission,
@@ -6874,20 +6874,29 @@ const checkClientMessages = async () => {
       onDismiss={() => setMsgToast(null)} />
   ) : null;
 
-  const heldEl = noCredits ? (() => {
-    const url = pricing ? purchaseUrl(pricing, co?.id ?? null) : null;
-    return (
-      <HeldSendModal
-        held={heldN}
-        onBuy={url ? () => {
-          setNoCredits(null);
-          // The drain fires when he comes back (the AppState listener), so nothing here
-          // has to wait for or trust a redirect.
-          void Linking.openURL(url);
-        } : null}
-        onClose={() => setNoCredits(null)} />
-    );
-  })() : null;
+  const heldEl = noCredits ? (
+    <HeldSendModal
+      held={heldN}
+      /**
+       * BUYS IN THE APP NOW (2026-08-26), not on the web.
+       *
+       * This used to open a RevenueCat Web Purchase Link. It was the highest-intent
+       * moment in the product — he has just been stopped mid-send — and it handed him
+       * to Safari, a password and a card form. For the user CLAUDE.md describes, that
+       * is where the purchase dies.
+       *
+       * It now opens the paywall, which sells the packs through StoreKit: Apple Pay,
+       * Face ID, two taps, back where he was. Costs 15% under the Small Business
+       * Program and buys the only thing that matters here, which is that the purchase
+       * completes.
+       *
+       * NEVER NULL ANY MORE. The old button vanished when `purchaseUrl` had no token or
+       * no company id — a man out of credits with no way to buy any. The paywall opens
+       * regardless and says for itself when a rail is unavailable.
+       */
+      onBuy={() => { setNoCredits(null); setShowPaywall(true); }}
+      onClose={() => setNoCredits(null)} />
+  ) : null;
 
   // The paywall (DEC-11) — a Modal, so mounted beside quotaEl in each early-return
   // screen; `visible` toggles it. Opened from a hit cap ("See plans") or Settings.
@@ -6907,10 +6916,6 @@ const checkClientMessages = async () => {
        */
       packs={pricing?.packs ?? []}
       creditsLeft={credits?.metered ? credits.available : null}
-      onBuyCredits={(() => {
-        const u = pricing ? purchaseUrl(pricing, co?.id ?? null) : null;
-        return u ? () => { void Linking.openURL(u); } : null;
-      })()}
       onClose={() => {
         setShowPaywall(false);
         if (settingsFrom === 'drawer') setMenuOpen(true);

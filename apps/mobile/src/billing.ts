@@ -96,7 +96,12 @@ export type PurchaseResult =
   | { ok: false; reason: 'not_configured' | 'no_tenant' | 'cancelled' | 'failed'; detail?: string };
 
 /** True when the id is one this build knows how to sell. */
+/** The credit packs sold on the App Store rail. Same identifiers the web/Stripe rail
+ *  uses, so one RevenueCat virtual-currency grant serves both. */
+const PACK_PRODUCTS = new Set(['credits_3', 'credits_20', 'credits_50']);
+
 function knownProduct(productId: string): boolean {
+  if (PACK_PRODUCTS.has(productId)) return true;
   return Object.values(PLANS).some(
     (p) => p.productIdMonthly === productId || p.productIdAnnual === productId);
 }
@@ -131,6 +136,55 @@ export async function purchasePlan(productId: string): Promise<PurchaseResult> {
     if (!product) return { ok: false, reason: 'failed', detail: 'product_unavailable' };
     const { customerInfo } = await Purchases.purchaseStoreProduct(product);
     return { ok: true, plan: planFromCustomerInfo(customerInfo) };
+  } catch (e: any) {
+    if (e?.userCancelled) return { ok: false, reason: 'cancelled' };
+    return { ok: false, reason: 'failed', detail: String(e?.message ?? e) };
+  }
+}
+
+/**
+ * BUY A CREDIT PACK — a consumable, not a subscription.
+ *
+ * Deliberately a SEPARATE function from `purchasePlan`, though the store call is the
+ * same, because the two differ in what success MEANS and a shared return type would
+ * hide that:
+ *
+ *   A subscription grants an ENTITLEMENT, readable straight off `customerInfo`. That
+ *   is why `purchasePlan` can say "you are on Core now" the moment the sheet closes.
+ *
+ *   A pack grants VIRTUAL CURRENCY. The balance lives in RevenueCat and reaches this
+ *   app through `credits`, so `customerInfo` says nothing useful about it — there is
+ *   no entitlement to check, and checking one would report every successful pack
+ *   purchase as a failure.
+ *
+ * So this returns only whether the STORE completed. The balance is read afterwards
+ * from the credits function, which is the one authority on it (see that function's
+ * header: RevenueCat owns the balance, Postgres owns reservations). Reporting a
+ * granted credit from here would be a second source of truth for a number a
+ * contractor may one day dispute.
+ */
+export async function purchaseCredits(
+  productId: string,
+): Promise<{ ok: true } | { ok: false; reason: 'not_configured' | 'no_tenant' | 'cancelled' | 'failed'; detail?: string }> {
+  if (billingStatus() !== 'ready') return { ok: false, reason: 'not_configured' };
+  // THE SAME ANONYMOUS REFUSAL as purchasePlan, and for a sharper reason: a pack bought
+  // by `$RCAnonymousID:…` credits a customer the webhook cannot map to a company, so the
+  // money is taken and the credits land nowhere anybody can spend them.
+  try {
+    const uid = await Purchases.getAppUserID();
+    if (!uid || uid.startsWith('$RCAnonymousID')) return { ok: false, reason: 'no_tenant' };
+  } catch { /* cannot tell -> a real purchase beats a false refusal */ }
+  if (!PACK_PRODUCTS.has(productId)) {
+    return { ok: false, reason: 'failed', detail: `unknown pack ${productId}` };
+  }
+  try {
+    const products = await Purchases.getProducts([productId]);
+    const product = products.find((p) => p.identifier === productId);
+    // Not yet "Ready to Submit" in App Store Connect is the usual cause, and it is a
+    // config problem the buyer should be told about plainly rather than a dead tap.
+    if (!product) return { ok: false, reason: 'failed', detail: 'product_unavailable' };
+    await Purchases.purchaseStoreProduct(product);
+    return { ok: true };
   } catch (e: any) {
     if (e?.userCancelled) return { ok: false, reason: 'cancelled' };
     return { ok: false, reason: 'failed', detail: String(e?.message ?? e) };

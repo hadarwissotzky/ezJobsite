@@ -19,7 +19,7 @@ const base: PricingConfig = {
   version: 2,
   freeAllowance: 2,
   packs: [
-    { id: 'credits_5',  credits:  5, web:  2500, iap:  3299 },
+    { id: 'credits_3',  credits:  3, web:  1499, iap:  1799 },
     { id: 'credits_20', credits: 20, web:  7900, iap: 10299 },
     { id: 'credits_50', credits: 50, web: 14900, iap: 19499 },
   ],
