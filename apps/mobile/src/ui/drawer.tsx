@@ -33,6 +33,28 @@ import type { UsageItem, UsageSummary } from '../usage';
 
 const SUPPORT_EMAIL = 'support@ezchangeorders.com';
 
+/**
+ * THE LEGAL PAGES, WRITTEN OUT (hadar, 2026-08-26).
+ *
+ * These were built as `https://${confirmBase}/${path}` — and `confirmBase` is already
+ * a full origin (`EXPO_PUBLIC_CONFIRM_BASE=https://approve.ezchangeorders.com`), so
+ * every tap opened
+ *
+ *     https://https://approve.ezchangeorders.com/terms
+ *
+ * a malformed URL with the scheme twice and no `.html`. `Linking.openURL(...).catch()`
+ * swallowed the failure, so both rows have been dead with nothing on screen to say so.
+ *
+ * CONSTANTS, NOT DERIVED FROM THE ENV. These two URLs are filed with the A2P 10DLC
+ * campaign and the App Store listing; they have to resolve from any build, including
+ * one where EXPO_PUBLIC_CONFIRM_BASE is unset or wrong. A legal link that depends on a
+ * build-time variable is a legal link that can ship broken — which is what happened.
+ * The approval link still uses `confirmBase`, because that one is genuinely
+ * per-environment; these are not.
+ */
+const TERMS_URL = 'https://approve.ezchangeorders.com/terms.html';
+const PRIVACY_URL = 'https://approve.ezchangeorders.com/privacy.html';
+
 export function Drawer({
   visible, onClose, onProfile, onCompanySettings, onPlans,
   planName, isFreePlan, isOwner, hasTeam,
@@ -147,8 +169,7 @@ export function Drawer({
   const go = (fn: () => void) => () => { pending.current = fn; onClose(); };
   const mailTo = (subject: string) =>
     Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}`).catch(() => {});
-  const openLegal = (path: string) =>
-    Linking.openURL(`https://${confirmBase || 'ezchangeorders.com'}/${path}`).catch(() => {});
+  const openLegal = (url: string) => Linking.openURL(url).catch(() => {});
   /**
    * THE COUNT IS PART OF THE QUESTION, not a footnote.
    *
@@ -352,8 +373,8 @@ export function Drawer({
           <Group label={T('set.support')}>
             <Row label={T('set.contact')} onPress={() => mailTo('EZChangeOrders — support')} />
             <Row label={T('set.feedback')} onPress={() => mailTo('EZChangeOrders — feedback')} />
-            <Row label={T('set.terms')} onPress={() => openLegal('terms')} />
-            <Row label={T('set.privacy')} onPress={() => openLegal('privacy')} />
+            <Row label={T('set.terms')} onPress={() => openLegal(TERMS_URL)} />
+            <Row label={T('set.privacy')} onPress={() => openLegal(PRIVACY_URL)} />
             {/* CLOSE ACCOUNT. Required by App Store 5.1.1(v) for any app that lets
                 somebody create an account — and it was missing entirely. Last in Help,
                 below the legal rows, because that is where somebody looks for it and
