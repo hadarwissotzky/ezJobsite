@@ -40,7 +40,7 @@
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import React from 'react';
-import { Animated, Dimensions, ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, ActivityIndicator, Image, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 
 import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, useAudioRecorderState } from '../recorder';
@@ -159,6 +159,64 @@ export function FusedCapture({
   const [micOn, setMicOn] = React.useState(false);
   const [facing, setFacing] = React.useState<CameraType>('back');
   const [flash, setFlash] = React.useState<'off' | 'on'>('off');
+
+  /**
+   * PINCH TO ZOOM (hadar, 2026-08-26: "the capture screen is missing a zoom -- can we
+   * use the same gesture (fingures) to zoom in and out ? as the camera").
+   *
+   * The gesture every phone camera has, so there is nothing to learn — which is the
+   * whole test in CLAUDE.md §1. It also costs NO new control on a screen whose touch
+   * budget is a hard constraint (mandate #3): a pinch is not a button.
+   *
+   * WHY PanResponder AND NOT react-native-gesture-handler: that library is not a
+   * dependency of this app, and adding it is a NATIVE change — it would need a new
+   * build and could not reach a phone over the air. This ships in an update. The cost
+   * is that the maths is ours; the benefit is that hadar gets it today.
+   *
+   * IT ONLY CLAIMS TWO-FINGER MOVES. `onMoveShouldSetPanResponder` returns false for a
+   * single touch, so taps, the torch button and everything in the overlay above the
+   * preview keep working exactly as they did. The shutter sits outside this band
+   * entirely, so it was never at risk.
+   */
+  // `camZoom`, not `zoom`: this file already has a `zoom` — the photo lightbox's open
+  // image. Two different subjects, one obvious name.
+  const [camZoom, setCamZoom] = React.useState(0);
+  // The live value, read inside the responder. State alone would be a stale closure —
+  // the responder is created once and would keep pinching from whatever the zoom was
+  // when the screen mounted.
+  const zoomRef = React.useRef(0);
+  const pinchFrom = React.useRef<{ dist: number; zoom: number } | null>(null);
+  const pinch = React.useMemo(() => {
+    const spread = (t: readonly { pageX: number; pageY: number }[]) =>
+      Math.hypot(t[0].pageX - t[1].pageX, t[0].pageY - t[1].pageY);
+    return PanResponder.create({
+      // Never on a single finger, and never on touch-down: a tap must stay a tap.
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (e) => e.nativeEvent.touches.length === 2,
+      onPanResponderGrant: (e) => {
+        const t = e.nativeEvent.touches;
+        if (t.length === 2) pinchFrom.current = { dist: spread(t), zoom: zoomRef.current };
+      },
+      onPanResponderMove: (e) => {
+        const t = e.nativeEvent.touches;
+        const from = pinchFrom.current;
+        if (t.length !== 2 || !from || from.dist <= 0) return;
+        // Proportional to how far the fingers moved RELATIVE to where they started, so
+        // the same spread gives the same zoom wherever on the screen it happens.
+        // 0.9 because a full 0→1 sweep of expo-camera's range across one hand-span is
+        // far too twitchy to frame a crack in a wall with.
+        const next = from.zoom + (spread(t) / from.dist - 1) * 0.9;
+        // Rounded, and skipped when unchanged: this fires every frame and each change
+        // re-renders the camera. Two decimals is finer than the preview can show.
+        const clamped = Math.max(0, Math.min(1, Math.round(next * 100) / 100));
+        if (clamped === zoomRef.current) return;
+        zoomRef.current = clamped;
+        setCamZoom(clamped);
+      },
+      onPanResponderRelease: () => { pinchFrom.current = null; },
+      onPanResponderTerminate: () => { pinchFrom.current = null; },
+    });
+  }, []);
 
   /**
    * THE FRAME BLINK — hadar, 2026-08-26: "i need the screen to flash ... to let user
@@ -631,7 +689,12 @@ export function FusedCapture({
             the flash/torch configuration is applied per mode and an implicit default is
             not something to rely on for hardware that either turns on or does not. */}
         <CameraView ref={camRef} style={st.fill} mode="picture" facing={facing}
-          flash={flash} enableTorch={torchOn} />
+          flash={flash} enableTorch={torchOn} zoom={camZoom} />
+
+        {/* THE PINCH SURFACE. Over the preview and UNDER the overlay cards, so the
+            cards and the torch button still take their own touches first. It claims
+            only two-finger moves, so a single tap passes straight through it. */}
+        <View style={StyleSheet.absoluteFill} {...pinch.panHandlers} />
 
         {/* THE BLINK. Over the preview, under everything the user can touch, and
             `pointerEvents="none"` so it can never swallow the next shutter press —
