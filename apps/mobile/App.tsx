@@ -190,7 +190,7 @@ import { clearHold, ensureSendHoldSchema, heldSends, holdSend, holdsToDrain,
          noteHoldAttempt } from './src/sendhold';
 // Prices and the checkout address come from the server, never from this binary — the
 // rail is a court case away from changing and must not need an App Store review.
-import { loadPricing, type PricingConfig } from './src/pricingconfig';
+import { loadPricing, railsFor, type PricingConfig } from './src/pricingconfig';
 // R8 / R5b push. Local notifications: the green light and a client question
 // reach the contractor with the phone in his pocket, with no provider behind it.
 import { ensureNotifySchema, notifyPermissionStatus, requestNotifyPermission,
@@ -6894,7 +6894,16 @@ const checkClientMessages = async () => {
        * no company id — a man out of credits with no way to buy any. The paywall opens
        * regardless and says for itself when a rail is unavailable.
        */
-      onBuy={() => { setNoCredits(null); setShowPaywall(true); }}
+      /**
+       * SEQUENCED, NOT STACKED — the iOS race this file has already been bitten by
+       * (see the purchase handler's note). Both of these are <Modal>s, and presenting
+       * one in the same commit that dismisses the other is how the paywall silently
+       * fails to appear.
+       */
+      onBuy={() => {
+        setNoCredits(null);
+        setTimeout(() => setShowPaywall(true), 320);
+      }}
       onClose={() => setNoCredits(null)} />
   ) : null;
 
@@ -6915,7 +6924,21 @@ const checkClientMessages = async () => {
        * cannot read, costs more than a missing one.
        */
       packs={pricing?.packs ?? []}
+      // The server's kill switch, honoured again — see `packsSellable`. `railsFor`
+      // reports 'none' or 'web' when IAP is off, and the app has no web rail any more,
+      // so either answer means: do not offer a purchase here.
+      packsSellable={pricing ? railsFor(pricing) !== 'none' && railsFor(pricing) !== 'web' : true}
       creditsLeft={credits?.metered ? credits.available : null}
+      /**
+       * A PACK CHANGES A NUMBER, NOT A TIER. `onPurchased` below is the subscription
+       * handler and says "You're now on <plan>"; routing a pack through it announced
+       * "You're now on Free" to somebody who had just bought 20 change orders.
+       *
+       * `drainHolds` is the right call and not merely a balance read: it re-reads the
+       * balance AND releases anything queued behind the gate he just paid to clear,
+       * which is the reason he bought them.
+       */
+      onCreditsPurchased={() => { void drainHolds(); }}
       onClose={() => {
         setShowPaywall(false);
         if (settingsFrom === 'drawer') setMenuOpen(true);
@@ -8632,6 +8655,9 @@ const checkClientMessages = async () => {
             so a first-time contractor whose very first send hits the gate would otherwise
             watch the button stop working with no explanation at all. */}
         {heldEl}
+        {/* WITHOUT THIS the out-of-credits modal's Buy is dead on this screen: it sets
+            `showPaywall`, and the paywall only exists where it is mounted. */}
+        {paywallEl}
         <StepReview
           // The stored sentinel is the string 'Owner'; what a person READS is
           // translated. See `client.unnamed` for why the two must stay apart.
@@ -9504,7 +9530,6 @@ const checkClientMessages = async () => {
       updateReady={ota.canRestart}
       onApplyUpdate={() => { setMenuOpen(false); void ota.restart(db); }}
       onCheckUpdates={ota.checkNow}
-      confirmBase={CONFIRM_BASE}
       onSignOut={async () => { setMenuOpen(false); await connector.signOut(); }}
       unsent={unsentWork}
       /**
@@ -10452,6 +10477,9 @@ const shortJob = (name: string): string => {
             AFTER {drawerEl} deliberately: a Modal declared before its sibling content
             does not present on iOS. */}
         {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+        {/* WITHOUT THIS the out-of-credits modal's Buy is dead on this screen: it sets
+            `showPaywall`, and the paywall only exists where it is mounted. */}
+        {paywallEl}
       {jobCreatedEl}
         {/* AND THE SAME OMISSION BIT THE SWIPE-DELETE (hadar 2026-08-05: "the button
             is there but it doesn't delete once I confirm"). Home is the ONLY screen
@@ -10744,6 +10772,9 @@ const shortJob = (name: string): string => {
     return (
       <View style={s.homeC}>
         {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+        {/* WITHOUT THIS the out-of-credits modal's Buy is dead on this screen: it sets
+            `showPaywall`, and the paywall only exists where it is mounted. */}
+        {paywallEl}
         {jobCreatedEl}
         <View style={s.dashHdr}>
           <Pressable style={s.hdrBtn} hitSlop={12} accessibilityLabel={T('common.back')}

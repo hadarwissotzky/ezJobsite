@@ -13,7 +13,7 @@ import React from 'react';
 import {Linking,ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { t } from '../i18n';
 import { PLANS, PAID_TIERS, offeredTiers, type PlanId } from '../plans';
-import { billingStatus, manageSubscriptionUrl, purchaseCredits, purchasePlan, restorePurchases } from '../billing';
+import { billingStatus, manageSubscriptionUrl, packPrices, purchaseCredits, purchasePlan, restorePurchases } from '../billing';
 // Prices come from the server (`pricing_config`), never from this binary — the rail is a
 // court case away from changing and must not need an App Store review.
 import { money as packMoney, perCredit, type Pack } from '../pricingconfig';
@@ -119,9 +119,36 @@ export function PaywallScreen(props: {
    * misconfiguration and one fewer option beats a broken one.
    */
   packs?: readonly Pack[];
+  /**
+   * MAY THE APP SELL PACKS AT ALL — `pricing_config.iap_enabled`, straight through.
+   *
+   * This exists because the switch stopped working. When the packs moved from a web
+   * link to StoreKit, `railsFor` / `iapEnabled` lost their last caller and the paywall
+   * began selling unconditionally — so setting `iap_enabled = false` on the server no
+   * longer stopped it. pricingconfig.ts's header states the opposite as a property
+   * ("the rail is a court case away from changing and must not need an App Store
+   * review"), and a property nothing enforces is a comment.
+   *
+   * Undefined = ALLOWED, so a build that has not loaded config yet still sells; the
+   * kill switch is a deliberate off, not a default.
+   */
+  packsSellable?: boolean;
   /** Change orders he can still send. Null = unknown or unlimited; the line is dropped
    *  rather than rendered as zero. */
   creditsLeft?: number | null;
+  /**
+   * A CREDIT PACK LANDED — deliberately NOT `onPurchased`.
+   *
+   * `onPurchased` is the SUBSCRIPTION handler: it caches the entitlement, closes this
+   * sheet, opens the drawer and announces "You're now on <tier>". Firing it after a
+   * pack told a contractor who had just bought 20 change orders that he was "now on
+   * Free", and never refreshed the balance he had just paid to increase.
+   *
+   * A pack changes a NUMBER, not a tier. The caller re-reads the balance; this sheet
+   * stays open, because the ladder he just bought from is the thing he wants to see
+   * confirm itself.
+   */
+  onCreditsPurchased?: () => void;
 }) {
   const ready = billingStatus() === 'ready';
   const best = bestAnnualSavingPct(props.currentPlan);
@@ -176,6 +203,27 @@ export function PaywallScreen(props: {
    */
   const iapPrice = (p: Pack) => p.iap || p.web;
 
+  /**
+   * THE STORE'S OWN PRICE STRINGS, keyed by product id.
+   *
+   * `iapPrice` below returns configured cents and `packMoney` formats them as `$` in
+   * en-US. That quotes dollars to a buyer in Toronto who will be charged CAD, and it
+   * quotes the server's number rather than the one App Store Connect holds — so any
+   * drift between the two shows a price the store will not take. Both are mandate #6.
+   *
+   * StoreKit localises correctly, so its string wins whenever it is available. Empty
+   * until the fetch lands, and empty forever if billing is unconfigured — the row then
+   * falls back to the configured figure, which is better than a blank price.
+   */
+  const [storePrice, setStorePrice] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    if (!props.packs?.length || !ready) return;
+    let live = true;
+    void packPrices(props.packs.map((p) => p.id))
+      .then((m) => { if (live) setStorePrice(m); });
+    return () => { live = false; };
+  }, [props.packs, ready]);
+
   /** Which pack's store sheet is open, so the other two dim instead of queueing. */
   const [busyPack, setBusyPack] = React.useState<string | null>(null);
   const [packNote, setPackNote] = React.useState<string | null>(null);
@@ -196,9 +244,9 @@ export function PaywallScreen(props: {
     setBusyPack(null);
     if (r.ok) {
       setPackNote(t({ k: 'paywall.payg.bought', p: { n: String(p.credits) } } as any));
-      // Same signal the subscription path uses: the caller re-reads the balance. The
-      // plan has not changed — a pack is not a tier — so the current one is passed back.
-      props.onPurchased?.(props.currentPlan);
+      // NOT `onPurchased` — see `onCreditsPurchased`. The sheet stays open and the note
+      // above it stands, which is the whole reason that note is reachable at all.
+      props.onCreditsPurchased?.();
       return;
     }
     if (r.reason === 'cancelled') { setPackNote(null); return; }
@@ -445,10 +493,11 @@ export function PaywallScreen(props: {
                     <Pressable
                       key={p.id}
                       onPress={() => buyPack(p)}
-                      disabled={!!busyPack || !ready}
+                      disabled={!!busyPack || !ready || props.packsSellable === false}
                       accessibilityRole="button"
                       accessibilityLabel={t({ k: 'paywall.payg.buyN',
-                        p: { n: String(p.credits), price: packMoney(iapPrice(p)) } } as any)}
+                        p: { n: String(p.credits),
+                             price: storePrice[p.id] ?? packMoney(iapPrice(p)) } } as any)}
                       style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center',
                         paddingVertical: 12, minHeight: touchTargets.minimum,
                         borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.line },
@@ -476,7 +525,7 @@ export function PaywallScreen(props: {
                                 number the store would not charge, which is the exact
                                 class of error mandate #6 exists for. */}
                             <Text style={{ fontFamily: F.dispSemi, fontSize: 17, color: C.ink }}>
-                              {packMoney(iapPrice(p))}
+                              {storePrice[p.id] ?? packMoney(iapPrice(p))}
                             </Text>
                             <Icon name={'chevRight' as IconName} size={18} color={C.muted} />
                           </>
@@ -494,6 +543,12 @@ export function PaywallScreen(props: {
                   ROW IS THE BUTTON. That is also the better screen: the tap that says
                   "twenty" is the tap that buys twenty, with no second place to change
                   your mind about a number you already picked. */}
+              {props.packsSellable === false && (
+                <Text style={{ fontFamily: F.body, fontSize: 13, color: C.steel,
+                  textAlign: 'center', marginTop: 10 }}>
+                  {t('paywall.notLive')}
+                </Text>
+              )}
               {packNote && (
                 <Text style={{ fontFamily: F.body, fontSize: 13, color: C.steel,
                   textAlign: 'center', marginTop: 10 }}>

@@ -163,6 +163,31 @@ export async function purchasePlan(productId: string): Promise<PurchaseResult> {
  * granted credit from here would be a second source of truth for a number a
  * contractor may one day dispute.
  */
+/**
+ * WHAT THE STORE WILL ACTUALLY CHARGE, per pack product.
+ *
+ * The paywall's own figures come from `pricing_config` and are rendered by `money()`,
+ * which hardcodes `$` and en-US. That is wrong twice: a buyer in Toronto is quoted
+ * dollars and charged CAD, and any drift between the server config and the App Store
+ * Connect price point quotes a number the store will not take. Both are the mandate #6
+ * class of error — a wrong statement about money.
+ *
+ * StoreKit already localises and formats this correctly, so the store's own
+ * `priceString` is the honest thing to render. Returns an EMPTY MAP rather than
+ * throwing when billing is unconfigured or the products are not fetchable; the caller
+ * falls back to the configured figure, which is better than a blank price.
+ */
+export async function packPrices(productIds: string[]): Promise<Record<string, string>> {
+  if (billingStatus() !== 'ready') return {};
+  try {
+    const products = await Purchases.getProducts(
+      productIds, Purchases.PRODUCT_CATEGORY.NON_SUBSCRIPTION);
+    const out: Record<string, string> = {};
+    for (const p of products) if (p.priceString) out[p.identifier] = p.priceString;
+    return out;
+  } catch { return {}; }
+}
+
 export async function purchaseCredits(
   productId: string,
 ): Promise<{ ok: true } | { ok: false; reason: 'not_configured' | 'no_tenant' | 'cancelled' | 'failed'; detail?: string }> {
@@ -178,7 +203,12 @@ export async function purchaseCredits(
     return { ok: false, reason: 'failed', detail: `unknown pack ${productId}` };
   }
   try {
-    const products = await Purchases.getProducts([productId]);
+    // NON_SUBSCRIPTION, EXPLICITLY. `getProducts` defaults to the SUBSCRIPTION
+    // category and these are consumables: on Android that default returns an empty
+    // list and every pack purchase fails as `product_unavailable`. iOS ignores the
+    // category, which is exactly why this would have shipped unnoticed.
+    const products = await Purchases.getProducts(
+      [productId], Purchases.PRODUCT_CATEGORY.NON_SUBSCRIPTION);
     const product = products.find((p) => p.identifier === productId);
     // Not yet "Ready to Submit" in App Store Connect is the usual cause, and it is a
     // config problem the buyer should be told about plainly rather than a dead tap.

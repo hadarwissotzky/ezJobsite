@@ -162,7 +162,11 @@ jobs:
             # campaign's filed URLs; a 404 here is a revoked campaign later.
             for p in index.html privacy.html terms.html sms.html support.html \
                      confirm.html ewa.js; do
-              code="$(curl -o /dev/null -s -w '%{http_code}' "$URL/$p")"
+              # `|| true` because this step runs under `bash -e`: a transient reset or
+              # a DNS blip during Pages propagation would otherwise abort the whole
+              # step instead of falling through to the next attempt — and the first
+              # attempt happens at t+15s, when propagation is least settled.
+              code="$(curl -o /dev/null -s -w '%{http_code}' "$URL/$p" || true)"
               [ "$code" = "200" ] || { echo "attempt $i: /$p returned $code"; ok=no; }
             done
             [ "$ok" = yes ] || continue
@@ -179,8 +183,10 @@ jobs:
             esac
             # The front door must be the LANDING page, not a second copy of the
             # approval form — the exact regression this deploy is fixing.
-            HOME="$(curl -fsSL "$URL/index.html" || true)"
-            case "$HOME" in
+            # NOT `HOME` — that is the shell's home directory, and overwriting it with a
+            # page of HTML breaks curl's netrc/config lookup for every later attempt.
+            LANDING="$(curl -fsSL "$URL/index.html" || true)"
+            case "$LANDING" in
               *"const SUPABASE_URL"*)
                 echo "attempt $i: index.html is serving the approval page"; continue;;
             esac

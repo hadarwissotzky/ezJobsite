@@ -48,7 +48,7 @@ import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, use
 // evidence — the recording stays owned by expo-audio; this only listens along.
 import { needsPermissionAsk, requestSpeechPermission, startLive, type LiveHandle } from '../ondevicestt';
 import { logDiag } from '../diaglog';
-import { signalShutter } from '../feedback';
+import { signalFailed, signalShutter } from '../feedback';
 import { stampNow, type Stamp } from '../stamp';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { useSessionDraft } from './sessiondraft';
@@ -397,6 +397,15 @@ export function FusedCapture({
   };
 
   const snap = async () => {
+    /**
+     * NO CAMERA, NO CUE. `camRef.current` is null until the preview mounts, and a tap
+     * in that window used to blink and click and take nothing — the outer catch
+     * swallowed it. A confirmation for a photo that does not exist is the phantom-
+     * "saved" fault at the shutter, and mandate #1 does not care that this one is only
+     * a shutter cue: he walks away believing he has the shot.
+     */
+    const cam = camRef.current;
+    if (!cam) return;
     try {
       const atMs = Date.now();
       /**
@@ -411,19 +420,31 @@ export function FusedCapture({
        * capture's real confirmation is `signalSaved`, which fires only once the write
        * has committed. Firing that here would be the phantom-"saved" fault; firing
        * this here is just a camera behaving like a camera.
+       *
+       * AND IT IS TAKEN BACK IF NOTHING ARRIVES — see the catch. The cue is a promise
+       * that a frame was grabbed; when the grab fails, saying so is the difference
+       * between a slow camera and a lost photograph.
        */
       flashFrame();
       void signalShutter();
-      const pic = await camRef.current?.takePictureAsync({ quality: 0.8 });
-      if (pic?.uri) {
-        setShots((s) => [...s, { uri: pic.uri, atMs, fromLibrary: false }]);
-        setWarnEmpty(false);
-        // Durable within a second of the shutter. Fire-and-forget: banking must never
-        // delay the next shot (mandate #3's touch budget) and a failed bank leaves the
-        // photo exactly as safe as it was before — in React state, committed at Done.
-        void draft.photo({ srcUri: pic.uri, atMs, mime: 'image/jpeg', fromLibrary: false });
-      }
-    } catch { /* a dropped frame must not end the walk */ }
+      const pic = await cam.takePictureAsync({ quality: 0.8 });
+      if (!pic?.uri) throw new Error('no image returned');
+      setShots((s) => [...s, { uri: pic.uri, atMs, fromLibrary: false }]);
+      setWarnEmpty(false);
+      // Durable within a second of the shutter. Fire-and-forget: banking must never
+      // delay the next shot (mandate #3's touch budget) and a failed bank leaves the
+      // photo exactly as safe as it was before — in React state, committed at Done.
+      void draft.photo({ srcUri: pic.uri, atMs, mime: 'image/jpeg', fromLibrary: false });
+    } catch (e: any) {
+      /**
+       * THE SHOT DID NOT HAPPEN, AND HE HAS ALREADY BEEN TOLD IT DID. A dropped frame
+       * must not end the walk — that rule stands — but it must not pass as a photo
+       * either. `signalFailed` is the file's own "unmistakably not the success sound",
+       * and the trail says which tap it was so a pattern is findable afterwards.
+       */
+      void signalFailed();
+      void logDiag(db, 'capture.snap', String(e?.message ?? e).slice(0, 160));
+    }
   };
 
   /** Pick from the gallery mid-walk. atMs = NOW: you pick it while talking about it,

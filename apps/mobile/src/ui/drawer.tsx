@@ -49,8 +49,9 @@ const SUPPORT_EMAIL = 'support@ezchangeorders.com';
  * campaign and the App Store listing; they have to resolve from any build, including
  * one where EXPO_PUBLIC_CONFIRM_BASE is unset or wrong. A legal link that depends on a
  * build-time variable is a legal link that can ship broken — which is what happened.
- * The approval link still uses `confirmBase`, because that one is genuinely
- * per-environment; these are not.
+ * The `confirmBase` prop went with them — nothing else in this file used it, and a
+ * prop kept "in case" is a prop that drifts out of meaning. The approval link is built
+ * where it is sent, from the same env var, and is untouched.
  */
 const TERMS_URL = 'https://approve.ezchangeorders.com/terms.html';
 const PRIVACY_URL = 'https://approve.ezchangeorders.com/privacy.html';
@@ -90,7 +91,6 @@ export function Drawer({
   onApplyUpdate?: () => void;
   /** Manual "check for updates". Resolves with what happened so the row can say so. */
   onCheckUpdates?: () => Promise<'downloaded' | 'none' | 'error'>;
-  confirmBase: string;
   onSignOut: () => Promise<void>;
   /** Rows still queued in every owned outbox plus any open capture draft — what a
    *  handover to another account would destroy. Null when it could not be counted. */
