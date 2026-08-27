@@ -38,6 +38,7 @@ import { AudioPlayer, createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 
 let savedPlayer: AudioPlayer | null = null;
 let failedPlayer: AudioPlayer | null = null;
+let shutterPlayer: AudioPlayer | null = null;
 
 /**
  * Load once, at startup. A capture confirmation cannot wait on a file read: the
@@ -52,6 +53,7 @@ export async function initFeedback() {
     await setAudioModeAsync({ playsInSilentMode: true });
     savedPlayer = createAudioPlayer(require('../assets/sounds/saved.wav'));
     failedPlayer = createAudioPlayer(require('../assets/sounds/failed.wav'));
+    shutterPlayer = createAudioPlayer(require('../assets/sounds/shutter.wav'));
   } catch {
     // No sound. The haptic still fires and the screen still shows it. Degraded,
     // not broken -- and never a reason to fail a capture.
@@ -75,6 +77,34 @@ export async function signalFailed() {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     if (failedPlayer) { failedPlayer.seekTo(0); failedPlayer.play(); }
   } catch { /* rule 4 */ }
+}
+
+/**
+ * THE SHUTTER FIRED — hadar, 2026-08-26: "i need the screen to flash and the camera
+ * snap sound -- to let user know that an image was taken".
+ *
+ * IT IS NOT A CONFIRMATION, and the distinction is this file's rule 1. `signalSaved`
+ * fires only once a capture is COMMITTED; this fires the instant the shutter is
+ * pressed, before the photo has been written anywhere. So it MUST NOT sound like
+ * saved.wav — a shutter that plays the save chime teaches a contractor that the click
+ * means "it is banked", which is the phantom-"saved" fault in a new costume.
+ *
+ * Hence its own asset: two dry transients, a mirror slap and its return, with no tonal
+ * resemblance to the rising save chime.
+ *
+ * DELIBERATELY QUIET (peak 0.55). This very often plays WHILE THE MIC IS LIVE — the
+ * whole product is a man narrating as he photographs — so every decibel here is an
+ * artefact in the evidence audio and a word the transcriber may lose. Loud enough to
+ * hear over a jobsite, no louder.
+ *
+ * THE HAPTIC IS STILL THE PRIMARY CHANNEL (rule 3): the ringer may be off, the phone
+ * may be at arm's length, the room may be a compressor. A hand always feels it.
+ */
+export async function signalShutter() {
+  try {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (shutterPlayer) { shutterPlayer.seekTo(0); shutterPlayer.play(); }
+  } catch { /* rule 4 — a dropped cue must never cost the photo */ }
 }
 
 /**

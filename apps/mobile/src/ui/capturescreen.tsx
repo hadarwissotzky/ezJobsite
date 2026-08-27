@@ -40,7 +40,7 @@
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import React from 'react';
-import { Dimensions, ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 
 import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, useAudioRecorderState } from '../recorder';
@@ -48,6 +48,7 @@ import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, use
 // evidence — the recording stays owned by expo-audio; this only listens along.
 import { needsPermissionAsk, requestSpeechPermission, startLive, type LiveHandle } from '../ondevicestt';
 import { logDiag } from '../diaglog';
+import { signalShutter } from '../feedback';
 import { stampNow, type Stamp } from '../stamp';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { useSessionDraft } from './sessiondraft';
@@ -158,6 +159,29 @@ export function FusedCapture({
   const [micOn, setMicOn] = React.useState(false);
   const [facing, setFacing] = React.useState<CameraType>('back');
   const [flash, setFlash] = React.useState<'off' | 'on'>('off');
+
+  /**
+   * THE FRAME BLINK — hadar, 2026-08-26: "i need the screen to flash ... to let user
+   * know that an image was taken".
+   *
+   * A white sheet over the preview for a blink, the way every camera app has done it
+   * since the shutter was mechanical. It answers the one question a man asks after
+   * pressing a button he cannot feel: did that do anything?
+   *
+   * NOT `flash` above — that is the LED/torch, a different thing with a confusingly
+   * similar name. This never touches the lamp.
+   *
+   * `useNativeDriver` because it runs at the same moment the camera is encoding a
+   * frame: an opacity animation on the JS thread would stutter exactly when the
+   * device is busiest, and a stuttering confirmation reads as a fault.
+   */
+  const blink = React.useRef(new Animated.Value(0)).current;
+  const flashFrame = React.useCallback(() => {
+    blink.setValue(0.9);
+    Animated.timing(blink, {
+      toValue: 0, duration: 220, useNativeDriver: true,
+    }).start();
+  }, [blink]);
   /**
    * THE FRONT CAMERA HAS NO LAMP. Asking iOS for a torch on it does nothing, so the
    * button would go back to being the dead control this change is fixing — just on a
@@ -375,6 +399,21 @@ export function FusedCapture({
   const snap = async () => {
     try {
       const atMs = Date.now();
+      /**
+       * FEEDBACK FIRST, BEFORE THE AWAIT — and that ordering is the point.
+       *
+       * `takePictureAsync` resolves after the image is encoded and written, which is
+       * hundreds of milliseconds later. Waiting for it would put the blink and the
+       * click a beat behind the thumb, and a confirmation that arrives late does not
+       * read as a response to what you did — it reads as the app being slow.
+       *
+       * Honest, because of what this cue CLAIMS: the shutter fired, nothing more. The
+       * capture's real confirmation is `signalSaved`, which fires only once the write
+       * has committed. Firing that here would be the phantom-"saved" fault; firing
+       * this here is just a camera behaving like a camera.
+       */
+      flashFrame();
+      void signalShutter();
       const pic = await camRef.current?.takePictureAsync({ quality: 0.8 });
       if (pic?.uri) {
         setShots((s) => [...s, { uri: pic.uri, atMs, fromLibrary: false }]);
@@ -572,6 +611,12 @@ export function FusedCapture({
             not something to rely on for hardware that either turns on or does not. */}
         <CameraView ref={camRef} style={st.fill} mode="picture" facing={facing}
           flash={flash} enableTorch={torchOn} />
+
+        {/* THE BLINK. Over the preview, under everything the user can touch, and
+            `pointerEvents="none"` so it can never swallow the next shutter press —
+            a confirmation that eats the following tap would cost the photo it was
+            meant to reassure him about. */}
+        <Animated.View pointerEvents="none" style={[st.blink, { opacity: blink }]} />
 
         {/* The cards sit in NORMAL FLOW inside an overlay, not absolutely positioned.
             They were absolute at first and it only worked on one screen height: the
@@ -890,6 +935,9 @@ const st = StyleSheet.create({
 
   // The hero. Lifted over the panel edge exactly as drawn, and the biggest target
   // on the screen because it is the one a gloved hand hits without looking.
+  // WHITE, not the app's cream. This is meant to read as a camera's frame blink, and
+  // every camera anyone has used blinks white; a tinted one reads as a glitch.
+  blink: { ...StyleSheet.absoluteFillObject, backgroundColor: '#fff' },
   shutter: { width: 118, height: 118, borderRadius: 59, backgroundColor: C.paper,
     alignItems: 'center', justifyContent: 'center', marginTop: -46 },
   shutterInner: { width: 106, height: 106, borderRadius: 53, backgroundColor: C.brand,
