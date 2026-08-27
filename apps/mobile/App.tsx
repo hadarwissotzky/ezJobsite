@@ -9710,7 +9710,7 @@ const checkClientMessages = async () => {
     return (
       <View style={s.homeC}>
         {dashHeader(T('feed.title'))}
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96 }}
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 96 }}
           refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPullRefresh} tintColor={C.steel} />}>
           {feedItems.length === 0 && (
             <EmptyState
@@ -12735,8 +12735,15 @@ const s = StyleSheet.create({
   homeEmpty: { color: C.steel, fontFamily: 'Barlow_600SemiBold', fontSize: 16,
     lineHeight: 23, textAlign: 'center', marginTop: 40, width: '100%' },
   // Company-feed day header (Today / Yesterday / date). Small caps label, olive-tinted.
+  // 18, MATCHING HOME'S `secHead` (hadar, 2026-08-27: "The co record in the list is
+  // shorter width wise in the company feed page then the homepage ... need to unify
+  // them"). The feed's ScrollView used to carry `paddingHorizontal: 16` AND the cards
+  // sat in `exList`, which adds another 16 — so a feed card was inset 32 a side against
+  // Home's 16 and read as a narrower, different object. The scroll padding is gone; the
+  // heading now carries its own inset, the way Home's already did.
   feedDayHead: { fontFamily: 'BarlowCondensed_600SemiBold', fontSize: 13, color: '#5E666E',
-    textTransform: 'uppercase', letterSpacing: 1.4, marginTop: 20, marginBottom: 6 },
+    textTransform: 'uppercase', letterSpacing: 1.4, marginHorizontal: 18,
+    marginTop: 20, marginBottom: 6 },
 
   // ── Project detail ─────────────────────────────────────────────────────
   detailHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
