@@ -9404,9 +9404,15 @@ const checkClientMessages = async () => {
             without saying what; the mic is the promise — talk — and the small +
             keeps "this makes a new one". White on ink-green is the highest contrast
             pair available here, which is the point of the change. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-          <Icon name="micLine" size={27} color="#FFFFFF" />
-          <Icon name="extra" size={14} color="#FFFFFF" />
+        <View style={s.fabGlyph}>
+          <Icon name="micLine" size={30} color="#FFFFFF" />
+          {/* SUPERSCRIPT, not a sibling (hadar's reference shot, 2026-08-27). Side by
+              side they read as two controls — "a mic" and "an add" — and the eye has to
+              decide which one it is about to press. Hung off the mic's shoulder they are
+              one mark that means "a new one, by talking". */}
+          <View style={s.fabPlus}>
+            <Icon name="extra" size={13} color="#FFFFFF" />
+          </View>
         </View>
       </Pressable>
       <View style={s.tabHalf}>
@@ -12995,14 +13001,30 @@ const s = StyleSheet.create({
   // sized for dark text on a light button — and the glyphs in here are now WHITE, which
   // on pale grey is barely a shape. A muted green keeps the white legible while still
   // reading as unavailable.
-  fabOff: { backgroundColor: '#7D8B7D', borderColor: '#EDEDEA' },
-  fab: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#1F3A24',
-    borderWidth: 2, borderColor: '#FFFFFF',
-    // Lifted a little further to keep the same amount of puck above the bar now that
-    // it is 8pt taller.
-    alignItems: 'center', justifyContent: 'center', marginTop: -22,
-    shadowColor: '#151A1E', shadowOpacity: 0.4, shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+  // Its own disabled fill, not the shared `btnOff` — that one is `#c4cdd5`, a pale
+  // grey sized for DARK text on a light button, and these glyphs are white.
+  fabOff: { backgroundColor: '#8A94A0' },
+  // MATCHED TO hadar's REFERENCE SHOT (2026-08-27): a dark slate disc, no ring, a
+  // white mic carrying a small +.
+  //
+  // NO BORDER. The white collar I added an hour ago was solving a problem this does
+  // not have — it existed to cut the shadow away from a dark puck, and the reference
+  // has no ring at all: the disc is dark enough that the white bar separates it on its
+  // own, and a collar makes it read as a badge stuck on rather than a control sitting
+  // in the bar.
+  //
+  // SLATE, NOT THE APP'S GREEN. Deliberate and worth flagging: every other accent in
+  // this app is green, and this is the one control that is not a statement about
+  // status. Neutral dark keeps it from reading as another green chip.
+  fab: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#2C3A47',
+    // Lifted so the same proportion of the disc clears the bar at the larger size.
+    alignItems: 'center', justifyContent: 'center', marginTop: -24,
+    shadowColor: '#151A1E', shadowOpacity: 0.32, shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 }, elevation: 6 },
+  // The mic and its + are one mark; this box exists so the + can hang off the mic's
+  // shoulder without pushing it off centre.
+  fabGlyph: { alignItems: 'center', justifyContent: 'center' },
+  fabPlus: { position: 'absolute', top: -3, right: -10 },
   fabT: { color: '#fff', fontSize: 30, marginTop: -2, fontFamily: 'Barlow_400Regular' },
   homeScrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(13,15,18,0.45)', paddingHorizontal: 14 },
