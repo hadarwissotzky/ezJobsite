@@ -127,7 +127,7 @@ import { ensureLogoCached, pickLogo, removeCompanyLogo,
 import { configureBilling, entitledPlanNow, entitledProductNow } from './src/billing';
 import { LABELS, labelHex } from './src/labels';
 import { companyFeed, type FeedItem } from './src/feed';
-import { ExtraCard } from './src/ui/extracard';
+import { ExtraCard, ExtraList } from './src/ui/extracard';
 import { setDraftClient,
 } from './src/changeorder';
 import { requestExtraReview } from './src/reviewrequest';
@@ -9757,7 +9757,7 @@ const checkClientMessages = async () => {
           return days.map((day) => (
             <React.Fragment key={day.key}>
               <Text style={s.feedDayHead}>{day.label}</Text>
-              <View style={s.exList}>
+              <ExtraList>
                 {day.items.map((f) => {
                   const st = stateKey(f.status, f.openQuestions);
                   return (
@@ -9797,7 +9797,7 @@ const checkClientMessages = async () => {
                       }} />
                   );
                 })}
-              </View>
+              </ExtraList>
             </React.Fragment>
           ));
           })()}
@@ -10326,7 +10326,7 @@ const shortJob = (name: string): string => {
                       surface with hairlines inside it — the right answer when a row was
                       a bare line of text. `ExtraCard` is a card, and nesting cards in a
                       card gave every row two edges. Only the gutter survives. */}
-                  <View style={s.exList}>{list.map(extraRow)}</View>
+                  <ExtraList>{list.map(extraRow)}</ExtraList>
                 </React.Fragment>
               );
             };
@@ -12438,6 +12438,11 @@ const s = StyleSheet.create({
   // job screen padded its container 20 instead, so its content was 8pt narrower
   // overall and every card edge missed Home's by 4pt. One number, and now the two
   // screens line up when you flick between them.
+  // paddingHorizontal MUST STAY EQUAL TO `EXTRA_GUTTER` (ui/extracard.tsx). The job
+  // screen is the one surface whose extra cards are NOT wrapped in `ExtraList` — this
+  // padding insets its header, stat tiles and card list together, so it arrives at the
+  // same gutter by a different route. Change one without the other and the job screen's
+  // cards stop matching Home's, which is the drift this pair of comments exists to stop.
   c: { flex: 1, paddingTop: 72, paddingHorizontal: 16, backgroundColor: '#F7F5F0' },
   h: { color: '#151A1E', fontFamily: 'Barlow_700Bold', fontSize: 30, letterSpacing: -0.2, marginBottom: 18 },
   btn: { backgroundColor: '#151A1E', paddingVertical: 28, borderRadius: 18, alignItems: 'center' },
@@ -12908,7 +12913,6 @@ const s = StyleSheet.create({
   // Gutter only. The rows inside are `ExtraCard`s and draw their own border, so this
   // must NOT add a second one — `exGroup` above is kept for the surfaces that still
   // hold bare rows rather than cards.
-  exList: { marginHorizontal: 16, marginBottom: 6 },
   exRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff',
     paddingVertical: 14, paddingHorizontal: 16 },
   exRowRule: { borderTopWidth: 1, borderTopColor: '#f0ebe6' },  // ink-100 hairline

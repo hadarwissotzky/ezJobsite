@@ -302,3 +302,41 @@ const st = StyleSheet.create({
   // which cost the schedule line its width.
   amt: { fontFamily: 'Inter_700Bold', fontSize: 18, color: '#2F5233', letterSpacing: -0.5 },
 });
+
+/* ─── THE GUTTER ────────────────────────────────────────────────────────────────
+ *
+ * The card above fixes layout, type and spacing. The one thing it never owned was how
+ * far its list sits from the screen edge — and that is the thing that drifted.
+ *
+ * hadar, 2026-08-27: "The co record in the list is shorter width wise in the company
+ * feed page then the homepage." The feed's ScrollView carried `paddingHorizontal: 16`
+ * and its cards ALSO sat in a wrapper with `marginHorizontal: 16`, so a feed card was
+ * inset 32 a side against Home's 16. Same component, same data, visibly narrower.
+ *
+ * THIS IS THE THIRD TIME THIS SHAPE HAS DRIFTED across these same three screens. The
+ * chip palette was defined twice and the same extra wore different colours depending
+ * on which screen you opened it from (fixed by `extraChip`). `stateKey`, `jobBucket`
+ * and `displayStatus` were three copies of one question and shipped three bugs, one of
+ * which nobody ever reported (fixed by `extrabucket.ts`). Each time the answer was the
+ * same: name it once, in the place the thing itself lives.
+ *
+ * NO STYLE PROP, DELIBERATELY. An override is the door the last three bugs walked
+ * through — a caller that can add its own inset is a caller that eventually does.
+ */
+export const EXTRA_GUTTER = 16;
+
+/**
+ * The list an `ExtraCard` belongs in. Wrap the rows; add no padding of your own.
+ *
+ * The container around this must contribute NO horizontal padding, or the two add up —
+ * which is the bug this exists to prevent. The job screen is the one surface that does
+ * not use this: its gutter comes from the screen root (`s.c`), which also insets the
+ * header and the stat tiles, so it arrives at the same 16 by a different route.
+ */
+export function ExtraList({ children }: { children: React.ReactNode }) {
+  return <View style={xl.list}>{children}</View>;
+}
+
+const xl = StyleSheet.create({
+  list: { marginHorizontal: EXTRA_GUTTER, marginBottom: 6 },
+});
