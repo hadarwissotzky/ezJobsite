@@ -9385,14 +9385,29 @@ const checkClientMessages = async () => {
           {active === 'jobs' && <View style={s.tabUnder} />}
         </Pressable>
       </View>
-      <Pressable style={[s.fab, (!!gate || !!initError) && s.btnOff]}
+      <Pressable style={[s.fab, (!!gate || !!initError) && s.fabOff]}
         disabled={!!gate || !!initError} hitSlop={8}
         accessibilityLabel={T('home.recordExtra')}
         onPress={() => { if (!terms) { openTerms(() => setShowCapture(true)); return; } setShowCapture(true); }}>
-        {/* An OUTLINED ring with a thin +, as drawn — not a filled green disc. The
-            capture entry belongs to the whole app; a solid green puck in the middle
-            of the bar outranked the screen's own primary action every time. */}
-        <Icon name="extra" size={24} color="#2F5233" />
+        {/* A FILLED DARK PUCK WITH A WHITE MIC (hadar, 2026-08-27: "make the + circle
+            bigger and darker with a white mic inside").
+
+            THIS REVERSES AN EARLIER DECISION, and the earlier reasoning is worth
+            keeping visible rather than deleting: the ring was outlined precisely so
+            "a solid puck in the middle of the bar" would not outrank each screen's
+            own primary action. hadar has now asked for the opposite, and he is
+            looking at the real thing on a real phone — on a jobsite, in sunlight,
+            the outlined version reads as a disabled control rather than as the one
+            button the whole product exists to offer.
+
+            THE MIC LEADS AND THE + QUALIFIES. The + alone said "add something"
+            without saying what; the mic is the promise — talk — and the small +
+            keeps "this makes a new one". White on ink-green is the highest contrast
+            pair available here, which is the point of the change. */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+          <Icon name="micLine" size={27} color="#FFFFFF" />
+          <Icon name="extra" size={14} color="#FFFFFF" />
+        </View>
       </Pressable>
       <View style={s.tabHalf}>
         {/* THE COMPANY STREAM HOLDS THIS SLOT (hadar, 2026-08-12: "in the bottom menu
@@ -12968,9 +12983,24 @@ const s = StyleSheet.create({
   // even to someone who cannot separate the two greens from the greys.
   tabUnder: { height: 3, borderRadius: 2, backgroundColor: '#2F5233',
     alignSelf: 'stretch', marginTop: 5, marginHorizontal: 10 },
-  fab: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#FFFFFF',
-    borderWidth: 1.5, borderColor: '#C7CFC3',
-    alignItems: 'center', justifyContent: 'center', marginTop: -18,
+  // 64, FILLED, INK-GREEN (hadar, 2026-08-27: "bigger and darker with a white mic
+  // inside"). It was a 56pt white circle with a pale ring and dark glyphs, which on a
+  // white tab bar had almost nothing to separate it from the bar.
+  //
+  // THE RING IS WHITE NOW, not green: on a filled dark puck the job of the border is to
+  // cut the shadow away from the bar beneath it, and a white collar does that on a
+  // white bar. A dark border on a dark fill would be invisible and the puck would
+  // smear into its own shadow.
+  // ITS OWN DISABLED FILL, not the shared `btnOff`. That one is `#c4cdd5`, a pale grey
+  // sized for dark text on a light button — and the glyphs in here are now WHITE, which
+  // on pale grey is barely a shape. A muted green keeps the white legible while still
+  // reading as unavailable.
+  fabOff: { backgroundColor: '#7D8B7D', borderColor: '#EDEDEA' },
+  fab: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#1F3A24',
+    borderWidth: 2, borderColor: '#FFFFFF',
+    // Lifted a little further to keep the same amount of puck above the bar now that
+    // it is 8pt taller.
+    alignItems: 'center', justifyContent: 'center', marginTop: -22,
     shadowColor: '#151A1E', shadowOpacity: 0.4, shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 }, elevation: 6 },
   fabT: { color: '#fff', fontSize: 30, marginTop: -2, fontFamily: 'Barlow_400Regular' },
