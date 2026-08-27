@@ -13001,22 +13001,29 @@ const s = StyleSheet.create({
   // sized for dark text on a light button — and the glyphs in here are now WHITE, which
   // on pale grey is barely a shape. A muted green keeps the white legible while still
   // reading as unavailable.
-  // Its own disabled fill, not the shared `btnOff` — that one is `#c4cdd5`, a pale
-  // grey sized for DARK text on a light button, and these glyphs are white.
-  fabOff: { backgroundColor: '#8A94A0' },
-  // MATCHED TO hadar's REFERENCE SHOT (2026-08-27): a dark slate disc, no ring, a
-  // white mic carrying a small +.
+  // Its own disabled fill, not the shared `btnOff` — that one is `#c4cdd5`, a pale grey
+  // sized for DARK text on a light button, and these glyphs are white. `C.muted` is the
+  // palette's mid grey and holds white legibly while still reading as unavailable.
+  fabOff: { backgroundColor: C.muted },
+  // MATCHED TO hadar's REFERENCE SHOT (2026-08-27): a dark disc, no ring, a white mic
+  // carrying a small +.
   //
-  // NO BORDER. The white collar I added an hour ago was solving a problem this does
-  // not have — it existed to cut the shadow away from a dark puck, and the reference
-  // has no ring at all: the disc is dark enough that the white bar separates it on its
-  // own, and a collar makes it read as a badge stuck on rather than a control sitting
-  // in the bar.
+  // NO BORDER. The white collar I tried first was solving a problem this does not have
+  // — it existed to cut the shadow away from a dark puck. The reference has no ring,
+  // and without one the disc reads as a control sitting IN the bar rather than a badge
+  // stuck on top of it.
   //
-  // SLATE, NOT THE APP'S GREEN. Deliberate and worth flagging: every other accent in
-  // this app is green, and this is the one control that is not a statement about
-  // status. Neutral dark keeps it from reading as another green chip.
-  fab: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#2C3A47',
+  // `C.ink` — OUR OWN PALETTE, NOT A SAMPLED HEX (hadar, 2026-08-27: "we can use one of
+  // our collors in our pallete"). I had matched the reference's slate `#2C3A47` by eye,
+  // which put a blue-grey into an app that has no blue-grey in it. `ink` is the
+  // palette's named colour for exactly this — theme.ts calls it "primary text + dark
+  // primary buttons" — so the capture button is now the same dark as every other
+  // primary button instead of a one-off.
+  //
+  // THE TOKEN, not `#151A1E`. That literal appears eleven times in this file and is the
+  // pre-palette value; it differs from `ink` by a hair nobody can see, but a token
+  // follows the palette when the palette moves and a copied hex does not.
+  fab: { width: 68, height: 68, borderRadius: 34, backgroundColor: C.ink,
     // Lifted so the same proportion of the disc clears the bar at the larger size.
     alignItems: 'center', justifyContent: 'center', marginTop: -24,
     shadowColor: '#151A1E', shadowOpacity: 0.32, shadowRadius: 10,
