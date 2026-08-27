@@ -908,7 +908,13 @@ const st = StyleSheet.create({
   wave: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 32, marginTop: 6 },
   waveBar: { flex: 1, borderRadius: 1.5, backgroundColor: C.brand },
 
-  liveBox: { marginTop: 'auto', backgroundColor: 'rgba(0,0,0,0.6)',
+  // LIFTED OFF THE BOTTOM EDGE (hadar, 2026-08-26: "it is too low and hidden under
+  // the take came button"). `marginTop:'auto'` pins this to the bottom of the band,
+  // and the shutter sits over that same edge — so the last line of what he had just
+  // said was underneath the button he was pressing. The clearance is the fix; the
+  // pinning is still right, because the words should track the bottom of the frame
+  // rather than a fixed offset from the top.
+  liveBox: { marginTop: 'auto', marginBottom: 20, backgroundColor: 'rgba(0,0,0,0.6)',
     borderRadius: radii.sm, padding: 10 },
   liveLabel: { fontFamily: F.body, color: '#ffffff99', fontSize: 11, marginBottom: 2 },
   liveText: { fontFamily: F.body, color: '#fff', fontSize: 15, lineHeight: 20 },
