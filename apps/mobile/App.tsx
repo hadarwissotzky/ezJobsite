@@ -8116,7 +8116,7 @@ const checkClientMessages = async () => {
             * leaving it out would make "1 of 3" mean something different from what he
             * just lived through.
             */}
-          <View style={{ marginBottom: 4 }}><FlowRail step={2} /></View>
+          <View style={{ marginBottom: 20 }}><FlowRail step={2} /></View>
           <Text style={s.jpTitle}>{T('assign.title')}</Text>
 
           {hero ? (
@@ -12438,7 +12438,8 @@ const s = StyleSheet.create({
   // ── transition screen (FLOW step 1.5), themed 2026-07-27 ──────────────────
   trScreen: { flex: 1, backgroundColor: C.paper },
   trScroll: { alignItems: 'center', paddingTop: 74, paddingHorizontal: 22, paddingBottom: 40 },
-  trTitle: { fontFamily: F.disp, fontSize: 30, color: C.ink, textTransform: 'uppercase',
+  // 28.5 — 5% down from 30, matching the job picker.
+  trTitle: { fontFamily: F.disp, fontSize: 28.5, color: C.ink, textTransform: 'uppercase',
     letterSpacing: 0.6, textAlign: 'center', marginTop: 14 },
   trSub: { fontFamily: F.body, fontSize: 16, color: C.steel, textAlign: 'center',
     marginTop: 8, lineHeight: 22 },
@@ -13182,7 +13183,9 @@ const s = StyleSheet.create({
     marginBottom: 16 },
   jpOrLine: { height: 1, backgroundColor: '#e2dbd4', flexGrow: 1 },
   jpOrT: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#6b625b' },
-  jpTitle: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 36, color: '#131110' },
+  // 29.5/34 — 5% down from 31/36 (hadar, 2026-08-27). The line-height comes down with
+  // it: shrinking the face alone would leave a two-line title looking loosely leaded.
+  jpTitle: { fontFamily: 'Inter_700Bold', fontSize: 29.5, lineHeight: 34, color: '#131110' },
   jpSub: { fontFamily: 'Inter_400Regular', fontSize: 15.5, color: '#6b625b', marginTop: 4 },
   jpSearchWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16,
     backgroundColor: '#fff', borderColor: '#e2dbd4', borderWidth: 1, borderRadius: 12,
