@@ -12,6 +12,7 @@ import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, TextInput, Vi
 
 import { addressFromHere, type AddressHit, suggestAddresses } from '../geocode';
 import { t as T } from '../i18n';
+import { Icon } from './icon';
 
 export function AddressInput({
   value, onChangeText, onPick, placeholder,
@@ -58,24 +59,55 @@ export function AddressInput({
 
   return (
     <View>
-      <TextInput
-        style={st.input}
-        value={value}
-        onChangeText={onType}
-        placeholder={placeholder ?? T('job.address')}
-        placeholderTextColor="#8c959f"
-        autoCapitalize="words"
-        // A labelled way OUT of the keyboard (hadar 2026-08-12: "it doesn't retract").
-        // The default return key on a one-line field reads as a newline, so nobody
-        // presses it; "Done" says what it does. Blurring also closes the suggestion
-        // list, which is the other thing covering the form.
-        returnKeyType="done"
-        onSubmitEditing={() => { setOpen(false); Keyboard.dismiss(); }}
-      />
-      <Pressable style={st.hereBtn} onPress={useHere} disabled={locating}>
-        {locating ? <ActivityIndicator color="#4E6243" />
-          : <Text style={st.hereT}>📍 {T('addr.useLocation')}</Text>}
-      </Pressable>
+      {/* THE BUTTON LIVES IN THE FIELD (hadar, 2026-08-27: "use my local need to be a
+          more notisable button can add it inside the edit box to the right").
+
+          It was a bare green text link UNDER the field with about 20pt of tap area —
+          the least noticeable thing on a form whose hardest question it answers. A
+          contractor standing on the job should not be typing an address he is
+          currently stood at, so this is the fast path and it now looks like one.
+
+          THE BORDER MOVED to the wrapper. The field and the button share one outline,
+          which is what makes the button read as part of the input rather than a
+          control that happens to sit near it. */}
+      <View style={st.field}>
+        <TextInput
+          style={st.input}
+          value={value}
+          onChangeText={onType}
+          placeholder={placeholder ?? T('job.address')}
+          placeholderTextColor="#8c959f"
+          autoCapitalize="words"
+          // A labelled way OUT of the keyboard (hadar 2026-08-12: "it doesn't retract").
+          // The default return key on a one-line field reads as a newline, so nobody
+          // presses it; "Done" says what it does. Blurring also closes the suggestion
+          // list, which is the other thing covering the form.
+          returnKeyType="done"
+          onSubmitEditing={() => { setOpen(false); Keyboard.dismiss(); }}
+        />
+        <Pressable style={st.hereBtn} onPress={useHere} disabled={locating}
+          accessibilityRole="button" accessibilityLabel={T('addr.useLocation')}
+          hitSlop={8}>
+          {locating ? <ActivityIndicator color="#fff" size="small" />
+            : (
+              <>
+                {/* The real pin, not the 📍 emoji it used to draw: an emoji renders in
+                    the system font at a size we do not control and cannot be recoloured
+                    to sit on a filled button. */}
+                <Icon name="mapPin" size={15} color="#fff" />
+                {/* THE LABEL GOES WHEN THE FIELD FILLS. Worded out it is ~154pt in
+                    English and ~169 in Spanish, which leaves under 200pt of a 390pt
+                    screen to read an address in — and the first thing this button does
+                    is put an address there. So: labelled while the field is empty,
+                    where it has to be found; a bare pin once there is something to
+                    read, where it only has to be recognised. */}
+                {!value.trim() && (
+                  <Text style={st.hereT} numberOfLines={1}>{T('addr.useLocation')}</Text>
+                )}
+              </>
+            )}
+        </Pressable>
+      </View>
       {open && (
         <View style={st.list}>
           {hits.map((h, i) => (
@@ -90,12 +122,26 @@ export function AddressInput({
 }
 
 const st = StyleSheet.create({
-  input: {
+  // The outline is HERE now, not on the TextInput — one box holding the field and its
+  // button, so the two read as one control.
+  field: {
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#fff', borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 10,
+    paddingRight: 6,
+  },
+  // `minWidth: 0` matters: without it a long value refuses to shrink and pushes the
+  // button off the right edge instead of scrolling inside the field.
+  input: {
+    flex: 1, minWidth: 0,
     paddingHorizontal: 14, paddingVertical: 14, fontSize: 17, color: '#151A1E',
   },
-  hereBtn: { alignSelf: 'flex-start', paddingVertical: 10, paddingHorizontal: 2 },
-  hereT: { color: '#4E6243', fontSize: 15, fontWeight: '700' },
+  // FILLED, not a link. 44pt tall inside a ~52pt field, plus hitSlop — the old link
+  // was about 20pt of target for the one control that saves the most typing.
+  hereBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0,
+    minHeight: 44, paddingHorizontal: 12, borderRadius: 8, backgroundColor: '#4E6243',
+  },
+  hereT: { color: '#fff', fontSize: 14, fontWeight: '700' },
   list: { backgroundColor: '#fff', borderColor: '#D5D0C7', borderWidth: 1, borderRadius: 10,
     marginTop: 2, overflow: 'hidden' },
   row: { paddingHorizontal: 14, paddingVertical: 13 },
