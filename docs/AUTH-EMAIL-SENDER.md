@@ -3,9 +3,16 @@
 hadar, 2026-08-27, on the signup confirmation: *"Need to make sure that the email is
 not from subpase security but ezchangeorder."*
 
-**No email template can fix this.** The templates decide what the email SAYS; the
-project's SMTP settings decide who it is FROM. Right now the project uses Supabase's
-built-in sender, which is hard-wired to:
+**SMTP is the single unlock, and it is not optional.** I tried to install the branded
+templates through the Management API and Supabase refused outright:
+
+> Email template modification is not available for free tier projects using the
+> default email provider. Please upgrade your plan or configure a custom SMTP
+> provider.
+
+So the sender and the body are not two problems — they are one. While the built-in
+sender is in use the templates **cannot be edited at all**, and the From line is
+hard-wired to:
 
 ```
 From:  Supabase Auth <noreply@mail.app.supabase.io>
@@ -13,7 +20,11 @@ From:  Supabase Auth <noreply@mail.app.supabase.io>
 
 That name and address cannot be overridden while the built-in sender is in use.
 
-## There is a second reason this is not optional
+Verified against the live project on 2026-08-27: `smtp_host` is null, the stored
+templates are still the stock two-line ones, and `rate_limit_email_sent` is **2 per
+hour**.
+
+## And a second reason, beyond branding
 
 Supabase's built-in email service is **rate limited to a handful of messages per
 hour** and is documented as being for development only. Every signup and every
@@ -40,8 +51,9 @@ Enable custom SMTP and set:
 | Sender name | `EZChangeOrders` |
 | Host / Port / User / Pass | from the provider |
 
-**3. Raise the rate limit** under Authentication → Rate Limits once SMTP is on — the
-built-in cap no longer applies, and the default is still low.
+**3. Raise the rate limit** under Authentication → Rate Limits once SMTP is on. It is
+currently **2 emails per hour** for the whole project — two signups in an hour and the
+third contractor is told to check an inbox that will stay empty.
 
 **4. Paste both templates**, Authentication → Emails:
 
@@ -55,13 +67,17 @@ address gets "Confirm signup", a known one gets "Magic Link" — which is why th
 branded magic-link template was already in place and hadar still received a stock
 email while registering.
 
-**5. Set Email OTP expiry to 900 seconds** (Authentication → Settings). Both templates
-say "expires in 15 minutes"; Supabase defaults to 3600. A promise in an email the
-server does not keep is the kind of small lie that teaches people to distrust the
-whole flow.
+**5. Email OTP expiry is ALREADY 900 seconds** — checked, not assumed. Both templates
+say "expires in 15 minutes" and the project agrees, so nothing to do here. Leave it
+alone if the copy ever changes.
 
-## Why this is not automated
+## What can and cannot be automated from here
 
-It needs a Supabase **management** access token, which is not in this checkout —
-the service-role key reaches the database and Storage, not project configuration.
-Nothing here can be applied from the repo.
+The Supabase CLI is logged in on this machine, so the Management API IS reachable and
+steps 3–4 could be applied with one call — that is how the refusal above was found.
+
+What cannot be automated is step 1 and step 2: they need an account with an email
+provider and DNS records at the registrar. Nobody should be creating those on the
+project's behalf, and without them steps 3–4 are refused anyway.
+
+So the order is fixed: **SMTP first, everything else follows.**
