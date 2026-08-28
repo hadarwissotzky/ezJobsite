@@ -176,6 +176,36 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
       if (e3) throw e3;
       return;
     }
+
+    /**
+     * NO CODE AND NO TOKEN — SO READ WHY, INSTEAD OF INVENTING A WORD FOR IT.
+     *
+     * hadar, 2026-08-27, on a Google sign-in: the screen said `oauth_no_session` and
+     * nothing else. That string is ours, it means only "neither branch above matched",
+     * and it was hiding the actual answer: when Supabase or the provider refuses, it
+     * redirects back WITH `error`, `error_code` and `error_description` — in the query
+     * on the PKCE flow and in the fragment on the implicit one — and this function read
+     * past all of them to throw a name it made up.
+     *
+     * The commonest cause of landing here is a redirect URI that is not on the
+     * project's allow-list; the description says so in words, and we were discarding
+     * the one sentence that would have ended the guesswork.
+     */
+    const grab = (k: string) =>
+      new RegExp(`[?#&]${k}=([^&]+)`).exec(url)?.[1];
+    const code0 = grab('error_code');
+    const desc = grab('error_description');
+    const err = grab('error');
+
+    // THE USER SAID NO. Google's own cancel comes back as `access_denied`, and it is
+    // the same decision as closing the sheet — which the branch above already treats
+    // as silence. Failing loudly here would scold somebody for changing their mind.
+    if (err === 'access_denied') return;
+
+    if (err || desc || code0) {
+      const said = decodeURIComponent(desc ?? err ?? code0 ?? '').replace(/\+/g, ' ');
+      throw new Error(said || String(err));
+    }
     throw new Error('oauth_no_session');
   }
 
