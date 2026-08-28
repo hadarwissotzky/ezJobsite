@@ -1,0 +1,66 @@
+<!--
+  EZChangeOrders — Confirm signup email template.
+
+  WHERE THIS GOES: Supabase Dashboard → Authentication → Emails → "Confirm signup".
+
+  WHY THIS FILE EXISTS SEPARATELY FROM THE MAGIC-LINK ONE (hadar, 2026-08-27, on a
+  Supabase-branded email: "Need to make sure that the email is not from subpase
+  security but ezchangeorder").
+
+  The app calls `signInWithOtp({ shouldCreateUser: true })`, and Supabase picks the
+  template by whether the address is already a user:
+
+      known address  -> "Magic Link"      (docs/email-magic-link-template.html)
+      new address    -> "Confirm signup"  (this file)
+
+  So the branded template was in place and hadar still got the stock one, because he
+  was registering rather than logging in. Both templates have to be set or the first
+  email a new contractor ever receives is the unbranded one.
+
+  ALSO SET, on the same screen:
+    • Subject: "Confirm your email for EZChangeOrders"
+
+  THE SENDER IS NOT SET HERE, and no template can change it. The "From: Supabase
+  Auth" hadar saw comes from the project's SMTP settings, not its templates — see
+  docs/AUTH-EMAIL-SENDER.md. Editing this file changes what the email SAYS; only SMTP
+  changes who it is FROM.
+
+  {{ .ConfirmationURL }} is Supabase's placeholder — it carries the token and
+  redirects to `ezjobsite://auth-callback`, which App.tsx's deep-link handler
+  exchanges for a session.
+-->
+<div style="margin:0;padding:32px 16px;background:#F7F4EE;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:480px;margin:0 auto;">
+
+    <h1 style="margin:0 0 24px;text-align:center;font-size:26px;font-weight:800;color:#4E6243;">
+      EZChangeOrders
+    </h1>
+
+    <div style="background:#ffffff;border:1px solid #E4DFD6;border-radius:14px;padding:28px 24px;text-align:center;">
+      <p style="margin:0 0 22px;font-size:17px;line-height:26px;color:#151A1E;font-weight:600;">
+        Tap the button below to finish setting up your account. This link expires in 15 minutes.
+      </p>
+
+      <a href="{{ .ConfirmationURL }}"
+         style="display:inline-block;background:#1F3128;color:#ffffff;text-decoration:none;
+                font-size:17px;font-weight:700;padding:15px 44px;border-radius:999px;">
+        Confirm and get started
+      </a>
+    </div>
+
+    <div style="border-top:1px solid #E4DFD6;margin-top:24px;padding-top:20px;text-align:center;">
+      <p style="margin:0 0 8px;font-size:14px;line-height:20px;color:#5E666E;">
+        Or paste this link into your browser:
+      </p>
+      <a href="{{ .ConfirmationURL }}"
+         style="font-size:13px;line-height:19px;color:#4E6243;word-break:break-all;">
+        {{ .ConfirmationURL }}
+      </a>
+    </div>
+
+    <p style="margin:22px 0 0;text-align:center;font-size:13px;line-height:19px;color:#8a9199;">
+      If you didn’t sign up for EZChangeOrders, you can ignore this email — no account will be created.
+    </p>
+
+  </div>
+</div>
