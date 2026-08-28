@@ -94,6 +94,7 @@ import { reachable, remindTargets } from './src/remindrecipients';
 import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
+import { FlowRail } from './src/ui/flowrail';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { PhotoLightbox, RecordScreen, scheduleSentence, billingSentence,
          type RecordLifecycle } from './src/ui/recordscreen';
@@ -7769,8 +7770,12 @@ const checkClientMessages = async () => {
           {/* Last of four on a NEW extra. An AUGMENT is not that sequence: it has no
               job question and no owner question, so numbering it would describe a
               walk he did not take. */}
+          {/* The rail, not a lone grey line. This screen is where the wait happens,
+              so it is the one that most needs to say how much is left. */}
           {!t.isAugment && (
-            <Text style={s.flowStepOnDark}>{T({ k: 'flow.stepOf', p: { n: '4', of: '4' } } as any)}</Text>
+            <View style={{ alignSelf: 'stretch', marginBottom: 14 }}>
+              <FlowRail step={4} />
+            </View>
           )}
           <Text style={s.trTitle}>
             {T(t.isAugment ? 'cap.transTitleAug' : 'cap.transTitle')}
@@ -8111,7 +8116,7 @@ const checkClientMessages = async () => {
             * leaving it out would make "1 of 3" mean something different from what he
             * just lived through.
             */}
-          <Text style={s.flowStep}>{T({ k: 'flow.stepOf', p: { n: '2', of: '4' } } as any)}</Text>
+          <View style={{ marginBottom: 4 }}><FlowRail step={2} /></View>
           <Text style={s.jpTitle}>{T('assign.title')}</Text>
 
           {hero ? (
@@ -13129,12 +13134,6 @@ const s = StyleSheet.create({
   waitMeta: { fontFamily: 'Barlow_400Regular', fontSize: 12.5, color: '#5E666E' },
   /** The step line on the post-record screens. Label-quiet: it reports, it does not
    *  compete with the question underneath it. */
-  flowStep: { fontFamily: 'Inter_600SemiBold', fontSize: 12, letterSpacing: 1.1,
-              color: '#8c959f', textTransform: 'uppercase', marginBottom: 6 },
-  /** Same line on the processing screen, which sits on the cream page like the rest. */
-  flowStepOnDark: { fontFamily: 'Inter_600SemiBold', fontSize: 12, letterSpacing: 1.1,
-                    color: '#8c959f', textTransform: 'uppercase', marginBottom: 8,
-                    textAlign: 'center' },
   homeTabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   homeTab: { flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: '#D5D0C7',
     backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },

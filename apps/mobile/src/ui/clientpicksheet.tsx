@@ -29,6 +29,7 @@
 import React from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { t } from '../i18n';
+import { FlowRail } from './flowrail';
 import { BottomSheet, Button } from './kit';
 import { C, F } from './theme';
 
@@ -75,7 +76,7 @@ export function ClientPickSheet(props: {
         {/* Third of four — see the note on the job picker's step line. */}
         <Text style={{ fontFamily: F.dispSemi, fontSize: 12, letterSpacing: 1.1,
           color: C.steel, textTransform: 'uppercase', marginBottom: 6 }}>
-          {t({ k: 'flow.stepOf', p: { n: '3', of: '4' } } as any)}
+        <View style={{ marginBottom: 4 }}><FlowRail step={3} /></View>
         </Text>
         <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink }} numberOfLines={2}>
           {props.scope}
