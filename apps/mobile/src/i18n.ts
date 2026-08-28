@@ -2051,7 +2051,7 @@ const EN: Record<string, string> = {
   // An edit never asks where the work goes — see the transition's `awaitingFiling`.
   // WHO IS THIS FOR — the popup after the job is chosen on a new extra (hadar's flow,
   // 2026-08-23). Skippable by design: the send sheet still asks, so this is an early
-  // chance to answer, never a new gate. See ui/clientpicksheet.tsx.
+  // chance to answer, never a new gate. See ui/clientpickscreen.tsx.
   'clientpick.title': 'Who is this for?',
   'clientpick.why': 'Pick the client now and this extra is ready to send when you are. You can also do it later.',
   'clientpick.addNew': '+ Add a client',

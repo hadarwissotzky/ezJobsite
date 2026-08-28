@@ -27,22 +27,22 @@
  * overwhelmingly likely to want them again.
  */
 import React from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { t } from '../i18n';
 import { FlowRail } from './flowrail';
-import { BottomSheet, Button } from './kit';
+import { Button } from './kit';
 import { C, F } from './theme';
 
 export type ClientChoice = { id: string; name: string };
 
-export function ClientPickSheet(props: {
+export function ClientPickScreen(props: {
   /** The extra's title, so he knows WHICH one — he may have made three today. */
   scope: string;
   /** Active clients on this job, most recently used first. May be empty. */
   roster: readonly ClientChoice[];
   /** Tapped an existing client. */
   onPick: (c: ClientChoice) => void;
-  /** Typed a new one. The sheet never writes; the caller owns both saves. */
+  /** Typed a new one. This screen never writes; the caller owns both saves. */
   onAdd: (name: string, phone: string) => void;
   /** Open the device contact picker and fill the form from it. */
   onPickContact?: () => Promise<{ name: string; phone: string } | null>;
@@ -56,27 +56,36 @@ export function ClientPickSheet(props: {
 
   const canAdd = name.trim().length > 1;
 
+  /**
+   * A FULL SCREEN, NOT A SHEET (hadar, 2026-08-27: "During the co create sequence none
+   * of these forms can be bottom popups — the sequence have to be the same (forms)").
+   *
+   * This was the only one of the four steps that arrived as a bottom sheet: record,
+   * job and write-up are pages, and this slid up over a greyed-out copy of the last
+   * one. A sheet says "a small aside you can flick away"; a page says "the next thing".
+   * Halfway through a sequence the wrong one of those is actively misleading — and it
+   * made the rail sit on a different-shaped screen each time, which is the opposite of
+   * what the rail is for.
+   *
+   * The X is gone with it. Dismissing a step by flicking it away is a gesture a sheet
+   * offers and a page does not; "Do it later" is the same escape, said in words, where
+   * every other step keeps its escape.
+   */
   return (
-    <BottomSheet
-      visible
-      title={t('clientpick.title')}
-      onClose={props.onSkip}
-      tall={props.roster.length > 3}
-      footer={
-        adding
-          ? <Button
-              label={t('clientpick.save')}
-              onPress={() => props.onAdd(name.trim(), phone.trim())}
-              disabled={!canAdd || !!props.busy}
-            />
-          : <Button label={t('clientpick.later')} variant="neutral" onPress={props.onSkip} />
-      }
-    >
+    <View style={st.screen}>
+      <ScrollView
+        contentContainerStyle={st.scroll}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets>
       <View style={{ paddingBottom: 4 }}>
         {/* Third of four. The rail replaced a one-line label here and my edit left it
             wrapped in that label's <Text> — a <View> inside a <Text>, which React
             Native lays out as inline text rather than as a row of bars. */}
         <View style={{ marginBottom: 20 }}><FlowRail step={3} /></View>
+        {/* The question was the sheet's header bar; on a page it is the page's title.
+            Matched to the job picker's `jpTitle` — same face, same size, same place —
+            because "the sequence has to be the same" is the whole point of the move. */}
+        <Text style={st.title}>{t('clientpick.title')}</Text>
         <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink }} numberOfLines={2}>
           {props.scope}
         </Text>
@@ -159,6 +168,29 @@ export function ClientPickSheet(props: {
           </View>
         )}
       </View>
-    </BottomSheet>
+      </ScrollView>
+      {/* The footer sits ON the page, in the same place step 2 and step 4 put theirs. */}
+      <View style={st.foot}>
+        {adding
+          ? <Button
+              label={t('clientpick.save')}
+              onPress={() => props.onAdd(name.trim(), phone.trim())}
+              disabled={!canAdd || !!props.busy}
+            />
+          : <Button label={t('clientpick.later')} variant="neutral" onPress={props.onSkip} />}
+      </View>
+    </View>
   );
 }
+
+const st = StyleSheet.create({
+  // Matched to the job picker's `jpC` so steps 2 and 3 are the same shape of screen.
+  screen: { flex: 1, backgroundColor: '#faf7f3', paddingTop: 54 },
+  scroll: { paddingHorizontal: 18, paddingBottom: 24 },
+  // Step 2's `jpTitle`, verbatim: Inter 29.5/34. Not the theme's Barlow — this whole
+  // sequence is drawn in the 2026-08-07 Inter treatment, and matching the theme here
+  // would make step 3 the odd screen again for a different reason.
+  title: { fontFamily: 'Inter_700Bold', fontSize: 29.5, lineHeight: 34, color: '#131110',
+           marginBottom: 14 },
+  foot: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 28 },
+});

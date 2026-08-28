@@ -59,7 +59,7 @@ import { cachedDeveloper, refreshDeveloper } from './src/devflag';
 // foreground, so this is the only surface that can carry a question arriving mid-session.
 import { MessageToast } from './src/ui/messagetoast';
 // The one unfinished state that cannot fix itself: processed, silent, and still empty.
-import { ClientPickSheet } from './src/ui/clientpicksheet';
+import { ClientPickScreen } from './src/ui/clientpickscreen';
 import { SilentNoticeSheet } from './src/ui/silentnoticesheet';
 import { ensureSilentNoticeSchema, markSilentNoticeShown, pendingSilentNotices,
          type SilentNotice } from './src/silentnotice';
@@ -7661,7 +7661,7 @@ const checkClientMessages = async () => {
     const cp = clientPick;
     const finish = () => { setClientPick(null); cp.onDone(); };
     return (
-      <ClientPickSheet
+      <ClientPickScreen
         scope={coRowsRef.current.find((c) => c.id === cp.coId)?.scope ?? T('erec.untitled')}
         roster={cp.roster}
         busy={cp.busy}
