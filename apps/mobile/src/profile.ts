@@ -64,6 +64,32 @@ export async function saveProfile(
 }
 
 /**
+ * Mirror JUST the display language to the account.
+ *
+ * `saveProfile` already carries `lang` up with a profile save, but the language is the
+ * one field that changes on its own: it is now the single control for it (the drawer's
+ * duplicate is gone, hadar 2026-08-26), and picking a language touches nothing else on
+ * the screen. Without this, a language change reached `device_settings` and stopped
+ * there — so `restoreProfileFromAccount` handed a reinstalled phone the language the
+ * user had BEFORE they changed it, which is the exact failure that read-back exists to
+ * prevent.
+ *
+ * `updateUser` MERGES into user_metadata, so writing this one key does not disturb
+ * `full_name`, `is_solo`, `company_name` or `trade`.
+ *
+ * Best-effort and silent, like the mirror in `saveProfile`: the device copy is the
+ * source of truth for the UI, and no sync failure may cost the user the language they
+ * just picked (mandate #7 — offline is the normal case).
+ */
+export async function saveLangToAccount(
+  connector: SupabaseConnector, lang: 'en' | 'es',
+): Promise<void> {
+  try {
+    await connector.client.auth.updateUser({ data: { lang } });
+  } catch { /* the local write already happened; a failed mirror never surfaces */ }
+}
+
+/**
  * Rebuild the local profile cache from the signed-in account.
  *
  * COSTS NOTHING AND NEEDS NO SIGNAL: `user_metadata` rides inside the session that is

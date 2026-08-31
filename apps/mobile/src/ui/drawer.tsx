@@ -28,7 +28,6 @@ import { C, F } from './theme';
 import { radii, shadows } from './tokens';
 import { Icon, type IconName } from './icon';
 import { t as T } from '../i18n';
-import type { Lang } from '../i18n';
 import type { UsageItem, UsageSummary } from '../usage';
 
 const SUPPORT_EMAIL = 'support@ezchangeorders.com';
@@ -59,7 +58,7 @@ const PRIVACY_URL = 'https://approve.ezchangeorders.com/privacy.html';
 export function Drawer({
   visible, onClose, onProfile, onCompanySettings, onPlans,
   planName, isFreePlan, isOwner, hasTeam,
-  lang, onToggleLang, appVersion, confirmBase, onSignOut, unsent, account,
+  appVersion, onSignOut, unsent, account,
   onShowIntro, onSimulateFirstRun,
   devTools,
   companies, activeCompanyId, onSwitchCompany, onCloseAccount,
@@ -79,8 +78,6 @@ export function Drawer({
   /** True only when there is somebody ELSE in the tenant. Names the row — a solo
    *  operator gets "Your business", a crew gets "Company settings". Same screen. */
   hasTeam?: boolean;
-  lang: Lang;
-  onToggleLang: () => void;
   appVersion: string;
   /** Plan + what is left of each metered cap. Null until the first read completes. */
   usage?: UsageSummary | null;
@@ -169,6 +166,12 @@ export function Drawer({
 
   // Close first, act after. Anything that opens a Modal MUST go through this.
   const go = (fn: () => void) => () => { pending.current = fn; onClose(); };
+  /** Whether the APP group has anything to show. Every row in it is conditional now
+   *  that language has moved to the profile, and `Group` always draws its label — so
+   *  without this the panel shows an "APP" heading over an empty card. */
+  const hasAppRows = Boolean(
+    (updateReady && onApplyUpdate) ||
+    (devTools && (onShowIntro || onSimulateFirstRun)));
   const mailTo = (subject: string) =>
     Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}`).catch(() => {});
   const openLegal = (url: string) => Linking.openURL(url).catch(() => {});
@@ -331,25 +334,27 @@ export function Drawer({
             )}
           </Group>
 
-          {/* ── APP ── language inline, exactly as the reference does it: the control
-              lives IN the row rather than opening a screen to flip one switch. */}
+          {/* ── APP ──
+              LANGUAGE IS NOT HERE ANY MORE (hadar, 2026-08-26: "the language is now
+              inside the profile — we can remove the app language").
+
+              It was in two places writing one key: this inline segment called
+              `saveLang` on tap, and the profile's toggle called it again behind that
+              screen's Save button. Same setting, two commit models — instant here,
+              deferred there — so what the control did depended on which door you found
+              it through. The profile keeps it, because that is where the language also
+              rides to the ACCOUNT (`saveProfile`), which is what survives a reinstall;
+              this row never did that half.
+
+              THE GROUP IS NOW CONDITIONAL. Every row left in it is optional, so with
+              no update waiting and dev tools off it would have drawn the heading "APP"
+              over an empty card. A `Group` always renders its label — that is right
+              when it has content and a bug when it does not. */}
+          {hasAppRows && (
           <Group label={T('drawer.app')}>
-            <Row label={T('set.language')} last={!updateReady}
-              right={
-                <View style={st.seg}>
-                  {(['en', 'es'] as Lang[]).map((l) => (
-                    <Pressable key={l} onPress={() => { if (l !== lang) onToggleLang(); }}
-                      accessibilityRole="radio" accessibilityState={{ selected: lang === l }}
-                      style={[st.segBtn, lang === l && st.segOn]}>
-                      <Text style={[st.segT, lang === l && st.segTOn]}>
-                        {l === 'en' ? 'English' : 'Español'}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              } />
             {updateReady && onApplyUpdate && (
-              <Row label={T('set.restartToUpdate')} accent onPress={onApplyUpdate} />
+              <Row label={T('set.restartToUpdate')} accent onPress={onApplyUpdate}
+                last={!devTools} />
             )}
             {/* DEV ONLY — replay the first-open intro. It lives HERE, not only on the
                 sign-in screen, because the sign-in screen is unreachable once you are
@@ -370,6 +375,7 @@ export function Drawer({
                 onPress={go(onSimulateFirstRun)} last />
             )}
           </Group>
+          )}
 
           {/* ── HELP ── */}
           <Group label={T('set.support')}>
@@ -532,11 +538,6 @@ const st = StyleSheet.create({
   badgeT: { fontFamily: F.bodyBold, fontSize: 13, color: C.ink },
   chev: { fontFamily: F.body, fontSize: 22, color: C.steel, marginLeft: 2 },
 
-  seg: { flexDirection: 'row', backgroundColor: C.surfaceMuted, borderRadius: 999, padding: 3 },
-  segBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999 },
-  segOn: { backgroundColor: C.card, borderWidth: 1, borderColor: C.line },
-  segT: { fontFamily: F.body, fontSize: 13, color: C.steel },
-  segTOn: { fontFamily: F.bodySemi, color: C.ink },
 
   // An outline pill, not a red block: signing out is routine and reversible, and
   // dressing it as destructive teaches the wrong thing about the one action that is.
