@@ -438,6 +438,10 @@ const EN: Record<string, string> = {
   'job.fixedPrice': 'Fixed price',
   'job.nte': 'Not to exceed',
   'job.noneInFilter': 'Nothing here yet.',
+  // The JOB screen's empty state — a jobsite with no change orders at all. Distinct
+  // from `job.noneInFilter`, which is a full job seen through a narrow pill.
+  'job.emptyTitle': 'No change orders yet',
+  'job.emptyBody': 'Record something on this job and it will show up here.',
   'job.pillApproved': 'Approved',
   'job.totApproved': 'Approved',
   'job.totAwaiting': 'Pending',
@@ -2646,6 +2650,8 @@ const ES: Record<string, string> = {
   'job.fixedPrice': 'Precio fijo',
   'job.nte': 'Máximo',
   'job.noneInFilter': 'Nada aquí todavía.',
+  'job.emptyTitle': 'Aún no hay órdenes de cambio',
+  'job.emptyBody': 'Cuando grabe algo en este trabajo, aparecerá aquí.',
   'job.pillApproved': 'Aprobado',
   'job.totApproved': 'Aprobado',
   'job.totAwaiting': 'Pendiente',

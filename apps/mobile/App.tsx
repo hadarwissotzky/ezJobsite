@@ -11887,7 +11887,22 @@ const shortJob = (name: string): string => {
               : jobFilter === 'waiting' ? jobWaiting : jobApproved;
 
             if (rows.length === 0) {
-              return <Text style={s.jsEmpty}>{T('job.noneInFilter')}</Text>;
+              /**
+               * TWO DIFFERENT FACTS, and they were sharing one grey line.
+               *
+               * hadar, 2026-08-31: a jobsite with nothing on it did not get the
+               * illustrated empty state that Home and the Jobs list use — it got a
+               * sentence, which reads as a list that failed to load rather than as a
+               * job waiting for its first change order.
+               *
+               * But a FILTER that matches nothing is not an empty job: the jobsite is
+               * full, it is being seen through a narrow pill. Putting the illustration
+               * there would call a busy jobsite empty, so that case keeps the quiet
+               * line — it is a statement about the filter, not about the job.
+               */
+              return coRows.length === 0
+                ? <EmptyState compact title={T('job.emptyTitle')} body={T('job.emptyBody')} />
+                : <Text style={s.jsEmpty}>{T('job.noneInFilter')}</Text>;
             }
 
             return rows.map((c) => {
