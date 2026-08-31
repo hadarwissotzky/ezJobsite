@@ -2095,6 +2095,10 @@ const EN: Record<string, string> = {
   // doing its job. Matches the voice of `stuck.offlineTitle` above.
   'net.offline': 'No signal — everything still saves on this phone.',
   'net.offlineWaiting': 'No signal — everything still saves. {n} waiting to send.',
+  // WEAK, not offline: connected and reachable, but our own uploads are retrying.
+  // Says the consequence rather than a number of bars — iOS will not tell us the
+  // bars, and 'still trying' is what he can act on anyway.
+  'net.weak': 'Weak signal — {n} taking a while to send. Nothing is lost.',
   // A2P 10DLC consent, ticked once per recipient before the first text goes to them.
   // Names the person, because "this person" is vague at the moment it matters.
   'sms.consent': 'I have {name}’s permission to text them about this job. They can reply STOP at any time.',
@@ -3919,6 +3923,7 @@ const ES: Record<string, string> = {
   'stuck.offlineTitle': 'Guardado — esperando señal',
   'net.offline': 'Sin señal — todo se sigue guardando en este teléfono.',
   'net.offlineWaiting': 'Sin señal — todo se guarda. {n} esperando para enviarse.',
+  'net.weak': 'Señal débil — {n} tardando en enviarse. Nada se pierde.',
   'sms.consent': 'Tengo permiso de {name} para enviarle mensajes sobre este trabajo. Puede responder STOP en cualquier momento.',
   'silent.title': 'No se dijo nada en esa grabación',
   'silent.photosOne': 'Su foto está guardada y sellada — no se perdió nada.',

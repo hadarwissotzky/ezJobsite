@@ -8,7 +8,8 @@ import { syncLine, type SyncState } from './syncstate.ts';
 
 const NOW = 1_700_000_000_000;
 const base: SyncState = {
-  connected: true, everSynced: true, lastSyncedAtMs: NOW - 120_000, projects: 8, queued: 0,
+  connected: true, everSynced: true, lastSyncedAtMs: NOW - 120_000, projects: 8,
+  queued: 0, struggling: 0,
 };
 
 test('a healthy phone says when and how many', () => {

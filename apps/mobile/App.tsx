@@ -843,6 +843,10 @@ export default function App() {
    */
   const [online, setOnline] = React.useState(true);
   const [pendingUp, setPendingUp] = React.useState(0);
+  // `netReachable`, not `reachable`: this file already has a `reachable()` that
+  // filters remind targets to those with a phone number. Two subjects, one name.
+  const [netReachable, setNetReachable] = React.useState<boolean | null>(null);
+  const [strugglingUp, setStrugglingUp] = React.useState(0);
   /** A home-screen quick action arrived. Held until the app is `ready` — on a cold start
    *  the deep link lands before the database is open, and a flag waits where a call is
    *  lost. */
@@ -969,8 +973,13 @@ export default function App() {
   // the outbox while offline should take the number down with it.
   React.useEffect(() => {
     let live = true;
-    const readNet = (st: { isConnected?: boolean | null }) => {
-      if (live) setOnline(st?.isConnected !== false);
+    const readNet = (st: { isConnected?: boolean | null; isInternetReachable?: boolean | null }) => {
+      if (!live) return;
+      setOnline(st?.isConnected !== false);
+      // CONNECTED IS NOT REACHED. A dead hotspot, a captive portal and cell with a
+      // bar and no data all report `isConnected: true` — the bar missed every one of
+      // them until this was read too.
+      setNetReachable(st?.isInternetReachable ?? null);
     };
     void Network.getNetworkStateAsync().then(readNet).catch(() => {});
     const sub = Network.addNetworkStateListener(readNet);
@@ -6944,7 +6953,8 @@ const checkClientMessages = async () => {
    * layout: it is absolutely positioned and `pointerEvents="none"`, so it costs the
    * screens beneath it nothing and can never swallow a tap.
    */
-  const offlineEl = <OfflineBar connected={online} queued={pendingUp} topInset={44} />;
+  const offlineEl = <OfflineBar connected={online} reachable={netReachable}
+    queued={pendingUp} struggling={strugglingUp} topInset={44} />;
 
   const heldEl = noCredits ? (
     <HeldSendModal

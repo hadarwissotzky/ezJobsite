@@ -33,27 +33,49 @@ import { t } from '../i18n';
 import { Icon } from './icon';
 import { C, F } from './theme';
 
-export function OfflineBar({ connected, queued, topInset = 0 }: {
-  /** False when the OS reports no usable connection. */
+export function OfflineBar({ connected, reachable, queued, struggling, topInset = 0 }: {
+  /** False when the OS reports no network interface at all. */
   connected: boolean;
-  /** Rows waiting in the owned outboxes. Drives the second half of the line. */
+  /**
+   * `isInternetReachable`. A phone can be CONNECTED and unreachable — a dead
+   * hotspot, a captive portal, cell with a bar and no data — which is the exact
+   * "weak connection" hadar asked about and which `connected` alone misses.
+   * Undefined means the OS has not decided yet; that is not a failure.
+   */
+  reachable?: boolean | null;
+  /** Rows waiting in the owned outboxes. */
   queued: number;
+  /**
+   * Rows that have failed twice or more and are on a backoff. This is how a bad
+   * connection is detected honestly: iOS does not expose signal strength, so the
+   * truthful measure is whether OUR OWN uploads are getting through.
+   */
+  struggling: number;
   /** Height of the status bar, so the text clears it. */
   topInset?: number;
 }) {
-  // ONLINE IS SILENT. A bar that is always there stops being read, and there is
-  // nothing to tell somebody whose phone is working.
-  if (connected) return null;
+  const down = !connected || reachable === false;
+  // A connection that is up and reachable but cannot finish an upload. Only worth
+  // saying while something is actually stuck — otherwise it is a claim about the
+  // network with no consequence attached to it.
+  const weak = !down && struggling > 0;
+
+  // ONLINE AND MOVING IS SILENT. A bar that is always there stops being read, and
+  // there is nothing to tell somebody whose phone is working.
+  if (!down && !weak) return null;
 
   return (
     <View pointerEvents="none"
-      style={[st.bar, { paddingTop: topInset + 8 }]}
+      style={[st.bar, { paddingTop: topInset + 8 },
+              weak && { backgroundColor: C.syncing }]}
       accessibilityRole="alert">
-      <Icon name="offline" size={16} color="#FFFFFF" />
+      <Icon name={down ? 'offline' : 'sync'} size={16} color="#FFFFFF" />
       <Text style={st.text} numberOfLines={2}>
-        {queued > 0
-          ? t({ k: 'net.offlineWaiting', p: { n: String(queued) } } as any)
-          : t('net.offline')}
+        {weak
+          ? t({ k: 'net.weak', p: { n: String(struggling) } } as any)
+          : queued > 0
+            ? t({ k: 'net.offlineWaiting', p: { n: String(queued) } } as any)
+            : t('net.offline')}
       </Text>
     </View>
   );

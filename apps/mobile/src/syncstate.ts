@@ -30,6 +30,16 @@ export type SyncState = {
   projects: number;
   /** Local writes still waiting to go up, across every owned outbox. */
   queued: number;
+  /**
+   * Rows that have FAILED AT LEAST TWICE and are sitting on a backoff.
+   *
+   * This is the closest thing to "weak signal" that an app can honestly report. iOS
+   * does not expose signal strength — RSSI is a private API and using it gets an app
+   * rejected — so the only truthful measure of a bad connection is whether our own
+   * uploads are getting through. A row on its third attempt IS a bad connection,
+   * described by its consequence instead of by a number of bars.
+   */
+  struggling: number;
 };
 
 /**
@@ -47,6 +57,7 @@ export async function syncState(db: AbstractPowerSyncDatabase): Promise<SyncStat
   // The same eleven outboxes `ota.ts` gates a restart on. Imported rather than
   // re-listed: two copies of this list is how one of them gets forgotten.
   let queued = 0;
+  let struggling = 0;
   try {
     const { OUTBOX_TABLES } = await import('./ota.ts');
     for (const t of OUTBOX_TABLES) {
@@ -54,8 +65,16 @@ export async function syncState(db: AbstractPowerSyncDatabase): Promise<SyncStat
         const r = await db.getAll<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t}`);
         queued += r[0]?.n ?? 0;
       } catch { /* table absent in this version */ }
+      try {
+        // >= 2 attempts, not >= 1: one failure is a dropped packet and every queue
+        // has them. Two is a pattern, and a pattern is what a person should be told
+        // about. Guarded because not every outbox carries the column.
+        const r = await db.getAll<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM ${t} WHERE attempt_count >= 2`);
+        struggling += r[0]?.n ?? 0;
+      } catch { /* no attempt_count in this outbox */ }
     }
-  } catch { /* leave it at zero rather than guess */ }
+  } catch { /* leave them at zero rather than guess */ }
 
   const last = s.lastSyncedAt instanceof Date ? s.lastSyncedAt.getTime() : null;
   return {
@@ -64,6 +83,7 @@ export async function syncState(db: AbstractPowerSyncDatabase): Promise<SyncStat
     lastSyncedAtMs: last,
     projects,
     queued,
+    struggling,
   };
 }
 
