@@ -2089,6 +2089,12 @@ const EN: Record<string, string> = {
   // Offline is not a fault — status.ts: "no signal is the expected condition, so this is
   // not a problem, it is Tuesday". Title and row label both say WAITING, never FAILED.
   'stuck.offlineTitle': 'Saved — waiting for signal',
+  // The offline bar (ui/offlinebar.tsx). LEADS WITH WHAT IS TRUE, not with the
+  // failure: mandate #7 says no signal is the expected condition, and a banner that
+  // reads as an error teaches a contractor the app is broken exactly when it is
+  // doing its job. Matches the voice of `stuck.offlineTitle` above.
+  'net.offline': 'No signal — everything still saves on this phone.',
+  'net.offlineWaiting': 'No signal — everything still saves. {n} waiting to send.',
   // A2P 10DLC consent, ticked once per recipient before the first text goes to them.
   // Names the person, because "this person" is vague at the moment it matters.
   'sms.consent': 'I have {name}’s permission to text them about this job. They can reply STOP at any time.',
@@ -3911,6 +3917,8 @@ const ES: Record<string, string> = {
   'jobpick.tipBody': 'Siempre puede cambiar el trabajo antes de enviar el extra.',
   'stuck.filesTitle': 'Los archivos aún están subiendo',
   'stuck.offlineTitle': 'Guardado — esperando señal',
+  'net.offline': 'Sin señal — todo se sigue guardando en este teléfono.',
+  'net.offlineWaiting': 'Sin señal — todo se guarda. {n} esperando para enviarse.',
   'sms.consent': 'Tengo permiso de {name} para enviarle mensajes sobre este trabajo. Puede responder STOP en cualquier momento.',
   'silent.title': 'No se dijo nada en esa grabación',
   'silent.photosOne': 'Su foto está guardada y sellada — no se perdió nada.',

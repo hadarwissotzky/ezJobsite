@@ -96,6 +96,7 @@ import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { FlowRail } from './src/ui/flowrail';
 import { syncLine, syncState } from './src/syncstate';
+import { OfflineBar } from './src/ui/offlinebar';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { PhotoLightbox, RecordScreen, scheduleSentence, billingSentence,
          type RecordLifecycle } from './src/ui/recordscreen';
@@ -238,7 +239,7 @@ import { addParty, assignBoundary, drainScopeOutbox, ensurePartySchema, listBoun
 import { captureStatus, levelColor, screenStatus } from './src/status';
 import { FIRST_RUN_TAPS, firstExtraSeen, isFirstRun, markFirstExtraSeen, markFirstRunDone,
          nextStep, resetFirstRunFlags, savedLang, saveLang } from './src/firstrun';
-import { getProfile, hasProfile as hasProfileFn, saveProfile } from './src/profile';
+import { getProfile, hasProfile as hasProfileFn, saveLangToAccount, saveProfile } from './src/profile';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          playCapture, stopPlayback, type Note } from './src/annotate';
 import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
@@ -825,10 +826,23 @@ export default function App() {
   const [menuOpen, setMenuOpen] = React.useState(false);
 
   /**
-   * THE SYNC LINE for the drawer. Read only while the drawer is open — this counts
-   * rows in twelve tables and nobody is looking at it the rest of the time.
+   * THE SYNC LINE for the drawer. Re-read when the drawer opens and every 5s while it
+   * is open — never on a timer behind a closed menu, because this is a diagnostic
+   * nobody is reading most of the time and it counts rows in twelve tables.
    */
   const [syncLabel, setSyncLabel] = React.useState<string | null>(null);
+
+  /**
+   * CONNECTED, AND HOW MUCH IS WAITING — for the offline bar.
+   *
+   * Subscribed, not polled: `addNetworkStateListener` fires on the transition, which
+   * is the moment the bar has to appear or go. Starts OPTIMISTIC (`true`) so a cold
+   * launch never flashes an offline bar at somebody whose phone is fine — the first
+   * reading corrects it within a tick, and a false alarm on launch is worse than a
+   * beat of silence.
+   */
+  const [online, setOnline] = React.useState(true);
+  const [pendingUp, setPendingUp] = React.useState(0);
   /** A home-screen quick action arrived. Held until the app is `ready` — on a cold start
    *  the deep link lands before the database is open, and a flag waits where a call is
    *  lost. */
@@ -935,8 +949,8 @@ export default function App() {
     return () => clearTimeout(id);
   }, []);
 
-  // Below `ready` on purpose: it is a dependency, and a hook that reads a variable
-  // declared later is a compile error the first time somebody moves either one.
+  // Placed after `ready` exists — see `syncLabel` above for why it only runs while
+  // the drawer is open.
   React.useEffect(() => {
     if (!menuOpen || !ready) return;
     let live = true;
@@ -949,6 +963,34 @@ export default function App() {
     const id = setInterval(read, 5000);
     return () => { live = false; clearInterval(id); };
   }, [menuOpen, ready, db]);
+
+  // The bar's two inputs. The network half is a subscription; the queue half is
+  // re-read on every network change and on a slow tick, because a drain that empties
+  // the outbox while offline should take the number down with it.
+  React.useEffect(() => {
+    let live = true;
+    const readNet = (st: { isConnected?: boolean | null }) => {
+      if (live) setOnline(st?.isConnected !== false);
+    };
+    void Network.getNetworkStateAsync().then(readNet).catch(() => {});
+    const sub = Network.addNetworkStateListener(readNet);
+    return () => { live = false; sub?.remove?.(); };
+  }, []);
+
+  React.useEffect(() => {
+    if (!ready) return;
+    let live = true;
+    const read = () => {
+      void syncState(db)
+        .then((st) => { if (live) setPendingUp(st.queued); })
+        .catch(() => { /* the bar just drops the count */ });
+    };
+    read();
+    // 20s, not 5: this is a number on a passive bar, not a diagnostic somebody is
+    // watching, and it counts rows in twelve tables.
+    const id = setInterval(read, 20_000);
+    return () => { live = false; clearInterval(id); };
+  }, [ready, db, online]);
   const [gate, setGate] = React.useState<string | null>(null);
   const [initError, setInitError] = React.useState<string | null>(null);
   // AUTH. `session` undefined = still checking the stored token; null = logged out;
@@ -6897,6 +6939,13 @@ const checkClientMessages = async () => {
       onDismiss={() => setMsgToast(null)} />
   ) : null;
 
+  /**
+   * THE OFFLINE BAR. Mounted with the other overlays rather than in each screen's
+   * layout: it is absolutely positioned and `pointerEvents="none"`, so it costs the
+   * screens beneath it nothing and can never swallow a tap.
+   */
+  const offlineEl = <OfflineBar connected={online} queued={pendingUp} topInset={44} />;
+
   const heldEl = noCredits ? (
     <HeldSendModal
       held={heldN}
@@ -6921,7 +6970,11 @@ const checkClientMessages = async () => {
        * SEQUENCED, NOT STACKED — the iOS race this file has already been bitten by
        * (see the purchase handler's note). Both of these are <Modal>s, and presenting
        * one in the same commit that dismisses the other is how the paywall silently
-       * fails to appear.
+       * fails to appear. The timeout clears the fade before the next present.
+       *
+       * The delay is also why this cannot be `setShowPaywall` alone: a contractor who
+       * taps Buy and sees nothing has been told the app is broken at the exact moment
+       * he is trying to give it money.
        */
       onBuy={() => {
         setNoCredits(null);
@@ -7271,7 +7324,7 @@ const checkClientMessages = async () => {
        */
       <KeyboardAvoidingView style={s.njScreen}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+        {offlineEl}{quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {discardSheet}
         {paywallEl}
@@ -8116,7 +8169,7 @@ const checkClientMessages = async () => {
     );
     return (
       <View style={s.jpC}>
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+        {offlineEl}{quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {discardSheet}
         {paywallEl}
@@ -9564,11 +9617,6 @@ const checkClientMessages = async () => {
       companyName={co?.name ?? null}
       canEditLogo={isOwner}
       onLogoPress={() => setLogoSheet(true)}
-      lang={lang}
-      onToggleLang={async () => {
-        const n: Lang = lang === 'en' ? 'es' : 'en';
-        setLang(n); setLangState(n); await saveLang(db, n);
-      }}
       appVersion={(appJson as any)?.expo?.version ?? '1.0.0'}
       syncLabel={syncLabel ?? undefined}
       buildLabel={buildLine({
@@ -9879,7 +9927,7 @@ const checkClientMessages = async () => {
         {bottomNav('company', false)}
         {drawerEl}
         {/* Feed can open the drawer too, so it needs the modals the drawer opens. */}
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+        {offlineEl}{quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {paywallEl}
       </View>
@@ -9900,7 +9948,16 @@ const checkClientMessages = async () => {
         // `lang` goes with it here too: Settings can change the display language, and
         // the account copy is what survives a reinstall.
         onSaveProfile={async (p) => { await saveProfile(connector, db, p, lang); setSettingsProfile(p); await refresh(); }}
-        onSetLang={async (l) => { setLang(l); setLangState(l); await saveLang(db, l); }}
+        /* THE ONE LANGUAGE CONTROL IN THE APP (hadar, 2026-08-26). The drawer's
+           duplicate segment is gone; this is the only place the display language is
+           chosen after setup, so it owns BOTH halves of the write — the device key that
+           the UI reads offline, and the account copy that survives a reinstall. The
+           mirror is not awaited: the language must flip instantly with no signal. */
+        onSetLang={async (l) => {
+          setLang(l); setLangState(l);
+          await saveLang(db, l);
+          void saveLangToAccount(connector, l);
+        }}
         // Settings -> Plans KEEPS the door Settings came through (no argument, so
         // `settingsFrom` is left as it is): he is still inside that journey, and closing
         // Plans should land where it began rather than inventing a new origin.
@@ -10441,7 +10498,11 @@ const shortJob = (name: string): string => {
              *   approved   -> nobody's move, and it is the good news
              *   everything else -> declined, withdrawn: over
              */
-            const closedRest = [...closedList].sort((a, b) => b.created_at_ms - a.created_at_ms);
+            /* "EVERYTHING ELSE" IS GONE FROM HOME (hadar, 2026-08-27: "remove
+               everything else section"). Declined and withdrawn records are over —
+               nobody's move — and a summary screen answering "what do I have to do"
+               spent its last heading on them. They are not lost: every one still
+               counts toward the "Show all" footer below and lives in the feed. */
 
             /**
              * HOME IS A SUMMARY, NOT THE ARCHIVE (hadar, 2026-08-25: "nor there i a
@@ -10464,13 +10525,15 @@ const shortJob = (name: string): string => {
              *  recent few and the footer offers the rest. "Needs you first" is NOT
              *  capped — see below. */
             const cap = (l: Extra[]) => l.slice(0, REST_ON_HOME);
-            const hiddenCount = [waitingList, approvedList, closedRest]
-              .reduce((n, l) => n + Math.max(0, l.length - REST_ON_HOME), 0);
+            const hiddenCount = [waitingList, approvedList]
+              .reduce((n, l) => n + Math.max(0, l.length - REST_ON_HOME), 0)
+              // The closed records render nowhere on Home now, so ALL of them are
+              // "more to see", not just the tail past the cap.
+              + closedList.length;
             return (<>
               {bucket('home.needsYouFirst', needs)}
               {bucket('home.waitingOnClient', cap(waitingList))}
               {bucket('home.approvedSec', cap(approvedList))}
-              {bucket('home.everythingElse', cap(closedRest))}
               {/* SHOW ALL — the artboard's footer.
                   Home holds the most recent extras; this is the way to the full list
                   across every job, which is what `openFeed` already is. Only when there
@@ -10525,7 +10588,7 @@ const shortJob = (name: string): string => {
             be mounted on all three; jobs already had them, home and activity did not.
             AFTER {drawerEl} deliberately: a Modal declared before its sibling content
             does not present on iOS. */}
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+        {offlineEl}{quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
         {/* WITHOUT THIS the out-of-credits modal's Buy is dead on this screen: it sets
             `showPaywall`, and the paywall only exists where it is mounted. */}
         {paywallEl}
@@ -10562,7 +10625,7 @@ const shortJob = (name: string): string => {
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     return (
       <View style={s.homeC}>
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+        {offlineEl}{quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {discardSheet}
         {paywallEl}
@@ -10820,7 +10883,7 @@ const shortJob = (name: string): string => {
 
     return (
       <View style={s.homeC}>
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+        {offlineEl}{quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
         {/* WITHOUT THIS the out-of-credits modal's Buy is dead on this screen: it sets
             `showPaywall`, and the paywall only exists where it is mounted. */}
         {paywallEl}
@@ -11034,7 +11097,7 @@ const shortJob = (name: string): string => {
         {bottomNav('activity', false)}
         {drawerEl}
         {/* Same reason as home — the drawer opens from here too. */}
-        {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+        {offlineEl}{quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {paywallEl}
         {drafts.length > 0 && (
@@ -11095,7 +11158,7 @@ const shortJob = (name: string): string => {
   const startCaptureJob = () => { if (!terms) { openTerms(() => setShowCapture(true)); return; } setShowCapture(true); };
   return (
     <View style={s.c}>
-      {quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+      {offlineEl}{quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
       {jobCreatedEl}
         {discardSheet}
       {paywallEl}
