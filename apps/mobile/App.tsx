@@ -97,6 +97,7 @@ import { AddressInput } from './src/ui/addressinput';
 import { FlowRail } from './src/ui/flowrail';
 import { syncLine, syncState } from './src/syncstate';
 import { OfflineBar } from './src/ui/offlinebar';
+import { deleteEmptyProject, deleteRefusalKey } from './src/deleteproject';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { PhotoLightbox, RecordScreen, scheduleSentence, billingSentence,
          type RecordLifecycle } from './src/ui/recordscreen';
@@ -8417,6 +8418,33 @@ const checkClientMessages = async () => {
    * function the header rename calls. So editing the scope of work renamed the
    * extra, and renaming the extra destroyed the scope of work, and neither said so.
    */
+  /**
+   * DELETE AN EMPTY JOBSITE. Confirmed first, because it is irreversible — but a
+   * light confirmation, not a scary one: there is nothing in it to lose, and the
+   * sheet says so ("Nothing is saved in it") rather than warning about consequences
+   * that do not exist.
+   *
+   * THE SERVER DECIDES whether it is really empty. The button is only OFFERED when
+   * this device believes the job is empty, which is a hint, not the authority — a
+   * capture filed from another phone a second ago is invisible here, and the RPC
+   * re-checks inside the DELETE for exactly that.
+   */
+  const deleteJob = async (projectId: string, name: string) => {
+    const r = await deleteEmptyProject(db, connector.client, projectId);
+    if (r.ok) {
+      // Back to the list first: the screen we are on is about a jobsite that no
+      // longer exists, and leaving it up while its data drains is how a render
+      // crashes on a row that is gone.
+      setNav('jobs');
+      setProjectId(INBOX_ID);
+      setProjects(await listProjects(db));
+      setAck({ kind: 'ok', title: T({ k: 'job.deleted', p: { name } } as any) });
+      void refresh();
+      return;
+    }
+    setAck({ kind: 'no', title: T(deleteRefusalKey(r) as any) });
+  };
+
   const saveScope = async (changeOrderId: string, text: string) => {
     const ok = await saveScopeOfWork(db, changeOrderId, text);
     if (!ok) {
@@ -11906,6 +11934,35 @@ const shortJob = (name: string): string => {
             });
           })()}
 
+          {/* DELETE — only for a jobsite this device believes holds NOTHING.
+              Offered at the very bottom, quiet and destructive-coloured, because it is
+              the least common thing anyone does here and the one that cannot be undone.
+
+              THE CONDITION IS A HINT, NOT THE AUTHORITY. `coRows` is what this phone
+              knows; a capture filed from another device a second ago is invisible to
+              it. The server re-checks fourteen tables inside the DELETE, so the worst
+              this can do is offer a button that then explains why it declined. */}
+          {coRows.length === 0 && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                const name = projects.find((x) => x.id === projectId)?.name ?? '';
+                Alert.alert(
+                  T('job.delete'),
+                  T({ k: 'job.delConfirm', p: { name } } as any),
+                  [
+                    { text: T('common.cancel'), style: 'cancel' },
+                    { text: T('job.delete'), style: 'destructive',
+                      onPress: () => { void deleteJob(projectId, name); } },
+                  ],
+                );
+              }}
+              style={({ pressed }) => [s.jsDelete, pressed ? { opacity: 0.6 } : null]}>
+              <Text style={s.jsDeleteT}>{T('job.delete')}</Text>
+            </Pressable>
+          )}
+
+
           {/* THE BOTTOM ACTIONS ARE GONE (hadar, 2026-08-11). "Create new change
               order" and "View change order log" both left the screen.
 
@@ -13509,6 +13566,10 @@ const s = StyleSheet.create({
   jlStatN: { fontFamily: 'Inter_700Bold', fontSize: 20, marginTop: 2, letterSpacing: -0.4 },
   jlUnarchive: { minHeight: 40, justifyContent: 'center', marginTop: 6 },
   jlUnarchiveT: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#4E6243' },
+  // Quiet, and the palette's muted brick rather than a red — deleting an empty
+  // jobsite is tidying, not an emergency. 48pt because it is still destructive.
+  jsDelete: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 22 },
+  jsDeleteT: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#8B5148' },
   jsStats: { flexDirection: 'row', gap: 8, marginTop: 2 },
   jsStat: { flex: 1, backgroundColor: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#DEDBD3', borderRadius: 8, paddingHorizontal: 11, paddingVertical: 10,

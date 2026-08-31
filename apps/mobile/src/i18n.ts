@@ -448,6 +448,18 @@ const EN: Record<string, string> = {
   'job.seeLess': 'See less',
   'job.which': 'Which job?',
   'job.new': 'New job',
+  // Deleting an EMPTY jobsite (deleteproject.ts). Offered only when it holds
+  // nothing; a job with history is archived instead, never deleted.
+  'job.delete': 'Delete this job',
+  'job.delConfirm': 'Delete “{name}”? Nothing is saved in it.',
+  // Names the state, not the mechanism: he does not care which table stopped it,
+  // only that this job has work in it and is therefore kept.
+  'job.delNotEmpty': 'Cannot delete — this job already has work saved in it.',
+  'job.delNotOwner': 'Only the company owner can delete a job.',
+  // NOT a refusal: the job is still there and trying later is the right advice.
+  'job.delOffline': 'No signal. The job is still here — try again when you have one.',
+  'job.delFailed': 'Could not delete. The job is still here.',
+  'job.deleted': 'Deleted “{name}”.',
   'job.createdTitle': 'Job created!',
   'job.createdSub': 'You can create a change order for this job now, or do it later from the job.',
   'job.createdCo': 'Create change order',
@@ -2787,6 +2799,13 @@ const ES: Record<string, string> = {
   'detail.noCaptures': 'Aún no hay nada aquí. Toca grabar, saca una foto o escribe una nota.',
   'job.which': '¿Cuál trabajo?',
   'job.new': 'Trabajo nuevo',
+  'job.delete': 'Eliminar este trabajo',
+  'job.delConfirm': '¿Eliminar “{name}”? No hay nada guardado en él.',
+  'job.delNotEmpty': 'No se puede eliminar — este trabajo ya tiene trabajo guardado.',
+  'job.delNotOwner': 'Solo el dueño de la empresa puede eliminar un trabajo.',
+  'job.delOffline': 'Sin señal. El trabajo sigue aquí — inténtelo de nuevo con conexión.',
+  'job.delFailed': 'No se pudo eliminar. El trabajo sigue aquí.',
+  'job.deleted': 'Se eliminó “{name}”.',
   'job.createdTitle': '¡Trabajo creado!',
   'job.createdSub': 'Puede crear una orden de cambio para este trabajo ahora, o hacerlo después desde el trabajo.',
   'job.createdCo': 'Crear orden de cambio',
