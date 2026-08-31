@@ -11882,9 +11882,16 @@ const shortJob = (name: string): string => {
             // same extra wore a different colour depending on which screen you opened it
             // from. Outlined, not filled: a filled block the size of a word competed
             // with the price for the same glance.
-            const rows = jobFilter === null ? coRows
-              : jobFilter === 'needs' ? jobNeeds
-              : jobFilter === 'waiting' ? jobWaiting : jobApproved;
+            // EVERY FILTER GETS ITS OWN BRANCH, including `closed`. It did not have
+            // one — the chain ended `: jobApproved`, so selecting Closed silently
+            // showed the APPROVED list: a filter that lied about what it was showing.
+            // The correct five-way version already existed a few hundred lines up as
+            // `jobShown`, computed and never read; this is that logic, in the place
+            // that actually renders.
+            const rows = jobFilter === 'needs' ? jobNeeds
+              : jobFilter === 'waiting' ? jobWaiting
+              : jobFilter === 'approved' ? jobApproved
+              : jobFilter === 'closed' ? jobClosed : coRows;
 
             if (rows.length === 0) {
               /**
