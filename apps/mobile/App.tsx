@@ -10758,7 +10758,7 @@ const shortJob = (name: string): string => {
             {([
               { k: null,       label: T('job.pillAll'),      icon: null,               tint: '#3f423e' },
               { k: 'needs',    label: T('job.statNeeds'),    icon: 'person' as const,  tint: '#C2610C' },
-              { k: 'waiting',  label: T('job.chipWaiting'),  icon: 'clock' as const,   tint: '#2E5AA8' },
+              { k: 'waiting',  label: T('job.pillWaiting'),  icon: 'clock' as const,   tint: '#2E5AA8' },
               { k: 'approved', label: T('job.statApproved'), icon: 'approved' as const, tint: '#2F5233' },
             ] as const).map((f) => {
               const on = jobStat === f.k;
@@ -10869,7 +10869,7 @@ const shortJob = (name: string): string => {
                 <View style={s.jlStats}>
                   {stat(cc.needs, T('job.statNeeds'), 'statPerson', '#C2610C', '#FBEFE0')}
                   <View style={s.jlStatDiv} />
-                  {stat(cc.waiting, T('job.chipWaiting'), 'statClock', '#2E5AA8', '#E8EFFA')}
+                  {stat(cc.waiting, T('job.pillWaiting'), 'statClock', '#2E5AA8', '#E8EFFA')}
                   <View style={s.jlStatDiv} />
                   {stat(cc.approved, T('job.statApproved'), 'statCheck', '#2F5233', '#E9EFE5')}
                 </View>
@@ -11249,6 +11249,11 @@ const shortJob = (name: string): string => {
   const jobWaiting = coRows.filter((c) => jobBucket(c) === 'waiting');
   const jobApproved = coRows.filter((c) => jobBucket(c) === 'approved');
   const jobClosed = coRows.filter((c) => jobBucket(c) === 'closed');
+  // The Closed control only exists while something is closed, so a stuck `closed`
+  // filter could freeze this list empty with nothing on screen to clear it — the
+  // same trap the Jobs list defuses for a colour whose chip has gone. Read the
+  // filter through this, never raw.
+  const jobFx = jobFilter === 'closed' && !jobClosed.length ? null : jobFilter;
   const jobTotal = coRows.reduce((n, c) => n + (c.amount_cents ?? 0), 0);
   const jobShown = jobFilter === 'needs' ? jobNeeds
     : jobFilter === 'waiting' ? jobWaiting
@@ -11843,7 +11848,7 @@ const shortJob = (name: string): string => {
           <View style={s.jsStats}>
             {([
               { k: 'needs',    icon: 'statPerson' as const, label: T('job.statNeeds'),    n: jobNeeds.length },
-              { k: 'waiting',  icon: 'statClock'  as const, label: T('job.statWaiting'),  n: jobWaiting.length },
+              { k: 'waiting',  icon: 'statClock'  as const, label: T('job.pillWaiting'),  n: jobWaiting.length },
               { k: 'approved', icon: 'statCheck'  as const, label: T('job.statApproved'), n: jobApproved.length },
               // A FOURTH TILE ONLY WHEN THERE IS SOMETHING IN IT. A job where nothing
               // was ever declined or withdrawn should not carry a permanent zero — it
@@ -11853,11 +11858,15 @@ const shortJob = (name: string): string => {
                      label: T('job.statClosed'), n: jobClosed.length }]
                 : []),
             ] as const).map((st) => (
-              <Pressable key={st.k} style={[s.jsStat, jobFilter === st.k && s.jsStatOn]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: jobFilter === st.k }}
-                accessibilityLabel={`${st.label}: ${st.n}`}
-                onPress={() => setJobFilter(jobFilter === st.k ? null : st.k)}>
+              // NOT PRESSABLE ANY MORE (hadar, 2026-08-31: "what is all, gray? filters??").
+              // These tiles filtered, and so did the pills six lines down — one filter,
+              // two controls, two different names for each bucket ("Needs approval" up
+              // here, "Needs you" down there). Asked what the grey row was, the honest
+              // answer was "the same thing you already tapped", which is the answer that
+              // means one of them should not exist. The Jobs list already resolves this:
+              // numbers report, pills filter. This screen now reads the same way.
+              <View key={st.k} style={s.jsStat}
+                accessibilityLabel={`${st.label}: ${st.n}`}>
                 {/* ICON ON ITS OWN LINE. Beside the words it left ~70pt for a
                     two-word label in three columns on a 13 mini, and every card
                     truncated: "Needs appro…", "Awaitin g resp…", "Approv ed". A
@@ -11877,7 +11886,7 @@ const shortJob = (name: string): string => {
                   <Text style={s.jsStatLab} numberOfLines={2}>{st.label}</Text>
                 </View>
                 <Text style={s.jsStatN}>{st.n}</Text>
-              </Pressable>
+              </View>
             ))}
           </View>
 
@@ -11911,21 +11920,36 @@ const shortJob = (name: string): string => {
               nothing selected — a state with no control of its own. */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false}
             contentContainerStyle={s.jsPills}>
+            {/* THE SAME ROW THE JOBS LIST CARRIES — same icons, same colours, same
+                words as the tiles above. The labels used to be a second vocabulary
+                ("Needs you" for the tiles' "Needs approval"), so the screen named
+                every bucket twice and agreed with itself nowhere.
+
+                CLOSED ONLY WHILE SOMETHING IS CLOSED, matching the fourth tile: a
+                permanent Closed pill on a clean job offers a filter that can only
+                ever return nothing. */}
             {([
-              { k: null,       label: T('job.pillAll') },
-              { k: 'needs',    label: T('job.pillNeeds') },
-              { k: 'waiting',  label: T('job.pillWaiting') },
-              { k: 'approved', label: T('job.pillApproved') },
-              { k: 'closed',   label: T('home.closedChip') },
-            ] as const).map((f) => (
-              <Pressable key={String(f.k)}
-                style={[s.jsPill, jobFilter === f.k && s.jsPillOn]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: jobFilter === f.k }}
-                onPress={() => setJobFilter(f.k as any)}>
-                <Text style={[s.jsPillT, jobFilter === f.k && s.jsPillTOn]}>{f.label}</Text>
-              </Pressable>
-            ))}
+              { k: null,       label: T('job.pillAll'),      icon: null,                tint: '#3f423e' },
+              { k: 'needs',    label: T('job.statNeeds'),    icon: 'person' as const,   tint: '#C2610C' },
+              { k: 'waiting',  label: T('job.pillWaiting'),  icon: 'clock' as const,    tint: '#2E5AA8' },
+              { k: 'approved', label: T('job.statApproved'), icon: 'approved' as const, tint: '#2F5233' },
+              ...(jobClosed.length
+                ? [{ k: 'closed' as const, label: T('job.statClosed'),
+                     icon: 'clock' as const, tint: '#6B7280' }]
+                : []),
+            ] as const).map((f) => {
+              const on = jobFx === f.k;
+              return (
+                <Pressable key={String(f.k)} hitSlop={4}
+                  style={[s.jsPill, on && s.jsPillOn]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  onPress={() => setJobFilter(f.k as any)}>
+                  {f.icon && <Icon name={f.icon} size={15} color={on ? '#fff' : f.tint} />}
+                  <Text style={[s.jsPillT, on && s.jsPillTOn]}>{f.label}</Text>
+                </Pressable>
+              );
+            })}
           </ScrollView>
 
           {/* ── ONE FLAT LIST OF RICH CARDS ────────────────────────────────────
@@ -11953,10 +11977,10 @@ const shortJob = (name: string): string => {
             // The correct five-way version already existed a few hundred lines up as
             // `jobShown`, computed and never read; this is that logic, in the place
             // that actually renders.
-            const rows = jobFilter === 'needs' ? jobNeeds
-              : jobFilter === 'waiting' ? jobWaiting
-              : jobFilter === 'approved' ? jobApproved
-              : jobFilter === 'closed' ? jobClosed : coRows;
+            const rows = jobFx === 'needs' ? jobNeeds
+              : jobFx === 'waiting' ? jobWaiting
+              : jobFx === 'approved' ? jobApproved
+              : jobFx === 'closed' ? jobClosed : coRows;
 
             if (rows.length === 0) {
               /**
@@ -13680,7 +13704,6 @@ const s = StyleSheet.create({
   jsStat: { flex: 1, backgroundColor: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#DEDBD3', borderRadius: 8, paddingHorizontal: 11, paddingVertical: 10,
     minHeight: 71, justifyContent: 'space-between' },
-  jsStatOn: { borderWidth: 1.5, borderColor: '#2F5233' },
   jsStatTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   jsStatLab: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 10.5, lineHeight: 13,
     color: '#3f423e', height: 26 },
@@ -13726,8 +13749,9 @@ const s = StyleSheet.create({
    * Adding `paddingHorizontal` to `jsPills` itself would have fixed Home and shifted the
    * job screen by 12pt at the same time.
    */
-  jsPill: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 15, borderRadius: 999,
-    borderWidth: 1, borderColor: '#D6D2C7', backgroundColor: 'transparent' },
+  jsPill: { flexDirection: 'row', alignItems: 'center', gap: 7,
+    minHeight: 40, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 999,
+    borderWidth: 1, borderColor: '#D6D2C7', backgroundColor: '#fff' },
   jsPillOn: { backgroundColor: '#2F4F2A', borderColor: '#2F4F2A' },
   jsPillT: { fontFamily: 'Inter_500Medium', fontSize: 13.5, color: '#3f423e' },
   jsPillTOn: { color: '#FFFFFF', fontFamily: 'Inter_600SemiBold' },
