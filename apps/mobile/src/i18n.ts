@@ -141,10 +141,13 @@ const EN: Record<string, string> = {
   // ── first-open landing (hadar's design, 2026-08-12) ──
   // Four written lines, not a wrapped sentence: the break before EXTRA WORK is what
   // puts the gold on the phrase that matters.
-  'ob.h1': 'Get the',
-  'ob.h2': 'yes before',
-  'ob.h3': 'you do the',
-  'ob.h4': 'extra work.',
+  // The artwork's headline, one line per key so the break is the design's and not the
+  // box's (hadar, 2026-08-26). It replaces "Get the yes before you do the extra work" —
+  // same claim, stated as the warning rather than the instruction.
+  'ob.h1': 'Don’t do',
+  'ob.h2': 'extra work',
+  'ob.h3': 'on a',
+  'ob.h4': 'verbal yes.',
   'ob.lede': 'Create and send clear change orders from the jobsite in minutes.',
   // Outcomes, not mechanisms. He is not buying voice capture; he is buying getting paid.
   'ob.p1t': 'Protect your payment',
@@ -153,6 +156,9 @@ const EN: Record<string, string> = {
   'ob.p2b': 'Create, send, and track change orders in minutes.',
   'ob.p3t': 'Keep it in writing',
   'ob.p3b': 'Photos, notes, and approval all in one place.',
+  // The artwork's closing chip, under the three promises (hadar, 2026-08-26).
+  'ob.captureH': 'Capture it on site.',
+  'ob.captureB': 'Send it for approval.',
   'ob.haveAccount': 'Already have an account?',
   'ob.back': 'Back',
   // ── guided first change order (hadar's design, 2026-08-12) ──
@@ -385,6 +391,9 @@ const EN: Record<string, string> = {
   'job.pillWaiting': 'Waiting',
   // ── job screen (design, 2026-08-10) ──
   'job.pillAll': 'All',
+  // Names BOTH things you can search on. The old placeholder was the generic
+  // 'home.search', which did not say an address would match.
+  'jobs.searchPh': 'Search jobs or address',
   'jobs.lastActivity': 'Last activity {ago} ago',
   'job.settings': 'Job settings — colour, status, archive',
   'job.statNeeds': 'Needs approval',
@@ -472,7 +481,6 @@ const EN: Record<string, string> = {
   'job.addressLabel': 'Address (optional)',
   'job.newAddressWhy': 'Add an address or use your current location, and photos and extras taken here file themselves to this job.',
   'home.projects': 'Jobs',
-  'home.search': 'Search jobs',
   'home.newProject': 'New job',
   'home.gotOne': 'Got an extra?',
   'home.sayIt': 'Say it now — file it after. Don’t let it slip.',
@@ -535,7 +543,6 @@ const EN: Record<string, string> = {
      what do I have to do. So: what needs him, then everything else, and the status
      pill on each row still says which is which. */
   'home.needsYouFirst': 'Needs you first',
-  'home.everythingElse': 'Everything else',
   /* FOUR groups, not two (hadar, 2026-08-25, after living with the artboard's two).
      "Waiting on client" earns its own heading because it is the state he checks most
      and can do least about — folding it into "everything else" buried the money that
@@ -842,6 +849,7 @@ const EN: Record<string, string> = {
   // reader's language, so none of this may be baked into the component.
   // Prefix is `erec.` because `rec.` already belongs to the RECORDING screen.
   'erec.back': 'Job',
+  'erec.untitled': 'Untitled change',
   'erec.more': 'More',
   'erec.moreActions': 'More',
   'erec.people': 'People on this record',
@@ -1144,6 +1152,7 @@ const EN: Record<string, string> = {
   'set.teammate': 'Team member',
   'set.remove': 'Remove',
   'set.invite': 'Invite someone',
+  'set.seatsLocked': 'Your free plan is at its crew limit. Upgrade to add more people.',
   'set.role.owner': 'Owner',
   'set.role.crew': 'Crew',
   'set.role.sub': 'Sub',
@@ -1295,6 +1304,7 @@ const EN: Record<string, string> = {
   'quota.body.recordingMinutes': 'Your free plan includes {limit} minutes of recording. Upgrade for unlimited recording.',
   // ── usage, shown BEFORE the wall ──
   'usage.yourPlan': 'Your plan',
+  'usage.paidFeature': 'Included with a paid plan',
   'usage.upgrade': 'Upgrade',
   'usage.seePlans': 'See plans',
   // ── pay as you go (hadar, 2026-08-18) ──
@@ -1364,6 +1374,9 @@ const EN: Record<string, string> = {
   'paywall.thanks': 'You’re all set — thank you. Your plan updates in a moment.',
   'paywall.manage': 'Change or cancel your plan',
   'paywall.restore': 'Restore purchase',
+  'paywall.legal.renews': 'Subscriptions renew automatically at the price shown until cancelled. Payment is charged to your Apple ID. Manage or cancel any time in your App Store subscription settings.',
+  'paywall.legal.terms': 'Terms of Use',
+  'paywall.legal.privacy': 'Privacy Policy',
   'paywall.restoreNone': 'No purchase found to restore.',
   'paywall.f.jobs2': 'Up to 2 active jobs',
   'paywall.f.jobsUnlim': 'Unlimited jobs & extras',
@@ -1937,6 +1950,7 @@ const EN: Record<string, string> = {
   // a fact about a sealed document, in the words someone would use to settle an
   // argument about it two years later.
   'elock.signedApproved': 'Signed & approved',
+  'elock.schedNotStated': 'Schedule effect not stated.',
   'elock.approvedOnBy': 'Approved on {when} by {name}.',
   // The three narrower lines are not padding: they are what is true when the frozen
   // snapshot carries only part of the answer. Nothing is filled in from elsewhere —
@@ -2408,10 +2422,10 @@ const ES: Record<string, string> = {
 
   // --- onboarding slideshow (pre-login intro) ---
   'ob.next': 'Siguiente',
-  'ob.h1': 'Consigue el',
-  'ob.h2': 'sí antes de',
-  'ob.h3': 'hacer el',
-  'ob.h4': 'trabajo extra.',
+  'ob.h1': 'No hagas',
+  'ob.h2': 'trabajo extra',
+  'ob.h3': 'por un',
+  'ob.h4': 'sí de palabra.',
   'ob.lede': 'Crea y envía órdenes de cambio claras desde la obra en minutos.',
   'ob.p1t': 'Protege tu pago',
   'ob.p1b': 'Consigue la aprobación antes de hacer el trabajo extra.',
@@ -2419,6 +2433,8 @@ const ES: Record<string, string> = {
   'ob.p2b': 'Crea, envía y sigue órdenes de cambio en minutos.',
   'ob.p3t': 'Déjalo por escrito',
   'ob.p3b': 'Fotos, notas y aprobación en un solo lugar.',
+  'ob.captureH': 'Captúralo en obra.',
+  'ob.captureB': 'Envíalo para aprobación.',
   'ob.haveAccount': '¿Ya tienes cuenta?',
   'ob.back': 'Atrás',
   'fx.h1': 'Vamos a crear tu',
@@ -2629,6 +2645,7 @@ const ES: Record<string, string> = {
   'job.pillNeeds': 'Te necesita',
   'job.pillWaiting': 'Esperando',
   'job.pillAll': 'Todos',
+  'jobs.searchPh': 'Buscar trabajos o dirección',
   'jobs.lastActivity': 'Última actividad hace {ago}',
   'job.settings': 'Ajustes del trabajo — color, estado, archivar',
   'job.statNeeds': 'Necesita aprobación',
@@ -2661,7 +2678,6 @@ const ES: Record<string, string> = {
   'job.seeAll': 'Ver todo',
   'job.seeLess': 'Ver menos',
   'home.projects': 'Trabajos',
-  'home.search': 'Buscar trabajos',
   'home.newProject': 'Nuevo trabajo',
   'home.gotOne': '¿Hay un extra?',
   'home.sayIt': 'Dilo ahora — archívalo después. Que no se escape.',
@@ -2715,7 +2731,6 @@ const ES: Record<string, string> = {
   'home.closedChip': 'Cerradas',
   'home.approvedSec': 'Aprobado',
   'home.needsYouFirst': 'Requiere su atención',
-  'home.everythingElse': 'Todo lo demás',
   'home.waitingOnClient': 'Esperando al cliente',
   'home.showAllN': 'Ver las {n} órdenes de cambio',
   'home.clientQuestion': 'Pregunta del cliente',
@@ -2975,6 +2990,7 @@ const ES: Record<string, string> = {
   // PRD R6b — el registro del extra. Escrito, no traducido: "extra" es la palabra
   // que se usa en la obra; "cobrarlo" es lo que importa, no "facturarlo".
   'erec.back': 'Trabajo',
+  'erec.untitled': 'Cambio sin título',
   'erec.more': 'Más',
   'erec.moreActions': 'Más',
   'erec.people': 'Quién está en este registro',
@@ -3209,6 +3225,7 @@ const ES: Record<string, string> = {
   'set.teammate': 'Miembro del equipo',
   'set.remove': 'Quitar',
   'set.invite': 'Invitar a alguien',
+  'set.seatsLocked': 'Tu plan gratis llegó al límite de cuadrilla. Mejora tu plan para agregar más personas.',
   'set.role.owner': 'Dueño',
   'set.role.crew': 'Cuadrilla',
   'set.role.sub': 'Subcontratista',
@@ -3308,6 +3325,7 @@ const ES: Record<string, string> = {
   'quota.body.photos': 'Tu plan gratis incluye {limit} fotos. Mejora tu plan para tener fotos ilimitadas.',
   'quota.body.recordingMinutes': 'Tu plan gratis incluye {limit} minutos de grabación. Mejora tu plan para grabar sin límite.',
   'usage.yourPlan': 'Tu plan',
+  'usage.paidFeature': 'Incluido con un plan de pago',
   'usage.upgrade': 'Mejorar plan',
   'usage.seePlans': 'Ver planes',
   'paywall.payg.title': 'Pago por uso',
@@ -3360,6 +3378,9 @@ const ES: Record<string, string> = {
   'paywall.thanks': 'Listo — gracias. Tu plan se actualiza en un momento.',
   'paywall.manage': 'Cambiar o cancelar tu plan',
   'paywall.restore': 'Restaurar compra',
+  'paywall.legal.renews': 'Las suscripciones se renuevan automáticamente al precio mostrado hasta que las canceles. El cobro se hace a tu Apple ID. Adminístralas o cancélalas cuando quieras en la configuración de suscripciones del App Store.',
+  'paywall.legal.terms': 'Términos de uso',
+  'paywall.legal.privacy': 'Política de privacidad',
   'paywall.restoreNone': 'No se encontró ninguna compra para restaurar.',
   'paywall.f.jobs2': 'Hasta 2 trabajos activos',
   'paywall.f.jobsUnlim': 'Trabajos y extras ilimitados',
@@ -3817,6 +3838,7 @@ const ES: Record<string, string> = {
   // para resolver un pleito. Ninguna línea le pide nada al lector — ya no hay nada
   // que hacer, y esa es justamente la idea.
   'elock.signedApproved': 'Firmado y aprobado',
+  'elock.schedNotStated': 'Efecto en el calendario no indicado.',
   'elock.approvedOnBy': 'Aprobado el {when} por {name}.',
   'elock.approvedBy': 'Aprobado por {name}. La hora exacta no está en este teléfono.',
   'elock.approvedOn': 'Aprobado el {when}.',

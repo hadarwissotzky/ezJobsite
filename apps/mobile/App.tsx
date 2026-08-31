@@ -868,6 +868,10 @@ export default function App() {
   const [jobFilter, setJobFilter] =
     React.useState<null | 'needs' | 'waiting' | 'approved' | 'closed'>(null);
   const [labelFilter, setLabelFilter] = React.useState<string | null>(null); // REQ-PM14 Jobs-list filter
+  // The Jobs list filters by STATE now, not only by colour (design, 2026-08-31). It is
+  // the same three buckets the job screen and every job card already use, so the pill
+  // you press and the number you pressed it because of cannot disagree.
+  const [jobStat, setJobStat] = React.useState<'needs' | 'waiting' | 'approved' | null>(null);
   const [jobsArchived, setJobsArchived] = React.useState(false);             // REQ-PM4 Jobs-list archived view
   const [archivedCards, setArchivedCards] = React.useState<ProjectCard[]>([]);
   // Change orders per job, for the Jobs list cards. One read for every job (see
@@ -10659,7 +10663,16 @@ const shortJob = (name: string): string => {
       .filter((p) => p.id !== INBOX_ID)
       .filter((p) => !q || p.name.toLowerCase().includes(q) ||
                      (p.address ?? '').toLowerCase().includes(q))
-      .filter((p) => !activeLabel || p.label === activeLabel);
+      .filter((p) => !activeLabel || p.label === activeLabel)
+      // A STATE PILL KEEPS THE JOBS THAT HAVE SOMETHING IN THAT STATE — it does not
+      // reduce the cards to that state. "Needs approval" answers "which jobs want me",
+      // and the card still shows all three counts, because the answer to "which jobs
+      // want me" is useless without "and what else is on them".
+      .filter((p) => {
+        if (!jobStat) return true;
+        const cc = jobCounts[p.id];
+        return (cc?.[jobStat] ?? 0) > 0;
+      });
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     return (
       <View style={s.homeC}>
@@ -10685,29 +10698,81 @@ const shortJob = (name: string): string => {
               not. Above the Active/Archived pills because it belongs to the LIST, not
               to whichever slice of it is showing — under the filter it would read as
               "create an archived job". */}
+          {/* SEARCH FIRST, AND ALWAYS (design, 2026-08-31). It used to sit below the
+              Active/Archived pills and only appear past four jobs — so the control
+              MOVED as the list grew, and the one contractor who most needs it (the one
+              with thirty jobs) had learnt the screen without it. A field that appears
+              on its own is a field nobody looks for. It is hidden only at zero jobs,
+              where there is nothing to search.
+
+              The magnifier is inside the field, not beside it: the placeholder alone
+              read as an empty name box. */}
+          {jobsSrc.length > 0 && (
+            <View style={s.jlSearch}>
+              <Icon name="search" size={19} color="#8c959f" />
+              <TextInput style={s.jlSearchIn} value={search} onChangeText={setSearch}
+                placeholder={T('jobs.searchPh')} placeholderTextColor="#8c959f"
+                returnKeyType="search" clearButtonMode="while-editing" />
+            </View>
+          )}
+
           <Pressable style={s.jlNew} accessibilityRole="button"
             onPress={() => setNewJob({ name: '', address: '' })}>
             <Icon name="extra" size={18} color="#fff" />
             <Text style={s.jlNewT}>{T('job.new')}</Text>
           </Pressable>
 
-          {/* REQ-PM4 — Active vs Archived. Archived jobs are retained, out of the way. */}
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 2 }}>
+          {/* REQ-PM4 — Active vs Archived. Archived jobs are retained, out of the way.
+              TWO EQUAL HALVES, not two pills sized by their own words: they are the
+              two states of one switch, and unequal widths read as one button plus an
+              afterthought. */}
+          <View style={s.jlSeg}>
             <Pressable hitSlop={6} onPress={() => setJobsArchived(false)}
-              style={{ minHeight: 38, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 19, borderWidth: !jobsArchived ? 2 : 1,
-                borderColor: !jobsArchived ? '#151A1E' : '#D5D0C7', backgroundColor: !jobsArchived ? '#151A1E' : '#fff' }}>
-              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: !jobsArchived ? '#fff' : '#5E666E' }}>{T('pm4.activeJobs')}</Text>
+              accessibilityRole="button" accessibilityState={{ selected: !jobsArchived }}
+              style={[s.jlSegB, !jobsArchived && s.jlSegBOn]}>
+              <Text style={[s.jlSegT, !jobsArchived && s.jlSegTOn]}>{T('pm4.activeJobs')}</Text>
             </Pressable>
             <Pressable hitSlop={6} onPress={async () => { setJobsArchived(true); await loadArchived(); }}
-              style={{ minHeight: 38, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 19, borderWidth: jobsArchived ? 2 : 1,
-                borderColor: jobsArchived ? '#151A1E' : '#D5D0C7', backgroundColor: jobsArchived ? '#151A1E' : '#fff' }}>
-              <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13, color: jobsArchived ? '#fff' : '#5E666E' }}>{T('pm4.archived')}</Text>
+              accessibilityRole="button" accessibilityState={{ selected: jobsArchived }}
+              style={[s.jlSegB, jobsArchived && s.jlSegBOn]}>
+              <Text style={[s.jlSegT, jobsArchived && s.jlSegTOn]}>{T('pm4.archived')}</Text>
             </Pressable>
           </View>
-          {jobsSrc.length > 4 && (
-            <TextInput style={s.searchIn} value={search} onChangeText={setSearch}
-              placeholder={T('home.search')} placeholderTextColor="#8c959f" />
-          )}
+
+          {/* ── FILTER BY STATE (design, 2026-08-31) ──────────────────────────
+              The only filter this list had was by COLOUR LABEL, which answers a
+              question a contractor rarely asks, and it disappeared entirely when no
+              job carried a label — so most accounts had no filter at all.
+
+              These four are the buckets already printed on every card below. THE
+              ICONS AND COLOURS ARE THE CARD'S, DELIBERATELY: orange person, blue
+              clock, green check. The pill and the number it filters on are the same
+              thing said twice, so the eye can travel from a count on a card to the
+              pill that isolates it without translating.
+
+              ALL IS A REAL PILL, and the default. Expressing "everything" by having
+              nothing selected makes the most common state the only one with no
+              control — the same defect the job screen's pills were fixed for. */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.jlSF}>
+            {([
+              { k: null,       label: T('job.pillAll'),      icon: null,               tint: '#3f423e' },
+              { k: 'needs',    label: T('job.statNeeds'),    icon: 'person' as const,  tint: '#C2610C' },
+              { k: 'waiting',  label: T('job.chipWaiting'),  icon: 'clock' as const,   tint: '#2E5AA8' },
+              { k: 'approved', label: T('job.statApproved'), icon: 'approved' as const, tint: '#2F5233' },
+            ] as const).map((f) => {
+              const on = jobStat === f.k;
+              return (
+                <Pressable key={String(f.k)} hitSlop={4}
+                  accessibilityRole="button" accessibilityState={{ selected: on }}
+                  style={[s.jlSFB, on && s.jlSFBOn]}
+                  onPress={() => setJobStat(f.k as any)}>
+                  {f.icon && <Icon name={f.icon} size={15} color={on ? '#fff' : f.tint} />}
+                  <Text style={[s.jlSFT, on && s.jlSFTOn]}>{f.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
           {/* REQ-PM14 — filter by color label. Chips carry the color NAME (not color
               alone — color-blind ICP) and are full-height taps (gloves, mandate #3). */}
           {usedLabels.length > 0 && (
@@ -12943,9 +13008,6 @@ const s = StyleSheet.create({
 
   // ── Projects home ──────────────────────────────────────────────────────
   homeHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  searchIn: { backgroundColor: '#ffffff', borderColor: '#D5D0C7', borderWidth: 1,
-    borderRadius: 10, color: '#151A1E', paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 15, marginBottom: 12 },
   newProjBtn: { backgroundColor: '#151A1E', borderRadius: 12, paddingVertical: 16,
     alignItems: 'center', marginBottom: 14 },
   newProjT: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.5 },
@@ -13434,6 +13496,28 @@ const s = StyleSheet.create({
   // the design and it is one line now, which sets the type size rather than taste.
   jlNew: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
     minHeight: 50, borderRadius: 8, backgroundColor: '#2F4F2A', marginTop: 12 },
+  // ── the Jobs list header (design, 2026-08-31) ──
+  jlSearch: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48,
+    paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: '#D5D0C7',
+    backgroundColor: '#fff', marginTop: 4 },
+  // The field takes the rest of the row rather than a fixed width, or a long address
+  // types past the edge of the box.
+  jlSearchIn: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 15.5, color: '#151A1E',
+    paddingVertical: 12 },
+  jlSeg: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  // flex:1 is what makes the two halves equal; minHeight clears mandate #3's 48pt.
+  jlSegB: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center',
+    borderRadius: 24, borderWidth: 1, borderColor: '#D5D0C7', backgroundColor: '#fff' },
+  jlSegBOn: { backgroundColor: '#151A1E', borderColor: '#151A1E' },
+  jlSegT: { fontFamily: 'Barlow_600SemiBold', fontSize: 15, color: '#5E666E' },
+  jlSegTOn: { color: '#fff' },
+  jlSF: { flexDirection: 'row', gap: 8, paddingVertical: 12, paddingRight: 12 },
+  jlSFB: { flexDirection: 'row', alignItems: 'center', gap: 7, minHeight: 40,
+    paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: '#D6D2C7',
+    backgroundColor: '#fff' },
+  jlSFBOn: { backgroundColor: '#2F4F2A', borderColor: '#2F4F2A' },
+  jlSFT: { fontFamily: 'Inter_500Medium', fontSize: 13.5, color: '#3f423e' },
+  jlSFTOn: { color: '#fff', fontFamily: 'Inter_600SemiBold' },
   jlNewT: { fontFamily: 'Inter_700Bold', fontSize: 16, color: '#fff' },
   // ── notifications ──
   tabBadge: { position: 'absolute', top: -4, right: -8, minWidth: 17, height: 17,
