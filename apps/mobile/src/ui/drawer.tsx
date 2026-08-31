@@ -63,7 +63,7 @@ export function Drawer({
   onShowIntro, onSimulateFirstRun,
   devTools,
   companies, activeCompanyId, onSwitchCompany, onCloseAccount,
-  buildLabel, updateReady, onApplyUpdate, onCheckUpdates, usage,
+  buildLabel, syncLabel, updateReady, onApplyUpdate, onCheckUpdates, usage,
   logoUri, companyName, canEditLogo, onLogoPress,
 }: {
   visible: boolean;
@@ -86,6 +86,8 @@ export function Drawer({
   usage?: UsageSummary | null;
   /** From `buildLine()` — native version PLUS the running update id (REQ-OTA5). */
   buildLabel?: string;
+  /** From `syncLine()` — connected, when it last synced, how many rows are local. */
+  syncLabel?: string;
   /** An update is downloaded AND nothing is in flight (REQ-OTA2). */
   updateReady?: boolean;
   onApplyUpdate?: () => void;
@@ -414,6 +416,10 @@ export function Drawer({
               with OTA wired, this genuinely fetches a new bundle rather than sending
               the user to the App Store. */}
           <Text style={st.version}>{buildLabel ?? `v${appVersion}`}</Text>
+          {/* WHAT THE PHONE ACTUALLY HOLDS. Beside the build line on purpose: those
+              two lines together answer every "why am I not seeing it" question this
+              app has produced — is the code current, and has the data arrived. */}
+          {!!syncLabel && <Text style={st.version}>{syncLabel}</Text>}
           {onCheckUpdates && (
             <Pressable onPress={check} disabled={checking}
               style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>

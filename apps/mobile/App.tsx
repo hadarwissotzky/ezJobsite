@@ -95,6 +95,7 @@ import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { FlowRail } from './src/ui/flowrail';
+import { syncLine, syncState } from './src/syncstate';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { PhotoLightbox, RecordScreen, scheduleSentence, billingSentence,
          type RecordLifecycle } from './src/ui/recordscreen';
@@ -822,6 +823,12 @@ export default function App() {
   // The ☰ menu on Home: the jobs list + language now live behind it, because the
   // dashboard's front page is the money, not navigation (hadar, 2026-07-23 mockup).
   const [menuOpen, setMenuOpen] = React.useState(false);
+
+  /**
+   * THE SYNC LINE for the drawer. Read only while the drawer is open — this counts
+   * rows in twelve tables and nobody is looking at it the rest of the time.
+   */
+  const [syncLabel, setSyncLabel] = React.useState<string | null>(null);
   /** A home-screen quick action arrived. Held until the app is `ready` — on a cold start
    *  the deep link lands before the database is open, and a flag waits where a call is
    *  lost. */
@@ -927,6 +934,21 @@ export default function App() {
     const id = setTimeout(() => setSplashHeld(false), SPLASH_MIN_MS);
     return () => clearTimeout(id);
   }, []);
+
+  // Below `ready` on purpose: it is a dependency, and a hook that reads a variable
+  // declared later is a compile error the first time somebody moves either one.
+  React.useEffect(() => {
+    if (!menuOpen || !ready) return;
+    let live = true;
+    const read = () => {
+      void syncState(db)
+        .then((st) => { if (live) setSyncLabel(syncLine(st, Date.now())); })
+        .catch(() => { if (live) setSyncLabel(null); });
+    };
+    read();
+    const id = setInterval(read, 5000);
+    return () => { live = false; clearInterval(id); };
+  }, [menuOpen, ready, db]);
   const [gate, setGate] = React.useState<string | null>(null);
   const [initError, setInitError] = React.useState<string | null>(null);
   // AUTH. `session` undefined = still checking the stored token; null = logged out;
@@ -9548,6 +9570,7 @@ const checkClientMessages = async () => {
         setLang(n); setLangState(n); await saveLang(db, n);
       }}
       appVersion={(appJson as any)?.expo?.version ?? '1.0.0'}
+      syncLabel={syncLabel ?? undefined}
       buildLabel={buildLine({
         version: (appJson as any)?.expo?.version ?? '1.0.0',
         updateId: ota.updateId,
