@@ -996,7 +996,7 @@ export default function App() {
     let live = true;
     const read = () => {
       void syncState(db)
-        .then((st) => { if (live) setPendingUp(st.queued); })
+        .then((st) => { if (live) { setPendingUp(st.queued); setStrugglingUp(st.struggling); } })
         .catch(() => { /* the bar just drops the count */ });
     };
     read();
