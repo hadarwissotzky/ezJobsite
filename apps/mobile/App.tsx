@@ -10659,20 +10659,22 @@ const shortJob = (name: string): string => {
     // no reset (review 2026-07-25, QA lens). Ignore a filter whose color is gone.
     const activeLabel = usedLabels.some((l) => l.key === labelFilter) ? labelFilter : null;
     const loadArchived = async () => setArchivedCards(await projectCards(db, await listProjects(db, 'archived')));
-    const shown = jobsSrc
+    // EVERYTHING EXCEPT THE STATE FILTER. The pill counts are taken from here, not
+    // from `shown`, or selecting a pill would rewrite every other pill's number to
+    // describe the slice you are already inside — each count has to keep answering
+    // "how many are there", not "how many survive what I just pressed".
+    const jobsBase = jobsSrc
       .filter((p) => p.id !== INBOX_ID)
       .filter((p) => !q || p.name.toLowerCase().includes(q) ||
                      (p.address ?? '').toLowerCase().includes(q))
-      .filter((p) => !activeLabel || p.label === activeLabel)
-      // A STATE PILL KEEPS THE JOBS THAT HAVE SOMETHING IN THAT STATE — it does not
-      // reduce the cards to that state. "Needs approval" answers "which jobs want me",
-      // and the card still shows all three counts, because the answer to "which jobs
-      // want me" is useless without "and what else is on them".
-      .filter((p) => {
-        if (!jobStat) return true;
-        const cc = jobCounts[p.id];
-        return (cc?.[jobStat] ?? 0) > 0;
-      });
+      .filter((p) => !activeLabel || p.label === activeLabel);
+    // A STATE PILL KEEPS THE JOBS THAT HAVE SOMETHING IN THAT STATE — it does not
+    // reduce the cards to that state. "Needs approval" answers "which jobs want me",
+    // and the card still shows all three counts, because the answer to "which jobs
+    // want me" is useless without "and what else is on them".
+    const inState = (k: 'needs' | 'waiting' | 'approved') =>
+      jobsBase.filter((p) => (jobCounts[p.id]?.[k] ?? 0) > 0).length;
+    const shown = jobStat ? jobsBase.filter((p) => (jobCounts[p.id]?.[jobStat] ?? 0) > 0) : jobsBase;
     const open = (id: string) => { setProjectId(id); void touchProject(db, id); setNav('project'); };
     return (
       <View style={s.homeC}>
@@ -10756,19 +10758,31 @@ const shortJob = (name: string): string => {
           <ScrollView horizontal showsHorizontalScrollIndicator={false}
             contentContainerStyle={s.jlSF}>
             {([
-              { k: null,       label: T('job.pillAll'),      icon: null,               tint: '#3f423e' },
-              { k: 'needs',    label: T('job.statNeeds'),    icon: 'person' as const,  tint: '#C2610C' },
-              { k: 'waiting',  label: T('job.pillWaiting'),  icon: 'clock' as const,   tint: '#2E5AA8' },
-              { k: 'approved', label: T('job.statApproved'), icon: 'approved' as const, tint: '#2F5233' },
+              { k: null,       label: T('job.pillAll'),      icon: null,                tint: '#3f423e', n: jobsBase.length },
+              { k: 'needs',    label: T('job.statNeeds'),    icon: 'person' as const,   tint: '#C2610C', n: inState('needs') },
+              { k: 'waiting',  label: T('job.pillWaiting'),  icon: 'clock' as const,    tint: '#2E5AA8', n: inState('waiting') },
+              { k: 'approved', label: T('job.statApproved'), icon: 'approved' as const, tint: '#2F5233', n: inState('approved') },
             ] as const).map((f) => {
               const on = jobStat === f.k;
+              // A PILL THAT CAN ONLY RETURN NOTHING IS NOT OFFERED. Pressing it would
+              // empty the screen and teach that the row breaks things — and it is the
+              // honest reading of grey, which otherwise just looks switched off.
+              const dead = f.n === 0 && !on;
               return (
-                <Pressable key={String(f.k)} hitSlop={4}
-                  accessibilityRole="button" accessibilityState={{ selected: on }}
-                  style={[s.jlSFB, on && s.jlSFBOn]}
+                <Pressable key={String(f.k)} hitSlop={4} disabled={dead}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on, disabled: dead }}
+                  accessibilityLabel={`${f.label}: ${f.n}`}
+                  style={[s.jlSFB, on && s.jlSFBOn, dead && s.jlSFBOff]}
                   onPress={() => setJobStat(f.k as any)}>
-                  {f.icon && <Icon name={f.icon} size={15} color={on ? '#fff' : f.tint} />}
-                  <Text style={[s.jlSFT, on && s.jlSFTOn]}>{f.label}</Text>
+                  {f.icon && <Icon name={f.icon} size={15}
+                    color={on ? '#fff' : dead ? '#B7B2A8' : f.tint} />}
+                  <Text style={[s.jlSFT, on && s.jlSFTOn, dead && s.jlSFTOff]}>{f.label}</Text>
+                  {/* THE NUMBER IS WHY THE ROW READS AS A FILTER AT ALL (hadar asked
+                      twice what it was). A row of bare words is decoration; a word
+                      with a count is plainly a filter over a set, and it says what is
+                      behind the pill before you spend a tap finding out. */}
+                  <Text style={[s.jlSFN, on && s.jlSFTOn, dead && s.jlSFTOff]}>{f.n}</Text>
                 </Pressable>
               );
             })}
@@ -13542,6 +13556,10 @@ const s = StyleSheet.create({
   jlSFBOn: { backgroundColor: '#2F4F2A', borderColor: '#2F4F2A' },
   jlSFT: { fontFamily: 'Inter_500Medium', fontSize: 13.5, color: '#3f423e' },
   jlSFTOn: { color: '#fff', fontFamily: 'Inter_600SemiBold' },
+  // Bolder than the word beside it: the count is the part that is scanned.
+  jlSFN: { fontFamily: 'Inter_700Bold', fontSize: 13.5, color: '#3f423e' },
+  jlSFBOff: { backgroundColor: '#F4F1EA', borderColor: '#E4E0D6' },
+  jlSFTOff: { color: '#B7B2A8' },
   jlNewT: { fontFamily: 'Inter_700Bold', fontSize: 16, color: '#fff' },
   // ── notifications ──
   tabBadge: { position: 'absolute', top: -4, right: -8, minWidth: 17, height: 17,
