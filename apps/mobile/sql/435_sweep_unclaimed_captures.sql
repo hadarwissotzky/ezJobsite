@@ -74,12 +74,17 @@ from unclaimed u join public.project p on p.id = u.project_id
 group by p.name order by count(*) desc;
 
 -- Derived artefacts first: they reference the capture and are meaningless without it.
-delete from public.capture_transcript_current where capture_id in (select id from unclaimed);
+--
+-- BASE TABLES ONLY. `capture_transcript_current`, `capture_structured_current` and
+-- `structure_latency` are VIEWS, and the first attempt to run this file died on exactly
+-- that — "cannot delete from view ... Views containing DISTINCT are not automatically
+-- updatable" (hadar, 2026-09-01). They are dropped from this list rather than fixed
+-- with a trigger: a view over `capture_transcript` stops returning the row the moment
+-- the base row goes, so deleting from both was always redundant, not merely illegal.
+-- They remain in the NOT EXISTS predicate above, where READING a view is fine.
 delete from public.capture_transcript         where capture_id in (select id from unclaimed);
-delete from public.capture_structured_current where capture_id in (select id from unclaimed);
 delete from public.capture_structured         where capture_id in (select id from unclaimed);
 delete from public.capture_content_signal     where capture_id in (select id from unclaimed);
-delete from public.structure_latency          where capture_id in (select id from unclaimed);
 delete from public.capture_mutation           where capture_id in (select id from unclaimed);
 delete from public.capture_discarded          where capture_id in (select id from unclaimed);
 delete from public.capture_op_state           where capture_id in (select id from unclaimed);
