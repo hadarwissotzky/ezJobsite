@@ -432,7 +432,6 @@ const EN: Record<string, string> = {
    * OC-2 in Spanish is one record with two names, and the client holding the paperwork
    * cannot see which language the app was set to.
    */
-  'job.coNoOn': 'CO-{n} · {job}',
   'job.coNo': 'CO-{n}',
   'job.coNoNumber': 'Change order',
   'job.initiated': 'Initiated {d}',
@@ -2657,7 +2656,6 @@ const ES: Record<string, string> = {
   'job.chipNeeds': 'Necesita aprobación',
   'job.chipWaiting': 'Esperando al cliente',
   'job.chipApproved': 'Aprobado',
-  'job.coNoOn': 'CO-{n} · {job}',
   'job.coNo': 'CO-{n}',
   'job.coNoNumber': 'Orden de cambio',
   'job.initiated': 'Iniciada {d}',
