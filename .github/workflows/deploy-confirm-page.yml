@@ -68,9 +68,18 @@ jobs:
         run: |
           for f in website/index.html website/privacy.html website/terms.html \
                    website/sms.html website/support.html \
-                   apps/web/confirm.html apps/web/ewa.js; do
+                   apps/web/confirm.html apps/web/ewa.js apps/web/buy.html; do
             [ -f "$f" ] || { echo "::error::missing: $f"; exit 1; }
           done
+
+      # A PAGE THAT TAKES MONEY MUST NOT SHIP WITH ITS KEY UNSUBSTITUTED. buy.html is
+      # useless without a RevenueCat key, and useless here means a contractor tapping a
+      # pack and getting an error instead of credits. Fail the deploy rather than publish
+      # a checkout that cannot check out.
+      - name: Refuse to publish buy.html without its key
+        run: |
+          [ -n "${{ vars.RC_WEB_KEY }}" ] \
+            || { echo "::error::vars.RC_WEB_KEY is unset — buy.html would ship a dead checkout"; exit 1; }
 
       # The three clauses the carriers check. Losing one does not break a page — it
       # revokes the campaign, days later, silently. Cheaper to fail here than to
@@ -105,6 +114,12 @@ jobs:
           # Extra Work Authorization with "could not load". No substitution here: it
           # holds no keys, only rendering.
           cp apps/web/ewa.js _site/ewa.js
+          # The web purchase page, with its RevenueCat key substituted the same way
+          # confirm.html gets its Supabase key. This is a PUBLIC SDK key — the same class
+          # as the anon key two lines up — but it still lives in repo vars rather than in
+          # the file, so rotating it is a settings change and not a commit.
+          sed -e "s|__RC_WEB_KEY__|${{ vars.RC_WEB_KEY }}|g" \
+              apps/web/buy.html > _site/buy.html
           # Stops GitHub treating these as Jekyll sources, which silently drops any
           # file whose name begins with an underscore.
           touch _site/.nojekyll
@@ -161,7 +176,7 @@ jobs:
             # Every public page must answer 200. terms/privacy/sms are the A2P
             # campaign's filed URLs; a 404 here is a revoked campaign later.
             for p in index.html privacy.html terms.html sms.html support.html \
-                     confirm.html ewa.js; do
+                     confirm.html ewa.js buy.html; do
               # `|| true` because this step runs under `bash -e`: a transient reset or
               # a DNS blip during Pages propagation would otherwise abort the whole
               # step instead of falling through to the next attempt — and the first

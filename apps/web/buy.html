@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Buy change orders — EZchangeorder</title>
+<!--
+  THE WEB PURCHASE PAGE — pay-as-you-go credit packs, bought outside the App Store.
+
+  hadar, 2026-09-01: "i would like to evaluate changing the IN app purchase to an
+  alternative online payment to avoid the apple tax."
+
+  WHY THIS IS CHEAP TO BUILD: the rail already existed. RevenueCat Web Billing
+  (app `appe36cc78b07`) was configured on 2026-08-04 and a `credits` offering created
+  on 2026-08-18 with the metadata "Web purchase link for pay-as-you-go credit packs" —
+  and then nothing consumed it. This page is the missing consumer.
+
+  Nothing downstream changes. RevenueCat is the merchant of record, so it registers and
+  remits sales tax, owns refunds and dunning, and its name is on the receipt. And a web
+  purchase raises the SAME webhook the App Store does — `supabase/functions/
+  revenuecat-webhook` filters on entitlements and event types, never on store — so
+  `company.plan` and the credit grant land through code that already runs in production.
+
+  THE IDENTITY IS THE COMPANY, NOT THE PERSON (billing.ts: "the RevenueCat appUserID is
+  the COMPANY id"). The webhook maps `app_user_id` straight back to `company.id`. So this
+  page is useless without one, and it is passed in the link the app opens rather than
+  discovered here: the buyer is already signed in over there, and asking him to sign in
+  again to spend money is how a purchase page loses the sale.
+
+  IT RENDERS WHATEVER THE OFFERING RETURNS, and that is deliberate rather than lazy.
+  `credits_3` does not exist as a Web Billing product yet — RevenueCat's API refuses to
+  create one ("Web Billing product creation is still not supported"), so it has to be
+  added in their dashboard by hand. A page with three hardcoded cards would need a deploy
+  the moment that happens. This one picks it up on the next page load.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#191A17; --paper:#F7F6F3; --card:#FFFFFF;
+    --steel:#6B6F6A; --line:#E7E6E1; --approve:#2F5233; --approveDeep:#26431F;
+    --disp:'Barlow Condensed','Arial Narrow',sans-serif;
+    --body:'Barlow',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);
+       -webkit-font-smoothing:antialiased;padding:28px 18px 64px}
+  .wrap{max-width:560px;margin:0 auto}
+  h1{font-family:var(--disp);font-size:38px;line-height:1.05;letter-spacing:.2px;margin:0 0 6px;text-transform:uppercase}
+  .sub{color:var(--steel);font-size:16px;line-height:1.45;margin:0 0 26px}
+  .pack{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
+        background:var(--card);border:1px solid var(--line);border-radius:14px;
+        padding:18px 18px;margin-bottom:12px;cursor:pointer;font:inherit;color:inherit;
+        transition:border-color .12s, transform .06s}
+  .pack:hover{border-color:var(--approve)}
+  .pack:active{transform:scale(.995)}
+  .pack:disabled{opacity:.55;cursor:default;transform:none}
+  .pn{font-family:var(--disp);font-size:26px;line-height:1;text-transform:uppercase}
+  .pd{color:var(--steel);font-size:14px;margin-top:3px}
+  .price{margin-left:auto;font-family:var(--disp);font-size:26px;white-space:nowrap}
+  .note{color:var(--steel);font-size:13.5px;line-height:1.5;margin-top:22px}
+  .msg{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--approve);
+       border-radius:12px;padding:18px 20px;font-size:15.5px;line-height:1.5}
+  .msg.bad{border-left-color:#8B5148}
+  .done{font-family:var(--disp);font-size:30px;text-transform:uppercase;margin:0 0 8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Buy change orders</h1>
+  <p class="sub">Packs never expire. Use them whenever you need one.</p>
+  <div id="out"><p class="sub">Loading…</p></div>
+  <p class="note" id="foot"></p>
+</div>
+
+<script type="module">
+/**
+ * PINNED, EXACTLY, AND THE REASON IS IN THIS REPO'S OWN HISTORY.
+ *
+ * `confirm.html` imports `@supabase/supabase-js@2` — an unpinned MAJOR range resolved at
+ * page load off a CDN. A patch release on someone else's server changed the builder and
+ * disabled the entire client-facing half of this product, with no deploy, no commit and
+ * no signal (see that file's note dated 2026-08-06). A payment page is a worse place for
+ * that to happen than an approval page, so this pins the exact version and takes the
+ * cost of updating it deliberately.
+ */
+import { Purchases } from 'https://esm.sh/@revenuecat/purchases-js@1.55.0';
+
+const KEY = '__RC_WEB_KEY__';
+const out  = document.getElementById('out');
+const foot = document.getElementById('foot');
+
+const show = (html, bad) => { out.innerHTML = `<div class="msg${bad ? ' bad' : ''}">${html}</div>`; };
+const esc  = (s) => String(s).replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+
+/**
+ * WHOSE ACCOUNT THIS BUYS FOR. The app opens this link with its own company id, because
+ * that is what RevenueCat is keyed on and what the webhook maps back to `company.id`.
+ *
+ * Shape-checked, not trusted: a malformed value would create a junk RevenueCat customer
+ * that no webhook could ever match, and the buyer would pay for credits that land
+ * nowhere. Better to refuse the page than to take money into a void.
+ */
+const companyId = new URLSearchParams(location.search).get('c');
+const looksLikeId = companyId && /^[A-Za-z0-9_-]{8,64}$/.test(companyId);
+
+if (!looksLikeId) {
+  show('Open this page from the EZchangeorder app so the credits reach your account. '
+     + 'Tap <b>Buy change orders</b> on the plans screen.', true);
+} else {
+  try {
+    // `appUserID` is the company, matching the mobile SDK exactly (billing.ts). If these
+    // two ever disagree, a web purchase silently credits a different account.
+    const purchases = Purchases.configure({ apiKey: KEY, appUserId: companyId });
+    const offerings = await purchases.getOfferings();
+
+    // The `credits` offering, NOT `current`. `default` is current and carries the mobile
+    // subscription paywall; its metadata says so out loud. Asking for `current` here
+    // would render subscription packages on a page that promises credit packs.
+    const off = offerings.all?.['credits'];
+    const pkgs = off?.availablePackages ?? [];
+
+    if (!pkgs.length) {
+      show('No packs are available right now. Please try again shortly, or buy from '
+         + 'inside the app.', true);
+    } else {
+      out.innerHTML = '';
+      for (const p of pkgs) {
+        const opt   = p.webBillingProduct ?? p.rcBillingProduct ?? p.product ?? {};
+        const price = opt.currentPrice?.formattedPrice ?? opt.price?.formattedPrice ?? '';
+        const title = opt.title || p.identifier.replace(/^\$rc_custom_/, '').replace(/_/g, ' ');
+        const btn = document.createElement('button');
+        btn.className = 'pack';
+        btn.innerHTML =
+          `<span><span class="pn">${esc(title)}</span>`
+        + `<span class="pd">${esc(opt.description || 'One-time purchase, never expires')}</span></span>`
+        + `<span class="price">${esc(price)}</span>`;
+        btn.onclick = async () => {
+          // Disable EVERY pack, not just this one: a second tap while the checkout is
+          // opening is a second charge, and the person doing it is the one who could
+          // least afford to be told "that is just how it works".
+          document.querySelectorAll('.pack').forEach((b) => { b.disabled = true; });
+          try {
+            await purchases.purchase({ rcPackage: p });
+            out.innerHTML =
+              '<div class="msg"><p class="done">Thank you</p>'
+            + '<p>Your change orders have been added. Go back to the app — they will be '
+            + 'there within a few seconds.</p></div>';
+            foot.textContent = '';
+          } catch (e) {
+            // A cancelled checkout is not an error and must not be dressed as one.
+            const cancelled = /cancel/i.test(String(e?.errorCode ?? e?.message ?? e));
+            if (cancelled) {
+              document.querySelectorAll('.pack').forEach((b) => { b.disabled = false; });
+              return;
+            }
+            show('That purchase did not go through and you have not been charged. '
+               + `<br><br><small>${esc(e?.message ?? e)}</small>`, true);
+          }
+        };
+        out.appendChild(btn);
+      }
+      foot.innerHTML =
+        'Payment is handled by RevenueCat, the seller of record, and includes any tax due '
+      + 'in your area. Receipts come by email. '
+      + '<a href="/terms.html">Terms</a> · <a href="/privacy.html">Privacy</a>';
+    }
+  } catch (e) {
+    show('Could not load the packs. Please try again, or buy from inside the app.'
+       + `<br><br><small>${esc(e?.message ?? e)}</small>`, true);
+  }
+}
+</script>
+</body>
+</html>
