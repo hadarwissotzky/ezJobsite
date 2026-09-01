@@ -97,6 +97,10 @@ const EN: Record<string, string> = {
   'flow.s2': 'Job',
   'flow.s3': 'Client',
   'flow.s4': 'Write-up',
+  // The step he SENDS from. Named for what he does there, not for what the screen
+  // is — 'Draft' would describe the record's state and tell him nothing about why he
+  // is looking at it.
+  'flow.s5': 'Review',
   'assign.title': 'Which job is this for?',
   'assign.sub': 'Saved safe on this phone. A change order belongs to a job — pick one, or make it.',
   'assign.search': 'Search jobs or address',
@@ -2419,6 +2423,7 @@ const ES: Record<string, string> = {
   'flow.s2': 'Trabajo',
   'flow.s3': 'Cliente',
   'flow.s4': 'Redacción',
+  'flow.s5': 'Revisar',
   'assign.title': '¿De qué trabajo es esto?',
   'assign.sub': 'Guardado seguro en este teléfono. Un cambio pertenece a un trabajo — elige uno o créalo.',
   'assign.search': 'Busca trabajo o dirección',

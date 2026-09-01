@@ -105,6 +105,9 @@ export type RecordLifecycle = {
 };
 
 export type RecordScreenProps = {
+  /** Arrived here from the capture flow, so the DRAFT screen draws the progress rail.
+   *  Passed straight through: this screen decides nothing about it and reads it once. */
+  inFlow?: boolean;
   /**
    * A COUNTER THAT MEANS "LAND ON THE CONVERSATION" (2026-08-25). Bumped by App when a
    * client-message push is tapped, so the record opens with the message sheet already
@@ -260,6 +263,7 @@ export function RecordScreen(props: RecordScreenProps) {
       return (
         <ExtraDraftScreen
           rec={rec}
+          inFlow={props.inFlow}
           kind={lifecycle.kind}
           // No extra is numbered within its job anywhere in this build, so the
           // kicker carries kind + job only. A number invented here would be the

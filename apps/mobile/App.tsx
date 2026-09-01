@@ -1657,7 +1657,21 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
 
 /** Close the record overlay and drop every layer loaded with it. One function so
  *  a new layer cannot be cleared on one exit path and leak on the other. */
+/**
+ * The change order the capture flow just produced, if the contractor is still looking
+ * at it. Nothing but the progress rail depends on it.
+ *
+ * IT IS AN ID, NOT A BOOLEAN, and that is the whole point: a flag would still be true
+ * when he closed this record and opened an unrelated draft, and he would be shown "step
+ * 5 of 5" on a change order he made last week. Comparing ids means the rail is right by
+ * construction rather than by remembering to clear it.
+ */
+const [flowRecordId, setFlowRecordId] = React.useState<string | null>(null);
+
 const closeRecord = () => {
+  // Leaving the record ends the journey. Coming back to it later is not a continuation
+  // of anything, so the rail must not survive the exit.
+  setFlowRecordId(null);
   recordIdRef.current = null;
   setRecord(null); setApproval(null); setRecordLc(null); setRecordTimeline([]);
   setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
@@ -3815,7 +3829,11 @@ const checkClientMessages = async () => {
                 title: T('proc.readyTitle'),
                 detail: T('proc.readyBody'),
                 okLabel: T('common.ok'),
-                then: () => { void openRecord(h.coId); },
+                // ONLY THE 'new' BRANCH MARKS THE FLOW. A generate or an augment lands
+                // on this same screen, but the contractor was editing an extra that
+                // already existed — telling him he is on step 5 of making one would be
+                // a rail describing a journey he never started.
+                then: () => { setFlowRecordId(h.coId); void openRecord(h.coId); },
               });
             }
           }
@@ -9118,6 +9136,9 @@ const checkClientMessages = async () => {
       {clientSheet}
       {sheets}
       <RecordScreen
+        /* Step 5 of 5, and only on the record the flow just made. Compared by id so the
+           rail cannot outlive the journey — see `flowRecordId`. */
+        inFlow={!!record && record.id === flowRecordId}
         openMessages={openMessagesNonce}
         unreadMessages={record ? (unreadMsgs.get(record.id) ?? 0) : 0}
         /* Opening the conversation is seeing it. Without this the badge would still

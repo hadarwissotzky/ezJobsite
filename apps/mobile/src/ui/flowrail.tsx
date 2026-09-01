@@ -32,25 +32,35 @@ import { StyleSheet, Text, View } from 'react-native';
 import { t } from '../i18n';
 import { C, F } from './theme';
 
-/** Which of the four screens is on. 1 = recording, 4 = the write-up. */
-export type FlowStep = 1 | 2 | 3 | 4;
+/**
+ * Which of the five screens is on. 1 = recording, 5 = the review he sends from.
+ *
+ * IT USED TO STOP AT FOUR, and that was the whole defect (hadar, 2026-09-01: "the goal
+ * is to get the contractor to send a CO for approval"). The rail ran out at the write-up
+ * and the contractor was DROPPED on a record screen, where sending became a decision he
+ * had to make rather than the end of something he was already doing. A flow that stops
+ * one step short of its own purpose is a flow that produces unsent change orders.
+ */
+export type FlowStep = 1 | 2 | 3 | 4 | 5;
 
-const SEGMENTS = ['flow.s1', 'flow.s2', 'flow.s3', 'flow.s4'] as const;
+const SEGMENTS = ['flow.s1', 'flow.s2', 'flow.s3', 'flow.s4', 'flow.s5'] as const;
 
 export function FlowRail({ step, tone = 'light' }: {
   step: FlowStep;
   /** `dark` only changes the UPCOMING track, which is invisible on a dark page. */
   tone?: 'light' | 'dark';
 }) {
-  // Completed steps only — arriving at step 2 means one of four is behind you.
-  const pct = (step - 1) * 25;
+  // Completed steps only — arriving at step 2 means one of five is behind you. Rounded,
+  // because fifths are 20/40/60/80 and a contractor reading "80% done" on the screen he
+  // sends from is being told the truth in a way "4 of 5" does not manage.
+  const pct = Math.round(((step - 1) / SEGMENTS.length) * 100);
   const upcoming = tone === 'dark' ? '#3A3F3B' : '#E0DACE';
 
   return (
     <View>
       <View style={st.head}>
         <Text style={st.headT}>
-          {t({ k: 'flow.stepOf', p: { n: String(step), of: '4' } } as any)}
+          {t({ k: 'flow.stepOf', p: { n: String(step), of: String(SEGMENTS.length) } } as any)}
         </Text>
         {pct > 0 && (
           <Text style={st.headT}>{t({ k: 'flow.pctDone', p: { n: String(pct) } } as any)}</Text>

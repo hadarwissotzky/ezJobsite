@@ -46,6 +46,7 @@ import {
   type SendBlocker, type SendGate, type SendReadiness, type SendRecommendation,
 } from '../sendreadiness';
 import { canDelete, canSend, chipKey, displayStatus, stageOf } from '../extralifecycle';
+import { FlowRail } from './flowrail';
 import { canSendExtra } from '../extraprocstate';
 import { t } from '../i18n';
 import {
@@ -259,6 +260,21 @@ export type ExtraDraftProps = {
   /** The extra's number within its job, for the kicker ("Extra #4"). Null when the
    *  job does not number them — the kicker then carries kind + job only. */
   extraNo: number | null;
+  /**
+   * True when the contractor arrived here from the capture flow, rather than by opening
+   * an old draft from the records list.
+   *
+   * IT DRAWS THE RAIL AND NOTHING ELSE. The screen is identical either way — same gates,
+   * same cards, same Send button — because the difference is not what he can do here, it
+   * is whether he is in the middle of something. Arriving from the flow, this is step 5
+   * of 5 and the rail says so; arriving from the list, a progress rail would be a lie
+   * about a journey he is not on.
+   *
+   * hadar, 2026-09-01: "the goal is to get the contractor to send a CO for approval."
+   * The flow used to stop at the write-up and drop him here with no thread back to what
+   * he had been doing, which turned sending from the end of a task into a decision.
+   */
+  inFlow?: boolean;
   /** REQ-LC11's single readiness authority, computed by the caller from the same
    *  row this screen renders. Never recomputed here, and never second-guessed. */
   /**
@@ -511,6 +527,13 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             plain cards. The slab ends at the state banner and not lower, because on a
             draft the price is BELOW the scope (391) — the scope is content here, not
             header. */}
+        {/* THE RAIL, AND ONLY WHEN HE IS ON THE JOURNEY IT DESCRIBES. Above the header
+            slab rather than inside it: the slab says what this record IS, and the rail
+            says where he is in getting it sent — two different facts, and folding the
+            second into the first is how the header grew four bands the last time. */}
+        {props.inFlow && (
+          <View style={{ marginBottom: 16 }}><FlowRail step={5} /></View>
+        )}
         <View style={st.headerSlab}>
         {/**
           * THE HEADER, REORGANISED (hadar, 2026-08-24: "the title needs to be much
