@@ -460,7 +460,12 @@ const EN: Record<string, string> = {
   // Deleting an EMPTY jobsite (deleteproject.ts). Offered only when it holds
   // nothing; a job with history is archived instead, never deleted.
   'job.delete': 'Delete this job',
-  'job.delConfirm': 'Delete “{name}”? Nothing is saved in it.',
+  // DOES NOT CLAIM THE JOB IS EMPTY. The button appears when there are no change
+  // orders; the server refuses if ANY of twelve tables has a row, photos included. The
+  // old copy said "Nothing is saved in it" and was followed, on jobs holding captures,
+  // by "this job already has work saved in it" — the app contradicting itself across two
+  // consecutive dialogs. This promises only what is true and warns of the refusal.
+  'job.delConfirm': 'Delete “{name}”? This can’t be undone — and if any photo or change order was saved to it, it stays.',
   // Names the state, not the mechanism: he does not care which table stopped it,
   // only that this job has work in it and is therefore kept.
   'job.delNotEmpty': 'Cannot delete — this job already has work saved in it.',
@@ -2819,7 +2824,7 @@ const ES: Record<string, string> = {
   'job.which': '¿Cuál trabajo?',
   'job.new': 'Trabajo nuevo',
   'job.delete': 'Eliminar este trabajo',
-  'job.delConfirm': '¿Eliminar “{name}”? No hay nada guardado en él.',
+  'job.delConfirm': '¿Eliminar “{name}”? No se puede deshacer — y si tiene alguna foto u orden de cambio guardada, se queda.',
   'job.delNotEmpty': 'No se puede eliminar — este trabajo ya tiene trabajo guardado.',
   'job.delNotOwner': 'Solo el dueño de la empresa puede eliminar un trabajo.',
   'job.delOffline': 'Sin señal. El trabajo sigue aquí — inténtelo de nuevo con conexión.',

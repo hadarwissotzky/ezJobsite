@@ -10706,6 +10706,10 @@ const checkClientMessages = async () => {
       {jobCreatedEl}
         {discardSheet}
         {paywallEl}
+        {/* A SUCCESSFUL DELETE LANDS HERE, not on the job screen it was fired from —
+            `deleteJob` navigates away before it acknowledges, so the confirmation is
+            raised on one screen and must be drawn on this one. */}
+        {ackEl}
         {/* Header: title · new job (the ＋ opens the create-job screen, an early
             return, so it works from here). */}
         {/* NO ＋ HERE (hadar, 2026-08-12). Creating a job is still reachable — the
@@ -11317,6 +11321,19 @@ const checkClientMessages = async () => {
       {jobCreatedEl}
         {discardSheet}
       {paywallEl}
+      {/* WITHOUT THIS, DELETE IS A DEAD BUTTON (hadar, 2026-09-01: "i click on delete
+          this job but it doesn't delete the job").
+
+          `deleteJob` reports BOTH outcomes through `setAck` — the refusal and the
+          confirmation — and `ackEl` was mounted on five screens, none of them this one.
+          So the state flipped into a tree with nothing to draw it and the tap did
+          nothing visible, whether the server had refused or agreed. The comment above
+          the button says the worst case is "a button that then explains why it
+          declined"; it could not explain, because the explanation had nowhere to go.
+
+          Same omission as the drawer's Upgrade and Home's swipe-delete before it, on
+          the same screen-local-modal pattern: setting state is not mounting a view. */}
+      {ackEl}
       {/* Header: back · Job · bell (mockup 2026-07-23). Fixed above the scroll. */}
       {/* ── THE LETTERHEAD HEADER (design, 2026-08-11) ─────────────────────────
           It said "‹  Job  🔔". "Job" is the app telling the contractor which screen
