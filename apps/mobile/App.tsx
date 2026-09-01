@@ -52,6 +52,7 @@ import { HeldSendModal } from './src/ui/heldsendmodal';
 // What an empty list says. TRUE empties only — a filtered or searched list keeps its one
 // quiet line, because a drawing reading "nothing yet" over a filtered list is false.
 import { EmptyState } from './src/ui/emptystate';
+import { findAddressTwin } from './src/dupeaddress';
 // The developer flag (417). A build-time `__DEV__` cannot answer "who is holding the
 // phone", which is the case hadar has: replaying the intro on a release build.
 import { cachedDeveloper, refreshDeveloper } from './src/devflag';
@@ -7311,6 +7312,10 @@ const checkClientMessages = async () => {
   );
 
   if (newJob) {
+    // Computed once for the screen: the warning band and the Create button must never
+    // disagree about whether this address is already taken.
+    const dupeTwin = findAddressTwin(projects, newJob.address,
+      { lat: newJob.lat, lng: newJob.lng });
     return (
       /**
        * ── KEYBOARD (hadar, 2026-08-12: "cannot create new job — the keyboard is
@@ -7382,6 +7387,33 @@ const checkClientMessages = async () => {
           />
         </View>
 
+        {/* ALREADY GOT ONE? (hadar, 2026-08-31: "we should not allow the creation of
+            multiple jobsites with the same address.")
+
+            IT ANSWERS WHILE HE TYPES, not after he commits. A refusal fired by the
+            Create button is a wasted trip through a form; a line under the address is
+            the answer arriving where the question was asked, and it offers the thing
+            he probably wanted — the job that already exists.
+
+            IT WARNS AND OFFERS RATHER THAN REFUSING. Two units of a duplex, and the
+            same house remodelled again next year, are indistinguishable from a slip
+            of the finger to any comparison of addresses. A hard block makes those
+            impossible and tells the contractor the app knows his street better than
+            he does. So creating stays possible — but it can no longer happen by
+            accident, and the button now says what it is about to do. */}
+        {dupeTwin && (
+          <Pressable style={s.njDupe} accessibilityRole="button"
+            onPress={() => { setNewJob(null); setPicker(false);
+                             setProjectId(dupeTwin.id); setNav('project'); }}>
+            <Icon name="info" size={17} color="#8B5148" />
+            <View style={{ flex: 1 }}>
+              <Text style={s.njDupeT}>{T('job.dupeHere')}</Text>
+              <Text style={s.njDupeN} numberOfLines={1}>{dupeTwin.name}</Text>
+            </View>
+            <Text style={s.njDupeGo}>{T('job.dupeOpen')}</Text>
+          </Pressable>
+        )}
+
         {/* WHY THE ADDRESS MATTERS, in the terms it matters to him: it is what makes
             a capture file itself later. Stated as the consequence, not as a rule. */}
         <View style={s.njNote}>
@@ -7423,7 +7455,10 @@ const checkClientMessages = async () => {
               // offers the first change order, and both of its buttons land on the job.
               setJobCreated({ id: r.id });
             }}>
-            <Text style={s.njCreateT}>{T('job.create')}</Text>
+            {/* THE LABEL CHANGES WHEN THIS WOULD MAKE A SECOND JOB AT ONE ADDRESS.
+                A button that reads the same whether or not it is about to duplicate
+                is the button that made the duplicate. */}
+            <Text style={s.njCreateT}>{dupeTwin ? T('job.createAnyway') : T('job.create')}</Text>
           </Pressable>
           <Pressable style={s.njCancel} onPress={() => setNewJob(null)}>
             <Text style={s.njCancelT}>{T('common.cancel')}</Text>
@@ -13667,6 +13702,13 @@ const s = StyleSheet.create({
     color: '#3d4a38' },
   // The commit sits at the BOTTOM of the screen, where the thumb already is, rather
   // than immediately under the last field where it competes with the keyboard.
+  njDupe: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12,
+    paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, borderWidth: 1,
+    borderColor: '#E4CFC9', backgroundColor: '#FBF1EE' },
+  njDupeT: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#8B5148' },
+  njDupeN: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#6b625b', marginTop: 1 },
+  njDupeGo: { fontFamily: 'Inter_700Bold', fontSize: 13.5, color: '#8B5148',
+    textDecorationLine: 'underline' },
   njFoot: { paddingBottom: 10 },
   njCreate: { minHeight: 54, borderRadius: 8, backgroundColor: '#2F4F2A',
     alignItems: 'center', justifyContent: 'center' },
