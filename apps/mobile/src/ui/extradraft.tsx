@@ -446,9 +446,28 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
    * Both were me re-deriving a rule that already existed twenty lines away.
    */
   const scopeWritten = !props.readiness.blockers.includes('no_description');
-  /** The write-up is owed — either still coming, or it ran and produced nothing. Both
-   *  are "the app has not done its part", and both offer Generate rather than Send. */
-  const needsGenerate = isDraft && (notProcessed || !scopeWritten);
+  /**
+   * GENERATE IS OFFERED WHEN THERE IS NO WRITE-UP. Not when the PIPELINE is unfinished.
+   *
+   * hadar, 2026-09-01: "i have updated the scope of work manually (edited it) but i
+   * still see generate the change order message, even though the scope of work is
+   * populated with whatever I've written."
+   *
+   * This used to read `notProcessed || !scopeWritten`, so a contractor who typed his own
+   * scope was still told to generate one — and pressing it would have run the AI over
+   * his words and replaced them. The rule it came from (hadar, 2026-08-06: "if the draft
+   * was not processed, hide send and ask to generate") was written for a draft with NO
+   * write-up, where generating is the only sensible act. Once he has written it himself
+   * that premise is gone: the app's part is done, by him.
+   *
+   * TWO DIFFERENT QUESTIONS, AND THEY WERE FUSED. "Is there a write-up?" decides which
+   * BUTTON this is. "Has the evidence left the phone?" decides whether that button may
+   * SEND — and it is still enforced, by `canSendNow` through `canSendExtra(proc)`, which
+   * mandate #1 requires and this does not touch. So a written-up draft whose recording
+   * is still uploading now shows Send, refused, with the pipeline reason on its second
+   * line — the honest state — instead of a Generate button that would overwrite him.
+   */
+  const needsGenerate = isDraft && !scopeWritten;
   /**
    * IS THE EVIDENCE EVEN ON THIS PHONE?
    *
