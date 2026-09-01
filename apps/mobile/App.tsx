@@ -98,7 +98,7 @@ import { AddressInput } from './src/ui/addressinput';
 import { FlowRail } from './src/ui/flowrail';
 import { syncLine, syncState } from './src/syncstate';
 import { OfflineBar } from './src/ui/offlinebar';
-import { deleteEmptyProject, deleteRefusalKey } from './src/deleteproject';
+import { deleteEmptyProject, deleteHoldsKey, deleteRefusalKey } from './src/deleteproject';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { PhotoLightbox, RecordScreen, scheduleSentence, billingSentence,
          type RecordLifecycle } from './src/ui/recordscreen';
@@ -8481,7 +8481,12 @@ const checkClientMessages = async () => {
       void refresh();
       return;
     }
-    setAck({ kind: 'no', title: T(deleteRefusalKey(r) as any) });
+    // NAME WHAT IS BLOCKING IT. "Already has work saved in it" is true and useless —
+    // it sent hadar looking for change orders that were never there, when the answer
+    // was photos.
+    const holds = deleteHoldsKey(r);
+    setAck({ kind: 'no', title: T(deleteRefusalKey(r) as any),
+             detail: holds ? T(holds as any) : undefined });
   };
 
   const saveScope = async (changeOrderId: string, text: string) => {

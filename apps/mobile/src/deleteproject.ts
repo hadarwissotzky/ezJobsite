@@ -68,6 +68,37 @@ export async function deleteEmptyProject(
   }
 }
 
+/**
+ * WHAT is holding the jobsite, in words, or null when the refusal was not about content.
+ *
+ * `holds` has carried the blocking table name since this was written, with a comment
+ * promising "so the message can be specific" — and nothing ever read it. The refusal
+ * said only "this job already has work saved in it", which hadar read, reasonably, as
+ * "it thinks they have CO in them that is not the case" (2026-09-01). He was right that
+ * they have no change orders. They hold PHOTOS, and the message never said so, so the
+ * app looked wrong when it was being careful.
+ *
+ * Grouped rather than one phrase per table: `capture`, `attachment`, `capture_op_state`
+ * and `capture_pair` are four tables describing one thing a person recognises, and
+ * naming the table would answer a question nobody asked.
+ */
+const HOLDS_PHRASE: Record<string, string> = {
+  change_order: 'job.holdsCo',
+  capture: 'job.holdsMedia', attachment: 'job.holdsMedia',
+  capture_op_state: 'job.holdsMedia', capture_pair: 'job.holdsMedia',
+  decision: 'job.holdsDecision',
+  approval: 'job.holdsApproval', confirmation_request: 'job.holdsApproval',
+  extra_work_authorization: 'job.holdsEwa',
+  co_comment: 'job.holdsComment',
+  scope_boundary: 'job.holdsScope',
+  processing_job: 'job.holdsProcessing',
+};
+
+export function deleteHoldsKey(r: Extract<DeleteProjectResult, { ok: false }>): string | null {
+  if (r.reason !== 'not_empty') return null;
+  return HOLDS_PHRASE[r.holds] ?? null;
+}
+
 /** Which i18n key explains a refusal. Kept beside the result type so a new reason
  *  cannot be added without a sentence to show for it. */
 export function deleteRefusalKey(r: Extract<DeleteProjectResult, { ok: false }>): string {
