@@ -475,6 +475,11 @@ const EN: Record<string, string> = {
   // destructive tap is never made against a half-remembered figure.
   'job.delWithMediaAsk': '“{name}” has {n} photos or recordings saved to it. Deleting the job deletes them too.',
   'job.delMediaTitle': 'Permanently delete {n} photos?',
+  // The same warning when the phone does not know HOW MANY. `capture_commit` is
+  // local-only, so a capture from another device is invisible to it — the server
+  // still refuses, and this is the second chance offered on its word rather than ours.
+  'job.delMediaTitleSome': 'Delete the photos too?',
+  'job.delMediaGoSome': 'Delete job and photos',
   'job.delMediaWarn': 'This cannot be undone. They are not recoverable from the app or from support.',
   'job.delMediaGo': 'Delete job and {n} photos',
   'job.delMediaGone': '{n} photos were deleted with it.',
@@ -2847,6 +2852,8 @@ const ES: Record<string, string> = {
   'job.delNotEmpty': 'No se puede eliminar — este trabajo ya tiene trabajo guardado.',
   'job.delWithMediaAsk': '«{name}» tiene {n} fotos o grabaciones guardadas. Si elimina el trabajo, también se eliminan.',
   'job.delMediaTitle': '¿Eliminar {n} fotos para siempre?',
+  'job.delMediaTitleSome': '¿Eliminar también las fotos?',
+  'job.delMediaGoSome': 'Eliminar trabajo y fotos',
   'job.delMediaWarn': 'No se puede deshacer. No se pueden recuperar desde la app ni con soporte.',
   'job.delMediaGo': 'Eliminar trabajo y {n} fotos',
   'job.delMediaGone': 'Se eliminaron {n} fotos con él.',

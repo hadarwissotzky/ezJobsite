@@ -8525,15 +8525,62 @@ const checkClientMessages = async () => {
     void caps;
   };
 
-  /** The confirmation chain for Delete. One step when nothing is lost, two when
-   *  photographs are — the extra tap appears only when there is something to lose. */
+  /**
+   * Try the harmless delete, and OFFER the destructive one only if the server says the
+   * job is not empty.
+   *
+   * THIS EXISTS BECAUSE THE LOCAL COUNT LIES BY OMISSION (hadar, 2026-09-01: "i deleted
+   * SFO and it is still there"). `capture_commit` is created by raw DDL and never
+   * synced — it is the ledger of captures THIS PHONE made. A capture taken on another
+   * device, or before a local wipe, is on the server and absent from it. SFO's three
+   * photos were exactly that, so `localCaptureCount` returned 0, the chain took the
+   * empty path, and the server refused a jobsite the app had just promised was empty.
+   *
+   * So the routing decision moved to where the truth is. `deleteEmptyProject` is safe
+   * to attempt blind: it deletes ONLY a genuinely empty jobsite and otherwise changes
+   * nothing, so using it as the question costs a round trip and risks nothing.
+   */
+  const tryEmptyThenOfferMedia = async (projectId: string, name: string) => {
+    const r = await deleteEmptyProject(db, connector.client, projectId);
+    if (r.ok) {
+      setNav('jobs');
+      setProjectId(INBOX_ID);
+      setProjects(await listProjects(db));
+      setAck({ kind: 'ok', title: T({ k: 'job.deleted', p: { name } } as any) });
+      void refresh();
+      return;
+    }
+    if (r.reason === 'not_empty') {
+      // The server knows WHAT is on it but does not send back a count, so this warning
+      // names the thing without a number. A commitment is not offered a second chance
+      // here — `delete_project_with_media_v1` refuses those, and this only ever reaches
+      // a jobsite whose blocker was media.
+      Alert.alert(
+        T('job.delMediaTitleSome'), T('job.delMediaWarn'),
+        [
+          { text: T('common.cancel'), style: 'cancel' },
+          { text: T('job.delMediaGoSome'), style: 'destructive',
+            onPress: () => { void deleteJobWithMedia(projectId, name, 0); } },
+        ],
+      );
+      return;
+    }
+    const holds = deleteHoldsKey(r);
+    setAck({ kind: 'no', title: T(deleteRefusalKey(r) as any),
+             detail: holds ? T(holds as any) : undefined });
+  };
+
+  /** The confirmation chain for Delete. The local count is a HINT that lets the warning
+   *  carry a real number when this phone happens to know it; when it does not, the
+   *  server is asked instead of guessed. Either way nothing is destroyed without a
+   *  second, deliberate tap. */
   const askDeleteJob = async (projectId: string, name: string) => {
     const caps = await localCaptureCount(db, projectId);
     if (caps === 0) {
       Alert.alert(T('job.delete'), T({ k: 'job.delConfirm', p: { name } } as any), [
         { text: T('common.cancel'), style: 'cancel' },
         { text: T('job.delete'), style: 'destructive',
-          onPress: () => { void deleteJob(projectId, name); } },
+          onPress: () => { void tryEmptyThenOfferMedia(projectId, name); } },
       ]);
       return;
     }
