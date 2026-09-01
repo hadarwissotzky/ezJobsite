@@ -38,6 +38,12 @@ on:
       - 'website/**'
       - 'apps/web/confirm.html'
       - 'apps/web/ewa.js'
+      # WITHOUT THIS LINE THE PURCHASE PAGE NEVER REDEPLOYS. It is named in the build,
+      # the half-site guard and the 200-check, so it would ship once — on some unrelated
+      # push that happened to touch `website/` — and then silently stop tracking the
+      # file. A page that takes money is the worst one to leave frozen at whatever it
+      # was the last time something else changed.
+      - 'apps/web/buy.html'
       - '.github/workflows/deploy-confirm-page.yml'
   workflow_dispatch:
 
