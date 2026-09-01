@@ -10724,22 +10724,18 @@ const shortJob = (name: string): string => {
             <Text style={s.jlNewT}>{T('job.new')}</Text>
           </Pressable>
 
-          {/* REQ-PM4 — Active vs Archived. Archived jobs are retained, out of the way.
-              TWO EQUAL HALVES, not two pills sized by their own words: they are the
-              two states of one switch, and unequal widths read as one button plus an
-              afterthought. */}
-          <View style={s.jlSeg}>
-            <Pressable hitSlop={6} onPress={() => setJobsArchived(false)}
-              accessibilityRole="button" accessibilityState={{ selected: !jobsArchived }}
-              style={[s.jlSegB, !jobsArchived && s.jlSegBOn]}>
-              <Text style={[s.jlSegT, !jobsArchived && s.jlSegTOn]}>{T('pm4.activeJobs')}</Text>
-            </Pressable>
-            <Pressable hitSlop={6} onPress={async () => { setJobsArchived(true); await loadArchived(); }}
-              accessibilityRole="button" accessibilityState={{ selected: jobsArchived }}
-              style={[s.jlSegB, jobsArchived && s.jlSegBOn]}>
-              <Text style={[s.jlSegT, jobsArchived && s.jlSegTOn]}>{T('pm4.archived')}</Text>
-            </Pressable>
-          </View>
+          {/* THE ACTIVE/ARCHIVED PAIR IS NOT HERE ANY MORE (hadar, 2026-08-31: "i would
+              like to remove the active and archived filter"). It sat at the top
+              competing with the state filter below it, and the overwhelming majority
+              of openings want the active list — which it made you re-read every time.
+
+              IT IS MOVED, NOT DELETED, and the difference matters: this control is the
+              ONLY door to an archived job, and the un-archive button lives inside that
+              view. Deleting it outright would strand every archived job with no way
+              back — silently, since they would simply stop existing on screen. It is
+              now one plain line at the FOOT of the list, where a rare escape hatch
+              belongs. Say the word and archiving goes entirely, but that is a bigger
+              decision than moving a control. */}
 
           {/* ── FILTER BY STATE (design, 2026-08-31) ──────────────────────────
               The only filter this list had was by COLOUR LABEL, which answers a
@@ -10918,6 +10914,19 @@ const shortJob = (name: string): string => {
               : <EmptyState
                   title={T('home.emptyJobsTitle')} body={T('home.emptyJobsBody')} />
           )}
+          {/* The archived list's only entrance, and its only exit. A plain line, not a
+              pill: it must be findable, and it must not look like the state filters
+              above, which is exactly the confusion that got the old pair removed. */}
+          <Pressable hitSlop={8} style={s.jlArch}
+            accessibilityRole="button"
+            onPress={async () => {
+              if (jobsArchived) { setJobsArchived(false); return; }
+              setJobsArchived(true); await loadArchived();
+            }}>
+            <Text style={s.jlArchT}>
+              {jobsArchived ? T('pm4.activeJobs') : T('pm4.archived')}
+            </Text>
+          </Pressable>
         </ScrollView>
         {bottomNav('jobs', false)}
         {drawerEl}
@@ -11872,15 +11881,15 @@ const shortJob = (name: string): string => {
                      label: T('job.statClosed'), n: jobClosed.length }]
                 : []),
             ] as const).map((st) => (
-              // NOT PRESSABLE ANY MORE (hadar, 2026-08-31: "what is all, gray? filters??").
-              // These tiles filtered, and so did the pills six lines down — one filter,
-              // two controls, two different names for each bucket ("Needs approval" up
-              // here, "Needs you" down there). Asked what the grey row was, the honest
-              // answer was "the same thing you already tapped", which is the answer that
-              // means one of them should not exist. The Jobs list already resolves this:
-              // numbers report, pills filter. This screen now reads the same way.
-              <View key={st.k} style={s.jsStat}
-                accessibilityLabel={`${st.label}: ${st.n}`}>
+              // THE TILE IS THE FILTER, and the only one on this screen. It briefly was
+              // not — I made these inert and kept the pills, which fixed the duplication
+              // the wrong way round: it left the bare words and threw away the counts.
+              // Tap to narrow, tap again to clear.
+              <Pressable key={st.k} style={[s.jsStat, jobFx === st.k && s.jsStatOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: jobFx === st.k }}
+                accessibilityLabel={`${st.label}: ${st.n}`}
+                onPress={() => setJobFilter(jobFx === st.k ? null : st.k)}>
                 {/* ICON ON ITS OWN LINE. Beside the words it left ~70pt for a
                     two-word label in three columns on a 13 mini, and every card
                     truncated: "Needs appro…", "Awaitin g resp…", "Approv ed". A
@@ -11900,7 +11909,7 @@ const shortJob = (name: string): string => {
                   <Text style={s.jsStatLab} numberOfLines={2}>{st.label}</Text>
                 </View>
                 <Text style={s.jsStatN}>{st.n}</Text>
-              </View>
+              </Pressable>
             ))}
           </View>
 
@@ -11929,43 +11938,19 @@ const shortJob = (name: string): string => {
           </View>
 
           <Text style={s.jsH2}>{T('job.changeOrders')}</Text>
-          {/* ALL is a real option, and it is the default. The old pills could only be
-              toggled on and off, so "show me everything" was expressed by having
-              nothing selected — a state with no control of its own. */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.jsPills}>
-            {/* THE SAME ROW THE JOBS LIST CARRIES — same icons, same colours, same
-                words as the tiles above. The labels used to be a second vocabulary
-                ("Needs you" for the tiles' "Needs approval"), so the screen named
-                every bucket twice and agreed with itself nowhere.
+          {/* THE PILL ROW IS GONE (hadar, 2026-08-31: "all and gray filters are still
+              in the jobs page"). He asked what it was twice, and on THIS screen the
+              honest answer was worse than on the Jobs list: the tiles directly above
+              already carry the same four buckets, the same icons and the same counts,
+              so the pills were the same information a second time in a weaker form —
+              the words without the numbers.
 
-                CLOSED ONLY WHILE SOMETHING IS CLOSED, matching the fourth tile: a
-                permanent Closed pill on a clean job offers a filter that can only
-                ever return nothing. */}
-            {([
-              { k: null,       label: T('job.pillAll'),      icon: null,                tint: '#3f423e' },
-              { k: 'needs',    label: T('job.statNeeds'),    icon: 'person' as const,   tint: '#C2610C' },
-              { k: 'waiting',  label: T('job.pillWaiting'),  icon: 'clock' as const,    tint: '#2E5AA8' },
-              { k: 'approved', label: T('job.statApproved'), icon: 'approved' as const, tint: '#2F5233' },
-              ...(jobClosed.length
-                ? [{ k: 'closed' as const, label: T('job.statClosed'),
-                     icon: 'clock' as const, tint: '#6B7280' }]
-                : []),
-            ] as const).map((f) => {
-              const on = jobFx === f.k;
-              return (
-                <Pressable key={String(f.k)} hitSlop={4}
-                  style={[s.jsPill, on && s.jsPillOn]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                  onPress={() => setJobFilter(f.k as any)}>
-                  {f.icon && <Icon name={f.icon} size={15} color={on ? '#fff' : f.tint} />}
-                  <Text style={[s.jsPillT, on && s.jsPillTOn]}>{f.label}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
+              THE TILES FILTER AGAIN, which is where this started: one control, not
+              two. Tap a tile to narrow the list, tap it again for everything. The
+              cost is that "show me all" has no control of its own — a real loss, and
+              the reason the pills were added in the first place — but it buys a
+              screen with one filter on it instead of two that disagreed about what
+              each bucket was called. */}
           {/* ── ONE FLAT LIST OF RICH CARDS ────────────────────────────────────
               The grouped Waiting / Needs you / Approved sections are gone. They
               answered the same question the three counts above now answer, and they
@@ -13542,13 +13527,9 @@ const s = StyleSheet.create({
   // types past the edge of the box.
   jlSearchIn: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 15.5, color: '#151A1E',
     paddingVertical: 12 },
-  jlSeg: { flexDirection: 'row', gap: 10, marginTop: 12 },
-  // flex:1 is what makes the two halves equal; minHeight clears mandate #3's 48pt.
-  jlSegB: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center',
-    borderRadius: 24, borderWidth: 1, borderColor: '#D5D0C7', backgroundColor: '#fff' },
-  jlSegBOn: { backgroundColor: '#151A1E', borderColor: '#151A1E' },
-  jlSegT: { fontFamily: 'Barlow_600SemiBold', fontSize: 15, color: '#5E666E' },
-  jlSegTOn: { color: '#fff' },
+  jlArch: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
+  jlArchT: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: '#5E666E',
+    textDecorationLine: 'underline' },
   jlSF: { flexDirection: 'row', gap: 8, paddingVertical: 12, paddingRight: 12 },
   jlSFB: { flexDirection: 'row', alignItems: 'center', gap: 7, minHeight: 40,
     paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: '#D6D2C7',
@@ -13722,6 +13703,7 @@ const s = StyleSheet.create({
   jsStat: { flex: 1, backgroundColor: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#DEDBD3', borderRadius: 8, paddingHorizontal: 11, paddingVertical: 10,
     minHeight: 71, justifyContent: 'space-between' },
+  jsStatOn: { borderWidth: 1.5, borderColor: '#2F5233' },
   jsStatTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   jsStatLab: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 10.5, lineHeight: 13,
     color: '#3f423e', height: 26 },
@@ -13745,34 +13727,6 @@ const s = StyleSheet.create({
 
   jsH2: { fontFamily: 'Inter_700Bold', fontSize: 21, color: '#131110', marginTop: 16,
     letterSpacing: -0.4 },
-
-  // Pills: unselected are TRANSPARENT with a hairline — the design has no white
-  // chips on the cream. Selected is the dark green.
-  jsPills: { flexDirection: 'row', gap: 7, paddingVertical: 10, paddingRight: 12 },
-  /**
-   * HOME'S COPY OF THE PILL ROW, and it exists for one reason: the two screens pad
-   * differently.
-   *
-   * The job screen's outer ScrollView carries `paddingHorizontal: 12`, so `jsPills`
-   * needs no left padding of its own and looks right. Home's outer ScrollView has NONE —
-   * every card there supplies its own `marginHorizontal: 16` — so the same style put the
-   * row flush against x=0 and clipped the rounded corner off the selected pill
-   * (hadar, 2026-08-18, screenshot).
-   *
-   * 16 to match `ctaCard`/`exList`, which is the card directly above and below it; that
-   * is the edge the eye actually checks alignment against.
-   *
-   * PADDING ON THE CONTENT, NOT THE SCROLLVIEW, deliberately: the row stays full-bleed so
-   * pills scroll out under the screen edge instead of being clipped inside a padded box.
-   * Adding `paddingHorizontal` to `jsPills` itself would have fixed Home and shifted the
-   * job screen by 12pt at the same time.
-   */
-  jsPill: { flexDirection: 'row', alignItems: 'center', gap: 7,
-    minHeight: 40, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 999,
-    borderWidth: 1, borderColor: '#D6D2C7', backgroundColor: '#fff' },
-  jsPillOn: { backgroundColor: '#2F4F2A', borderColor: '#2F4F2A' },
-  jsPillT: { fontFamily: 'Inter_500Medium', fontSize: 13.5, color: '#3f423e' },
-  jsPillTOn: { color: '#FFFFFF', fontFamily: 'Inter_600SemiBold' },
 
   // ── the record row's type scale (hadar 2026-08-13: "increase the gaps between
   // lines and increase the font of the smaller letters") ──────────────────────────
