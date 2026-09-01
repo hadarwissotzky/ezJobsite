@@ -11855,7 +11855,25 @@ const checkClientMessages = async () => {
           The money at a glance. Where the pipeline USED to dump an unstyled list,
           this is the contractor's answer to "where do I stand on this job?": what's
           approved, what's still out, and the notation status of each one. */}
-      {coRows.length > 0 && (() => {
+      {/* NO `coRows.length > 0` GATE ANY MORE (hadar, 2026-09-01: "this is what I
+          expect for the job even when empty but I get a completely empty screen when
+          there are no co. the header is missing sections").
+
+          THE WHOLE SCREEN BELOW THE HERO WAS BEHIND THAT ONE CONDITION — the counts,
+          the money, the "Change orders" heading and the list. So a jobsite with no
+          change order rendered its hero and then nothing at all: not an empty state, a
+          void. A screen that vanishes reads as a screen that failed to load.
+
+          IT ALSO SWALLOWED THE FIX I SHIPPED THIS MORNING. I put the illustrated empty
+          state inside the card list, which is inside this block — so the one case it
+          existed for was the exact case that could not reach it. It has never rendered
+          once. That is what a gate this high up does: it hides the handling of the
+          state it triggers on.
+
+          Everything here is safe at zero: both totals `reduce` from 0, the tiles show
+          their own counts, the Closed tile is already conditional, and the banner
+          returns null with nothing flagged. */}
+      {(() => {
         const approved = coRows.filter((c) => c.status === 'approved');
         const awaiting = coRows.filter((c) => c.status === 'sent');
         // DERIVED HERE from raw cents, in one place. Summing formatted "$1,850"
