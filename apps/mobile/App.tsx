@@ -98,8 +98,8 @@ import { AddressInput } from './src/ui/addressinput';
 import { FlowRail } from './src/ui/flowrail';
 import { syncLine, syncState } from './src/syncstate';
 import { OfflineBar } from './src/ui/offlinebar';
-import { deleteEmptyProject, deleteHoldsKey, deleteProjectWithMedia,
-         deleteRefusalKey, localCaptureCount } from './src/deleteproject';
+import { deleteEmptyProject, deleteHoldsKey, deleteRefusalKey,
+         localCaptureCount, purgeProject, purgeRefusalKey } from './src/deleteproject';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { PhotoLightbox, RecordScreen, scheduleSentence, billingSentence,
          type RecordLifecycle } from './src/ui/recordscreen';
@@ -8503,18 +8503,30 @@ const checkClientMessages = async () => {
    * THE COUNT IS SHOWN BEFORE THE DEED, from the local ledger so it works with no
    * signal, and the second tap is asked for separately. That sequence IS the exception:
    * take the number away and this is just deletion with extra words.
+   *
+   * IT GOES THROUGH `purgeProject` NOW, NOT `deleteProjectWithMedia`. The latter could
+   * never have worked: `capture` carries an unconditional append-only trigger and
+   * SECURITY DEFINER does not exempt a trigger, so every call threw. sql/437 opens one
+   * audited door — a NOLOGIN role owning one function — and this is the only caller.
+   * The reason string is what lands in the purge ledger beside the actor and the
+   * capture ids, so it says where the request came from rather than "user request".
    */
   const deleteJobWithMedia = async (projectId: string, name: string, caps: number) => {
-    const r = await deleteProjectWithMedia(db, connector.client, projectId);
+    const r = await purgeProject(db, connector.client, projectId,
+                                 `owner deleted the jobsite from the app (${caps || 'unknown'} photos shown)`);
     if (r.ok) {
       setNav('jobs');
       setProjectId(INBOX_ID);
       setProjects(await listProjects(db));
       // THE SERVER'S COUNT, not the local one: it reports what it actually destroyed,
       // and a capture from another device that never reached this phone is still gone.
+      // `keysLeft` is said out loud rather than swallowed — the rows are gone either way,
+      // but bytes left in the bucket are a fact the person who asked for this should have.
       setAck({ kind: 'ok', title: T({ k: 'job.deleted', p: { name } } as any),
-               detail: r.captures > 0
-                 ? T({ k: 'job.delMediaGone', p: { n: r.captures } } as any) : undefined });
+               detail: r.keysLeft > 0
+                 ? T({ k: 'job.purgeKeysLeft', p: { n: r.keysLeft } } as any)
+                 : r.captures > 0
+                   ? T({ k: 'job.delMediaGone', p: { n: r.captures } } as any) : undefined });
       void refresh();
       return;
     }
@@ -8522,9 +8534,8 @@ const checkClientMessages = async () => {
       setAck({ kind: 'no', title: T('job.delNotEmpty'), detail: T('job.holdsCo') });
       return;
     }
-    setAck({ kind: 'no', title: T(deleteRefusalKey(r) as any),
+    setAck({ kind: 'no', title: T(purgeRefusalKey(r) as any),
              detail: 'detail' in r && r.detail ? r.detail : undefined });
-    void caps;
   };
 
   /**

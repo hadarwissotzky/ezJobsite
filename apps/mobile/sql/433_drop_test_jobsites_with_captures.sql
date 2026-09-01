@@ -1,3 +1,16 @@
+-- ############################################################################
+-- SUPERSEDED 2026-09-01 — DO NOT RUN. IT CANNOT SUCCEED.
+--
+-- This file deletes from `capture`, which carries an unconditional append-only trigger
+-- (`capture_is_immutable`). Every DELETE on that table raises. Nothing in this file can
+-- commit; it will abort exactly as it stands, and the transaction wrapper is the only
+-- reason a partial run is not possible.
+--
+-- The working route is sql/437_evidence_purge.sql, which opens ONE audited exception
+-- fenced on a NOLOGIN role and writes a permanent ledger row before destroying anything.
+-- Use `purge_project_v1`, or the app's Delete button, which now calls it.
+-- ############################################################################
+
 -- 433 — Delete four test jobsites AND the captures inside them.
 --
 -- ⚠️ THIS DESTROYS EVIDENCE ON PURPOSE. Every other delete path in this product refuses

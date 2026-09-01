@@ -483,6 +483,10 @@ const EN: Record<string, string> = {
   'job.delMediaWarn': 'This cannot be undone. They are not recoverable from the app or from support.',
   'job.delMediaGo': 'Delete job and {n} photos',
   'job.delMediaGone': '{n} photos were deleted with it.',
+  // Said out loud rather than swallowed: the rows are gone either way, but bytes left
+  // in the bucket are a fact the person who asked for the delete should have.
+  'job.purgeKeysLeft': 'Deleted, but {n} files could not be removed from storage. They are recorded in the purge log.',
+  'job.purgeNoReason': 'Could not delete — the app did not record a reason. This is a bug, not something you did.',
   'common.continue': 'Continue',
   // Each names the thing a PERSON would look for, not the table it lives in.
   'job.holdsCo': 'It holds change orders.',
@@ -2857,6 +2861,8 @@ const ES: Record<string, string> = {
   'job.delMediaWarn': 'No se puede deshacer. No se pueden recuperar desde la app ni con soporte.',
   'job.delMediaGo': 'Eliminar trabajo y {n} fotos',
   'job.delMediaGone': 'Se eliminaron {n} fotos con él.',
+  'job.purgeKeysLeft': 'Eliminado, pero {n} archivos no se pudieron borrar del almacenamiento. Quedan registrados en el historial de purga.',
+  'job.purgeNoReason': 'No se pudo eliminar — la app no registró un motivo. Es un error nuestro, no algo que usted hizo.',
   'common.continue': 'Continuar',
   'job.holdsCo': 'Tiene órdenes de cambio.',
   'job.holdsMedia': 'Tiene fotos o grabaciones.',

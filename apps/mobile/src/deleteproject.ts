@@ -45,48 +45,84 @@ export async function localCaptureCount(
   } catch { return 0; }
 }
 
-export type DeleteWithMediaResult =
-  | { ok: true; already?: boolean; captures: number }
-  /** A priced commitment stopped it. These are never deletable, by any route. */
+const BUCKET = 'captures';
+
+export type PurgeResult =
+  | { ok: true; already?: boolean; captures: number; bytes: number; keysLeft: number }
+  /** A priced commitment stopped it. Not purgeable by any route in the database. */
   | { ok: false; reason: 'has_commitment'; holds: string }
-  | { ok: false; reason: 'not_owner' | 'not_signed_in' | 'offline' | 'failed'; detail?: string };
+  | { ok: false; reason: 'not_owner' | 'not_signed_in' | 'no_reason' | 'offline' | 'failed'; detail?: string };
 
 /**
- * Delete a jobsite AND its captures.
+ * Destroy a jobsite and every capture on it, through the one audited door.
  *
- * SEPARATE FROM `deleteEmptyProject`, deliberately, rather than a flag on it. One of
- * these destroys nothing and the other destroys photographs; a boolean argument would
- * put both behind one call site and make the destructive path reachable by passing the
- * wrong value. Two names cannot be confused at a glance.
+ * WHY THIS EXISTS WHEN `deleteProjectWithMedia` ALREADY DID NOT WORK. `capture` carries
+ * an unconditional append-only trigger, and eighteen sibling tables carry the same one
+ * in spirit. No function, however privileged, could delete a capture — SECURITY DEFINER
+ * does not exempt a trigger, which is the fact that cost an hour of failed attempts.
+ * sql/437 adds exactly one exception, fenced on a NOLOGIN role that owns exactly one
+ * function, and this calls it.
+ *
+ * THE REASON IS NOT DECORATION. The server refuses an empty one: a purge with nothing
+ * recorded about why is not auditable, and the ledger row is written before a single
+ * row is destroyed.
+ *
+ * STORAGE IS THE CALLER'S HALF, because SQL cannot reach the Storage API. The function
+ * hands back the object keys and this deletes the bytes. A failure there is REPORTED,
+ * never swallowed — `keysLeft` counts what is still in the bucket, and the ledger holds
+ * every key, so an orphaned byte is always traceable to the purge that stranded it.
  */
-export async function deleteProjectWithMedia(
+export async function purgeProject(
   db: AbstractPowerSyncDatabase,
   supabase: SupabaseClient,
   projectId: string,
-): Promise<DeleteWithMediaResult> {
+  reason: string,
+): Promise<PurgeResult> {
   try {
-    const { data, error } = await supabase.rpc('delete_project_with_media_v1', {
-      p_project_id: projectId,
+    const { data, error } = await supabase.rpc('purge_project_v1', {
+      p_project_id: projectId, p_reason: reason,
     });
     if (error) {
       const msg = String(error.message ?? '');
       if (/network|fetch|timeout|offline/i.test(msg)) return { ok: false, reason: 'offline' };
-      return { ok: false, reason: 'failed', detail: msg.slice(0, 160) };
+      return { ok: false, reason: 'failed', detail: msg.slice(0, 200) };
     }
     const r = data as any;
-    if (r?.ok) {
-      // Local rows too, and the same reasoning as the empty-delete path: waiting for a
-      // checkpoint means the contractor is told it worked and watches it sit there.
-      try { await db.execute(`DELETE FROM project WHERE id = ?`, [projectId]); } catch { /* sync will */ }
-      try { await db.execute(`DELETE FROM capture_commit WHERE project_id = ?`, [projectId]); } catch { /* best effort */ }
-      return { ok: true, already: r.already === true, captures: Number(r.captures ?? 0) };
+    if (!r?.ok) {
+      if (r?.reason === 'has_commitment') {
+        return { ok: false, reason: 'has_commitment', holds: String(r.holds ?? 'something') };
+      }
+      const k = r?.reason;
+      return { ok: false, reason: k === 'not_owner' ? 'not_owner'
+                        : k === 'no_reason' ? 'no_reason' : 'not_signed_in' };
     }
-    if (r?.reason === 'has_commitment') {
-      return { ok: false, reason: 'has_commitment', holds: String(r.holds ?? 'something') };
+
+    // The rows are gone and committed. EVERYTHING BELOW IS BEST-EFFORT cleanup of things
+    // that cannot roll back with them, so none of it may turn a successful purge into a
+    // reported failure.
+    const keys: string[] = Array.isArray(r.object_keys) ? r.object_keys : [];
+    let keysLeft = 0;
+    for (let i = 0; i < keys.length; i += 100) {
+      // `remove` caps at 100 keys per call — the exact shape that makes a sweep look
+      // complete while leaving the tail in the bucket.
+      const batch = keys.slice(i, i + 100);
+      const { error: rmErr } = await supabase.storage.from(BUCKET).remove(batch);
+      if (rmErr) keysLeft += batch.length;
     }
-    return { ok: false, reason: r?.reason === 'not_owner' ? 'not_owner' : 'not_signed_in' };
+    await dropLocalRows(db, projectId);
+
+    return { ok: true, already: r.already === true,
+             captures: Number(r.captures ?? 0), bytes: Number(r.bytes ?? 0), keysLeft };
   } catch (e: any) {
-    return { ok: false, reason: 'failed', detail: String(e?.message ?? e).slice(0, 160) };
+    return { ok: false, reason: 'failed', detail: String(e?.message ?? e).slice(0, 200) };
+  }
+}
+
+/** The device's own copies, so the screen agrees with the server before sync catches up. */
+async function dropLocalRows(db: AbstractPowerSyncDatabase, projectId: string): Promise<void> {
+  for (const sql of [`DELETE FROM project WHERE id = ?`,
+                     `DELETE FROM capture_commit WHERE project_id = ?`]) {
+    try { await db.execute(sql, [projectId]); } catch { /* sync reconciles */ }
   }
 }
 
@@ -164,6 +200,21 @@ const HOLDS_PHRASE: Record<string, string> = {
 export function deleteHoldsKey(r: Extract<DeleteProjectResult, { ok: false }>): string | null {
   if (r.reason !== 'not_empty') return null;
   return HOLDS_PHRASE[r.holds] ?? null;
+}
+
+/** Which i18n key explains a PURGE refusal. Separate from `deleteRefusalKey` because a
+ *  purge can fail two ways that a plain delete cannot: a missing reason, and a
+ *  commitment that no route may touch. */
+export function purgeRefusalKey(r: Extract<PurgeResult, { ok: false }>): string {
+  switch (r.reason) {
+    case 'has_commitment': return 'job.delNotEmpty';
+    case 'not_owner':      return 'job.delNotOwner';
+    case 'offline':        return 'job.delOffline';
+    // A reason is generated by the app, never typed by the user, so an empty one is a
+    // bug in the caller and says so rather than blaming the person who pressed the button.
+    case 'no_reason':      return 'job.purgeNoReason';
+    default:               return 'job.delFailed';
+  }
 }
 
 /** Which i18n key explains a refusal. Kept beside the result type so a new reason

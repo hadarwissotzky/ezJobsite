@@ -1,3 +1,21 @@
+-- ############################################################################
+-- SUPERSEDED 2026-09-01 — DO NOT RUN. IT CANNOT SUCCEED.
+--
+-- This file deletes from `capture`, which carries an unconditional append-only trigger
+-- (`capture_is_immutable`). Every DELETE on that table raises. Nothing in this file can
+-- commit; it will abort exactly as it stands, and the transaction wrapper is the only
+-- reason a partial run is not possible.
+--
+-- The working route is sql/437_evidence_purge.sql, which opens ONE audited exception
+-- fenced on a NOLOGIN role and writes a permanent ledger row before destroying anything.
+-- Use `purge_project_v1`, or the app's Delete button, which now calls it.
+-- ############################################################################
+
+-- ALSO WITHDRAWN ON ITS MERITS. Codex, 2026-09-01: "unreferenced does not mean
+-- disposable. The 139 captures may be incomplete, abandoned, or awaiting processing."
+-- The eight-table predicate was a reasonable inference and an inference is not a
+-- licence to destroy 61 photographs. Nobody asked for those to go.
+--
 -- 435 — Delete captures that nothing in the product points at.
 --
 -- hadar, 2026-09-01: "photos cannot be assigned to a jobsite -- only to a co -- this
