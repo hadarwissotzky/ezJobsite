@@ -1085,6 +1085,9 @@ const EN: Record<string, string> = {
   'pm4.in_progress': 'In progress',
   'pm4.complete': 'Complete',
   'pm4.archive': 'Archive',
+  // Says the two things a person needs before archiving: where it goes, and that
+  // nothing is destroyed. The second is the whole difference from Delete.
+  'job.archConfirm': 'Archive “{name}”? It leaves your jobs list. Nothing is deleted and you can bring it back any time.',
   'pm4.archived': 'Archived',
   'pm4.unarchive': 'Unarchive',
   'pm4.activeJobs': 'Active',
@@ -3172,6 +3175,7 @@ const ES: Record<string, string> = {
   'pm4.in_progress': 'En progreso',
   'pm4.complete': 'Completo',
   'pm4.archive': 'Archivar',
+  'job.archConfirm': 'Archivar «{name}»? Sale de la lista de trabajos. No se borra nada y puede recuperarlo cuando quiera.',
   'pm4.archived': 'Archivados',
   'pm4.unarchive': 'Desarchivar',
   'pm4.activeJobs': 'Activos',

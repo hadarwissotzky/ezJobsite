@@ -12107,6 +12107,50 @@ const shortJob = (name: string): string => {
             </Pressable>
           )}
 
+          {/* ARCHIVE — THE ANSWER FOR A JOB THAT CANNOT BE DELETED.
+              (hadar, 2026-08-31: "In the app I still see duplication of addresses.")
+
+              THIS BUTTON DID NOT EXIST, and that was a hole, not a decision. REQ-PM4's
+              archived VIEW was built, the un-archive button inside it was built, and
+              `pm4.archive` has been sitting in both languages since — but nothing in
+              the app ever set a project to `archived`. So the archived list could only
+              ever be empty, and the only way off the Jobs list was deletion.
+
+              THAT IS WHY IT MATTERS HERE. Four jobsites at 1155 Stanyan hold 88
+              captures between them, two of them under APPROVED change orders that
+              mandate #1 says are frozen and permanent. None of them can be deleted, and
+              nor should they be — but they can leave the list he works from every day
+              without a single capture being destroyed. Tidying and destroying were the
+              same act until now, so the only tool for a cluttered list was the one tool
+              that is irreversible.
+
+              NO `coRows` GATE, unlike delete: archiving takes nothing away, and a job
+              with change orders on it is the ordinary case for a finished job. */}
+          <Pressable accessibilityRole="button"
+            onPress={() => {
+              const name = projects.find((x) => x.id === projectId)?.name ?? '';
+              Alert.alert(
+                T('pm4.archive'),
+                T({ k: 'job.archConfirm', p: { name } } as any),
+                [
+                  { text: T('common.cancel'), style: 'cancel' },
+                  { text: T('pm4.archive'),
+                    onPress: () => { void (async () => {
+                      const r = await setProjectStatus(connector.client, db, projectId, 'archived');
+                      if (!r.ok) { setFiled(statusErr(r.code)); return; }
+                      // Off this screen: it is no longer in the list this screen came
+                      // from, so staying here would strand him on a job he just filed
+                      // away with a back button leading somewhere it is missing.
+                      setProjects(await listProjects(db));
+                      setNav('jobs');
+                    })(); } },
+                ],
+              );
+            }}
+            style={({ pressed }) => [s.jsArch, pressed ? { opacity: 0.6 } : null]}>
+            <Text style={s.jsArchT}>{T('pm4.archive')}</Text>
+          </Pressable>
+
 
           {/* THE BOTTOM ACTIONS ARE GONE (hadar, 2026-08-11). "Create new change
               order" and "View change order log" both left the screen.
@@ -13739,6 +13783,10 @@ const s = StyleSheet.create({
   jlUnarchiveT: { fontFamily: 'Inter_600SemiBold', fontSize: 13.5, color: '#4E6243' },
   // Quiet, and the palette's muted brick rather than a red — deleting an empty
   // jobsite is tidying, not an emergency. 48pt because it is still destructive.
+  // Archive sits ABOVE delete and in the calm steel, not the brick: it is the safe
+  // action of the two, and the safe one should be the one the thumb reaches first.
+  jsArch: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  jsArchT: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#5E666E' },
   jsDelete: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 22 },
   jsDeleteT: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#8B5148' },
   jsStats: { flexDirection: 'row', gap: 8, marginTop: 2 },
