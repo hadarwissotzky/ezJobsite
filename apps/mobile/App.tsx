@@ -10820,6 +10820,24 @@ const checkClientMessages = async () => {
             AFTER {drawerEl} deliberately: a Modal declared before its sibling content
             does not present on iOS. */}
         {offlineEl}{quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
+        {/* WITHOUT THIS, FINISHING A RECORDING LANDS HERE AND STOPS.
+            (hadar, 2026-09-01: "when i recorded it skipped the preview -- it just went
+            to the home screen.")
+
+            The post-processing handoff is an ack — "your change order is ready", with an
+            OK whose `then` opens the record. Processing finishes while HOME is the
+            screen underneath, so `setAck` wrote into a tree with nothing to draw it: no
+            popup, no tap, no navigation, and the change order stayed a draft nobody was
+            looking at. The one screen the flow always returns to was the one screen that
+            could not report its own completion.
+
+            FOURTH TIME THIS PATTERN HAS BITTEN TODAY — the drawer's Upgrade, Home's
+            swipe-delete, the job screen's Delete, and now this. Setting state is not
+            mounting a view, and every screen in this file is an early return that has to
+            remember every modal by hand. The real fix is one shell that mounts them
+            once; until that exists this list is a hand-maintained invariant, which is
+            another way of saying it will be wrong again. */}
+        {ackEl}
         {/* WITHOUT THIS the out-of-credits modal's Buy is dead on this screen: it sets
             `showPaywall`, and the paywall only exists where it is mounted. */}
         {paywallEl}
