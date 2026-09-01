@@ -421,11 +421,25 @@ export function Drawer({
           {/* Build + manual check, as in the reference. Ours does more than theirs can:
               with OTA wired, this genuinely fetches a new bundle rather than sending
               the user to the App Store. */}
-          <Text style={st.version}>{buildLabel ?? `v${appVersion}`}</Text>
-          {/* WHAT THE PHONE ACTUALLY HOLDS. Beside the build line on purpose: those
-              two lines together answer every "why am I not seeing it" question this
-              app has produced — is the code current, and has the data arrived. */}
-          {!!syncLabel && <Text style={st.version}>{syncLabel}</Text>}
+          {/* EACH LINE SAYS WHICH QUESTION IT ANSWERS.
+              (hadar, 2026-09-01, asked whether he was on the latest build and read back
+              "synced 3 h ago on this phone" — the DATA line. Then, a message earlier,
+              "v1.0.0", which is the marketing version and never moves on an OTA.)
+
+              Two lines in one style, one about CODE and one about DATA, and nothing on
+              either saying which. So the honest answer to "am I up to date" was sitting
+              on screen and unreadable, and I sent him to the wrong half of it twice.
+              A prefix is four characters and removes the whole class of question. */}
+          <Text style={st.version}>
+            <Text style={st.versionTag}>{T('set.lineApp')} </Text>
+            {buildLabel ?? `v${appVersion}`}
+          </Text>
+          {!!syncLabel && (
+            <Text style={st.version}>
+              <Text style={st.versionTag}>{T('set.lineData')} </Text>
+              {syncLabel}
+            </Text>
+          )}
           {onCheckUpdates && (
             <Pressable onPress={check} disabled={checking}
               style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
@@ -550,6 +564,9 @@ const st = StyleSheet.create({
   signOutT: { fontFamily: F.bodySemi, fontSize: 15.5, color: C.ink },
 
   version: { fontFamily: F.body, fontSize: 12.5, color: C.steel, textAlign: 'center', marginTop: 18 },
+  // Bolder and darker than the line it introduces: the tag is what the eye needs FIRST,
+  // because the question is always "which of these two am I reading".
+  versionTag: { fontFamily: F.bodyBold, color: C.ink },
   checkT: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.steel, textDecorationLine: 'underline' },
   checkNote: { fontFamily: F.body, fontSize: 12.5, color: C.steel, textAlign: 'center', marginTop: 2 },
 });

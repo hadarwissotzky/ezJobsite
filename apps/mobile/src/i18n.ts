@@ -1238,6 +1238,10 @@ const EN: Record<string, string> = {
   'drawer.account': 'Account',
   'drawer.app': 'App',
   'set.checkUpdates': 'Check for updates',
+  // Which of the two grey lines you are reading. CODE vs DATA — the distinction that
+  // decides whether 'I don't see it' means a stale bundle or a sync that has not landed.
+  'set.lineApp': 'App:',
+  'set.lineData': 'Data:',
   'set.updateChecking': 'Checking…',
   'set.updateReady': 'Update downloaded — restart to apply.',
   'set.updateNone': 'You’re up to date.',
@@ -3321,6 +3325,8 @@ const ES: Record<string, string> = {
   'drawer.account': 'Cuenta',
   'drawer.app': 'Aplicación',
   'set.checkUpdates': 'Buscar actualizaciones',
+  'set.lineApp': 'App:',
+  'set.lineData': 'Datos:',
   'set.updateChecking': 'Buscando…',
   'set.updateReady': 'Actualización descargada — reinicia para aplicarla.',
   'set.updateNone': 'Ya estás al día.',
