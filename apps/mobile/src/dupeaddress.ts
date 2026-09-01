@@ -66,6 +66,26 @@ export function normalizeAddress(raw: string | null | undefined): string {
  */
 export const SAME_SITE_M = 35;
 
+/**
+ * The street number, when the address starts with one.
+ *
+ * THIS EXISTS BECAUSE THE PIN RULE ALONE IS WRONG ON REAL DATA. In hadar's own
+ * database, "1151 Stanyan St" and "1155 Stanyan St" geocode to points ELEVEN METRES
+ * apart — the geocoder is resolving to the block, not the building — so any distance
+ * threshold loose enough to match one house geocoded twice is also loose enough to
+ * merge it with its neighbour. Tightening the radius does not fix it: the same house
+ * typed twice can legitimately land tens of metres apart, so there is no radius that
+ * separates these two cases.
+ *
+ * A DIFFERENT STREET NUMBER IS A DIFFERENT SITE, and that fact outranks the
+ * coordinates, which are an approximation of it. When both addresses carry a number
+ * and the numbers disagree, no proximity may overrule them.
+ */
+function houseNumber(flat: string): string | null {
+  const m = /^(\d+[a-z]?)\b/.exec(flat);
+  return m ? m[1] : null;
+}
+
 export type SiteLike = {
   id: string; name: string; address?: string | null;
   lat?: number | null; lng?: number | null;
@@ -99,7 +119,14 @@ export function findAddressTwin<T extends SiteLike>(
 
   for (const s of sites) {
     if (skipId && s.id === skipId) continue;
-    if (flat && normalizeAddress(s.address) === flat) return s;
+    const theirFlat = normalizeAddress(s.address);
+    if (flat && theirFlat === flat) return s;
+    // THE NUMBERS VETO THE PIN. Only when both sides actually state a number — an
+    // address with none ("the Miller place") has nothing to disagree with, so it
+    // falls through to the distance test rather than being excused from it.
+    const mine = flat ? houseNumber(flat) : null;
+    const theirs = theirFlat ? houseNumber(theirFlat) : null;
+    if (mine && theirs && mine !== theirs) continue;
     if (havePin && typeof s.lat === 'number' && typeof s.lng === 'number') {
       if (distanceM({ lat: lat as number, lng: lng as number },
                     { lat: s.lat, lng: s.lng }) <= SAME_SITE_M) return s;

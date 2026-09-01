@@ -60,3 +60,31 @@ test('a job is never its own duplicate', () => {
 test('an existing job with no address never matches', () => {
   assert.equal(findAddressTwin([site('a', null)], REAL), null);
 });
+
+// ── the street-number veto ───────────────────────────────────────────────────
+// Straight from hadar's database: the geocoder puts 1151 and 1155 Stanyan eleven
+// metres apart, well inside SAME_SITE_M. Without the veto the app would tell him his
+// neighbour's house is a duplicate of his own.
+test('a different street number beats a near-identical pin', () => {
+  const found = findAddressTwin(
+    [site('a', '1155 Stanyan St · San Francisco, CA', 37.7632, -122.4525)],
+    '1151 Stanyan St · San Francisco, CA', { lat: 37.7633, lng: -122.4525 });
+  assert.equal(found, null);
+});
+
+test('the SAME street number still matches on the pin alone', () => {
+  // "1155 Stanyan Street, San Francisco" vs "… St · San Francisco, CA" — the strings
+  // never reconcile (one carries the state, the other does not), so this is exactly
+  // the case the coordinates exist for, and the veto must not block it.
+  const found = findAddressTwin(
+    [site('a', '1155 Stanyan St · San Francisco, CA', 37.7632, -122.4525)],
+    '1155 Stanyan Street, San Francisco', { lat: 37.7632, lng: -122.4526 });
+  assert.equal(found?.id, 'a');
+});
+
+test('an address with no number is still matched by the pin', () => {
+  const found = findAddressTwin(
+    [site('a', 'The Miller place, Bolinas', 37.9088, -122.4801)],
+    'Miller barn', { lat: 37.9088, lng: -122.4801 });
+  assert.equal(found?.id, 'a');
+});
