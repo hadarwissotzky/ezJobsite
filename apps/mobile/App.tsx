@@ -98,7 +98,8 @@ import { AddressInput } from './src/ui/addressinput';
 import { FlowRail } from './src/ui/flowrail';
 import { syncLine, syncState } from './src/syncstate';
 import { OfflineBar } from './src/ui/offlinebar';
-import { deleteEmptyProject, deleteHoldsKey, deleteRefusalKey } from './src/deleteproject';
+import { deleteEmptyProject, deleteHoldsKey, deleteProjectWithMedia,
+         deleteRefusalKey, localCaptureCount } from './src/deleteproject';
 import { ReviewScreen } from './src/ui/reviewscreen';
 import { PhotoLightbox, RecordScreen, scheduleSentence, billingSentence,
          type RecordLifecycle } from './src/ui/recordscreen';
@@ -8489,6 +8490,78 @@ const checkClientMessages = async () => {
              detail: holds ? T(holds as any) : undefined });
   };
 
+  /**
+   * Delete a jobsite AND the photographs on it.
+   *
+   * hadar signed this off 2026-09-01 after four attempts to remove a test jobsite that
+   * holds three photos. The refusal was correct and the outcome was still wrong: a
+   * jobsite acquires ONE capture and becomes permanent, so a mistyped address with a
+   * photo on it is in the account forever. Mandate #1 forbids SILENT loss; this is the
+   * opposite of silent, and refusing to ever delete was not buying the mandate anything.
+   *
+   * THE COUNT IS SHOWN BEFORE THE DEED, from the local ledger so it works with no
+   * signal, and the second tap is asked for separately. That sequence IS the exception:
+   * take the number away and this is just deletion with extra words.
+   */
+  const deleteJobWithMedia = async (projectId: string, name: string, caps: number) => {
+    const r = await deleteProjectWithMedia(db, connector.client, projectId);
+    if (r.ok) {
+      setNav('jobs');
+      setProjectId(INBOX_ID);
+      setProjects(await listProjects(db));
+      // THE SERVER'S COUNT, not the local one: it reports what it actually destroyed,
+      // and a capture from another device that never reached this phone is still gone.
+      setAck({ kind: 'ok', title: T({ k: 'job.deleted', p: { name } } as any),
+               detail: r.captures > 0
+                 ? T({ k: 'job.delMediaGone', p: { n: r.captures } } as any) : undefined });
+      void refresh();
+      return;
+    }
+    if (r.reason === 'has_commitment') {
+      setAck({ kind: 'no', title: T('job.delNotEmpty'), detail: T('job.holdsCo') });
+      return;
+    }
+    setAck({ kind: 'no', title: T(deleteRefusalKey(r) as any) });
+    void caps;
+  };
+
+  /** The confirmation chain for Delete. One step when nothing is lost, two when
+   *  photographs are — the extra tap appears only when there is something to lose. */
+  const askDeleteJob = async (projectId: string, name: string) => {
+    const caps = await localCaptureCount(db, projectId);
+    if (caps === 0) {
+      Alert.alert(T('job.delete'), T({ k: 'job.delConfirm', p: { name } } as any), [
+        { text: T('common.cancel'), style: 'cancel' },
+        { text: T('job.delete'), style: 'destructive',
+          onPress: () => { void deleteJob(projectId, name); } },
+      ]);
+      return;
+    }
+    // STEP ONE states the loss in a number. It does not delete anything, and its
+    // forward button says "Continue", not "Delete" — nobody should be able to destroy
+    // three photographs by pressing the button they expected to be a confirmation.
+    Alert.alert(
+      T('job.delete'),
+      T({ k: 'job.delWithMediaAsk', p: { name, n: caps } } as any),
+      [
+        { text: T('common.cancel'), style: 'cancel' },
+        { text: T('common.continue'), onPress: () => {
+          // STEP TWO is the deliberate one, and it names the number again so the
+          // destructive tap is never made against a half-remembered figure.
+          Alert.alert(
+            T({ k: 'job.delMediaTitle', p: { n: caps } } as any),
+            T('job.delMediaWarn'),
+            [
+              { text: T('common.cancel'), style: 'cancel' },
+              { text: T({ k: 'job.delMediaGo', p: { n: caps } } as any), style: 'destructive',
+                onPress: () => { void deleteJobWithMedia(projectId, name, caps); } },
+            ],
+          );
+        } },
+      ],
+    );
+  };
+
   const saveScope = async (changeOrderId: string, text: string) => {
     const ok = await saveScopeOfWork(db, changeOrderId, text);
     if (!ok) {
@@ -12121,15 +12194,7 @@ const checkClientMessages = async () => {
               accessibilityRole="button"
               onPress={() => {
                 const name = projects.find((x) => x.id === projectId)?.name ?? '';
-                Alert.alert(
-                  T('job.delete'),
-                  T({ k: 'job.delConfirm', p: { name } } as any),
-                  [
-                    { text: T('common.cancel'), style: 'cancel' },
-                    { text: T('job.delete'), style: 'destructive',
-                      onPress: () => { void deleteJob(projectId, name); } },
-                  ],
-                );
+                void askDeleteJob(projectId, name);
               }}
               style={({ pressed }) => [s.jsDelete, pressed ? { opacity: 0.6 } : null]}>
               <Text style={s.jsDeleteT}>{T('job.delete')}</Text>

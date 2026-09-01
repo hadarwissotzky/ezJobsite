@@ -23,6 +23,73 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 
+/**
+ * How many captures this device knows are on a jobsite.
+ *
+ * Read from `capture_commit` — the LOCAL commitment ledger, not the server — so the
+ * number can be shown with no signal, which is the state a contractor is usually in
+ * when he notices he made the jobsite wrong. It is the count the confirmation names,
+ * and naming a real number is the whole difference between a chosen deletion and a
+ * silent one.
+ *
+ * It can under-report: a capture filed from another device that has not reached this
+ * one is not counted. The server is the authority and reports what it actually
+ * destroyed, which is why the acknowledgement uses ITS number rather than this one.
+ */
+export async function localCaptureCount(
+  db: AbstractPowerSyncDatabase, projectId: string,
+): Promise<number> {
+  try {
+    return (await db.getAll<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM capture_commit WHERE project_id = ?`, [projectId]))[0]?.n ?? 0;
+  } catch { return 0; }
+}
+
+export type DeleteWithMediaResult =
+  | { ok: true; already?: boolean; captures: number }
+  /** A priced commitment stopped it. These are never deletable, by any route. */
+  | { ok: false; reason: 'has_commitment'; holds: string }
+  | { ok: false; reason: 'not_owner' | 'not_signed_in' | 'offline' | 'failed'; detail?: string };
+
+/**
+ * Delete a jobsite AND its captures.
+ *
+ * SEPARATE FROM `deleteEmptyProject`, deliberately, rather than a flag on it. One of
+ * these destroys nothing and the other destroys photographs; a boolean argument would
+ * put both behind one call site and make the destructive path reachable by passing the
+ * wrong value. Two names cannot be confused at a glance.
+ */
+export async function deleteProjectWithMedia(
+  db: AbstractPowerSyncDatabase,
+  supabase: SupabaseClient,
+  projectId: string,
+): Promise<DeleteWithMediaResult> {
+  try {
+    const { data, error } = await supabase.rpc('delete_project_with_media_v1', {
+      p_project_id: projectId,
+    });
+    if (error) {
+      const msg = String(error.message ?? '');
+      if (/network|fetch|timeout|offline/i.test(msg)) return { ok: false, reason: 'offline' };
+      return { ok: false, reason: 'failed', detail: msg.slice(0, 160) };
+    }
+    const r = data as any;
+    if (r?.ok) {
+      // Local rows too, and the same reasoning as the empty-delete path: waiting for a
+      // checkpoint means the contractor is told it worked and watches it sit there.
+      try { await db.execute(`DELETE FROM project WHERE id = ?`, [projectId]); } catch { /* sync will */ }
+      try { await db.execute(`DELETE FROM capture_commit WHERE project_id = ?`, [projectId]); } catch { /* best effort */ }
+      return { ok: true, already: r.already === true, captures: Number(r.captures ?? 0) };
+    }
+    if (r?.reason === 'has_commitment') {
+      return { ok: false, reason: 'has_commitment', holds: String(r.holds ?? 'something') };
+    }
+    return { ok: false, reason: r?.reason === 'not_owner' ? 'not_owner' : 'not_signed_in' };
+  } catch (e: any) {
+    return { ok: false, reason: 'failed', detail: String(e?.message ?? e).slice(0, 160) };
+  }
+}
+
 export type DeleteProjectResult =
   | { ok: true; already?: boolean }
   /** `holds` names the table that stopped it, so the message can be specific. */

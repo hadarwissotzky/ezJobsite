@@ -469,6 +469,16 @@ const EN: Record<string, string> = {
   // Names the state, not the mechanism: he does not care which table stopped it,
   // only that this job has work in it and is therefore kept.
   'job.delNotEmpty': 'Cannot delete — this job already has work saved in it.',
+  // The delete-with-photos chain. STEP ONE states the loss and its forward button is
+  // "Continue", never "Delete": nobody may destroy photographs by pressing the button
+  // they expected to be the confirmation. STEP TWO names the number again, so the
+  // destructive tap is never made against a half-remembered figure.
+  'job.delWithMediaAsk': '“{name}” has {n} photos or recordings saved to it. Deleting the job deletes them too.',
+  'job.delMediaTitle': 'Permanently delete {n} photos?',
+  'job.delMediaWarn': 'This cannot be undone. They are not recoverable from the app or from support.',
+  'job.delMediaGo': 'Delete job and {n} photos',
+  'job.delMediaGone': '{n} photos were deleted with it.',
+  'common.continue': 'Continue',
   // Each names the thing a PERSON would look for, not the table it lives in.
   'job.holdsCo': 'It holds change orders.',
   'job.holdsMedia': 'It holds photos or recordings.',
@@ -2835,6 +2845,12 @@ const ES: Record<string, string> = {
   'job.delete': 'Eliminar este trabajo',
   'job.delConfirm': '¿Eliminar “{name}”? No se puede deshacer — y si tiene alguna foto u orden de cambio guardada, se queda.',
   'job.delNotEmpty': 'No se puede eliminar — este trabajo ya tiene trabajo guardado.',
+  'job.delWithMediaAsk': '«{name}» tiene {n} fotos o grabaciones guardadas. Si elimina el trabajo, también se eliminan.',
+  'job.delMediaTitle': '¿Eliminar {n} fotos para siempre?',
+  'job.delMediaWarn': 'No se puede deshacer. No se pueden recuperar desde la app ni con soporte.',
+  'job.delMediaGo': 'Eliminar trabajo y {n} fotos',
+  'job.delMediaGone': 'Se eliminaron {n} fotos con él.',
+  'common.continue': 'Continuar',
   'job.holdsCo': 'Tiene órdenes de cambio.',
   'job.holdsMedia': 'Tiene fotos o grabaciones.',
   'job.holdsDecision': 'Tiene decisiones de la obra.',
