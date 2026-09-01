@@ -299,12 +299,17 @@ begin
                             'object_keys', to_jsonb(v_keys));
 end $$;
 
--- OWNED BY THE PURGE ROLE. This line is the fence: it is what makes `current_user`
--- inside the function `evidence_purger`, and there is no other function in this database
--- for which that is true.
-alter function public.purge_project_v1(text, text) owner to evidence_purger;
-
-grant usage on schema public to evidence_purger;
+-- ── 5b. everything the role needs, BEFORE it is handed the function ─────────
+--
+-- ORDER MATTERS AND I HAD IT WRONG. The first run of this file died here with
+-- "permission denied for schema public" (hadar, 2026-09-01): `ALTER FUNCTION ... OWNER
+-- TO` checks that the NEW OWNER has CREATE on the schema holding the function, and
+-- `evidence_purger` had nothing at all — the grants were written after the ALTER, and
+-- USAGE would not have been enough even if they had come first.
+--
+-- CREATE on `public` for a NOLOGIN role granted to nobody but postgres adds no reach:
+-- only postgres can SET ROLE to it, and postgres already has CREATE there.
+grant usage, create on schema public to evidence_purger;
 grant usage on schema auth to evidence_purger;
 grant execute on function auth.uid() to evidence_purger;
 grant select, delete on
@@ -320,6 +325,12 @@ grant select on
   public.extra_work_authorization
   to evidence_purger;
 grant insert on public.evidence_purge_log to evidence_purger;
+
+-- OWNED BY THE PURGE ROLE, and this line is the fence: it is what makes `current_user`
+-- inside the function `evidence_purger`, and there is no other function in this database
+-- for which that is true. It comes AFTER the grants above, because the new owner must
+-- already hold CREATE on the schema for this statement to be allowed.
+alter function public.purge_project_v1(text, text) owner to evidence_purger;
 
 revoke all on function public.purge_project_v1(text, text) from public, anon;
 grant execute on function public.purge_project_v1(text, text) to authenticated;
