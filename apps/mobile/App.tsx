@@ -8487,7 +8487,8 @@ const checkClientMessages = async () => {
     // was photos.
     const holds = deleteHoldsKey(r);
     setAck({ kind: 'no', title: T(deleteRefusalKey(r) as any),
-             detail: holds ? T(holds as any) : undefined });
+             detail: holds ? T(holds as any)
+                   : 'detail' in r && r.detail ? r.detail : undefined });
   };
 
   /**
@@ -8521,7 +8522,8 @@ const checkClientMessages = async () => {
       setAck({ kind: 'no', title: T('job.delNotEmpty'), detail: T('job.holdsCo') });
       return;
     }
-    setAck({ kind: 'no', title: T(deleteRefusalKey(r) as any) });
+    setAck({ kind: 'no', title: T(deleteRefusalKey(r) as any),
+             detail: 'detail' in r && r.detail ? r.detail : undefined });
     void caps;
   };
 
@@ -8566,8 +8568,14 @@ const checkClientMessages = async () => {
       return;
     }
     const holds = deleteHoldsKey(r);
+    // SHOW THE ACTUAL ERROR when there is one. `detail` has always carried the server's
+    // message and no branch has ever rendered it, so every genuine failure reads as the
+    // same four words — "Could not delete. The job is still here." — and the one fact
+    // that would explain it is discarded at the point of display. That cost a full round
+    // of guessing at what the RPC was throwing (hadar, 2026-09-01).
     setAck({ kind: 'no', title: T(deleteRefusalKey(r) as any),
-             detail: holds ? T(holds as any) : undefined });
+             detail: holds ? T(holds as any)
+                   : 'detail' in r && r.detail ? r.detail : undefined });
   };
 
   /** The confirmation chain for Delete. The local count is a HINT that lets the warning
