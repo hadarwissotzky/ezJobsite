@@ -3916,16 +3916,51 @@ const checkClientMessages = async () => {
                   const scope = (row?.s ?? '').trim();
                   wrote = scope.length > 0 && scope !== UNTITLED_SCOPE;
                 } catch { wrote = true; /* cannot tell — do not accuse the pipeline */ }
+
+                /**
+                 * NAVIGATE FIRST, THEN SPEAK (hadar, 2026-09-02: "this message shows up
+                 * before that and it displays the main screen without the creation
+                 * progress bar, which breaks the user experience").
+                 *
+                 * The popup itself is his own 2026-08-20 decision and it stays. What was
+                 * wrong was the ORDER. `setTransition(null)` had already torn down the
+                 * processing screen, and the navigation was hanging off the ack's `then`
+                 * — so for as long as the message was on screen the backdrop was HOME.
+                 * A man five steps into making a change order was shown his dashboard,
+                 * no rail, no step count, and told something about work he could no
+                 * longer see. The flow appeared to have ended and then resumed.
+                 *
+                 * Opening the record first means the ack lands on step 5 with the rail
+                 * behind it, which is where the sentence is actually about something.
+                 * `ackEl` is rendered last in the tree, so it overlays whatever screen is
+                 * current — no z-order work needed, only the right order.
+                 *
+                 * ONLY THE 'new' BRANCH MARKS THE FLOW. A generate or an augment lands on
+                 * this same screen, but the contractor was editing an extra that already
+                 * existed — telling him he is on step 5 of making one would be a rail
+                 * describing a journey he never started.
+                 */
+                setFlowRecordId(h.coId);
+                await openRecord(h.coId);
+                if (!alive) return;
+
                 setAck({
-                  kind: 'ok',
+                  /**
+                   * A GREEN TICK ABOVE "WE COULDN'T MAKE OUT THE WORK" (hadar's
+                   * screenshot). `kind` was hard-coded 'ok', so the one case that is NOT
+                   * a success was drawn with the success mark — the icon said it worked
+                   * while the words said it did not, and the icon is read first.
+                   *
+                   * 'no' is the right shape and not an alarm: `ackBoxNo` is an amber
+                   * hairline and `ntAttention`, which is what "say it again and we'll
+                   * have it" looks like. Nothing failed that he needs to fear — the
+                   * recording IS saved, and mandate #1 is intact — but nothing was
+                   * written either, and the mark has to agree with the sentence.
+                   */
+                  kind: wrote ? 'ok' : 'no',
                   title: T(wrote ? 'proc.readyTitle' : 'proc.nothingHeardTitle'),
                   detail: T(wrote ? 'proc.readyBody' : 'proc.nothingHeardBody'),
                   okLabel: T('common.ok'),
-                  // ONLY THE 'new' BRANCH MARKS THE FLOW. A generate or an augment lands
-                  // on this same screen, but the contractor was editing an extra that
-                  // already existed — telling him he is on step 5 of making one would be
-                  // a rail describing a journey he never started.
-                  then: () => { setFlowRecordId(h.coId); void openRecord(h.coId); },
                 });
               })();
             }

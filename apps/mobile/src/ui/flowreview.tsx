@@ -83,7 +83,32 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
         <FlowRail step={5} />
 
         <Text style={st.title}>{t('draft.reviewTitle')}</Text>
-        <Text style={st.sub}>{t('draft.reviewSub')}</Text>
+        {/* THE SUBTITLE IS A CLAIM, so it only gets made when it is true. "We pulled
+            this from your recording" over a scope that was never written is the same
+            defect as the old "we wrote up what you said" popup — a sentence that
+            outruns its evidence, which CLAUDE.md names as this project's recurring one. */}
+        <Text style={st.sub}>
+          {scopeWritten ? t('draft.reviewSub') : t('draft.nothingHeardHere')}
+        </Text>
+
+        {/* ── NOTHING WAS HEARD, SAID ON THE SCREEN THAT CAN FIX IT ─────────────────
+            hadar, 2026-09-02: "why is this section doesn't show up as part of the
+            review screen."
+
+            It was a popup and only a popup. He tapped OK and the reason vanished,
+            leaving a review screen whose scope card said a quiet "Not written up yet"
+            — and the two buttons that solve it, Edit text and Record change, sat
+            underneath with nothing connecting them to what had gone wrong.
+
+            A modal is for something you acknowledge; this is a STATE the screen is in
+            until he does something about it, so the screen carries it. It disappears
+            the moment a scope exists, because then it is no longer true. */}
+        {!scopeWritten && (
+          <View style={st.heard}>
+            <Icon name="ntAttention" size={19} />
+            <Text style={st.heardT}>{t('draft.notWrittenUp')}</Text>
+          </View>
+        )}
 
         {/* SCOPE OF WORK — the words themselves, never truncated and never behind a tap.
             A scope you have to expand to read is a scope nobody proofreads before it
@@ -187,6 +212,13 @@ const st = StyleSheet.create({
   // 17pt and 24 line-height: this is the paragraph a client will read, and it is the one
   // thing on the screen that must be comfortable rather than compact.
   scope: { fontFamily: F.body, fontSize: 17, lineHeight: 24, color: C.ink },
+  // `caution` from the tint table, not an amber mixed here: "A screen never mixes its
+  // own amber" (theme.ts). Peach and a hairline, which is what "say it again" looks
+  // like — this is not a failure to be afraid of. The recording is saved.
+  heard: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, marginTop: 16,
+    paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12,
+    backgroundColor: '#FFF3EA', borderWidth: 1, borderColor: '#FFD9C2' },
+  heardT: { flex: 1, fontFamily: F.bodySemi, fontSize: 14.5, lineHeight: 20, color: '#7A3A12' },
   assure: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 18,
     paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12, backgroundColor: C.brandSoft },
   assureT: { flex: 1, fontFamily: F.body, fontSize: 14.5, color: C.ink, lineHeight: 19 },
