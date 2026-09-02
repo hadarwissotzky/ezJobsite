@@ -726,7 +726,14 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             It reads correctly in this slot as well as consistently: on a draft the
             client is the gap that decides whether any of the work below can be sent at
             all, and it used to be found only by scrolling past it. */}
-        <PeopleSection {...props} />
+        {/* IN THE FLOW, WHO IT GOES TO COMES AFTER WHAT IT SAYS.
+            The mockup's review step has no recipient at all — its step 6 did — and we
+            collapsed to five, so this is the last screen before a priced document
+            leaves and mandate #2 requires the sender to see the recipient. It moves
+            BELOW the write-up rather than above it: he is checking what the app heard
+            first, and who signs it second. Outside the flow it stays where it was, in
+            the same slot the negotiation and sealed screens use. */}
+        {!props.inFlow && <PeopleSection {...props} />}
 
         {/* 391 — THE SCOPE OF WORK IS NEAR THE TOP AND NEVER TRUNCATED.
             (It used to say "LEADS, above the price". It no longer leads — the price
@@ -794,8 +801,19 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             ) : null}
         />
 
-        <RawSection {...props} />
-        <ScopeSection {...props} />
+        {/* NOT IN THE FLOW. `RawSection` is the recording and its transcript;
+            `ScopeSection` is a second copy of the scope headed "SCOPE OF WORK (SENT TO
+            CLIENT)". Both are the right thing on a record you came back to and are
+            noise thirty seconds after speaking: the words are already in the block
+            above, and the recording is the thing he JUST made. hadar's screenshots show
+            the flow screen scrolling through four cards that all say the same work back
+            to him in different words. */}
+        {!props.inFlow && (
+          <>
+            <RawSection {...props} />
+            <ScopeSection {...props} />
+          </>
+        )}
 
         {/* THE CHECKLIST IS A GRID, TWO ACROSS, and the count sits on the heading
             row opposite the title — the design's shape, and the reason for it is
@@ -850,6 +868,8 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             It is also mandate #2 said out loud: nothing carrying a price commits or
             sends without a human confirming it. The band is not decoration; it is the
             product's central promise, printed where it is being kept. */}
+        {props.inFlow && <PeopleSection {...props} />}
+
         {props.inFlow && isDraft && (
           <View style={st.assure}>
             <Icon name="shield" size={19} />
