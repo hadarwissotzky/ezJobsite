@@ -42,7 +42,7 @@ import { C, F } from './theme';
  * exactly the place not to guess — `listRoster` already drops rows whose role it does
  * not recognise for the same reason.
  */
-export type ClientChoice = { id: string; name: string; role?: string };
+export type ClientChoice = { id: string; name: string; role?: string; phone?: string | null };
 
 /**
  * Tile colour and glyph per role, from the supplied kit's own mapping (README:
@@ -85,15 +85,56 @@ export function ClientPickScreen(props: {
   onAdd: (name: string, phone: string) => void;
   /** Open the device contact picker and fill the form from it. */
   onPickContact?: () => Promise<{ name: string; phone: string } | null>;
+  /**
+   * EVERYONE THIS ACCOUNT KNOWS FROM ITS OTHER LOCATIONS (`listKnownPeople`), deduped,
+   * minus the ones already on this one.
+   *
+   * WHY IT HAS TO BE HERE (hadar, 2026-09-02: "make sure we display potential clients
+   * that are related to the location"). `roster` is scoped `WHERE project_id = ?`,
+   * which is right — but a location he made ninety seconds ago on step 2 has NOBODY on
+   * it, so the correct answer to "who is this for" was an empty list and a blank form.
+   * The same homeowner on last month's job, the GC he subs for, the three owners on
+   * that street: all already in the database, all invisible at the one moment he needs
+   * them.
+   *
+   * IT IS A SEPARATE LIST AND STAYS ONE. These people are NOT on this location, and a
+   * screen that mixed them into the roster would be asserting they are — the same
+   * quiet relabelling `listRoster` refuses when it drops rows with unknown roles.
+   * Suggestion, never decision (mandate #2): picking one COPIES them onto this
+   * location, with their own role intact, and the copy is what `onPickKnown` does.
+   */
+  known?: readonly ClientChoice[];
+  /** Copy someone from another location onto this one, then use them. */
+  onPickKnown?: (c: ClientChoice) => void;
   /** Answer later. The send sheet asks again — see the header. */
   onSkip: () => void;
   busy?: boolean;
 }) {
-  const [adding, setAdding] = React.useState(props.roster.length === 0);
+  // OPENS ON THE FORM ONLY WHEN THERE IS GENUINELY NOBODY — roster empty AND nothing
+  // known from any other location. Before the known list existed this fired on every
+  // freshly-made location, which is exactly when the account is most likely to already
+  // know the person.
+  const [adding, setAdding] = React.useState(
+    props.roster.length === 0 && (props.known ?? []).length === 0);
   const [name, setName] = React.useState('');
   const [phone, setPhone] = React.useState('');
 
   const canAdd = name.trim().length > 1;
+
+  /**
+   * `listKnownPeople` already excludes THIS project by id, but it dedupes on name+phone
+   * across every other one — so the same homeowner can still arrive here while sitting
+   * on this location under a different row. Filtering by name is the last guard against
+   * the screen offering to add somebody it is already showing above.
+   */
+  const here = React.useMemo(
+    () => new Set(props.roster.map((r) => r.name.trim().toLowerCase())),
+    [props.roster]
+  );
+  const known = React.useMemo(
+    () => (props.known ?? []).filter((k) => !here.has(k.name.trim().toLowerCase())),
+    [props.known, here]
+  );
 
   /**
    * A FULL SCREEN, NOT A SHEET (hadar, 2026-08-27: "During the co create sequence none
@@ -150,6 +191,12 @@ export function ClientPickScreen(props: {
             row put a 16pt name and a chevron inside 52pt of height. The card is 92,
             the whole card is the target, and the tile gives the eye something to aim
             at before it has read anything. */}
+        {/* HEADINGS ONLY WHEN THERE ARE TWO GROUPS. One heading over one list is a
+            label on the obvious; two lists with no labels is a lie about where these
+            people stand. */}
+        {!adding && !!props.roster.length && !!known.length && (
+          <Text style={st.group}>{t('clientpick.onLocation')}</Text>
+        )}
         {!adding && props.roster.map((r) => {
           const tile = tileFor(r.role);
           return (
@@ -174,6 +221,39 @@ export function ClientPickScreen(props: {
             </Pressable>
           );
         })}
+
+        {/* ── PEOPLE FROM HIS OTHER LOCATIONS ─────────────────────────────────────
+            Under their own heading, always, so the boundary is visible. The subtitle
+            says what tapping does — it adds them HERE — because a man picking a name
+            off a list is entitled to know he is about to put that name on this job. */}
+        {!adding && !!known.length && (
+          <>
+            <Text style={st.group}>{t('clientpick.knownHead')}</Text>
+            {known.map((k) => {
+              const tile = tileFor(k.role);
+              return (
+                <Pressable
+                  key={k.id}
+                  onPress={() => props.onPickKnown?.(k)}
+                  disabled={!!props.busy || !props.onPickKnown}
+                  style={({ pressed }) => [st.card, pressed && st.cardDown]}
+                  accessibilityRole="button"
+                >
+                  <View style={[st.tile, { backgroundColor: tile.bg }]}>
+                    <Icon name={tile.icon} size={26} color={tile.fg} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.cardT} numberOfLines={2}>{k.name}</Text>
+                    <Text style={st.cardSub} numberOfLines={1}>
+                      {k.role ? roleLine(k.role) : t('clientpick.knownSub')}
+                    </Text>
+                  </View>
+                  <Icon name="acChevron" size={22} color="#6b625b" />
+                </Pressable>
+              );
+            })}
+          </>
+        )}
 
         {/* ── PICK FROM THE PHONE'S CONTACTS ──────────────────────────────────────
             Promoted out of the add-a-client form and onto the screen as its own card
@@ -347,6 +427,8 @@ const st = StyleSheet.create({
   addT: { fontFamily: 'Inter_700Bold', fontSize: 19, color: '#3d5236' },
   addSub: { fontFamily: F.body, fontSize: 15, color: '#5d6b56', marginTop: 2 },
 
+  group: { fontFamily: 'Inter_600SemiBold', fontSize: 12.5, letterSpacing: 1.1,
+    textTransform: 'uppercase', color: C.steel, marginTop: 26, marginBottom: -2 },
   rule: { height: 1, backgroundColor: C.line, marginTop: 26 },
   laterRow: { flexDirection: 'row', alignItems: 'center', gap: 15, minHeight: 76,
     paddingVertical: 12, marginTop: 6 },

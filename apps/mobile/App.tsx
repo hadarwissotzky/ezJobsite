@@ -753,6 +753,8 @@ export default function App() {
   const [clientPick, setClientPick] = React.useState<null | {
     coId: string; projectId: string;
     roster: Array<{ id: string; name: string; role?: string }>;
+    /** Everyone on the account's OTHER locations (`listKnownPeople`), deduped. */
+    known: Array<{ id: string; name: string; role?: string; phone?: string | null }>;
     onDone: () => void; busy: boolean;
   }>(null);
   // REQ-PROC8: the capture whose AI proposal is being reviewed, or null.
@@ -2306,11 +2308,42 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
   if (anchorCoId) {
     try {
       const roster = await listRoster(db, projId);
+      /**
+       * AND EVERYONE ELSE THE ACCOUNT KNOWS (hadar, 2026-09-02: "make sure we display
+       * potential clients that are related to the location").
+       *
+       * `listRoster` is scoped to this project, which is correct and was also the whole
+       * problem: a location created on step 2 ninety seconds ago has nobody on it, so
+       * step 3's honest answer was an empty list — while the homeowner from last month's
+       * job sat in the same table, one row away. `listKnownPeople` has existed since
+       * 2026-08-05 for exactly this and nothing on this path had ever called it.
+       *
+       * Failing to read it must never cost him the roster he DOES have, so it degrades
+       * to an empty list rather than joining the outer catch.
+       */
+      const known = (await listKnownPeople(db, projId).catch(() => []))
+        /**
+         * THE PLACEHOLDER ROWS ARE NOT PEOPLE, AND THIS SCREEN MUST NOT OFFER THEM.
+         *
+         * The live database holds `project_approver` rows literally named "Owner" — an
+         * older client sheet prefilled the `who_directed` seed into an editable name
+         * field and saved it (approvers.ts:298 documents how they got there). They are
+         * exactly the kind of row `listKnownPeople` happily returns: active, named,
+         * recently used.
+         *
+         * `saveClientApprover` REFUSES them at the writer, so tapping one would spend a
+         * tap and return a loud error he can do nothing about. Filtering here means the
+         * screen never shows a card that cannot work. `isNamedClient` is the same single
+         * definition the writer uses, so the two cannot drift apart.
+         */
+        .filter((r) => isNamedClient(r.name));
       setClientPick({ coId: anchorCoId, projectId: projId,
                       // `role` rides along now: step 3 prints it under the name
                       // ("Property owner", "General contractor / You"). It was being
                       // dropped here, so the screen had a name and nothing else to say.
                       roster: roster.map((r) => ({ id: r.id, name: r.name, role: r.role })),
+                      known: known.map((r) => ({ id: r.id, name: r.name, role: r.role,
+                                                 phone: r.phone })),
                       onDone: startProcessing, busy: false });
       return;
     } catch { /* no roster readable — never let this stand between him and the upload */ }
@@ -7889,6 +7922,7 @@ const checkClientMessages = async () => {
       <ClientPickScreen
         scope={coRowsRef.current.find((c) => c.id === cp.coId)?.scope ?? T('erec.untitled')}
         roster={cp.roster}
+        known={cp.known}
         busy={cp.busy}
         onSkip={finish}
         onPickContact={pickContactValue}
@@ -7901,6 +7935,39 @@ const checkClientMessages = async () => {
           if (!r.ok) setFiled(r.reason);
           await markApproverUsed(db, c.id).catch(() => { /* recency is not load-bearing */ });
           await refresh();
+          finish();
+        }}
+        /**
+         * SOMEBODY FROM ANOTHER LOCATION, COPIED ONTO THIS ONE.
+         *
+         * It is a COPY, not a reference: `project_approver` is per-project by design, so
+         * the row he taps stays where it is and a new one is written here. That is the
+         * same thing typing their name would do — this only spares him the typing.
+         *
+         * THEIR ROLE COMES WITH THEM. `saveClientApprover` defaults to the client role,
+         * and letting that default apply would silently turn the GC he subs for into
+         * this job's owner — the exact relabelling `listRoster` refuses when it drops
+         * rows with unknown roles. The role he already has on record is the one fact
+         * here that must not be invented.
+         *
+         * The phone rides along too, so an approval text can actually reach them; a
+         * copied client with no number is one the send sheet will refuse later, and the
+         * number is already known.
+         */
+        onPickKnown={async (c) => {
+          setClientPick({ ...cp, busy: true });
+          try {
+            await saveClientApprover(db, { projectId: cp.projectId, name: c.name,
+                                           phone: c.phone || null,
+                                           role: (c.role as any) || undefined });
+            const r = await setDraftClient(db, cp.coId, c.name);
+            if (!r.ok) setFiled(r.reason);
+            await refresh();
+          } catch (e: any) {
+            // Same rule as onAdd: loud. A client he picked and did not get is worse
+            // than being asked again, because he will believe it is on the extra.
+            setFiled(String(e?.message ?? e));
+          }
           finish();
         }}
         onAdd={async (name, phone) => {
