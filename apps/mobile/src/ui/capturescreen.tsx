@@ -321,6 +321,19 @@ export function FusedCapture({
   const [summary, setSummary] = React.useState('');
   const summaryTouched = React.useRef(false);
   /**
+   * THE LAST THING RECOGNITION SAID, so the next callback can be read as a DELTA.
+   *
+   * hadar, 2026-09-02: "it should accumulate the recording text into the draft summary
+   * field — it should not remove or erase the text."
+   *
+   * `startLive` reports the whole of the CURRENT recognition session each time, and a
+   * session restarts on pause, on resume, and whenever the OS decides it has heard
+   * enough silence. Assigning `t` straight into the field — which is what it did —
+   * therefore replaced everything the moment recognition began again: pause to think,
+   * speak again, and the first half of what you said was gone.
+   */
+  const lastLiveRef = React.useRef('');
+  /**
    * DISMISSED BY HAND, AND IT STAYS DISMISSED (hadar, 2026-08-18: "allow the user to
    * close the message screen so they can see the full camera screen").
    *
@@ -375,8 +388,25 @@ export function FusedCapture({
           startLive(db, (t) => {
             if (!live) return;
             setLiveText(t);
-            // Mirror into the field until he takes it over. See `draftTouched`.
-            if (!summaryTouched.current) setSummary(t);
+            /**
+             * APPEND THE NEW WORDS, NEVER REWRITE THE FIELD.
+             *
+             * `t` is cumulative within one recognition session, so the ordinary case is
+             * that it EXTENDS what we last saw and the delta is the tail. When it does
+             * not extend — a session restarted and `t` begins again — the whole of `t`
+             * is new and the earlier words are already in the field.
+             *
+             * Either way this only ever ADDS. A man who paused, typed a correction and
+             * carried on talking keeps the correction and gains the new sentence.
+             */
+            const last = lastLiveRef.current;
+            const delta = t.startsWith(last) ? t.slice(last.length) : t;
+            lastLiveRef.current = t;
+            if (!delta.trim()) return;
+            setSummary((prev) => {
+              const join = prev && !/\s$/.test(prev) && !/^\s/.test(delta) ? ' ' : '';
+              return prev + join + delta;
+            });
           })
             .then((h) => { liveRef.current = h; })
             .catch(() => { /* indicator only */ });
@@ -758,13 +788,8 @@ export function FusedCapture({
               is meant to be a panel — he opened it for one photo and must be able to
               return to his words. Recording keeps running throughout: closing the lens
               is not stopping the mic. */}
-          {camOpen && (
-            <Pressable onPress={() => setCamOpen(false)} style={st.topBtn}
-              accessibilityRole="button">
-              <Icon name="check" size={22} color={C.ink} />
-              <Text style={st.topLab}>{T('cap.doneShooting')}</Text>
-            </Pressable>
-          )}
+          {/* The way back is the PRIMARY button now, at the bottom where the thumb
+              already is. A second one up here was two controls for one act. */}
         </View>
       </View>
 
@@ -892,11 +917,22 @@ export function FusedCapture({
                   </Text>
                 </Pressable>
               )}
-              <View style={st.cardRule} />
+              {/* "YOU DO NOT NEED TO HOLD A BUTTON" IS ANSWERING A QUESTION THIS
+                  SCREEN NO LONGER RAISES (hadar, 2026-09-02: "remove the note").
+
+                  It was written for a viewfinder, where the mic runs under a camera and
+                  a contractor reasonably wonders whether it is listening. The recorder
+                  says so itself now — a card titled "Voice recording", a moving wave, a
+                  timer and his own words appearing underneath. Four pieces of evidence
+                  make a fifth reassurance into clutter. It stays in camera mode, where
+                  none of that is on screen. */}
+              {camOpen && <View style={st.cardRule} />}
+              {camOpen && (
               <View style={st.cardHint}>
                 <Text style={st.cardHintIcon}>☝︎</Text>
                 <Text style={st.cardHintT}>{T('cap.noHoldButton')}</Text>
               </View>
+              )}
             </View>
           ) : (
             // The collapsed strip: same information, one line, viewfinder free.
@@ -1065,17 +1101,26 @@ export function FusedCapture({
             last thing the thumb reaches. */}
         {/* Dimmed only when there is genuinely nothing: no photo, nothing said, and
             nothing typed. The button and the refusal above must agree. */}
+        {/* THE PRIMARY MEANS DIFFERENT THINGS IN THE TWO MODES, and it must
+            (hadar, 2026-09-02: "from the camera screen it should not be done
+            explaining, it should take you back to the recorder page").
+
+            The camera is a PANEL he opened for a photograph. Finishing the whole
+            capture from inside it commits a change order from a screen whose subject is
+            a lens — and it is the one button a thumb reaches without reading, so the
+            mistake it invites is the expensive one. From the camera the primary goes
+            BACK; from the recorder, where he can read what he said, it commits.
+
+            RECORDING KEEPS RUNNING ACROSS THE HOP, so "back" costs him nothing and the
+            two screens are one session rather than two steps. */}
         <Pressable style={[st.done,
-          (!shots.length && !spoke && !(summaryTouched.current && summary.trim())) && st.doneDim]}
-          onPress={finish} disabled={saving}>
+          !camOpen && (!shots.length && !spoke && !(summaryTouched.current && summary.trim()))
+            && st.doneDim]}
+          onPress={() => { if (camOpen) setCamOpen(false); else void finish(); }}
+          disabled={saving}>
           {saving ? <ActivityIndicator color="#fff" />
             : <Text style={st.doneT}>
-                {/* "Continue" in recording mode, because that is what it does — it goes
-                    on to the job, the client and the write-up. "Done explaining" is the
-                    right word beside a viewfinder, where the alternative is to keep
-                    shooting; on a screen he may never have spoken on it claims he
-                    explained something. */}
-                {camOpen ? T('cap.doneExplaining') : T('cap.continueArrow')}
+                {camOpen ? T('cap.backToRecording') : T('cap.continueArrow')}
               </Text>}
         </Pressable>
       </View>
