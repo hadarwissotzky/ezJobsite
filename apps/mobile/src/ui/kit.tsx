@@ -364,9 +364,22 @@ export function Row({
  */
 export type ChecklistState = 'done' | 'missing' | 'blocking';
 
-export function ChecklistRow({ state, label, hint, onPress }: {
+export function ChecklistRow({ state, label, value, hint, onPress }: {
   state: ChecklistState;
   label: string;
+  /**
+   * WHAT THE FIELD ACTUALLY SAYS — "$1,850", "Adds 1 day", "Fixed price".
+   *
+   * The row used to report only WHETHER a field was filled. That is a weak thing to
+   * show a man about to send a priced document: mandate #6 calls numbers, prices and
+   * measurements the highest-risk field precisely BECAUSE they come out of a transcript,
+   * and it asks for read-back plus tap-to-correct. "Price ✓" cannot be proofread.
+   * "Price $1,850" can, and the row was already tappable to correct it.
+   *
+   * Omitted where there is no scalar to show (a description is read in the scope block
+   * above, not summarised in a word).
+   */
+  value?: string | null;
   /** The plain-language consequence ("client won't see photos"). Coloured by state. */
   hint?: string;
   /** Jump to the field that fixes it. Omit for a static checklist. */
@@ -391,6 +404,19 @@ export function ChecklistRow({ state, label, hint, onPress }: {
         <Text style={st.rowLabel}>{label}</Text>
         {hint != null && <Text style={[st.rowSub, { color: hintColor }]}>{hint}</Text>}
       </View>
+      {/* THE VALUE, RIGHT-ALIGNED, and the pencil beside it. Only when there is one —
+          a row with no scalar keeps the old marks-and-label shape exactly.
+
+          The pencil is drawn rather than a chevron because the row EDITS a field it is
+          showing you, and those are different promises: a chevron says "there is more
+          through here", a pencil says "this is wrong, fix it", which is the whole
+          reason a read-back exists. */}
+      {value != null && value !== '' && (
+        <View style={st.rowValWrap}>
+          <Text style={st.rowVal} numberOfLines={1}>{value}</Text>
+          {onPress && <Icon name="edit" size={14} color={C.steel} />}
+        </View>
+      )}
       {/* No chevron: the design's checklist is marks + labels only. The whole row is
           still tappable to jump to the field; the chevron in a two-column grid landed
           in the middle of the card and read as clutter. */}
@@ -1335,6 +1361,11 @@ const st = StyleSheet.create({
    */
   rowLabel: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.ink },
   rowSub: { fontFamily: F.body, fontSize: 14, color: C.muted, marginTop: 1, lineHeight: 18 },
+  // The value sits right, the pencil beside it. `maxWidth` rather than a fixed width:
+  // "Not to exceed $12,400" must be allowed to take the room it needs, and the label
+  // has `flex: 1` to give it back.
+  rowValWrap: { flexDirection: 'row', alignItems: 'center', gap: 7, maxWidth: '52%', marginLeft: 8 },
+  rowVal: { fontFamily: F.bodyBold, fontSize: 15, color: C.ink, textAlign: 'right', flexShrink: 1 },
   // 58%, not 46%: at the tighter cap a normal value ("View previous versions") wrapped
   // its ROW to two lines, which is what made the locked screen twice as tall as the
   // design. The label side still wins the remaining space.

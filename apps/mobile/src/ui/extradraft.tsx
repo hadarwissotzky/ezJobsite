@@ -194,6 +194,12 @@ const st = StyleSheet.create({
   // The closing timestamp line. Quiet on purpose: it is provenance, not an action.
   stamp: { marginTop: 22, alignItems: 'center', gap: 2 },
   stampT: { fontFamily: F.body, fontSize: 12.5, color: C.muted, textAlign: 'center' },
+  // The palette's soft brand wash, not a white card: it is a reassurance, and it should
+  // read as a note about the screen rather than as one more thing on it.
+  assure: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 18,
+    paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12,
+    backgroundColor: C.brandSoft },
+  assureT: { flex: 1, fontFamily: F.body, fontSize: 14.5, color: C.ink, lineHeight: 19 },
   sendLabel: { fontFamily: F.bodyBold, fontSize: 17, color: C.card, letterSpacing: 0.2 },
   sendSub: { fontFamily: F.body, fontSize: 12.5, color: C.card, opacity: 0.72, marginTop: 2, textAlign: 'center' },
   // No fill and no border: Send owns the weight in this bar. 44pt of height is the
@@ -763,15 +769,37 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
                 {t({ k: 'draft.checklistCount', p: { have: doneCount(items), of: items.length } })}
               </Text>
             </View>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            {/* ONE COLUMN NOW, NOT TWO ACROSS.
+                The grid existed because the rows were label-only and two fitted. A row
+                that carries "Not to exceed $12,400" on its right does not fit in half a
+                phone, and the design hadar sent draws these as a single list of
+                label-value pairs. Reading down one column is also how a person checks a
+                document against what they meant to say. */}
+            <View>
               {items.map((it) => (
-                <View key={it.key} style={{ width: '50%' }}>
-                  <ChecklistRow state={it.state} label={it.label} onPress={it.onPress} />
-                </View>
+                <ChecklistRow key={it.key} state={it.state} label={it.label}
+                  value={it.value} onPress={it.onPress} />
               ))}
             </View>
           </Card>
         </View>
+
+        {/* "NOTHING IS SENT UNTIL YOU APPROVE IT" (hadar's mockup, 2026-09-01).
+            IN-FLOW ONLY. It answers a question a person has exactly once — the first
+            time they watch an app write a priced document out of their own voice, and
+            wonder whether it has already gone. On a draft reopened from the records
+            list that question is long answered, and a standing reassurance there would
+            be noise where the screen should be about the work.
+
+            It is also mandate #2 said out loud: nothing carrying a price commits or
+            sends without a human confirming it. The band is not decoration; it is the
+            product's central promise, printed where it is being kept. */}
+        {props.inFlow && isDraft && (
+          <View style={st.assure}>
+            <Icon name="shield" size={19} />
+            <Text style={st.assureT}>{t('draft.nothingSentYet')}</Text>
+          </View>
+        )}
 
         {/* Delete moved into the header ⋯ menu (hadar, 2026-07-28) — the design ends
             the scroll at the checklist, and a destructive red button beneath it was
@@ -1564,6 +1592,8 @@ type ChecklistItem = {
   key: string;
   state: ChecklistState;
   label: string;
+  /** What the field says, for read-back (mandate #6). Null where there is no scalar. */
+  value?: string | null;
   hint?: string;
   onPress: () => void;
 };
@@ -1579,25 +1609,55 @@ type ChecklistItem = {
  * A Decision has five items, not six — it carries no price, so a "Cost ✓" row
  * would be a tick against a question nobody asked.
  */
+/** First few words of a sentence, for a value column that must stay one line. */
+function firstWords(text: string, max = 28): string {
+  const one = text.replace(/\s+/g, ' ').trim();
+  return one.length <= max ? one : `${one.slice(0, max - 1).trimEnd()}…`;
+}
+
 function checklist(p: ExtraDraftProps): ChecklistItem[] {
   const { readiness: r } = p;
-  const hard = (b: SendBlocker, lbl: string, onPress: () => void): ChecklistItem => {
+  const hard = (b: SendBlocker, lbl: string, onPress: () => void, value?: string | null): ChecklistItem => {
     const missing = r.blockers.includes(b);
     return {
-      key: b, label: lbl, onPress,
+      key: b, label: lbl, onPress, value: missing ? null : value,
       state: missing ? 'blocking' : 'done',
       hint: missing ? t(blockerKey(b)) : undefined,
     };
   };
-  const soft = (s: SendRecommendation, lbl: string, onPress: () => void): ChecklistItem => {
+  const soft = (s: SendRecommendation, lbl: string, onPress: () => void, value?: string | null): ChecklistItem => {
     const missing = r.recommended.includes(s);
     return {
-      key: s, label: lbl, onPress,
+      key: s, label: lbl, onPress, value: missing ? null : value,
       state: missing ? 'missing' : 'done',
       hint: missing ? t(recommendationKey(s)) : undefined,
     };
   };
+  /**
+   * THE VALUE IS SHOWN ONLY WHEN THE FIELD IS SATISFIED, which is why `value` is nulled
+   * on the missing branch above. A row that is blocking already says what is wrong in
+   * its hint; printing a half-value beside that would be two sentences competing to
+   * explain one state.
+   */
+  const schedule = p.scheduleEffect === 'adds_days'
+    ? (p.scheduleDays != null
+        ? t({ k: 'draft.vSchedDays', p: { n: String(p.scheduleDays) } } as any)
+        : t('co.schedAdds'))
+    : p.scheduleEffect === 'no_change' ? t('co.schedNo')
+    : p.scheduleEffect === 'not_sure' ? t('co.schedUnsure') : null;
   return [
+    /**
+     * PRICE TYPE IS NOT A CHECKLIST ITEM — it is a value with no way of being missing,
+     * because `priceMode` is always one of two things. It earns a row here anyway
+     * (hadar's mockup draws it) for the same reason as the rest: it is a fact the
+     * client will see, extracted from speech, and this is the screen where it gets
+     * proofread. Marked done because it always is.
+     */
+    ...(p.kind === 'extra' ? [{
+      key: 'price_mode', state: 'done' as ChecklistState,
+      label: t('draft.vPriceType'), onPress: p.onEditCost,
+      value: p.priceMode === 'nte' ? t('draft.vNte') : t('erec.fixed'),
+    }] : []),
     // SHORT labels here, not the scope-row labels. The checklist is a two-across
     // grid; "Description of work" / "Impact on schedule" / "What is NOT included"
     // each wrapped to two lines and broke the grid's rhythm. The design uses the
@@ -1608,10 +1668,21 @@ function checklist(p: ExtraDraftProps): ChecklistItem[] {
     // `sendReadiness`, which is the one authority, so the two cannot disagree about
     // which ring a row wears.
     hard('no_photos', t('draft.photos'), p.onAddPhotos),
-    ...(p.kind === 'extra' ? [soft('no_cost', t('draft.cost'), p.onEditCost)] : []),
-    soft('no_billing_timing', t('draft.billing'), p.onEditBilling),
-    soft('no_schedule_effect', t('draft.ckSchedule'), p.onEditSchedule),
-    soft('no_exclusions', t('draft.ckExclusions'), p.onEditExclusions),
+    ...(p.kind === 'extra'
+      ? [soft('no_cost', t('draft.cost'), p.onEditCost, p.rec.priced ? p.rec.amount : null)]
+      : []),
+    soft('no_billing_timing', t('draft.billing'), p.onEditBilling, p.billingTiming),
+    soft('no_schedule_effect', t('draft.ckSchedule'), p.onEditSchedule, schedule),
+    // TRUNCATED, NOT WRAPPED. Exclusions are a sentence, and a sentence in the value
+    // column would make one row four lines tall in a list whose job is to be scanned.
+    soft('no_exclusions', t('draft.ckExclusions'), p.onEditExclusions,
+      p.exclusions ? firstWords(p.exclusions) : null),
+    /** Who asked for the work. No blocker governs it, so it shows when it is known and
+     *  is absent when it is not, rather than inventing a state for a fact nobody owes. */
+    ...(p.requestedBy
+      ? [{ key: 'requested_by', state: 'done' as ChecklistState,
+           label: t('draft.vRequestedBy'), onPress: p.onEditDetails, value: p.requestedBy }]
+      : []),
   ];
 }
 
