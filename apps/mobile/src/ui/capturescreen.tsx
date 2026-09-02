@@ -821,6 +821,15 @@ export function FusedCapture({
       )}
 
       {/* ---------- TOP BAR ---------- */}
+      {/* IN RECORDING MODE THERE IS NOTHING LEFT IN IT (hadar, 2026-09-02: "fix the
+          header position — there is a gap on top"). Cancel moved to the foot, the title
+          and the location went to the card, torch and flip belong to the camera. What
+          remained was 56pt of status-bar padding plus 10pt of nothing, pushing the rail
+          a third of the way down an empty screen.
+
+          The bar is not rendered at all now; the band takes the status-bar clearance
+          instead, so the rail sits where the header used to start. */}
+      {camOpen && (
       <View style={st.topBar}>
         {/* AN ICON IS ENOUGH HERE (hadar: "the cancel button in the header takes too
             much space"). The word earns its place over a viewfinder, where the top bar
@@ -894,6 +903,7 @@ export function FusedCapture({
               already is. A second one up here was two controls for one act. */}
         </View>
       </View>
+      )}
 
       {/* ---------- CAMERA BAND ---------- */}
       {/* BLACK BEHIND A LENS, PAPER BEHIND WORDS. The band is black because a viewfinder
@@ -940,7 +950,10 @@ export function FusedCapture({
             reassurance card grows with its state (the interruption copy is two lines,
             the coach card three) and a fixed `top` for the camera hint below it means
             a taller card lands on top of it. Flow + gap cannot overlap at any size. */}
-        <View style={st.bandFlow} pointerEvents="box-none">
+        {/* THE STATUS-BAR CLEARANCE LIVES HERE, not on the band. `bandFlow` is an
+            absolute fill, so it ignores its parent's padding entirely — putting the
+            inset on the band would have looked right in the diff and moved nothing. */}
+        <View style={[st.bandFlow, !camOpen && { paddingTop: 56 }]} pointerEvents="box-none">
           {/* THE SCREEN SAYS WHAT IT WANTS. A viewfinder needs no heading — it is
               obvious what a camera is for. A recorder is not: hadar's mockup opens with
               a sentence telling the contractor to talk, and that sentence is the
@@ -1581,7 +1594,11 @@ const st = StyleSheet.create({
   // means the card ends exactly where the controls begin, on every handset.
   // `minHeight: 0` because a flex child in RN will not shrink below its content without
   // it, which is what lets the input scroll rather than push.
-  draftBox: { flex: 1, minHeight: 0, backgroundColor: C.card, borderRadius: 14,
+  // `minHeight: 0` let it collapse to nothing when the recording card was tall, and the
+  // input's own minHeight then spilled its text OUT of the card — hadar's screenshot,
+  // 2026-09-02: a hairline box with a sentence hanging below it. A floor of 150 keeps a
+  // readable card; `flex: 1` still gives it everything left over when there is more.
+  draftBox: { flex: 1, minHeight: 150, backgroundColor: C.card, borderRadius: 14,
     borderWidth: 1, borderColor: C.line, paddingHorizontal: 14, paddingTop: 12,
     paddingBottom: 10 },
   draftHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
