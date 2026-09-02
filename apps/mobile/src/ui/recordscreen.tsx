@@ -54,6 +54,7 @@ import { C, F } from './theme';
 import { useRecordFacts } from './recordfacts';
 import { Button } from './kit';
 import { ExtraDraftScreen, type PriceMode } from './extradraft';
+import { FlowReviewScreen } from './flowreview';
 import type { CaptureDelivery } from '../uploader';
 import {
   ExtraNegotiationScreen,
@@ -260,10 +261,18 @@ export function RecordScreen(props: RecordScreenProps) {
       return <View style={{ flex: 1, backgroundColor: C.paper }} />;
     }
     if (stage === 'draft') {
+      /**
+       * TWO SCREENS FOR ONE STAGE, chosen by how he got here.
+       *
+       * Fresh from the capture flow he gets `FlowReviewScreen`: scope, the four values
+       * that came out of his voice, and Send. Opened from the records list he gets
+       * `ExtraDraftScreen`: the whole record, every affordance, everything still owed.
+       * Same props, same send gates — only the question differs.
+       */
+      const Draft = props.inFlow ? FlowReviewScreen : ExtraDraftScreen;
       return (
-        <ExtraDraftScreen
+        <Draft
           rec={rec}
-          inFlow={props.inFlow}
           kind={lifecycle.kind}
           // No extra is numbered within its job anywhere in this build, so the
           // kicker carries kind + job only. A number invented here would be the

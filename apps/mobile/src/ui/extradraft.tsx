@@ -46,7 +46,6 @@ import {
   type SendBlocker, type SendGate, type SendReadiness, type SendRecommendation,
 } from '../sendreadiness';
 import { canDelete, canSend, chipKey, displayStatus, stageOf } from '../extralifecycle';
-import { FlowRail } from './flowrail';
 import { canSendExtra } from '../extraprocstate';
 import { t } from '../i18n';
 import {
@@ -194,20 +193,6 @@ const st = StyleSheet.create({
   // The closing timestamp line. Quiet on purpose: it is provenance, not an action.
   stamp: { marginTop: 22, alignItems: 'center', gap: 2 },
   stampT: { fontFamily: F.body, fontSize: 12.5, color: C.muted, textAlign: 'center' },
-  // THE FLOW HEADING. Bigger and heavier than the record title it replaces, because
-  // in-flow this is the first thing on the screen and there is no kicker above it
-  // sharing the eye. Matches the type of the other four steps' headings so the five
-  // screens read as one journey rather than four plus an arrival somewhere else.
-  flowTitle: { fontFamily: F.bodyBold, fontSize: 30, lineHeight: 34, color: C.ink,
-    letterSpacing: -0.4 },
-  flowSub: { fontFamily: F.body, fontSize: 15.5, lineHeight: 21, color: C.steel,
-    marginTop: 7, marginBottom: 4 },
-  // The palette's soft brand wash, not a white card: it is a reassurance, and it should
-  // read as a note about the screen rather than as one more thing on it.
-  assure: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 18,
-    paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12,
-    backgroundColor: C.brandSoft },
-  assureT: { flex: 1, fontFamily: F.body, fontSize: 14.5, color: C.ink, lineHeight: 19 },
   sendLabel: { fontFamily: F.bodyBold, fontSize: 17, color: C.card, letterSpacing: 0.2 },
   sendSub: { fontFamily: F.body, fontSize: 12.5, color: C.card, opacity: 0.72, marginTop: 2, textAlign: 'center' },
   // No fill and no border: Send owns the weight in this bar. 44pt of height is the
@@ -274,21 +259,6 @@ export type ExtraDraftProps = {
   /** The extra's number within its job, for the kicker ("Extra #4"). Null when the
    *  job does not number them — the kicker then carries kind + job only. */
   extraNo: number | null;
-  /**
-   * True when the contractor arrived here from the capture flow, rather than by opening
-   * an old draft from the records list.
-   *
-   * IT DRAWS THE RAIL AND NOTHING ELSE. The screen is identical either way — same gates,
-   * same cards, same Send button — because the difference is not what he can do here, it
-   * is whether he is in the middle of something. Arriving from the flow, this is step 5
-   * of 5 and the rail says so; arriving from the list, a progress rail would be a lie
-   * about a journey he is not on.
-   *
-   * hadar, 2026-09-01: "the goal is to get the contractor to send a CO for approval."
-   * The flow used to stop at the write-up and drop him here with no thread back to what
-   * he had been doing, which turned sending from the end of a task into a decision.
-   */
-  inFlow?: boolean;
   /** REQ-LC11's single readiness authority, computed by the caller from the same
    *  row this screen renders. Never recomputed here, and never second-guessed. */
   /**
@@ -548,20 +518,6 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
           camera target changes. */}
       <ScrollView ref={scrollRef} contentContainerStyle={{
         paddingHorizontal: 18,
-        /**
-         * THE STATUS BAR CLEARANCE, WHICH I TOOK AWAY WITHOUT REPLACING.
-         *
-         * hadar, 2026-09-02: "the progress header is way too high up, hidden by the
-         * phone elements." He is right and the cause is mine: the comment three lines
-         * below says "ScreenHeader owns the 54pt status-bar clearance", and in-flow I
-         * replaced ScreenHeader with a plain title — inheriting none of it. The rail
-         * rendered under the notch and the clock.
-         *
-         * Put on the SCROLLVIEW rather than the flow header, so the padding belongs to
-         * the screen and not to whichever block happens to be first. The next person to
-         * change what renders at the top cannot lose it the way I just did.
-         */
-        paddingTop: props.inFlow && isDraft ? 54 : 0,
         paddingBottom: touchTargets.camera + touchTargets.spacing + 24,
       }}>
         {/* ScreenHeader owns the 54pt status-bar clearance AND the kicker, which
@@ -578,28 +534,6 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             slab rather than inside it: the slab says what this record IS, and the rail
             says where he is in getting it sent — two different facts, and folding the
             second into the first is how the header grew four bands the last time. */}
-        {props.inFlow && (
-          <View style={{ marginBottom: 16 }}><FlowRail step={5} /></View>
-        )}
-        {/* IN THE FLOW, THE SCREEN INTRODUCES ITSELF — not the record.
-            (hadar, 2026-09-01: "i expected the screen to be more like this style.")
-
-            The header slab states what this DOCUMENT is: its title, its job, a Synced
-            pill, a state banner. All correct for a draft you came back to, and all
-            noise thirty seconds after you recorded it — you know what it is, you just
-            made it. What you do not know is what the app heard, and whether it has
-            already gone anywhere.
-
-            So in-flow the slab is replaced by the two sentences that answer exactly
-            that: what this screen is for, and that nothing has been sent. The record's
-            own identity is still one tap away on the same screen you reach from the
-            records list, where it is the thing you actually need. */}
-        {props.inFlow && isDraft ? (
-          <View style={{ marginBottom: 4 }}>
-            <Text style={st.flowTitle}>{t('draft.reviewTitle')}</Text>
-            <Text style={st.flowSub}>{t('draft.reviewSub')}</Text>
-          </View>
-        ) : (
         <View style={st.headerSlab}>
         {/**
           * THE HEADER, REORGANISED (hadar, 2026-08-24: "the title needs to be much
@@ -689,7 +623,6 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
         </View>
 
         </View>
-        )}
 
         {/* THE PRICE SITS UNDER THE TITLE, like it does on the other two stages
             (hadar, 2026-08-24: "i am missing the price under the title").
@@ -740,14 +673,7 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             It reads correctly in this slot as well as consistently: on a draft the
             client is the gap that decides whether any of the work below can be sent at
             all, and it used to be found only by scrolling past it. */}
-        {/* IN THE FLOW, WHO IT GOES TO COMES AFTER WHAT IT SAYS.
-            The mockup's review step has no recipient at all — its step 6 did — and we
-            collapsed to five, so this is the last screen before a priced document
-            leaves and mandate #2 requires the sender to see the recipient. It moves
-            BELOW the write-up rather than above it: he is checking what the app heard
-            first, and who signs it second. Outside the flow it stays where it was, in
-            the same slot the negotiation and sealed screens use. */}
-        {!props.inFlow && <PeopleSection {...props} />}
+        <PeopleSection {...props} />
 
         {/* 391 — THE SCOPE OF WORK IS NEAR THE TOP AND NEVER TRUNCATED.
             (It used to say "LEADS, above the price". It no longer leads — the price
@@ -790,44 +716,11 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
           // further down the page, under the price — so the screen stated the problem
           // in one place and offered the fix in another, with a dollar figure between
           // them. One object: the heading, the state, the reason, the buttons.
-          /* TWO WAYS TO CHANGE IT, INSIDE THE BLOCK IT CHANGES.
-             (hadar's mockup: "Edit text" and "Record change" under the scope.)
-
-             They are the two ways this product accepts input, offered where the words
-             are, so correcting a write-up needs no hunt for a control. The mic is not
-             decoration: a man on a ladder with gloves on cannot type, and the whole
-             premise is that talking is the fast path (mandate #3).
-
-             `StuckBlock` still wins when there is no write-up yet — offering "Edit
-             text" over an empty box is offering to correct nothing. */
-          footer={isDraft && hasEvidence && !scopeWritten ? <StuckBlock {...props} />
-            : props.inFlow && isDraft ? (
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Button label={t('draft.editText')} icon="edit" variant="secondary"
-                    onPress={props.onEditDescription} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Button label={t('draft.recordChange')} icon="microphone" variant="secondary"
-                    onPress={props.onAddPhotos} />
-                </View>
-              </View>
-            ) : null}
+          footer={isDraft && hasEvidence && !scopeWritten ? <StuckBlock {...props} /> : null}
         />
 
-        {/* NOT IN THE FLOW. `RawSection` is the recording and its transcript;
-            `ScopeSection` is a second copy of the scope headed "SCOPE OF WORK (SENT TO
-            CLIENT)". Both are the right thing on a record you came back to and are
-            noise thirty seconds after speaking: the words are already in the block
-            above, and the recording is the thing he JUST made. hadar's screenshots show
-            the flow screen scrolling through four cards that all say the same work back
-            to him in different words. */}
-        {!props.inFlow && (
-          <>
-            <RawSection {...props} />
-            <ScopeSection {...props} />
-          </>
-        )}
+        <RawSection {...props} />
+        <ScopeSection {...props} />
 
         {/* THE CHECKLIST IS A GRID, TWO ACROSS, and the count sits on the heading
             row opposite the title — the design's shape, and the reason for it is
@@ -846,13 +739,7 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
         <View style={{ marginTop: 22 }}>
           <Card>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-              {/* "EXTRACTED DETAILS" in-flow, "Ready to send" otherwise. The rows are
-                  the same either way; what differs is what the reader is doing. Fresh
-                  from a recording he is checking what the app HEARD; returning to an old
-                  draft he is checking what is still OWED. Same card, two questions. */}
-              <Text style={[labelStyle, { flex: 1 }]}>
-                {t(props.inFlow && isDraft ? 'draft.extracted' : 'draft.checklist')}
-              </Text>
+              <Text style={[labelStyle, { flex: 1 }]}>{t('draft.checklist')}</Text>
               <Text style={[T.bodySteel, { fontSize: 13 }]}>
                 {t({ k: 'draft.checklistCount', p: { have: doneCount(items), of: items.length } })}
               </Text>
@@ -882,14 +769,6 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             It is also mandate #2 said out loud: nothing carrying a price commits or
             sends without a human confirming it. The band is not decoration; it is the
             product's central promise, printed where it is being kept. */}
-        {props.inFlow && <PeopleSection {...props} />}
-
-        {props.inFlow && isDraft && (
-          <View style={st.assure}>
-            <Icon name="shield" size={19} />
-            <Text style={st.assureT}>{t('draft.nothingSentYet')}</Text>
-          </View>
-        )}
 
         {/* Delete moved into the header ⋯ menu (hadar, 2026-07-28) — the design ends
             the scroll at the checklist, and a destructive red button beneath it was
