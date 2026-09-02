@@ -165,7 +165,28 @@ function fold(s: string): string {
  * conservative failure is the one that makes a man type the number.
  */
 function clauses(text: string): string[] {
-  return text.split(/[.!?;\n]+/).map((c) => c.trim()).filter(Boolean);
+  /**
+   * A DECIMAL POINT IS NOT A FULL STOP, and treating it as one silently halved a price.
+   *
+   * Found on hadar's own recording, 2026-09-02. He said "eighteen fifty"; Deepgram wrote
+   * "Fixed price $18.50 added a day"; this split it into "…Fixed price $18" and "50 added
+   * a day", and the first clause read as $18.00. The stored change order said $18.00 for
+   * work he had priced at $18.50 — and `parseMoney("$18.50")` had the right answer all
+   * along, 1850 cents, high confidence. It was never asked the whole number.
+   *
+   * IT LOSES CENTS SILENTLY, WHICH IS THE WORST SHAPE. $18 for $18.50 is plausible, so
+   * nothing downstream can catch it — no parser refuses, no confidence drops, and the
+   * read-back screen prints a wrong figure with a tick beside it. Mandate #6 exists for
+   * exactly this field.
+   *
+   * ONLY A DOT WITH DIGITS ON BOTH SIDES IS PROTECTED. The first attempt guarded any
+   * dot not preceded by a digit, which also stopped a trailing "450." from ending its
+   * clause — caught by voiceprice.test.ts, which is why that test exists. So: split when
+   * the dot has no digit AFTER it, or no digit BEFORE it. "$18.50" is protected because
+   * it has both; "450." splits because nothing follows; "close it up. Fix" splits
+   * because 'p' and 'F' are not digits.
+   */
+  return text.split(/(?:\.(?!\d)|(?<!\d)\.|[!?;\n])+/).map((c) => c.trim()).filter(Boolean);
 }
 
 type Found = { cents: number; matched: string; clause: string; nte: boolean };

@@ -41,10 +41,26 @@ export function parseMoney(text: string): ParsedMoney {
       return { cents, confidence: 'high', matched: m[0] };
     }
   }
-  // A bare number MIGHT be a price. Surface it, but never as high confidence.
-  const bare = text.match(/\b(\d{2,6}(?:\.\d{2})?)\b/);
+  /**
+   * A bare number MIGHT be a price. Surface it, but never as high confidence.
+   *
+   * THE GROUPING COMMA WAS SILENTLY DROPPING THE THOUSANDS DIGIT. `\b(\d{2,6})\b` on
+   * "1,850" cannot match across the comma, so `\b` landed after it and the match was
+   * "850" — parsed, rounded, returned as $850.00 for a figure that said $1,850.
+   *
+   * A HUNDREDFOLD-CLASS ERROR ON THE FIELD MANDATE #6 CALLS THE HIGHEST-RISK ONE, and
+   * it fails in the worst direction: the number it returns is plausible, so nothing
+   * downstream can tell it is wrong. The two branches above already strip commas; this
+   * one never did, and a transcript that writes "1,850" instead of "1850" is entirely
+   * ordinary.
+   *
+   * `[\d,]` to match the whole group, then the same `replace(/,/g, '')` the dollar and
+   * "dollars" branches use, so all three read a grouped figure identically.
+   */
+  const bare = text.match(/\b(\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d{2,6}(?:\.\d{2})?)\b/);
   if (bare) {
-    return { cents: Math.round(parseFloat(bare[1]) * 100), confidence: 'low', matched: bare[1] };
+    const cents = Math.round(parseFloat(bare[1].replace(/,/g, '')) * 100);
+    return { cents, confidence: 'low', matched: bare[1] };
   }
   return { cents: null, confidence: 'none' };
 }
