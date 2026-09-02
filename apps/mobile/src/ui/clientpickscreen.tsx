@@ -30,10 +30,49 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { t } from '../i18n';
 import { FlowRail } from './flowrail';
+import { Icon } from './icon';
 import { Button } from './kit';
 import { C, F } from './theme';
 
-export type ClientChoice = { id: string; name: string };
+/**
+ * `role` is what the artboard's second line says ("Property Owner", "Contractor / You").
+ * OPTIONAL, and rendered only when present: it is a real column on `project_approver`,
+ * so a row that lacks it gets no subtitle rather than an invented one. Labelling
+ * somebody's authority on a screen that decides who receives a priced document is
+ * exactly the place not to guess — `listRoster` already drops rows whose role it does
+ * not recognise for the same reason.
+ */
+export type ClientChoice = { id: string; name: string; role?: string };
+
+/**
+ * Tile colour and glyph per role, from the supplied kit's own mapping (README:
+ * "Contractor/user: C.brand · Owner/hardhat: amber · Other client/contacts: blue").
+ *
+ * COLOUR IS NEVER THE ONLY CARRIER — the kit's standing rule and the reason each tile
+ * sits beside a name and a written role. A contractor who cannot tell amber from green
+ * in direct sun loses nothing.
+ */
+/**
+ * The card's second line. `role.*` is the SAME vocabulary the send sheet and the record
+ * screen print, so a man reads "Property owner" in one place and "Property owner" in the
+ * other — two spellings of one fact is the drift this codebase keeps paying for.
+ *
+ * The contractor's own row gets "/ You" appended, because on his own roster his name is
+ * the one entry that is not a counterparty and he should not have to work that out.
+ */
+function roleLine(role: string): string {
+  const label = t(`role.${role}` as any);
+  return role === 'general_contractor'
+    ? t({ k: 'clientpick.you', p: { role: label } } as any)
+    : label;
+}
+
+function tileFor(role?: string): { bg: string; fg: string; icon: 'acUser' | 'acHardhat' } {
+  if (role === 'owner' || role === 'property_manager') {
+    return { bg: '#F7EBD6', fg: '#8A6A2F', icon: 'acHardhat' };
+  }
+  return { bg: '#E8EEE2', fg: '#4E6243', icon: 'acUser' };
+}
 
 export function ClientPickScreen(props: {
   /** The extra's title, so he knows WHICH one — he may have made three today. */
@@ -86,36 +125,124 @@ export function ClientPickScreen(props: {
             Matched to the job picker's `jpTitle` — same face, same size, same place —
             because "the sequence has to be the same" is the whole point of the move. */}
         <Text style={st.title}>{t('clientpick.title')}</Text>
-        <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink }} numberOfLines={2}>
-          {props.scope}
-        </Text>
-        <Text style={{ fontFamily: F.body, fontSize: 15, color: C.steel,
-          lineHeight: 22, marginTop: 8 }}>
-          {t('clientpick.why')}
-        </Text>
+        {/* THE SCOPE LINE IS GONE (the artboard, 2026-09-02). It printed the extra's
+            own title here, and the reason was real when this screen was a SHEET that
+            could surface at any time: "he may have made three today". Inside the flow
+            it cannot — he recorded this one forty seconds ago on step 1 and has not
+            left the sequence since. It was answering a question nobody standing here
+            is asking, above the sentence that explains the screen.
 
-        {!adding && props.roster.map((r) => (
+            `props.scope` stays on the props, unread, deliberately: it is what this
+            screen needs the moment it is ever shown outside the flow again. */}
+        {/* THE WHY GETS THE GLYPH, not a bare paragraph (the artboard, 2026-09-02).
+            It is the one sentence on the screen that explains the SCREEN rather than an
+            option, and the small tile is what separates it from the options below. */}
+        <View style={st.introRow}>
+          <View style={st.introTile}>
+            <Icon name="acClients" size={20} color="#4E6243" />
+          </View>
+          <Text style={st.introT}>{t('clientpick.why')}</Text>
+        </View>
+
+        {/* ── THE ROSTER, AS CARDS ────────────────────────────────────────────────
+            Rows with a hairline rule became cards with a 72pt tile. Not decoration:
+            this is a one-tap decision made with gloves on (mandate #3), and the old
+            row put a 16pt name and a chevron inside 52pt of height. The card is 92,
+            the whole card is the target, and the tile gives the eye something to aim
+            at before it has read anything. */}
+        {!adding && props.roster.map((r) => {
+          const tile = tileFor(r.role);
+          return (
+            <Pressable
+              key={r.id}
+              onPress={() => props.onPick(r)}
+              disabled={!!props.busy}
+              style={({ pressed }) => [st.card, pressed && st.cardDown]}
+              accessibilityRole="button"
+            >
+              <View style={[st.tile, { backgroundColor: tile.bg }]}>
+                <Icon name={tile.icon} size={26} color={tile.fg} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={st.cardT} numberOfLines={2}>{r.name}</Text>
+                {/* No role, no second line. See the note on ClientChoice.role. */}
+                {!!r.role && (
+                  <Text style={st.cardSub} numberOfLines={1}>{roleLine(r.role)}</Text>
+                )}
+              </View>
+              <Icon name="acChevron" size={22} color="#6b625b" />
+            </Pressable>
+          );
+        })}
+
+        {/* ── PICK FROM THE PHONE'S CONTACTS ──────────────────────────────────────
+            Promoted out of the add-a-client form and onto the screen as its own card
+            (the artboard). It was reachable only AFTER tapping "add a client", which
+            put the fastest path — the client is already in his phone — behind the
+            slowest one, typing a name. */}
+        {!adding && !!props.onPickContact && (
           <Pressable
-            key={r.id}
-            onPress={() => props.onPick(r)}
+            onPress={async () => {
+              const c = await props.onPickContact!();
+              if (!c) return;
+              setName(c.name); setPhone(c.phone); setAdding(true);
+            }}
             disabled={!!props.busy}
-            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14,
-              borderBottomWidth: 1, borderBottomColor: C.line }}
+            style={({ pressed }) => [st.card, pressed && st.cardDown]}
+            accessibilityRole="button"
           >
-            <Text style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 16, color: C.ink }}
-              numberOfLines={1}>
-              {r.name}
-            </Text>
-            <Text style={{ fontFamily: F.body, fontSize: 20, color: C.steel }}>›</Text>
+            <View style={[st.tile, { backgroundColor: '#EAF0F6' }]}>
+              <Icon name="acContacts" size={26} color="#3E5B7A" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={st.cardT}>{t('clientpick.contactsTitle')}</Text>
+              <Text style={st.cardSub}>{t('clientpick.contactsSub')}</Text>
+            </View>
+            <Icon name="acChevron" size={22} color="#6b625b" />
           </Pressable>
-        ))}
+        )}
 
+        {/* DASHED, because it MAKES a client rather than choosing one — the same
+            distinction step 2 draws for "new location right here", drawn the same way,
+            so the two screens teach the contractor one rule instead of two. */}
         {!adding && (
-          <Pressable onPress={() => setAdding(true)} style={{ paddingVertical: 14 }}>
-            <Text style={{ fontFamily: F.bodySemi, fontSize: 16, color: C.brand }}>
-              {t('clientpick.addNew')}
-            </Text>
+          <Pressable onPress={() => setAdding(true)}
+            style={({ pressed }) => [st.addCard, pressed && st.cardDown]}
+            accessibilityRole="button">
+            <View style={st.addPlus}>
+              <Icon name="acPlus" size={20} color="#4E6243" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={st.addT}>{t('clientpick.addTitle')}</Text>
+              <Text style={st.addSub}>{t('clientpick.addSub')}</Text>
+            </View>
           </Pressable>
+        )}
+
+        {/* ── LATER, ON THE PAGE ──────────────────────────────────────────────────
+            The footer button says the same words, and that is DELIBERATE, not a
+            duplicate I missed. They are two different moments: this row is an option
+            among the options, read while he is still choosing; the footer is the way
+            out of the step, in the fixed place every step of this sequence keeps its
+            way out. Removing either one makes the screen worse — the row would leave
+            "later" looking like it is not a real answer, and dropping the footer would
+            make step 3 the only step whose escape scrolls. */}
+        {!adding && (
+          <>
+            <View style={st.rule} />
+            <Pressable onPress={props.onSkip} disabled={!!props.busy}
+              style={({ pressed }) => [st.laterRow, pressed && st.cardDown]}
+              accessibilityRole="button">
+              <View style={[st.tile, st.tileSm, { backgroundColor: '#F1EFEA' }]}>
+                <Icon name="acCalendar" size={22} color="#6b625b" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={st.laterT}>{t('clientpick.later')}</Text>
+                <Text style={st.cardSub}>{t('clientpick.laterSub')}</Text>
+              </View>
+              <Icon name="acChevron" size={22} color="#6b625b" />
+            </Pressable>
+          </>
         )}
 
         {adding && (
@@ -192,5 +319,38 @@ const st = StyleSheet.create({
   // would make step 3 the odd screen again for a different reason.
   title: { fontFamily: 'Inter_700Bold', fontSize: 29.5, lineHeight: 34, color: '#131110',
            marginBottom: 14 },
+  introRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 13, marginTop: 2 },
+  introTile: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#E8EEE2',
+    alignItems: 'center', justifyContent: 'center' },
+  introT: { flex: 1, fontFamily: F.body, fontSize: 16, lineHeight: 23, color: C.steel,
+    paddingTop: 3 },
+
+  // 92pt tall and the WHOLE card is the target — well past the 48pt floor mandate #3
+  // sets, because this is a one-tap decision taken with gloves on.
+  card: { flexDirection: 'row', alignItems: 'center', gap: 15, minHeight: 92,
+    backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e6e0d8', borderRadius: 14,
+    paddingHorizontal: 15, paddingVertical: 14, marginTop: 14 },
+  // The only press feedback on the screen. A card this large with no state change reads
+  // as a panel rather than a control.
+  cardDown: { opacity: 0.62 },
+  tile: { width: 62, height: 62, borderRadius: 16, alignItems: 'center',
+    justifyContent: 'center' },
+  tileSm: { width: 52, height: 52, borderRadius: 14 },
+  cardT: { fontFamily: 'Inter_700Bold', fontSize: 19, lineHeight: 24, color: '#131110' },
+  cardSub: { fontFamily: F.body, fontSize: 15, color: C.steel, marginTop: 2 },
+
+  addCard: { flexDirection: 'row', alignItems: 'center', gap: 15, minHeight: 84,
+    borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#8FA383', borderRadius: 14,
+    paddingHorizontal: 15, paddingVertical: 14, marginTop: 16 },
+  addPlus: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#E8EEE2',
+    alignItems: 'center', justifyContent: 'center' },
+  addT: { fontFamily: 'Inter_700Bold', fontSize: 19, color: '#3d5236' },
+  addSub: { fontFamily: F.body, fontSize: 15, color: '#5d6b56', marginTop: 2 },
+
+  rule: { height: 1, backgroundColor: C.line, marginTop: 26 },
+  laterRow: { flexDirection: 'row', alignItems: 'center', gap: 15, minHeight: 76,
+    paddingVertical: 12, marginTop: 6 },
+  laterT: { fontFamily: 'Inter_700Bold', fontSize: 18, color: '#131110' },
+
   foot: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 28 },
 });

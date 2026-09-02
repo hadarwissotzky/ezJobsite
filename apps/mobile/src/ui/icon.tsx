@@ -32,6 +32,21 @@ const ICONS = {
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>',
   remind: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>',
   people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  // ── THE CLIENT-STEP KIT (hadar, 2026-09-02, EZChangeOrders_Client_Screen_Assets).
+  // Shipped as `currentColor` strokes at 1.8–2.0, drawn for the 72pt tiles on step 3.
+  //
+  // THEY ARE NEW NAMES, NOT REPLACEMENTS. `person`, `people`, `hardhat` and `calendar`
+  // already exist and are drawn all over the app; overwriting them would redraw a dozen
+  // screens nobody asked me to touch to fix one. These five are used by step 3 only —
+  // if the kit later supersedes the older set, that is a deliberate sweep, not a side
+  // effect of this screen.
+  acUser: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7.5" r="3.1"/><path d="M5.7 20c.55-3.9 2.65-5.9 6.3-5.9s5.75 2 6.3 5.9"/></svg>',
+  acHardhat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.5v-2.2a8 8 0 0 1 16 0v2.2"/><path d="M8.5 5.6v5.3"/><path d="M15.5 5.6v5.3"/><path d="M3 14.5h18v2.2H3z"/><path d="M6 17.2c.9 1.2 2.9 1.8 6 1.8s5.1-.6 6-1.8"/></svg>',
+  acContacts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.5"/><circle cx="16" cy="8.8" r="2.2"/><path d="M3.7 19c.5-3.5 2-5.2 4.3-5.2s3.8 1.7 4.3 5.2"/><path d="M12.8 14.3c2.9-.5 5.7 1.1 6.8 4.7"/><circle cx="12" cy="6.2" r="2.6"/></svg>',
+  acClients: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.4"/><circle cx="16" cy="8" r="2.4"/><path d="M3.5 19c.4-3.3 2-5 4.5-5s4.1 1.7 4.5 5"/><path d="M11.5 19c.4-3.3 2-5 4.5-5s4.1 1.7 4.5 5"/></svg>',
+  acChevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>',
+  acPlus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  acCalendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M8 3.5v4M16 3.5v4M4 9.5h16"/></svg>',
   person: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
   // Added 2026-08-20 for the language step, which puts one on each option row. The
   // only mark on that screen that means "language" without being written IN a

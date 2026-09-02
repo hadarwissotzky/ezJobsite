@@ -752,7 +752,7 @@ export default function App() {
    *  chosen; `onDone` starts the processing screen once it is answered or skipped. */
   const [clientPick, setClientPick] = React.useState<null | {
     coId: string; projectId: string;
-    roster: Array<{ id: string; name: string }>;
+    roster: Array<{ id: string; name: string; role?: string }>;
     onDone: () => void; busy: boolean;
   }>(null);
   // REQ-PROC8: the capture whose AI proposal is being reviewed, or null.
@@ -2307,7 +2307,10 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
     try {
       const roster = await listRoster(db, projId);
       setClientPick({ coId: anchorCoId, projectId: projId,
-                      roster: roster.map((r) => ({ id: r.id, name: r.name })),
+                      // `role` rides along now: step 3 prints it under the name
+                      // ("Property owner", "General contractor / You"). It was being
+                      // dropped here, so the screen had a name and nothing else to say.
+                      roster: roster.map((r) => ({ id: r.id, name: r.name, role: r.role })),
                       onDone: startProcessing, busy: false });
       return;
     } catch { /* no roster readable — never let this stand between him and the upload */ }
