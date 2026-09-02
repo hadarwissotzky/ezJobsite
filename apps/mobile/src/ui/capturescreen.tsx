@@ -444,7 +444,23 @@ export function FusedCapture({
   // the way of the viewfinder once he is actually doing the thing (hadar, 2026-07-27).
   // Pausing re-expands it, because a paused mic is exactly when "what is it doing now?"
   // needs a full-size answer.
-  const expanded = !cardDismissed && (paused || (!spoke && shots.length === 0));
+  /**
+   * IN RECORDING MODE THE CARD IS THE SCREEN, so it never collapses.
+   *
+   * hadar, 2026-09-02: "missing a button to pause and continue the recording." It was
+   * there — inside this card — and the card hides itself the moment he has SPOKEN
+   * (`!spoke`), which is precisely the moment a pause becomes useful. He talked, the
+   * card shrank to the slim strip, and the only pause control on the screen went with
+   * it. Recording mode has no action row to fall back on any more, so that left no way
+   * to pause at all.
+   *
+   * The collapse exists to CLEAR THE VIEWFINDER — the card is an overlay competing with
+   * a preview he is trying to frame. With no preview there is nothing to clear and
+   * nothing to compete with; the card is the content.
+   */
+  const expanded = camOpen
+    ? !cardDismissed && (paused || (!spoke && shots.length === 0))
+    : true;
 
   /** Close the sheet AND drop the viewer, so reopening never lands mid-photo.
    *  Android's back gesture routes here too: it shuts the viewer first if one is
@@ -832,14 +848,16 @@ export function FusedCapture({
                   the recording is untouched, which is the whole point: he is framing a
                   shot, not stopping. The mic state stays readable in the collapsed
                   strip that replaces this, so dismissing costs him no information. */}
-              <Pressable
-                onPress={() => setCardDismissed(true)}
-                accessibilityRole="button"
-                accessibilityLabel={T('cap.hideCard')}
-                hitSlop={8}
-                style={st.cardClose}>
-                <Text style={st.cardCloseT}>✕</Text>
-              </Pressable>
+              {camOpen && (
+                <Pressable
+                  onPress={() => setCardDismissed(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel={T('cap.hideCard')}
+                  hitSlop={8}
+                  style={st.cardClose}>
+                  <Text style={st.cardCloseT}>✕</Text>
+                </Pressable>
+              )}
               <View style={st.cardTop}>
                 <View style={[st.micDisc, paused && st.micDiscPaused]}>
                   <Icon name={paused ? 'pause' : 'microphone'} size={30} color="#fff" />
@@ -861,9 +879,15 @@ export function FusedCapture({
               {!camOpen && micOn && (
                 <Pressable style={st.stopBtn} onPress={togglePause}
                   disabled={saving || interrupted} accessibilityRole="button">
-                  <View style={st.stopSquare} />
+                  {paused
+                    ? <Icon name="play" size={16} color={C.brandDark} />
+                    : <View style={st.stopSquare} />}
+                  {/* ONE CONTROL, BOTH DIRECTIONS. It pauses the microphone and starts
+                      it again; it does not end the capture — "Continue" does that. The
+                      label has to say which of the two it is about to do, or a man who
+                      stopped to think cannot tell whether tapping it resumes or sends. */}
                   <Text style={st.stopT}>
-                    {paused ? T('cap.resumeVoice') : T('cap.stopRecording')}
+                    {paused ? T('cap.resumeRecording') : T('cap.stopRecording')}
                   </Text>
                 </Pressable>
               )}
