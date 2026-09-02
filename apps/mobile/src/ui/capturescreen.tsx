@@ -798,6 +798,17 @@ export function FusedCapture({
             the coach card three) and a fixed `top` for the camera hint below it means
             a taller card lands on top of it. Flow + gap cannot overlap at any size. */}
         <View style={st.bandFlow} pointerEvents="box-none">
+          {/* THE SCREEN SAYS WHAT IT WANTS. A viewfinder needs no heading — it is
+              obvious what a camera is for. A recorder is not: hadar's mockup opens with
+              a sentence telling the contractor to talk, and that sentence is the
+              difference between a man who starts speaking and one who looks for the
+              button. Camera mode keeps its bare viewfinder. */}
+          {!camOpen && (
+            <View>
+              <Text style={st.askTitle}>{T('cap.askTitle')}</Text>
+              <Text style={st.askSub}>{T('cap.askSub')}</Text>
+            </View>
+          )}
           {/* THE reassurance card. One card, one state at a time — an interruption or a
               refused Done REPLACES it rather than stacking another banner on top, so
               there is never more than one thing to read. */}
@@ -843,6 +854,19 @@ export function FusedCapture({
               <Text style={st.cardBody}>
                 {paused ? T('cap.pausedHint') : T('cap.explainWhat')}
               </Text>
+              {/* STOP, INSIDE THE CARD THAT IS RECORDING. In camera mode this lives in
+                  the action row beside the shutter, where a thumb finds it without
+                  looking. In recording mode the card IS the screen, and the control
+                  belongs to the thing it controls rather than to a row at the bottom. */}
+              {!camOpen && micOn && (
+                <Pressable style={st.stopBtn} onPress={togglePause}
+                  disabled={saving || interrupted} accessibilityRole="button">
+                  <View style={st.stopSquare} />
+                  <Text style={st.stopT}>
+                    {paused ? T('cap.resumeVoice') : T('cap.stopRecording')}
+                  </Text>
+                </Pressable>
+              )}
               <View style={st.cardRule} />
               <View style={st.cardHint}>
                 <Text style={st.cardHintIcon}>☝︎</Text>
@@ -884,6 +908,10 @@ export function FusedCapture({
             <View style={st.draftBox}>
               <View style={st.draftHead}>
                 <Text style={st.draftLabel}>{T('cap.draftSummary')}</Text>
+                {/* The field is always editable — this is a SIGNPOST, not a mode. A box
+                    of text a machine wrote does not look touchable, and a contractor who
+                    does not know he may change it will send words he never said. */}
+                <Text style={st.draftEdit}>{T('cap.editSummary')}</Text>
               </View>
               <TextInput
                 style={st.draftInput}
@@ -926,6 +954,32 @@ export function FusedCapture({
 
       {/* ---------- ACTION PANEL ---------- */}
       <View style={st.panel}>
+        {/* RECORDING MODE GETS ITS OWN CONTROLS, not the camera's three-across row.
+            That row exists to put a shutter between two side buttons; with no lens it
+            rendered an EMPTY BOX where the photo collection would be, a centred "Add
+            photos", and a Pause off to the right — the layout hadar screenshotted and
+            called not his design. Here the two things he can do get a full width each. */}
+        {!camOpen ? (
+          <View style={{ gap: 10 }}>
+            <Pressable style={st.wideBtn} onPress={() => setCamOpen(true)} disabled={saving}
+              accessibilityRole="button" accessibilityLabel={T('cap.addPhotos')}>
+              <Icon name="camera" size={22} color={C.ink} />
+              <Text style={st.wideBtnT}>{T('cap.addPhotos')}</Text>
+              <Text style={st.wideBtnSub}>{T('cap.optional')}</Text>
+              {shots.length > 0 && (
+                <View style={st.countPill}><Text style={st.countPillT}>{shots.length}</Text></View>
+              )}
+            </Pressable>
+            {/* The collection only when there IS one — an empty box was the placeholder
+                that made the row look broken. */}
+            {shots.length > 0 && (
+              <Pressable style={st.wideBtn} onPress={() => setSheetOpen(true)} disabled={saving}>
+                <Icon name="photo" size={22} color={C.ink} />
+                <Text style={st.wideBtnT}>{T('cap.viewPhotos')}</Text>
+              </Pressable>
+            )}
+          </View>
+        ) : (
         <View style={st.actionRow}>
           {/* THE COLLECTION, once there is one. On a recording screen with no photos
               "View photos" is a control for a thing that does not exist; with the
@@ -978,6 +1032,7 @@ export function FusedCapture({
             </Pressable>
           ) : <View style={st.sideBtn} />}
         </View>
+        )}
 
         {/* DONE sits at the very bottom of the panel now (hadar, 2026-07-27): the
             camera-hint card, the "this goes to …" line and the "saving on this phone"
@@ -989,7 +1044,14 @@ export function FusedCapture({
           (!shots.length && !spoke && !(summaryTouched.current && summary.trim())) && st.doneDim]}
           onPress={finish} disabled={saving}>
           {saving ? <ActivityIndicator color="#fff" />
-            : <Text style={st.doneT}>{T('cap.doneExplaining')}</Text>}
+            : <Text style={st.doneT}>
+                {/* "Continue" in recording mode, because that is what it does — it goes
+                    on to the job, the client and the write-up. "Done explaining" is the
+                    right word beside a viewfinder, where the alternative is to keep
+                    shooting; on a screen he may never have spoken on it claims he
+                    explained something. */}
+                {camOpen ? T('cap.doneExplaining') : T('cap.continueArrow')}
+              </Text>}
         </Pressable>
       </View>
 
@@ -1146,12 +1208,33 @@ const st = StyleSheet.create({
   // the camera closed this is the content of the screen, not an annotation on it.
   // Same footprint as the shutter it replaces, so the row does not jump when the camera
   // opens — the thumb keeps its target.
+  // FULL WIDTH, ROW-SHAPED. The camera's controls are round targets in a three-across
+  // row because a shutter must be reachable without looking; these are read before they
+  // are pressed, so they are wide, labelled, and stacked.
+  askTitle: { fontFamily: F.bodyBold, fontSize: 26, lineHeight: 30, color: C.ink,
+    letterSpacing: -0.3 },
+  askSub: { fontFamily: F.body, fontSize: 14.5, lineHeight: 20, color: C.steel, marginTop: 5 },
+  // Brand-tinted, not the dark primary: stopping is routine and reversible, and a black
+  // slab inside a card would outrank the Continue button at the bottom of the screen.
+  stopBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    minHeight: 48, borderRadius: 12, backgroundColor: C.brandSoft, marginTop: 12 },
+  stopSquare: { width: 15, height: 15, borderRadius: 3, backgroundColor: C.brand },
+  stopT: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.brandDark },
+  draftEdit: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.brand },
+  wideBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 56,
+    paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: C.line,
+    backgroundColor: C.card },
+  wideBtnT: { fontFamily: F.bodyBold, fontSize: 16, color: C.ink },
+  wideBtnSub: { fontFamily: F.body, fontSize: 13.5, color: C.muted },
   addPhotos: { alignItems: 'center', justifyContent: 'center', gap: 2,
     borderWidth: 1.5, borderColor: C.line, borderRadius: 16, backgroundColor: C.card,
     paddingHorizontal: 18, paddingVertical: 12 },
   addPhotosT: { fontFamily: F.bodyBold, fontSize: 15, color: C.ink },
   addPhotosSub: { fontFamily: F.body, fontSize: 12, color: C.muted },
-  draftBox: { marginTop: 'auto', backgroundColor: C.card, borderRadius: 14, borderWidth: 1,
+  // NO `marginTop: auto`. That pinned the summary to the bottom of a band sized for a
+  // viewfinder and left half a screen of nothing between it and the recording card —
+  // the gap in hadar's screenshot. It flows directly under what it summarises.
+  draftBox: { backgroundColor: C.card, borderRadius: 14, borderWidth: 1,
     borderColor: C.line, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10 },
   draftHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   draftLabel: { flex: 1, fontFamily: F.bodySemi, fontSize: 13.5, color: C.brand },
