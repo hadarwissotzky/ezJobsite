@@ -47,6 +47,7 @@ import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, use
 // R2 live view: words appear over the camera while he talks. An indicator, not
 // evidence — the recording stays owned by expo-audio; this only listens along.
 import { needsPermissionAsk, requestSpeechPermission, startLive, type LiveHandle } from '../ondevicestt';
+import { FlowRail } from './flowrail';
 import { logDiag } from '../diaglog';
 import { signalFailed, signalShutter } from '../feedback';
 import { stampNow, type Stamp } from '../stamp';
@@ -804,18 +805,26 @@ export function FusedCapture({
           <Text style={st.topLab}>{T('cap.cancel')}</Text>
         </Pressable>
 
-        <View style={st.topMid}>
-          <Text style={st.topTitle} numberOfLines={1}>
-            {(paused ? T('cap.voiceRecordingPaused') : T('cap.voiceRecording'))
-              + ` · ${two(Math.floor(secs / 60))}:${two(secs % 60)}`}
-          </Text>
-          {/* The where/when line is PERMANENT now, not a 5-second flash: it is the
-              plain-words version of mandate #9, and it costs nothing to keep saying. */}
-          <View style={st.topWhere}>
-            <Icon name="mapPin" size={13} color={C.steel} />
-            <Text style={st.topWhereT} numberOfLines={1}>{place ?? T('cap.savingTimeLoc')}</Text>
+        {/* THE HEADER SAID EVERYTHING TWICE (hadar, 2026-09-02: "clean the top").
+            "VOICE RECORDING · 00:16" over a card titled "Voice recording" carrying its
+            own timer, and a location line under a screen that has not asked about
+            location. In camera mode all of that is the ONLY place any of it appears, so
+            it stays there. On the recorder the card says it, better, in the place he is
+            already looking. */}
+        {camOpen ? (
+          <View style={st.topMid}>
+            <Text style={st.topTitle} numberOfLines={1}>
+              {(paused ? T('cap.voiceRecordingPaused') : T('cap.voiceRecording'))
+                + ` · ${two(Math.floor(secs / 60))}:${two(secs % 60)}`}
+            </Text>
+            {/* The where/when line is PERMANENT now, not a 5-second flash: it is the
+                plain-words version of mandate #9, and it costs nothing to keep saying. */}
+            <View style={st.topWhere}>
+              <Icon name="mapPin" size={13} color={C.steel} />
+              <Text style={st.topWhereT} numberOfLines={1}>{place ?? T('cap.savingTimeLoc')}</Text>
+            </View>
           </View>
-        </View>
+        ) : <View style={st.topMid} />}
 
         {/* CAMERA CHROME BELONGS TO THE CAMERA. Torch and flip are meaningless while
             the lens is not even mounted, and two dead-looking controls in the corner of
@@ -902,7 +911,13 @@ export function FusedCapture({
               button. Camera mode keeps its bare viewfinder. */}
           {!camOpen && (
             <View>
-              <Text style={st.askTitle}>{T('cap.askTitle')}</Text>
+              {/* STEP 1 OF THE SAME FLOW (hadar: "it is missing the progress bar on top").
+                  Record · Job · Client · Write-up · Review — this screen is the first of
+                  them and was the only one not saying so, which made the journey look
+                  like it started at the job picker. The rail is the same component the
+                  other four draw, so the five cannot disagree about where he is. */}
+              <FlowRail step={1} />
+              <Text style={[st.askTitle, { marginTop: 18 }]}>{T('cap.askTitle')}</Text>
               <Text style={st.askSub}>{T('cap.askSub')}</Text>
             </View>
           )}
@@ -953,10 +968,28 @@ export function FusedCapture({
                   </View>
                 )}
                 <View style={st.cardTopText}>
-                  <Text style={st.cardTitle}>
-                    {paused ? T('cap.voiceIsPaused') : T('cap.voiceIsRecording')}
-                  </Text>
-                  <Wave level={level} active={recordingNow} />
+                  {/* THE LABEL LEADS WITH A SMALL MIC, as the mockup draws it — the disc
+                      is gone but the symbol is worth one line at 15pt. */}
+                  <View style={st.cardTitleRow}>
+                    {!camOpen && <Icon name="microphone" size={15} color={C.brand} />}
+                    <Text style={st.cardTitle}>
+                      {paused ? T('cap.voiceIsPaused') : T('cap.voiceIsRecording')}
+                    </Text>
+                  </View>
+                  {/* THE TIMER MOVED HERE WITH THE HEADER IT USED TO LIVE IN. Cleaning
+                      the top took the only elapsed time on the recorder with it, and a
+                      recording with no clock is a recording you cannot judge the length
+                      of — the one number that tells him whether he has said enough. */}
+                  <View style={st.waveRow}>
+                    <View style={{ flex: 1 }}>
+                      <Wave level={level} active={recordingNow} />
+                    </View>
+                    {!camOpen && (
+                      <Text style={st.cardClock}>
+                        {two(Math.floor(secs / 60))}:{two(secs % 60)}
+                      </Text>
+                    )}
+                  </View>
                 </View>
               </View>
               {/* "Explain what changed and what needs to be done" IS INSTRUCTION THE
@@ -1056,8 +1089,20 @@ export function FusedCapture({
               screen is a recorder, the words are the content, and a field he can fix is
               the whole point of showing them (hadar, 2026-09-02: "into an edit field
               that the user can read and edit"). */}
+          {/* EDITING TAKES THE WHOLE SCREEN (hadar, 2026-09-02: "when I click to edit
+              the text it should stretch to the top of the screen so I have access to the
+              whole text and be able to edit it").
+
+              Reading back ninety seconds of speech through a 190pt window, with a
+              keyboard under it, is proofreading through a letterbox — and this is the
+              text a client will read. On focus the card lifts out of the flow and fills
+              the band, over the rail and the recording card, because while he is editing
+              those are not what he is doing. It drops back the moment he is done.
+
+              The recorder KEEPS RUNNING underneath. Editing is not an interruption, and
+              a man who thinks of something else mid-correction should be able to say it. */}
           {!camOpen && (
-            <View style={st.draftBox}>
+            <View style={[st.draftBox, summaryFocused && st.draftBoxFull]}>
               <View style={st.draftHead}>
                 <Text style={st.draftLabel}>{T('cap.draftSummary')}</Text>
                 {/* "EDIT" IS A SIGNPOST; "DONE" IS A WAY OUT.
@@ -1103,7 +1148,7 @@ export function FusedCapture({
                 </InputAccessoryView>
               )}
               <TextInput
-                style={st.draftInput}
+                style={[st.draftInput, summaryFocused && st.draftInputFull]}
                 inputAccessoryViewID={Platform.OS === 'ios' ? SUMMARY_ACCESSORY : undefined}
                 multiline
                 scrollEnabled
@@ -1428,6 +1473,11 @@ const st = StyleSheet.create({
   kbDone: { minHeight: 34, justifyContent: 'center', paddingHorizontal: 14,
     borderRadius: 8, backgroundColor: C.brand },
   kbDoneT: { fontFamily: F.bodyBold, fontSize: 15, color: '#fff' },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  waveRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
+  // Tabular-ish weight so the digits do not jitter the wave as they tick.
+  cardClock: { fontFamily: F.bodyBold, fontSize: 16, color: C.ink,
+    fontVariant: ['tabular-nums'] },
   pauseGlyph: { flexDirection: 'row', gap: 4 },
   pauseBar: { width: 4.5, height: 15, borderRadius: 1.5, backgroundColor: C.brand },
   stopT: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.brandDark },
@@ -1461,6 +1511,11 @@ const st = StyleSheet.create({
   // primary button off the bottom.
   draftInput: { fontFamily: F.body, fontSize: 16, lineHeight: 22, color: C.ink,
     minHeight: 96, maxHeight: 190, paddingTop: 2, paddingBottom: 6 },
+  // FOCUSED: out of the flow and over everything, so the words get the screen. `flex: 1`
+  // on the input rather than a taller maxHeight — the card is the height of the band and
+  // the field should be the height of the card, whatever screen it lands on.
+  draftBoxFull: { ...StyleSheet.absoluteFillObject, marginTop: 0 },
+  draftInputFull: { maxHeight: undefined, flex: 1 },
 
   // The photo stamp keeps the dark treatment — it is burned onto a photograph.
   stamp: { position: 'absolute', left: 16, bottom: 40, backgroundColor: 'rgba(0,0,0,0.45)',
