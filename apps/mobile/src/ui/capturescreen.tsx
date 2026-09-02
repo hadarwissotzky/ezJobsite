@@ -340,6 +340,9 @@ export function FusedCapture({
    * speak again, and the first half of what you said was gone.
    */
   const lastLiveRef = React.useRef('');
+  /** `paused` for the recognition callback, which closes over its first render. */
+  const pausedRef = React.useRef(false);
+  React.useEffect(() => { pausedRef.current = paused; }, [paused]);
   /** Is the summary field being typed in? Drives the Done affordance — see the header. */
   const [summaryFocused, setSummaryFocused] = React.useState(false);
 
@@ -456,6 +459,25 @@ export function FusedCapture({
              * Either way this only ever ADDS. A man who paused, typed a correction and
              * carried on talking keeps the correction and gains the new sentence.
              */
+            /**
+             * PAUSED MEANS PAUSED — INCLUDING THE WRITING.
+             *
+             * hadar, 2026-09-02: "the recording is on pause but the draft summary keeps
+             * on capturing text — that is wrong."
+             *
+             * `togglePause` pauses the RECORDER. On-device recognition is a separate
+             * session and kept listening, so words spoken during a pause were written
+             * into the summary while being absent from the audio. The text would then
+             * describe work the recording does not contain — a document saying more than
+             * its evidence, which is the shape of every dispute this product exists to
+             * prevent.
+             *
+             * `lastLiveRef` still advances, so the words heard during the pause are
+             * SWALLOWED rather than banked: on resume the delta starts from where
+             * recognition actually is, and nothing said while the mic was off arrives
+             * late in one lump.
+             */
+            if (pausedRef.current) { lastLiveRef.current = t; return; }
             const last = lastLiveRef.current;
             const delta = t.startsWith(last) ? t.slice(last.length) : t;
             lastLiveRef.current = t;
@@ -800,9 +822,16 @@ export function FusedCapture({
 
       {/* ---------- TOP BAR ---------- */}
       <View style={st.topBar}>
-        <Pressable onPress={onClose} hitSlop={12} style={st.topBtn}>
+        {/* AN ICON IS ENOUGH HERE (hadar: "the cancel button in the header takes too
+            much space"). The word earns its place over a viewfinder, where the top bar
+            is the only chrome and nothing else explains itself; on the recorder it is a
+            labelled box competing with a rail and a heading for the top of the screen,
+            to say what an ✕ already says. The accessible label keeps the word for anyone
+            who needs it read aloud. */}
+        <Pressable onPress={onClose} hitSlop={16} style={camOpen ? st.topBtn : st.topX}
+          accessibilityRole="button" accessibilityLabel={T('cap.cancel')}>
           <Icon name="close" size={22} color={C.ink} />
-          <Text style={st.topLab}>{T('cap.cancel')}</Text>
+          {camOpen && <Text style={st.topLab}>{T('cap.cancel')}</Text>}
         </Pressable>
 
         {/* THE HEADER SAID EVERYTHING TWICE (hadar, 2026-09-02: "clean the top").
@@ -970,9 +999,19 @@ export function FusedCapture({
                 <View style={st.cardTopText}>
                   {/* THE LABEL LEADS WITH A SMALL MIC, as the mockup draws it — the disc
                       is gone but the symbol is worth one line at 15pt. */}
+                  {/* THE LABEL IS A LABEL, NOT A HEADING (hadar: "the your voice is
+                      paused text is too big, and the icon to the right of it is too
+                      small"). It sat at heading weight above a wave that says the same
+                      thing louder, while the mic beside it was a 15pt afterthought. The
+                      two swap emphasis: the symbol reads at a glance, the words explain
+                      it. Camera mode keeps its own sizing — there the line is the only
+                      thing on screen saying the mic is live. */}
                   <View style={st.cardTitleRow}>
-                    {!camOpen && <Icon name="microphone" size={15} color={C.brand} />}
-                    <Text style={st.cardTitle}>
+                    {!camOpen && (
+                      <Icon name={paused ? 'pause' : 'microphone'} size={19}
+                        color={paused ? C.caution : C.brand} />
+                    )}
+                    <Text style={[st.cardTitle, !camOpen && st.cardTitleSm]}>
                       {paused ? T('cap.voiceIsPaused') : T('cap.voiceIsRecording')}
                     </Text>
                   </View>
@@ -1474,6 +1513,12 @@ const st = StyleSheet.create({
     borderRadius: 8, backgroundColor: C.brand },
   kbDoneT: { fontFamily: F.bodyBold, fontSize: 15, color: '#fff' },
   cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  // Label weight, not heading weight: the wave and the timer carry the state; this names
+  // it. Letterspaced small caps read as a caption rather than competing with the title
+  // of the screen two lines above.
+  cardTitleSm: { fontSize: 14.5, fontFamily: F.bodySemi, letterSpacing: 0.2 },
+  // Square, icon-only, still 44pt of touch (mandate #3) without a labelled box.
+  topX: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   waveRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
   // Tabular-ish weight so the digits do not jitter the wave as they tick.
   cardClock: { fontFamily: F.bodyBold, fontSize: 16, color: C.ink,
