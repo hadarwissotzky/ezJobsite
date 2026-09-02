@@ -959,9 +959,24 @@ export function FusedCapture({
                   <Wave level={level} active={recordingNow} />
                 </View>
               </View>
-              <Text style={st.cardBody}>
-                {paused ? T('cap.pausedHint') : T('cap.explainWhat')}
-              </Text>
+              {/* "Explain what changed and what needs to be done" IS INSTRUCTION THE
+                  RECORDER NO LONGER NEEDS (hadar, 2026-09-02: "remove the sentence").
+
+                  The screen already opens with "Just tell us what happened. Talk first.
+                  Edit after." — asked and answered, at the top, before he starts. A
+                  second brief inside the live card repeats it at the one moment he is
+                  doing the thing, which is when advice is least useful and most in the
+                  way of the wave, the timer and his own words.
+
+                  IT STAYS IN CAMERA MODE, where there is no heading and the card is the
+                  only thing telling him what to say. The PAUSED line stays in both: that
+                  is not advice, it is the state — photos still work, and a man who has
+                  paused needs to know he has not ended anything. */}
+              {(camOpen || paused) && (
+                <Text style={st.cardBody}>
+                  {paused ? T('cap.pausedHint') : T('cap.explainWhat')}
+                </Text>
+              )}
               {/* STOP, INSIDE THE CARD THAT IS RECORDING. In camera mode this lives in
                   the action row beside the shutter, where a thumb finds it without
                   looking. In recording mode the card IS the screen, and the control
