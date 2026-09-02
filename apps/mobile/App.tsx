@@ -96,6 +96,7 @@ import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { FlowRail } from './src/ui/flowrail';
+import { MapThumb } from './src/ui/mapthumb';
 import { syncLine, syncState } from './src/syncstate';
 import { OfflineBar } from './src/ui/offlinebar';
 import { deleteEmptyProject, deleteHoldsKey, deleteRefusalKey,
@@ -346,6 +347,10 @@ const OWNER_FALLBACK = 'owner-local';
  * and a contractor who set a 200 m fence around a large site did not thereby agree to
  * be told he is standing on a building he can barely see.
  */
+/** How many recent locations step 2 shows before "See all". Three is what fits under
+ *  the search box without pushing "new location right here" off the screen. */
+const RECENT_CAP = 3;
+
 const STANDING_ON_M = 30;
 
 /** How long the splash may cover a first sync before the Home takes over and says
@@ -824,6 +829,8 @@ export default function App() {
   // The wedge home (prototype c1): extras awaiting a signature, and the money already
   // recovered. Both read from real change_order rows — never invented.
   const [homeTab, setHomeTab] = React.useState<'extras' | 'jobs'>('extras');
+  // Step 2's recent list is capped; "See all" lifts the cap for the rest of the visit.
+  const [showAllJobs, setShowAllJobs] = React.useState(false);
   // The ☰ menu on Home: the jobs list + language now live behind it, because the
   // dashboard's front page is the money, not navigation (hadar, 2026-07-23 mockup).
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -8336,16 +8343,27 @@ const checkClientMessages = async () => {
 
           {hero ? (
             <View style={s.jpHero}>
-              <View style={s.jpHeroEyebrow}>
-                <Icon name="mapPin" size={15} color="#4E6243" />
-                <Text style={s.jpHeroEyebrowT}>
-                  {T('jobpick.closest')} · {T('jobpick.usingGps')}
-                </Text>
+              {/* THE EYEBROW SAYS ONE THING NOW (the artboard, 2026-09-02). It used to
+                  read "Closest location · Using GPS", which spends the most-read line
+                  on the screen explaining the MECHANISM. He does not need to be told
+                  the phone used GPS — the pin, the distance pill and "you are standing
+                  on it" all say it, and they say it as evidence rather than as a
+                  disclaimer. Mandate #8 is about GPS never DECIDING, and it still does
+                  not: this card suggests, and the whole rest of the screen is the
+                  refusal. That mandate never asked for the word "GPS" on screen. */}
+              <View style={s.jpHeroTop}>
+                <View style={{ flex: 1 }}>
+                  <View style={s.jpHeroEyebrow}>
+                    <Icon name="mapPin" size={15} color="#4E6243" />
+                    <Text style={s.jpHeroEyebrowT}>{T('jobpick.closest')}</Text>
+                  </View>
+                  <Text style={s.jpHeroAddr} numberOfLines={2}>{hero.address || hero.name}</Text>
+                  {!!hero.address && !!hero.name && hero.name !== hero.address && (
+                    <Text style={s.jpHeroName} numberOfLines={1}>{hero.name}</Text>
+                  )}
+                </View>
+                <MapThumb />
               </View>
-              <Text style={s.jpHeroAddr} numberOfLines={2}>{hero.address || hero.name}</Text>
-              {!!hero.address && !!hero.name && hero.name !== hero.address && (
-                <Text style={s.jpHeroName} numberOfLines={1}>{hero.name}</Text>
-              )}
               {heroDist != null && (
                 <View style={s.jpHeroPill}>
                   <Icon name="mapPin" size={14} color="#4E6243" />
@@ -8387,7 +8405,29 @@ const checkClientMessages = async () => {
               placeholderTextColor="#8c959f" />
           </View>
 
-          {others.map((p) => jobRow(p))}
+          {/* CAPPED AT THREE, WITH A WAY TO SEE THE REST (the artboard, 2026-09-02).
+              This used to render every location the account has. On a phone with four
+              that is a list; on hadar's, with a dozen jobsites on the same street, it
+              is a WALL between the search box and "new location right here" — and the
+              two things he actually reaches for are the ones it buries.
+
+              Three is what fits above the fold under the search box. "See all" reveals
+              the rest IN PLACE rather than navigating: this is step 2 of 5 and he is
+              holding an unfiled recording, so a screen that could push him somewhere
+              else is a screen that can lose his place. */}
+          {!!others.length && (
+            <View style={s.jpRecentHead}>
+              <Text style={s.jpRecentH}>{T('jobpick.recent')}</Text>
+              {others.length > RECENT_CAP && !showAllJobs && (
+                <Pressable onPress={() => setShowAllJobs(true)} accessibilityRole="button"
+                  hitSlop={12} style={s.jpSeeAll}>
+                  <Text style={s.jpSeeAllT}>{T('job.seeAll')}</Text>
+                  <Text style={s.jpSeeAllChev}>›</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+          {(showAllJobs ? others : others.slice(0, RECENT_CAP)).map((p) => jobRow(p))}
 
           {/* DASHED because it MAKES a thing rather than choosing one. Below the list
               now (the artboard, 2026-08-25): it used to sit above every job, which put
@@ -8411,16 +8451,15 @@ const checkClientMessages = async () => {
             <Text style={s.jpEmpty}>{T('jobpick.none')}</Text>
           )}
 
-          {/* Deliberately NO dismiss. A change order cannot move without a job — but
-              the choice is not final, and saying so is what stops him agonising over
-              it while standing in someone's kitchen. */}
-          <View style={s.jpTip}>
-            <Icon name="hardhat" size={20} color="#4E6243" />
-            <View style={{ flex: 1 }}>
-              <Text style={s.jpTipH}>{T('jobpick.tip')}</Text>
-              <Text style={s.jpTipT}>{T('jobpick.tipBody')}</Text>
-            </View>
-          </View>
+          {/* THE TIP CARD IS GONE (the artboard, 2026-09-02, which ends at the dashed
+              row). It said the location can still be changed before sending — true, and
+              worth saying, but it was saying it to a man who has not yet made the choice
+              it is reassuring him about. Reassurance belongs where the regret is, and
+              the regret is at REVIEW: `draft.nothingSentYet` is already there, on the
+              screen he sends from, where changing his mind still costs nothing.
+
+              Nothing was lost from the product, only from this screen. If the choice
+              ever does become hard to reverse, this comment is the trail back. */}
         </ScrollView>
       </View>
     );
@@ -13776,6 +13815,7 @@ const s = StyleSheet.create({
   jpC: { flex: 1, backgroundColor: '#faf7f3', paddingTop: 54 },
   jpHero: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2dbd4',
     borderRadius: 14, padding: 16, marginTop: 16 },
+  jpHeroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   jpHeroEyebrow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   jpHeroEyebrowT: { fontFamily: 'Inter_600SemiBold', fontSize: 12, letterSpacing: 1.1,
     textTransform: 'uppercase', color: '#4E6243' },
@@ -13819,6 +13859,14 @@ const s = StyleSheet.create({
   jpDist: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   jpDistT: { fontFamily: 'Inter_600SemiBold', fontSize: 14.5, color: '#4a4a46' },
   jpChev: { fontFamily: 'Inter_400Regular', fontSize: 22, color: '#b3aaa2' },
+  jpRecentHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 26, marginBottom: 2 },
+  jpRecentH: { fontFamily: 'Inter_700Bold', fontSize: 20, color: '#131110' },
+  // 44pt of height on a text link, because gloves do not care that it is styled quietly.
+  jpSeeAll: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44,
+    paddingLeft: 12 },
+  jpSeeAllT: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#2F4F2A' },
+  jpSeeAllChev: { fontFamily: 'Inter_400Regular', fontSize: 17, color: '#2F4F2A' },
   jpEmpty: { fontFamily: 'Inter_400Regular', fontSize: 15, color: '#8c959f', marginTop: 24, textAlign: 'center' },
   jpTip: { flexDirection: 'row', gap: 12, marginTop: 26, backgroundColor: '#eef2ea',
     borderRadius: 14, padding: 14 },
