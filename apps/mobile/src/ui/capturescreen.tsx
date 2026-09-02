@@ -839,13 +839,12 @@ export function FusedCapture({
             puts "Close for now", so leaving a flow looks the same wherever he is in it.
             It keeps the header over a viewfinder, where the top bar is the only chrome
             and there is nowhere else for it to go. */}
-        {camOpen ? (
-          <Pressable onPress={onClose} hitSlop={16} style={st.topBtn}
-            accessibilityRole="button" accessibilityLabel={T('cap.cancel')}>
-            <Icon name="close" size={22} color={C.ink} />
-            <Text style={st.topLab}>{T('cap.cancel')}</Text>
-          </Pressable>
-        ) : <View style={st.topX} />}
+        {/* NO CANCEL HERE EITHER (hadar, 2026-09-02). The camera is a PANEL, and its
+            primary button is "← Back to recording" — so there is already a way out, to
+            the screen that owns cancelling. Two exits from a panel, one of which throws
+            away the recording, is one exit too many next to a shutter.
+            A spacer, not nothing: the title and the torch balance around it. */}
+        <View style={st.topX} />
 
         {/* THE HEADER SAID EVERYTHING TWICE (hadar, 2026-09-02: "clean the top").
             "VOICE RECORDING · 00:16" over a card titled "Voice recording" carrying its
@@ -853,20 +852,16 @@ export function FusedCapture({
             location. In camera mode all of that is the ONLY place any of it appears, so
             it stays there. On the recorder the card says it, better, in the place he is
             already looking. */}
-        {camOpen ? (
-          <View style={st.topMid}>
-            <Text style={st.topTitle} numberOfLines={1}>
-              {(paused ? T('cap.voiceRecordingPaused') : T('cap.voiceRecording'))
-                + ` · ${two(Math.floor(secs / 60))}:${two(secs % 60)}`}
-            </Text>
-            {/* The where/when line is PERMANENT now, not a 5-second flash: it is the
-                plain-words version of mandate #9, and it costs nothing to keep saying. */}
-            <View style={st.topWhere}>
-              <Icon name="mapPin" size={13} color={C.steel} />
-              <Text style={st.topWhereT} numberOfLines={1}>{place ?? T('cap.savingTimeLoc')}</Text>
-            </View>
-          </View>
-        ) : <View style={st.topMid} />}
+        {/* THE CAMERA HEADER IS FOR CAMERA CONTROLS (hadar: "remove voice paused and
+            the address from the header of that screen").
+
+            The mic state is on the card in the band, three centimetres below, with a
+            wave and a timer. The where/when line was mandate #9 said in words — but it
+            is also said by the GPS stamp BAKED INTO EVERY PHOTOGRAPH, which is the
+            version that survives leaving this screen and the version that matters in a
+            dispute. A caption repeating it over the viewfinder costs a line of a screen
+            he is trying to aim. */}
+        <View style={st.topMid} />
 
         {/* CAMERA CHROME BELONGS TO THE CAMERA. Torch and flip are meaningless while
             the lens is not even mounted, and two dead-looking controls in the corner of
@@ -1102,13 +1097,11 @@ export function FusedCapture({
                   timer and his own words appearing underneath. Four pieces of evidence
                   make a fifth reassurance into clutter. It stays in camera mode, where
                   none of that is on screen. */}
-              {camOpen && <View style={st.cardRule} />}
-              {camOpen && (
-              <View style={st.cardHint}>
-                <Text style={st.cardHintIcon}>☝︎</Text>
-                <Text style={st.cardHintT}>{T('cap.noHoldButton')}</Text>
-              </View>
-              )}
+              {/* THE HOLD-BUTTON REASSURANCE IS GONE FROM BOTH MODES (hadar, twice:
+                  first from the recorder, now "remove the sentence you do not need to
+                  hold the button from your voice is paused under the camera screen").
+                  It answered a question about a hardware convention nobody has used in a
+                  decade, on a card that already shows a live wave and a running clock. */}
             </View>
           ) : (
             // The collapsed strip: same information, one line, viewfinder free.
@@ -1466,10 +1459,6 @@ const st = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
     paddingTop: 56, paddingBottom: 10, paddingHorizontal: 12, backgroundColor: C.paper, gap: 6 },
   topMid: { flex: 1, alignItems: 'center', paddingTop: 4 },
-  topTitle: { fontFamily: F.disp, fontSize: 21, color: C.ink, letterSpacing: 0.8,
-    fontVariant: ['tabular-nums'] },
-  topWhere: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  topWhereT: { fontFamily: F.body, fontSize: 13.5, color: C.steel, flexShrink: 1 },
   // Field UX: ≥48px targets, icon + LABEL. Cards, not scrims — the chrome is light now.
   topRight: { flexDirection: 'row', gap: 6 },
   topBtn: { minWidth: 54, minHeight: 54, alignItems: 'center', justifyContent: 'center',
@@ -1492,10 +1481,6 @@ const st = StyleSheet.create({
   cardTitle: { fontFamily: F.bodyBold, fontSize: 25, color: C.ink, letterSpacing: -0.4 },
   cardBody: { fontFamily: F.body, fontSize: 16, color: C.ink, lineHeight: 22, marginTop: 12,
     textAlign: 'center' },
-  cardRule: { height: 1, backgroundColor: C.line, marginVertical: 12 },
-  cardHint: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  cardHintIcon: { fontSize: 17, color: C.brand },
-  cardHintT: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.brand },
 
   // The dismiss control. Absolutely positioned so it does not reflow the card's
   // content, and 44pt of touch target (mandate #3) inside a much smaller glyph.

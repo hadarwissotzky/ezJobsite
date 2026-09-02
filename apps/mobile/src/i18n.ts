@@ -66,14 +66,10 @@ const EN: Record<string, string> = {
   // written to be read by someone on a ladder who does not think in software: it says
   // what is happening ("your voice is recording"), what to do ("explain what changed"),
   // and what he does NOT have to do ("you do not need to hold a button").
-  'cap.voiceRecording': 'VOICE RECORDING',
-  'cap.voiceRecordingPaused': 'VOICE PAUSED',
-  'cap.savingTimeLoc': 'Saving time and location',
   'cap.cancel': 'Cancel',
   'cap.voiceIsRecording': 'Your voice is recording',
   'cap.voiceIsPaused': 'Your voice is paused',
   'cap.explainWhat': 'Explain what changed and what needs to be done.',
-  'cap.noHoldButton': 'You do not need to hold a button.',
   'cap.viewPhotos': 'View photos',
   'cap.removePhoto': 'Remove photo',
   'cap.takePhoto': 'TAKE PHOTO',
@@ -2434,14 +2430,10 @@ const ES: Record<string, string> = {
   'cap.nothingYet': 'Aún no hay nada — di qué pasó o toma una foto. Luego toca Listo.',
   // Pantalla de captura rediseñada (2026-07-27). NOTA: este español lo escribió
   // Claude, no un traductor — revísalo antes de enviarlo a campo.
-  'cap.voiceRecording': 'GRABANDO VOZ',
-  'cap.voiceRecordingPaused': 'VOZ EN PAUSA',
-  'cap.savingTimeLoc': 'Guardando hora y lugar',
   'cap.cancel': 'Cancelar',
   'cap.voiceIsRecording': 'Tu voz se está grabando',
   'cap.voiceIsPaused': 'Tu voz está en pausa',
   'cap.explainWhat': 'Explica qué cambió y qué hay que hacer.',
-  'cap.noHoldButton': 'No necesitas mantener ningún botón.',
   'cap.viewPhotos': 'Ver fotos',
   'cap.removePhoto': 'Quitar foto',
   'cap.takePhoto': 'TOMAR FOTO',
