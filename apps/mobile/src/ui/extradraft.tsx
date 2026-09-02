@@ -194,6 +194,14 @@ const st = StyleSheet.create({
   // The closing timestamp line. Quiet on purpose: it is provenance, not an action.
   stamp: { marginTop: 22, alignItems: 'center', gap: 2 },
   stampT: { fontFamily: F.body, fontSize: 12.5, color: C.muted, textAlign: 'center' },
+  // THE FLOW HEADING. Bigger and heavier than the record title it replaces, because
+  // in-flow this is the first thing on the screen and there is no kicker above it
+  // sharing the eye. Matches the type of the other four steps' headings so the five
+  // screens read as one journey rather than four plus an arrival somewhere else.
+  flowTitle: { fontFamily: F.bodyBold, fontSize: 30, lineHeight: 34, color: C.ink,
+    letterSpacing: -0.4 },
+  flowSub: { fontFamily: F.body, fontSize: 15.5, lineHeight: 21, color: C.steel,
+    marginTop: 7, marginBottom: 4 },
   // The palette's soft brand wash, not a white card: it is a reassurance, and it should
   // read as a note about the screen rather than as one more thing on it.
   assure: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 18,
@@ -559,6 +567,25 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
         {props.inFlow && (
           <View style={{ marginBottom: 16 }}><FlowRail step={5} /></View>
         )}
+        {/* IN THE FLOW, THE SCREEN INTRODUCES ITSELF — not the record.
+            (hadar, 2026-09-01: "i expected the screen to be more like this style.")
+
+            The header slab states what this DOCUMENT is: its title, its job, a Synced
+            pill, a state banner. All correct for a draft you came back to, and all
+            noise thirty seconds after you recorded it — you know what it is, you just
+            made it. What you do not know is what the app heard, and whether it has
+            already gone anywhere.
+
+            So in-flow the slab is replaced by the two sentences that answer exactly
+            that: what this screen is for, and that nothing has been sent. The record's
+            own identity is still one tap away on the same screen you reach from the
+            records list, where it is the thing you actually need. */}
+        {props.inFlow && isDraft ? (
+          <View style={{ marginBottom: 4 }}>
+            <Text style={st.flowTitle}>{t('draft.reviewTitle')}</Text>
+            <Text style={st.flowSub}>{t('draft.reviewSub')}</Text>
+          </View>
+        ) : (
         <View style={st.headerSlab}>
         {/**
           * THE HEADER, REORGANISED (hadar, 2026-08-24: "the title needs to be much
@@ -648,6 +675,7 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
         </View>
 
         </View>
+        )}
 
         {/* THE PRICE SITS UNDER THE TITLE, like it does on the other two stages
             (hadar, 2026-08-24: "i am missing the price under the title").
@@ -741,7 +769,29 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
           // further down the page, under the price — so the screen stated the problem
           // in one place and offered the fix in another, with a dollar figure between
           // them. One object: the heading, the state, the reason, the buttons.
-          footer={isDraft && hasEvidence && !scopeWritten ? <StuckBlock {...props} /> : null}
+          /* TWO WAYS TO CHANGE IT, INSIDE THE BLOCK IT CHANGES.
+             (hadar's mockup: "Edit text" and "Record change" under the scope.)
+
+             They are the two ways this product accepts input, offered where the words
+             are, so correcting a write-up needs no hunt for a control. The mic is not
+             decoration: a man on a ladder with gloves on cannot type, and the whole
+             premise is that talking is the fast path (mandate #3).
+
+             `StuckBlock` still wins when there is no write-up yet — offering "Edit
+             text" over an empty box is offering to correct nothing. */
+          footer={isDraft && hasEvidence && !scopeWritten ? <StuckBlock {...props} />
+            : props.inFlow && isDraft ? (
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Button label={t('draft.editText')} icon="edit" variant="secondary"
+                    onPress={props.onEditDescription} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Button label={t('draft.recordChange')} icon="microphone" variant="secondary"
+                    onPress={props.onAddPhotos} />
+                </View>
+              </View>
+            ) : null}
         />
 
         <RawSection {...props} />
@@ -764,7 +814,13 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
         <View style={{ marginTop: 22 }}>
           <Card>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-              <Text style={[labelStyle, { flex: 1 }]}>{t('draft.checklist')}</Text>
+              {/* "EXTRACTED DETAILS" in-flow, "Ready to send" otherwise. The rows are
+                  the same either way; what differs is what the reader is doing. Fresh
+                  from a recording he is checking what the app HEARD; returning to an old
+                  draft he is checking what is still OWED. Same card, two questions. */}
+              <Text style={[labelStyle, { flex: 1 }]}>
+                {t(props.inFlow && isDraft ? 'draft.extracted' : 'draft.checklist')}
+              </Text>
               <Text style={[T.bodySteel, { fontSize: 13 }]}>
                 {t({ k: 'draft.checklistCount', p: { have: doneCount(items), of: items.length } })}
               </Text>
