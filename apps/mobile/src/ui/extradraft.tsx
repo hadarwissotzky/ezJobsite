@@ -548,6 +548,20 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
           camera target changes. */}
       <ScrollView ref={scrollRef} contentContainerStyle={{
         paddingHorizontal: 18,
+        /**
+         * THE STATUS BAR CLEARANCE, WHICH I TOOK AWAY WITHOUT REPLACING.
+         *
+         * hadar, 2026-09-02: "the progress header is way too high up, hidden by the
+         * phone elements." He is right and the cause is mine: the comment three lines
+         * below says "ScreenHeader owns the 54pt status-bar clearance", and in-flow I
+         * replaced ScreenHeader with a plain title — inheriting none of it. The rail
+         * rendered under the notch and the clock.
+         *
+         * Put on the SCROLLVIEW rather than the flow header, so the padding belongs to
+         * the screen and not to whichever block happens to be first. The next person to
+         * change what renders at the top cannot lose it the way I just did.
+         */
+        paddingTop: props.inFlow && isDraft ? 54 : 0,
         paddingBottom: touchTargets.camera + touchTargets.spacing + 24,
       }}>
         {/* ScreenHeader owns the 54pt status-bar clearance AND the kicker, which
