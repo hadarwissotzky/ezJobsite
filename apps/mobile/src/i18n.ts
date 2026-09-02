@@ -2367,6 +2367,12 @@ const EN: Record<string, string> = {
   'common.ok': 'OK',
   // The one acknowledgement after a capture finishes processing (hadar 2026-08-20).
   'proc.readyTitle': 'Your change order is ready',
+  // WHEN THE STRUCTURER FOUND NOTHING. It refuses to invent a scope or a price from
+  // speech that has neither (mandate #6), so this says that plainly instead of
+  // claiming a write-up. It blames nobody: a noisy site and a short recording are
+  // the ordinary causes, and the way out is on the screen he is about to land on.
+  'proc.nothingHeardTitle': 'We couldn’t make out the work',
+  'proc.nothingHeardBody': 'The recording is saved, but we couldn’t hear enough to write it up. Type it in or record again on the next screen.',
   'proc.readyBody': 'We wrote up what you said. Have a look before you send it.',
   'common.cancel': 'Cancel',
   'common.back': 'Back',
@@ -4207,6 +4213,8 @@ const ES: Record<string, string> = {
   'common.close': 'Cerrar',
   'common.ok': 'OK',
   'proc.readyTitle': 'Tu orden de cambio está lista',
+  'proc.nothingHeardTitle': 'No entendimos el trabajo',
+  'proc.nothingHeardBody': 'La grabación está guardada, pero no se oyó lo suficiente para redactarla. Escríbalo o grabe de nuevo en la siguiente pantalla.',
   'proc.readyBody': 'Escribimos lo que dijiste. Revísala antes de enviarla.',
   'common.cancel': 'Cancelar',
   'common.back': 'Atrás',

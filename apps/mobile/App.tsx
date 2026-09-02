@@ -3824,17 +3824,42 @@ const checkClientMessages = async () => {
             if (h.kind === 'gen') void finishGenerateById(h.coId);
             else if (h.kind === 'aug') void finishAugmentById(h.coId, h.ids);
             else {
-              setAck({
-                kind: 'ok',
-                title: T('proc.readyTitle'),
-                detail: T('proc.readyBody'),
-                okLabel: T('common.ok'),
-                // ONLY THE 'new' BRANCH MARKS THE FLOW. A generate or an augment lands
-                // on this same screen, but the contractor was editing an extra that
-                // already existed — telling him he is on step 5 of making one would be
-                // a rail describing a journey he never started.
-                then: () => { setFlowRecordId(h.coId); void openRecord(h.coId); },
-              });
+              /**
+               * DO NOT CLAIM A WRITE-UP THAT DID NOT HAPPEN.
+               *
+               * hadar, 2026-09-02: "i still see this message after the AI processing" —
+               * "Your change order is ready. We wrote up what you said." Every recording
+               * that night structured to `confidence: none` and produced no scope, no
+               * price, no schedule. The pipeline was right to refuse (mandate #6 forbids
+               * inventing a price from speech that contains none); the SENTENCE was
+               * wrong, and it is the same defect CLAUDE.md names as this project's
+               * recurring one — claims that outrun their evidence.
+               *
+               * Read the row rather than assume: if the scope is still the placeholder,
+               * nothing was written up, and the honest thing is to say so and point at
+               * the screen where he can write it himself. He still lands in the same
+               * place; only the promise changes.
+               */
+              void (async () => {
+                let wrote = false;
+                try {
+                  const row = (await db.getAll<{ s: string | null }>(
+                    `SELECT scope_of_work AS s FROM change_order WHERE id = ?`, [h.coId]))[0];
+                  const scope = (row?.s ?? '').trim();
+                  wrote = scope.length > 0 && scope !== UNTITLED_SCOPE;
+                } catch { wrote = true; /* cannot tell — do not accuse the pipeline */ }
+                setAck({
+                  kind: 'ok',
+                  title: T(wrote ? 'proc.readyTitle' : 'proc.nothingHeardTitle'),
+                  detail: T(wrote ? 'proc.readyBody' : 'proc.nothingHeardBody'),
+                  okLabel: T('common.ok'),
+                  // ONLY THE 'new' BRANCH MARKS THE FLOW. A generate or an augment lands
+                  // on this same screen, but the contractor was editing an extra that
+                  // already existed — telling him he is on step 5 of making one would be
+                  // a rail describing a journey he never started.
+                  then: () => { setFlowRecordId(h.coId); void openRecord(h.coId); },
+                });
+              })();
             }
           }
           return;
