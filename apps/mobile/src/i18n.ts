@@ -1892,6 +1892,8 @@ const EN: Record<string, string> = {
   'draft.editText': 'Edit text',
   'draft.recordChange': 'Record change',
   'draft.recordChanges': 'Record changes',
+  // Says it is not finished, unlike 'Cancel' — the draft is saved and waiting.
+  'draft.closeForNow': 'Close for now',
   'draft.reviewTitle': 'Review the write-up',
   'draft.reviewSub': 'We pulled this from your recording. Edit anything that looks off.',
   'draft.nothingSentYet': 'Nothing is sent until you approve it.',
@@ -3845,6 +3847,7 @@ const ES: Record<string, string> = {
   'draft.editText': 'Editar texto',
   'draft.recordChange': 'Grabar cambio',
   'draft.recordChanges': 'Grabar cambios',
+  'draft.closeForNow': 'Cerrar por ahora',
   'draft.reviewTitle': 'Revise la redacción',
   'draft.reviewSub': 'Esto lo sacamos de su grabación. Edite lo que no cuadre.',
   'draft.nothingSentYet': 'Nada se envía hasta que usted lo apruebe.',

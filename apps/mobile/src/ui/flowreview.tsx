@@ -23,7 +23,7 @@
  * field cannot mean one thing here and another there.
  */
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { t } from '../i18n';
 import { canSend } from '../extralifecycle';
 import { sendGate } from '../sendreadiness';
@@ -146,6 +146,22 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
         {!canSendNow && !!refusalLine(p, gate) && (
           <Text style={st.refused}>{refusalLine(p, gate)}</Text>
         )}
+
+        {/* THE WAY OUT, AND THE LOOP NEEDS ONE (hadar, 2026-09-02: "until he chooses to
+            send or closes for now").
+
+            Recording a correction returns here, which is right — but a loop with only
+            one exit is a trap, and the exit it had was the one act that cannot be undone.
+            A man who realises he needs a photo from the roof, or the client's number, or
+            simply his lunch, must be able to put this down.
+
+            NOTHING IS LOST BY LEAVING. The change order is a saved draft; it sits under
+            "Needs you first" on Home and reopens as the record, with everything he has
+            said so far. Quiet text rather than a button: it must be findable, never
+            competitive with Send. */}
+        <Pressable onPress={p.onBack} accessibilityRole="button" style={st.close}>
+          <Text style={st.closeT}>{t('draft.closeForNow')}</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -176,6 +192,10 @@ const st = StyleSheet.create({
   assureT: { flex: 1, fontFamily: F.body, fontSize: 14.5, color: C.ink, lineHeight: 19 },
   refused: { fontFamily: F.body, fontSize: 13.5, lineHeight: 18, color: C.steel,
     textAlign: 'center', marginTop: 8 },
+  // 44pt minimum (mandate #3) even though it is a text link: gloves do not care that
+  // something is styled quietly.
+  close: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  closeT: { fontFamily: F.bodySemi, fontSize: 15, color: C.steel },
   foot: { borderTopWidth: 1, borderTopColor: C.line, backgroundColor: C.card,
     paddingHorizontal: 18, paddingTop: 12, paddingBottom: 22 },
 });

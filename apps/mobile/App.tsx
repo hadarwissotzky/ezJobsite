@@ -1667,6 +1667,22 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
  * construction rather than by remembering to clear it.
  */
 const [flowRecordId, setFlowRecordId] = React.useState<string | null>(null);
+/**
+ * THE FLOW SURVIVES A RE-RECORD (hadar, 2026-09-02: "in preview mode if I record a
+ * change, get me back to the preview — the user stays in a loop until he chooses to
+ * send or closes for now").
+ *
+ * `augmentExtra` calls `closeRecord()` on its way to the camera, and `closeRecord`
+ * clears `flowRecordId` — correctly, because leaving a record normally does end the
+ * journey. But going out to record a correction is not leaving: it is the middle of
+ * reviewing. Without this the contractor came back to the full record screen and the
+ * loop broke on its first turn.
+ *
+ * A REF, NOT STATE: nothing renders from it, and it must survive the unmount that
+ * `closeRecord` triggers rather than schedule a re-render into a screen that is going
+ * away.
+ */
+const flowResumeRef = React.useRef<string | null>(null);
 
 const closeRecord = () => {
   // Leaving the record ends the journey. Coming back to it later is not a continuation
@@ -3822,7 +3838,16 @@ const checkClientMessages = async () => {
           if (handoff) {
             const h: { kind: 'gen' | 'aug' | 'new'; coId: string; ids: string[] } = handoff;
             if (h.kind === 'gen') void finishGenerateById(h.coId);
-            else if (h.kind === 'aug') void finishAugmentById(h.coId, h.ids);
+            else if (h.kind === 'aug') {
+              // BACK TO THE REVIEW, not to the record. He went out to say more about a
+              // change order he is still reviewing; returning him to a different screen
+              // than the one he left would end a loop he has not finished.
+              if (flowResumeRef.current === h.coId) {
+                flowResumeRef.current = null;
+                setFlowRecordId(h.coId);
+              }
+              void finishAugmentById(h.coId, h.ids);
+            }
             else {
               /**
                * DO NOT CLAIM A WRITE-UP THAT DID NOT HAPPEN.
@@ -8447,6 +8472,9 @@ const checkClientMessages = async () => {
     // next tab tap. We are not "going back" here; we are going forward into a
     // capture that lands on this same extra.
     returnToFeedRef.current = false;
+    // Carry the flow across. Only when THIS record is the one the flow made — an
+    // augment of some older extra opened from the list is not a review loop.
+    if (flowRecordId === changeOrderId) flowResumeRef.current = changeOrderId;
     closeRecord();
     setShowCapture(true);
   };
