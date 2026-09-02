@@ -882,12 +882,13 @@ export function FusedCapture({
                   {paused
                     ? <Icon name="play" size={16} color={C.brandDark} />
                     : <View style={st.stopSquare} />}
-                  {/* ONE CONTROL, BOTH DIRECTIONS. It pauses the microphone and starts
-                      it again; it does not end the capture — "Continue" does that. The
-                      label has to say which of the two it is about to do, or a man who
-                      stopped to think cannot tell whether tapping it resumes or sends. */}
+                  {/* PAUSE, NOT STOP (hadar, 2026-09-02). "Stop recording" beside a
+                      "Continue →" that ENDS the capture had the two words the wrong way
+                      round: this is the reversible one, and the irreversible one was
+                      wearing the gentler label. It pauses the microphone and starts it
+                      again; nothing here ends anything. */}
                   <Text style={st.stopT}>
-                    {paused ? T('cap.resumeRecording') : T('cap.stopRecording')}
+                    {paused ? T('cap.resumeRecording') : T('cap.pauseRecording')}
                   </Text>
                 </Pressable>
               )}
