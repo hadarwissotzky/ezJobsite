@@ -6004,6 +6004,27 @@ const checkClientMessages = async () => {
         await noteCapturedBy(db, pr.captureId);
         ids.push(pr.captureId);
       }
+      /**
+       * WHAT HE TYPED, committed as a capture of its own (REQ-CAP2 text modality).
+       *
+       * hadar, 2026-09-02: "you can talk -- or you can write (up to you)." Writing has
+       * to produce evidence the same way talking does, or the two inputs are not
+       * equals — one becomes a real capture and the other a UI nicety that vanishes.
+       *
+       * FIRST, BEFORE THE AUDIO, deliberately: it is the smallest and the most certain
+       * to succeed, and mandate #1 wants the cheapest durable thing written earliest. A
+       * later audio failure refuses loudly without un-saving these words.
+       */
+      if (a.typedText) {
+        const tr = await performCapture(db, {
+          ownerId: OWNER, projectId: res.projectId,
+          input: textCapture(a.typedText),
+          stamp: a.stamp,
+        });
+        if (!tr.ok) throw new Error(tr.reason);
+        await noteCapturedBy(db, tr.captureId);
+        ids.push(tr.captureId);
+      }
       // The narration, possibly split by a phone call: every segment commits, in order.
       // A failed later segment refuses loudly but never un-saves the earlier ones.
       for (const seg of a.audioSegments) {

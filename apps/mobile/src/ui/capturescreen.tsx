@@ -40,7 +40,7 @@
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import React from 'react';
-import { Animated, Dimensions, ActivityIndicator, Image, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Dimensions, Image, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 
 import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, useAudioRecorderState } from '../recorder';
@@ -68,6 +68,10 @@ export type FusedArtifacts = {
    *  show what was just captured and the flow reads as one continuous workflow. */
   previewUris: string[];
   durationSecs: number;
+  /** What the contractor TYPED, when he typed anything. Undefined when the summary was
+   *  left as the recogniser wrote it — see the note at the call site. A text capture in
+   *  its own right (REQ-CAP2), committed beside the audio and never instead of it. */
+  typedText?: string;
 };
 
 function two(n: number) { return n < 10 ? '0' + n : '' + n; }
@@ -181,6 +185,23 @@ export function FusedCapture({
   // `camZoom`, not `zoom`: this file already has a `zoom` — the photo lightbox's open
   // image. Two different subjects, one obvious name.
   const [camZoom, setCamZoom] = React.useState(0);
+  /**
+   * RECORDING MODE FIRST, CAMERA ON REQUEST (hadar, 2026-09-02: "rather than enter a
+   * camera mode you enter a recording mode — you can talk, or you can write, up to you.
+   * Add photos only if you need them").
+   *
+   * The screen opened as a viewfinder, which told every contractor that this product is
+   * about photographs. It is not: the atomic unit is a spoken decision, and the camera
+   * is corroboration. Opening on the recorder puts the primary input first and makes the
+   * camera what it actually is — optional, and one tap away.
+   *
+   * NOTHING ABOUT THE CAPTURE MACHINERY CHANGES. Same recorder, same permissions, same
+   * stamp, same commit, same live recognition. Only what is on screen when it opens.
+   * `CameraView` is not merely hidden: it is not MOUNTED until asked for, so a
+   * contractor who never needs a photo never spins up the camera, never warms the lens,
+   * and never spends the battery on it.
+   */
+  const [camOpen, setCamOpen] = React.useState(false);
   // The live value, read inside the responder. State alone would be a stale closure —
   // the responder is created once and would keep pinching from whatever the zoom was
   // when the screen mounted.
@@ -285,6 +306,21 @@ export function FusedCapture({
   // transcript is made from the FILE after the session commits.
   const [liveText, setLiveText] = React.useState('');
   /**
+   * THE WORDS HE CAN CHANGE — seeded by recognition, owned by him from the first keypress.
+   *
+   * `draftTouched` is what makes both true at once: until he types, the field mirrors
+   * the live transcript and keeps updating as he keeps talking. The moment he edits, the
+   * recogniser stops overwriting him. Without that flag either the field is frozen the
+   * instant recognition starts, or it silently eats what he typed on the next partial —
+   * and losing something a person typed is the same sin as losing a capture.
+   *
+   * IT IS NOT THE EVIDENCE. The audio is, and it is committed whatever this says. This
+   * is the working copy: a correction of what the machine heard, saved beside the
+   * recording rather than instead of it.
+   */
+  const [summary, setSummary] = React.useState('');
+  const summaryTouched = React.useRef(false);
+  /**
    * DISMISSED BY HAND, AND IT STAYS DISMISSED (hadar, 2026-08-18: "allow the user to
    * close the message screen so they can see the full camera screen").
    *
@@ -336,7 +372,12 @@ export function FusedCapture({
             const got = await requestSpeechPermission();
             void logDiag(db, 'stt.ask', `-> ${got}`);
           }
-          startLive(db, (t) => { if (live) setLiveText(t); })
+          startLive(db, (t) => {
+            if (!live) return;
+            setLiveText(t);
+            // Mirror into the field until he takes it over. See `draftTouched`.
+            if (!summaryTouched.current) setSummary(t);
+          })
             .then((h) => { liveRef.current = h; })
             .catch(() => { /* indicator only */ });
         } catch { /* mic optional: photos-only is still a capture */ }
@@ -559,7 +600,14 @@ export function FusedCapture({
     if (saving) return;
     // The empty-done guard: no photos and nothing HEARD -> there is nothing to build a
     // change order from. Refuse loudly and coach, instead of saving emptiness.
-    if (!shots.length && !spokeRef.current) { setWarnEmpty(true); return; }
+    /**
+     * TYPING IS CAPTURING. Without `typed` here, a contractor who wrote instead of
+     * speaking — because the site was too loud, or he was on a call, or he simply
+     * preferred to — was told he had captured nothing and refused. That would make
+     * "you can talk or you can write" false at the only moment it matters.
+     */
+    const typed = summaryTouched.current && summary.trim().length > 0;
+    if (!shots.length && !spokeRef.current && !typed) { setWarnEmpty(true); return; }
     setSaving(true);
     try { await recorder.stop(); } catch { /* noop */ }
     try {
@@ -587,6 +635,21 @@ export function FusedCapture({
           accuracyM: null, fixAgeMs: null, status: 'unavailable' },
         previewUris: shots.map((x) => x.uri),
         durationSecs: secs,
+        /**
+         * WHAT HE TYPED, and ONLY when he typed it.
+         *
+         * `summaryTouched` is the whole condition. Untouched, the field is a mirror of
+         * the live recogniser — passing that back would commit a text capture that says
+         * exactly what the audio already says, in a rougher form, and the pipeline would
+         * then structure a transcript of a transcript.
+         *
+         * IT DOES NOT REPLACE THE AUDIO. Every segment above still commits; this is an
+         * additional capture, and both are evidence of the same moment. A man who typed
+         * because the site was too loud to speak gets a text capture and no audio; a man
+         * who spoke and then fixed a word gets both, and the correction is the newer of
+         * the two rather than an edit of the older.
+         */
+        typedText: summaryTouched.current && summary.trim() ? summary.trim() : undefined,
       });
     } finally { setSaving(false); }
   };
@@ -688,8 +751,15 @@ export function FusedCapture({
             `mode="picture"` is set explicitly rather than left to the default, because
             the flash/torch configuration is applied per mode and an implicit default is
             not something to rely on for hardware that either turns on or does not. */}
-        <CameraView ref={camRef} style={st.fill} mode="picture" facing={facing}
-          flash={flash} enableTorch={torchOn} zoom={camZoom} />
+        {/* MOUNTED ONLY WHEN ASKED FOR. Not hidden — absent. A contractor who only
+            talks never starts the camera, and the recorder gets the screen it deserves
+            as the primary input rather than as an overlay on a viewfinder. */}
+        {camOpen ? (
+          <CameraView ref={camRef} style={st.fill} mode="picture" facing={facing}
+            flash={flash} enableTorch={torchOn} zoom={camZoom} />
+        ) : (
+          <View style={[st.fill, { backgroundColor: C.paper }]} />
+        )}
 
         {/* THE PINCH SURFACE. Over the preview and UNDER the overlay cards, so the
             cards and the torch button still take their own touches first. It claims
@@ -784,7 +854,29 @@ export function FusedCapture({
           {/* The live words, over the camera, while he talks. Rough by design and
               labelled so — it is never the stored transcript. `marginTop:'auto'` pins
               it to the bottom of the band without a magic offset. */}
-          {liveText.length > 0 && (
+          {/* WITH THE CAMERA OPEN this stays what it was: three read-only lines over a
+              viewfinder, because there is nowhere to type and nothing to type on.
+              With the camera CLOSED the same words become an editable field — the
+              screen is a recorder, the words are the content, and a field he can fix is
+              the whole point of showing them (hadar, 2026-09-02: "into an edit field
+              that the user can read and edit"). */}
+          {!camOpen && (
+            <View style={st.draftBox}>
+              <View style={st.draftHead}>
+                <Text style={st.draftLabel}>{T('cap.draftSummary')}</Text>
+              </View>
+              <TextInput
+                style={st.draftInput}
+                multiline
+                value={summary}
+                onChangeText={(v: string) => { setSummary(v); summaryTouched.current = true; }}
+                placeholder={T('cap.draftPlaceholder')}
+                placeholderTextColor={C.disabled}
+                textAlignVertical="top"
+              />
+            </View>
+          )}
+          {camOpen && liveText.length > 0 && (
             <View style={st.liveBox} pointerEvents="none">
               <Text style={st.liveLabel}>{T('r2.liveRough')}</Text>
               <Text style={st.liveText} numberOfLines={3}>{liveText}</Text>
@@ -825,12 +917,30 @@ export function FusedCapture({
             </View>
           </Pressable>
 
-          <Pressable style={st.shutter} onPress={snap} disabled={saving}>
-            <View style={[st.shutterInner, recordingNow && st.shutterLive]}>
-              <Icon name="camera" size={32} color="#fff" />
-              <Text style={st.shutterT}>{T('cap.takePhoto')}</Text>
-            </View>
-          </Pressable>
+          {/* THE CENTRE BUTTON SUMMONS THE CAMERA BEFORE IT TAKES A PHOTO.
+              Closed, it says "Add photos" and is marked optional — the honest label for
+              a control on a screen whose job is a spoken decision. Open, it is the
+              shutter it always was.
+              ONE TAP TO GET THERE, not a mode buried behind a menu: the camera being
+              optional must not make it hard, and mandate #3's budget counts every touch
+              on a ladder. */}
+          {camOpen ? (
+            <Pressable style={st.shutter} onPress={snap} disabled={saving}>
+              <View style={[st.shutterInner, recordingNow && st.shutterLive]}>
+                <Icon name="camera" size={32} color="#fff" />
+                <Text style={st.shutterT}>{T('cap.takePhoto')}</Text>
+              </View>
+            </Pressable>
+          ) : (
+            <Pressable style={st.shutter} onPress={() => setCamOpen(true)} disabled={saving}
+              accessibilityRole="button" accessibilityLabel={T('cap.addPhotos')}>
+              <View style={st.addPhotos}>
+                <Icon name="camera" size={26} color={C.ink} />
+                <Text style={st.addPhotosT}>{T('cap.addPhotos')}</Text>
+                <Text style={st.addPhotosSub}>{T('cap.optional')}</Text>
+              </View>
+            </Pressable>
+          )}
 
           {micOn ? (
             <Pressable style={st.sideBtn} onPress={togglePause} disabled={saving || interrupted}>
@@ -846,7 +956,10 @@ export function FusedCapture({
             camera-hint card, the "this goes to …" line and the "saving on this phone"
             lock row were all removed to give the viewfinder more room, and Done is the
             last thing the thumb reaches. */}
-        <Pressable style={[st.done, (!shots.length && !spoke) && st.doneDim]}
+        {/* Dimmed only when there is genuinely nothing: no photo, nothing said, and
+            nothing typed. The button and the refusal above must agree. */}
+        <Pressable style={[st.done,
+          (!shots.length && !spoke && !(summaryTouched.current && summary.trim())) && st.doneDim]}
           onPress={finish} disabled={saving}>
           {saving ? <ActivityIndicator color="#fff" />
             : <Text style={st.doneT}>{T('cap.doneExplaining')}</Text>}
@@ -1002,6 +1115,23 @@ const st = StyleSheet.create({
     borderRadius: radii.sm, padding: 10 },
   liveLabel: { fontFamily: F.body, color: '#ffffff99', fontSize: 11, marginBottom: 2 },
   liveText: { fontFamily: F.body, color: '#fff', fontSize: 15, lineHeight: 20 },
+  // The recording-mode summary. A CARD ON PAPER, not an overlay on a viewfinder: with
+  // the camera closed this is the content of the screen, not an annotation on it.
+  // Same footprint as the shutter it replaces, so the row does not jump when the camera
+  // opens — the thumb keeps its target.
+  addPhotos: { alignItems: 'center', justifyContent: 'center', gap: 2,
+    borderWidth: 1.5, borderColor: C.line, borderRadius: 16, backgroundColor: C.card,
+    paddingHorizontal: 18, paddingVertical: 12 },
+  addPhotosT: { fontFamily: F.bodyBold, fontSize: 15, color: C.ink },
+  addPhotosSub: { fontFamily: F.body, fontSize: 12, color: C.muted },
+  draftBox: { marginTop: 'auto', backgroundColor: C.card, borderRadius: 14, borderWidth: 1,
+    borderColor: C.line, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10 },
+  draftHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  draftLabel: { flex: 1, fontFamily: F.bodySemi, fontSize: 13.5, color: C.brand },
+  // minHeight, not height: it grows with what he says rather than scrolling a field he
+  // is trying to proofread.
+  draftInput: { fontFamily: F.body, fontSize: 16, lineHeight: 22, color: C.ink,
+    minHeight: 96, paddingTop: 2, paddingBottom: 6 },
 
   // The photo stamp keeps the dark treatment — it is burned onto a photograph.
   stamp: { position: 'absolute', left: 16, bottom: 40, backgroundColor: 'rgba(0,0,0,0.45)',
