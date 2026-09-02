@@ -828,11 +828,24 @@ export function FusedCapture({
             labelled box competing with a rail and a heading for the top of the screen,
             to say what an ✕ already says. The accessible label keeps the word for anyone
             who needs it read aloud. */}
-        <Pressable onPress={onClose} hitSlop={16} style={camOpen ? st.topBtn : st.topX}
-          accessibilityRole="button" accessibilityLabel={T('cap.cancel')}>
-          <Icon name="close" size={22} color={C.ink} />
-          {camOpen && <Text style={st.topLab}>{T('cap.cancel')}</Text>}
-        </Pressable>
+        {/* NOT IN THE HEADER ANY MORE (hadar, 2026-09-02: "the close X on top of the
+            header still takes too much space — need to remove it from there and move it
+            somewhere else").
+
+            The recorder's top is a rail and a sentence, and a 44pt control beside them
+            is a third element competing for the first thing he reads — on the screen
+            whose whole instruction is "start talking". It moves to the FOOT, under the
+            primary, as a quiet word: the same place and the same shape the review screen
+            puts "Close for now", so leaving a flow looks the same wherever he is in it.
+            It keeps the header over a viewfinder, where the top bar is the only chrome
+            and there is nowhere else for it to go. */}
+        {camOpen ? (
+          <Pressable onPress={onClose} hitSlop={16} style={st.topBtn}
+            accessibilityRole="button" accessibilityLabel={T('cap.cancel')}>
+            <Icon name="close" size={22} color={C.ink} />
+            <Text style={st.topLab}>{T('cap.cancel')}</Text>
+          </Pressable>
+        ) : <View style={st.topX} />}
 
         {/* THE HEADER SAID EVERYTHING TWICE (hadar, 2026-09-02: "clean the top").
             "VOICE RECORDING · 00:16" over a card titled "Voice recording" carrying its
@@ -1339,6 +1352,15 @@ export function FusedCapture({
                 {camOpen ? T('cap.backToRecording') : T('cap.continueArrow')}
               </Text>}
         </Pressable>
+
+        {/* THE WAY OUT, at the foot and quiet. Discarding a recording is not a thing to
+            put a thumb's width from Continue, and it is not a thing to hide either — so
+            it is findable, 44pt, and unmistakably the lesser of the two. */}
+        {!camOpen && (
+          <Pressable onPress={onClose} style={st.cancelLink} accessibilityRole="button">
+            <Text style={st.cancelLinkT}>{T('cap.cancel')}</Text>
+          </Pressable>
+        )}
       </View>
 
       {/* ---------- PHOTO SHEET ---------- */}
@@ -1360,6 +1382,26 @@ export function FusedCapture({
                     {sh.fromLibrary && (
                       <View style={st.sheetTag}><Text style={st.sheetTagT}>{T('cap.fromGalleryTag')}</Text></View>
                     )}
+                    {/* REMOVE A SHOT BEFORE IT IS COMMITTED (hadar, 2026-09-02: "be able
+                        to remove photos that were taken from the photos in this recording
+                        list").
+
+                        NOTHING IS BEING DESTROYED HERE, and that is what makes it a
+                        simple ✕ rather than a confirmation. These are frames held in
+                        memory for a capture that has not happened yet — a mis-framed
+                        shot, a thumb over the lens, the same wall twice. Once Continue
+                        is pressed they become committed evidence and mandate #1 takes
+                        over; until then dropping one is the same act as not taking it.
+
+                        A confirmation here would be the app treating a blurry photo as
+                        gravely as a signed change order, which teaches him to tap past
+                        the dialogs that do matter. */}
+                    <Pressable style={st.sheetX} hitSlop={6}
+                      onPress={() => setShots((prev) => prev.filter((_, n) => n !== i))}
+                      accessibilityRole="button"
+                      accessibilityLabel={T('cap.removePhoto')}>
+                      <Icon name="close" size={15} color="#fff" />
+                    </Pressable>
                   </Pressable>
                 ))}
               </ScrollView>
@@ -1519,6 +1561,8 @@ const st = StyleSheet.create({
   cardTitleSm: { fontSize: 14.5, fontFamily: F.bodySemi, letterSpacing: 0.2 },
   // Square, icon-only, still 44pt of touch (mandate #3) without a labelled box.
   topX: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  cancelLink: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 6 },
+  cancelLinkT: { fontFamily: F.bodySemi, fontSize: 15, color: C.steel },
   waveRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
   // Tabular-ish weight so the digits do not jitter the wave as they tick.
   cardClock: { fontFamily: F.bodyBold, fontSize: 16, color: C.ink,
@@ -1545,8 +1589,16 @@ const st = StyleSheet.create({
   // NO `marginTop: auto`. That pinned the summary to the bottom of a band sized for a
   // viewfinder and left half a screen of nothing between it and the recording card —
   // the gap in hadar's screenshot. It flows directly under what it summarises.
-  draftBox: { backgroundColor: C.card, borderRadius: 14, borderWidth: 1,
-    borderColor: C.line, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10 },
+  // FLEX, NOT A FIXED CAP (hadar: "cap the height of the draft summary so it will not
+  // hide under the add photos button"). A number that fits a 6.7" screen overflows a
+  // 13 mini, and the band clips it — so the last lines of what he said disappear under
+  // the panel with nothing to say they are there. Taking the remaining space instead
+  // means the card ends exactly where the controls begin, on every handset.
+  // `minHeight: 0` because a flex child in RN will not shrink below its content without
+  // it, which is what lets the input scroll rather than push.
+  draftBox: { flex: 1, minHeight: 0, backgroundColor: C.card, borderRadius: 14,
+    borderWidth: 1, borderColor: C.line, paddingHorizontal: 14, paddingTop: 12,
+    paddingBottom: 10 },
   draftHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   draftLabel: { flex: 1, fontFamily: F.bodySemi, fontSize: 13.5, color: C.brand },
   // minHeight, not height: it grows with what he says rather than scrolling a field he
@@ -1554,13 +1606,15 @@ const st = StyleSheet.create({
   // maxHeight, not just minHeight: the card stays a fixed object on the screen and the
   // words move inside it. Without the cap a long recording pushed Add photos and the
   // primary button off the bottom.
-  draftInput: { fontFamily: F.body, fontSize: 16, lineHeight: 22, color: C.ink,
-    minHeight: 96, maxHeight: 190, paddingTop: 2, paddingBottom: 6 },
+  // Fills its card and scrolls inside it. No maxHeight: the CARD owns the height now,
+  // and the field owning one too is how the two disagree.
+  draftInput: { flex: 1, fontFamily: F.body, fontSize: 16, lineHeight: 22, color: C.ink,
+    minHeight: 72, paddingTop: 2, paddingBottom: 6 },
   // FOCUSED: out of the flow and over everything, so the words get the screen. `flex: 1`
   // on the input rather than a taller maxHeight — the card is the height of the band and
   // the field should be the height of the card, whatever screen it lands on.
   draftBoxFull: { ...StyleSheet.absoluteFillObject, marginTop: 0 },
-  draftInputFull: { maxHeight: undefined, flex: 1 },
+  draftInputFull: { flex: 1 },
 
   // The photo stamp keeps the dark treatment — it is burned onto a photograph.
   stamp: { position: 'absolute', left: 16, bottom: 40, backgroundColor: 'rgba(0,0,0,0.45)',
@@ -1610,6 +1664,11 @@ const st = StyleSheet.create({
   sheetEmpty: { fontFamily: F.body, fontSize: 15.5, color: C.steel, lineHeight: 22,
     paddingVertical: 24, textAlign: 'center' },
   sheetGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 8 },
+  // Top-right of the thumbnail, on a dark disc so it reads over any photograph. Small,
+  // because it must not compete with the tap that opens the picture — and hitSlop gives
+  // it the touch area the glyph does not.
+  sheetX: { position: 'absolute', top: 5, right: 5, width: 24, height: 24, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,22,20,0.62)' },
   sheetCell: { width: 104, height: 104, borderRadius: radii.sm, overflow: 'hidden',
     backgroundColor: C.surfaceMuted },
   sheetThumb: { width: '100%', height: '100%' },
