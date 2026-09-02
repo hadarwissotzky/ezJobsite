@@ -715,10 +715,14 @@ export function FusedCapture({
           </View>
         </View>
 
+        {/* CAMERA CHROME BELONGS TO THE CAMERA. Torch and flip are meaningless while
+            the lens is not even mounted, and two dead-looking controls in the corner of
+            a recording screen are two more things to read past before talking. They
+            appear with the camera and leave with it. */}
         <View style={st.topRight}>
           {/* Hidden, not disabled-looking, on the front camera: there is no lamp to
               turn on, and a greyed control still invites the tap that will do nothing. */}
-          {facing === 'back' && (
+          {camOpen && facing === 'back' && (
             <Pressable onPress={() => setFlash((f) => (f === 'off' ? 'on' : 'off'))}
               style={st.topBtn} accessibilityRole="button"
               accessibilityState={{ selected: torchOn }}>
@@ -728,15 +732,31 @@ export function FusedCapture({
               </Text>
             </Pressable>
           )}
-          <Pressable onPress={() => setFacing((f) => (f === 'back' ? 'front' : 'back'))} style={st.topBtn}>
-            <Icon name="cameraFlip" size={22} color={C.ink} />
-            <Text style={st.topLab}>{T('cap.flip')}</Text>
-          </Pressable>
+          {camOpen && (
+            <Pressable onPress={() => setFacing((f) => (f === 'back' ? 'front' : 'back'))} style={st.topBtn}>
+              <Icon name="cameraFlip" size={22} color={C.ink} />
+              <Text style={st.topLab}>{T('cap.flip')}</Text>
+            </Pressable>
+          )}
+          {/* THE WAY BACK. A camera you can only leave by finishing is a mode, and this
+              is meant to be a panel — he opened it for one photo and must be able to
+              return to his words. Recording keeps running throughout: closing the lens
+              is not stopping the mic. */}
+          {camOpen && (
+            <Pressable onPress={() => setCamOpen(false)} style={st.topBtn}
+              accessibilityRole="button">
+              <Icon name="check" size={22} color={C.ink} />
+              <Text style={st.topLab}>{T('cap.doneShooting')}</Text>
+            </Pressable>
+          )}
         </View>
       </View>
 
       {/* ---------- CAMERA BAND ---------- */}
-      <View style={st.band}>
+      {/* BLACK BEHIND A LENS, PAPER BEHIND WORDS. The band is black because a viewfinder
+          wants black around it; with the camera closed the same black would be a hole in
+          a light screen, and every card on it would read as an overlay on nothing. */}
+      <View style={[st.band, !camOpen && { backgroundColor: C.paper }]}>
         {/* THE LIGHT STAYS ON — `enableTorch`, not just `flash` (hadar 2026-08-13:
             "the flash doesn't run").
             `flash="on"` fires the LED for a few milliseconds at the shutter and does
@@ -907,6 +927,12 @@ export function FusedCapture({
       {/* ---------- ACTION PANEL ---------- */}
       <View style={st.panel}>
         <View style={st.actionRow}>
+          {/* THE COLLECTION, once there is one. On a recording screen with no photos
+              "View photos" is a control for a thing that does not exist; with the
+              camera open it is how he checks what he has already got without leaving
+              the lens. Shown whenever either is true, so a photo taken and then closed
+              is still reachable from the recorder. */}
+          {(camOpen || shots.length > 0) ? (
           <Pressable style={st.sideBtn} onPress={() => setSheetOpen(true)} disabled={saving}>
             <Icon name="photo" size={22} color={C.ink} />
             <View style={st.sideLabRow}>
@@ -916,6 +942,7 @@ export function FusedCapture({
               )}
             </View>
           </Pressable>
+          ) : <View style={st.sideBtn} />}
 
           {/* THE CENTRE BUTTON SUMMONS THE CAMERA BEFORE IT TAKES A PHOTO.
               Closed, it says "Add photos" and is marked optional — the honest label for
