@@ -24,6 +24,22 @@ export async function requestMic(): Promise<boolean> {
   await AudioModule.setAudioModeAsync({
     allowsRecording: true,
     playsInSilentMode: true,
+    /**
+     * KEEP THE SESSION WHEN THE APP IS NOT IN FRONT.
+     *
+     * Without this, iOS tears the audio session down as soon as the app is backgrounded
+     * or the handset locks — and the recorder stops mid-sentence with nothing on screen
+     * to say so. A contractor takes a call, or the auto-lock fires at thirty seconds
+     * while he is still describing a wall, and the second half of what he said never
+     * existed. That is silent capture loss, which mandate #1 calls the one unforgivable
+     * failure.
+     *
+     * It pairs with `UIBackgroundModes: audio` in app.json — the entitlement is what
+     * makes this flag mean anything, and neither works without a NEW BUILD. The screen
+     * lock is held separately while the mic is open (capturescreen), so the ordinary
+     * case never reaches this; this is the backstop for when it does.
+     */
+    shouldPlayInBackground: true,
   });
   return true;
 }

@@ -24,6 +24,9 @@
             "UIApplicationShortcutItemSubtitle": "Snap it. Say it. Send it.",
             "UIApplicationShortcutItemIconType": "UIApplicationShortcutIconTypeCapturePhoto"
           }
+        ],
+        "UIBackgroundModes": [
+          "audio"
         ]
       },
       "entitlements": {

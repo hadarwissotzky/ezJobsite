@@ -40,7 +40,7 @@
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import React from 'react';
-import { ActivityIndicator, Animated, Dimensions, Image, Keyboard, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, Dimensions, Image, InputAccessoryView, Keyboard, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 
 import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, useAudioRecorderState } from '../recorder';
@@ -100,6 +100,12 @@ function StampBlock({ place, now }: { place: string | null; now: number }) {
 }
 
 /** The dense mockup waveform. Purely an indicator — it reads the live meter only. */
+/** Ties the keyboard bar to the summary field. Any stable string; it only has to match. */
+const SUMMARY_ACCESSORY = 'ezco-summary-kb';
+
+/** Scopes the wake lock to this screen, so releasing it cannot free somebody else's. */
+const KEEP_AWAKE_TAG = 'ezco-capture';
+
 function Wave({ level, active }: { level: number; active: boolean }) {
   const bars = React.useMemo(() => Array.from({ length: 34 }, (_, i) => i), []);
   return (
@@ -335,6 +341,54 @@ export function FusedCapture({
   const lastLiveRef = React.useRef('');
   /** Is the summary field being typed in? Drives the Done affordance — see the header. */
   const [summaryFocused, setSummaryFocused] = React.useState(false);
+
+  /**
+   * THE SCREEN STAYS ON WHILE THE MIC IS OPEN (hadar, 2026-09-02: "when I am recording
+   * the phone goes into hibernation mode — this should not be the case, keep the phone
+   * alive").
+   *
+   * IT IS NOT A COMFORT FEATURE. This app has no `UIBackgroundModes: audio`, so when
+   * iOS sleeps the handset it suspends the app and the recorder stops — mid-sentence,
+   * with no warning, on the screen whose one promise is that it captured what he said.
+   * A contractor describing a wall for ninety seconds without touching the glass is the
+   * NORMAL case here, and the auto-lock default is thirty.
+   *
+   * Scoped to the recording, not the screen: it releases the moment the mic closes, so
+   * a capture screen left open on a bench does not hold the display on until the battery
+   * is flat.
+   */
+  React.useEffect(() => {
+    if (!micOn) return;
+    let held = false;
+    /**
+     * LOADED AT RUNTIME, NOT IMPORTED AT THE TOP, AND THAT IS NOT STYLE.
+     *
+     * `expo-keep-awake` is a NATIVE module. A static import ships in the JS bundle, and
+     * this app updates over the air onto a binary that does not contain it — so the
+     * import would resolve to nothing and take the capture screen down with it. The one
+     * screen that must never fail is the one that records.
+     *
+     * So: ask for it, use it if the running binary has it, and carry on without it if
+     * not. The wake lock arrives when the next build does; nothing waits for it and
+     * nothing breaks before it.
+     */
+    void (async () => {
+      try {
+        const ka = await import('expo-keep-awake');
+        await ka.activateKeepAwakeAsync(KEEP_AWAKE_TAG);
+        held = true;
+      } catch { /* older binary: the screen may sleep, everything else still works */ }
+    })();
+    return () => {
+      if (!held) return;
+      void (async () => {
+        try {
+          const ka = await import('expo-keep-awake');
+          await ka.deactivateKeepAwake(KEEP_AWAKE_TAG);
+        } catch { /* nothing to release */ }
+      })();
+    };
+  }, [micOn]);
   /**
    * DISMISSED BY HAND, AND IT STAYS DISMISSED (hadar, 2026-08-18: "allow the user to
    * close the message screen so they can see the full camera screen").
@@ -886,9 +940,18 @@ export function FusedCapture({
                 </Pressable>
               )}
               <View style={st.cardTop}>
-                <View style={[st.micDisc, paused && st.micDiscPaused]}>
-                  <Icon name={paused ? 'pause' : 'microphone'} size={30} color="#fff" />
-                </View>
+                {/* THE 60pt MIC DISC IS CAMERA-MODE FURNITURE (hadar: "the your voice is
+                    recording section is much too big — we can remove the icon and just
+                    have the progress bar"). Over a viewfinder it is the only thing
+                    saying the mic is live. On the recorder the card is already titled
+                    "Voice recording", the wave is moving and the timer is counting, so a
+                    third mic symbol costs a third of the card's height to repeat what
+                    two other elements already say. */}
+                {camOpen && (
+                  <View style={[st.micDisc, paused && st.micDiscPaused]}>
+                    <Icon name={paused ? 'pause' : 'microphone'} size={30} color="#fff" />
+                  </View>
+                )}
                 <View style={st.cardTopText}>
                   <Text style={st.cardTitle}>
                     {paused ? T('cap.voiceIsPaused') : T('cap.voiceIsRecording')}
@@ -906,9 +969,20 @@ export function FusedCapture({
               {!camOpen && micOn && (
                 <Pressable style={st.stopBtn} onPress={togglePause}
                   disabled={saving || interrupted} accessibilityRole="button">
+                  {/* THE GLYPH HAS TO AGREE WITH THE WORD (hadar, 2026-09-02: "we need
+                      a different button, one that will resemble a pause icon"). A filled
+                      square is the universal STOP mark, and it sat next to the word
+                      Pause — the icon saying one thing and the label another, on the
+                      control that decides whether a recording survives. Two bars now,
+                      drawn rather than iconised so they match the label's weight. */}
                   {paused
                     ? <Icon name="play" size={16} color={C.brandDark} />
-                    : <View style={st.stopSquare} />}
+                    : (
+                      <View style={st.pauseGlyph}>
+                        <View style={st.pauseBar} />
+                        <View style={st.pauseBar} />
+                      </View>
+                    )}
                   {/* PAUSE, NOT STOP (hadar, 2026-09-02). "Stop recording" beside a
                       "Continue →" that ENDS the capture had the two words the wrong way
                       round: this is the reversible one, and the irreversible one was
@@ -996,8 +1070,26 @@ export function FusedCapture({
                   `maxHeight` with `scrollEnabled` keeps the card a fixed object and
                   makes the text move inside it, which is also what lets him read back
                   the beginning of what he said. */}
+              {/* A BAR THAT RIDES ON THE KEYBOARD ITSELF.
+                  hadar, twice: "i still cannot close the keyboard once i am in the edit
+                  field." My first attempt put Done in the card header — which the
+                  keyboard covers on any screen where the card has scrolled up, so the
+                  exit was behind the thing it was meant to escape. `InputAccessoryView`
+                  is attached to the keyboard and rises with it, so it cannot be covered
+                  by definition. iOS only; Android's back gesture already dismisses. */}
+              {Platform.OS === 'ios' && (
+                <InputAccessoryView nativeID={SUMMARY_ACCESSORY}>
+                  <View style={st.kbBar}>
+                    <Pressable onPress={() => Keyboard.dismiss()} hitSlop={10}
+                      accessibilityRole="button" style={st.kbDone}>
+                      <Text style={st.kbDoneT}>{T('cap.doneTyping')}</Text>
+                    </Pressable>
+                  </View>
+                </InputAccessoryView>
+              )}
               <TextInput
                 style={st.draftInput}
+                inputAccessoryViewID={Platform.OS === 'ios' ? SUMMARY_ACCESSORY : undefined}
                 multiline
                 scrollEnabled
                 value={summary}
@@ -1313,7 +1405,16 @@ const st = StyleSheet.create({
   // slab inside a card would outrank the Continue button at the bottom of the screen.
   stopBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
     minHeight: 48, borderRadius: 12, backgroundColor: C.brandSoft, marginTop: 12 },
-  stopSquare: { width: 15, height: 15, borderRadius: 3, backgroundColor: C.brand },
+  // Sits ON the keyboard. Right-aligned because that is where iOS users look for Done,
+  // and a full-width bar so the tap target is the whole right end rather than a word.
+  kbBar: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center',
+    backgroundColor: C.surfaceMuted, borderTopWidth: 1, borderTopColor: C.line,
+    paddingHorizontal: 14, paddingVertical: 7 },
+  kbDone: { minHeight: 34, justifyContent: 'center', paddingHorizontal: 14,
+    borderRadius: 8, backgroundColor: C.brand },
+  kbDoneT: { fontFamily: F.bodyBold, fontSize: 15, color: '#fff' },
+  pauseGlyph: { flexDirection: 'row', gap: 4 },
+  pauseBar: { width: 4.5, height: 15, borderRadius: 1.5, backgroundColor: C.brand },
   stopT: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.brandDark },
   draftEdit: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.brand },
   // Bolder and boxed while typing: it is the only way off this keyboard, so it has to
