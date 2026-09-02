@@ -40,7 +40,7 @@
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import React from 'react';
-import { ActivityIndicator, Animated, Dimensions, Image, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, Dimensions, Image, Keyboard, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 
 import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, useAudioRecorderState } from '../recorder';
@@ -333,6 +333,8 @@ export function FusedCapture({
    * speak again, and the first half of what you said was gone.
    */
   const lastLiveRef = React.useRef('');
+  /** Is the summary field being typed in? Drives the Done affordance — see the header. */
+  const [summaryFocused, setSummaryFocused] = React.useState(false);
   /**
    * DISMISSED BY HAND, AND IT STAYS DISMISSED (hadar, 2026-08-18: "allow the user to
    * close the message screen so they can see the full camera screen").
@@ -969,16 +971,39 @@ export function FusedCapture({
             <View style={st.draftBox}>
               <View style={st.draftHead}>
                 <Text style={st.draftLabel}>{T('cap.draftSummary')}</Text>
-                {/* The field is always editable — this is a SIGNPOST, not a mode. A box
-                    of text a machine wrote does not look touchable, and a contractor who
-                    does not know he may change it will send words he never said. */}
-                <Text style={st.draftEdit}>{T('cap.editSummary')}</Text>
+                {/* "EDIT" IS A SIGNPOST; "DONE" IS A WAY OUT.
+                    A box of text a machine wrote does not look touchable, so the label
+                    invites the tap — but this is a MULTILINE field, where Return inserts
+                    a newline and the keyboard has no close key of its own. hadar, 2026-09-02:
+                    "if the keyboard has opened you cannot close it." The keyboard covered
+                    Add photos and the primary, so opening it was a trap. Same slot, two
+                    jobs, and only ever one of them on screen. */}
+                {summaryFocused ? (
+                  <Pressable onPress={() => Keyboard.dismiss()} hitSlop={10}
+                    accessibilityRole="button" style={st.draftDone}>
+                    <Text style={st.draftEditOn}>{T('cap.doneTyping')}</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={st.draftEdit}>{T('cap.editSummary')}</Text>
+                )}
               </View>
+              {/* IT SCROLLS RATHER THAN GROWS (hadar, 2026-09-02: "the draft field
+                  needs to have a scroller so you can scroll down and read the text").
+
+                  A minute of talking is a paragraph, and an unbounded multiline input
+                  pushed the Add photos button and the primary off the bottom of the
+                  screen — the longer he spoke, the less of the screen he could use.
+                  `maxHeight` with `scrollEnabled` keeps the card a fixed object and
+                  makes the text move inside it, which is also what lets him read back
+                  the beginning of what he said. */}
               <TextInput
                 style={st.draftInput}
                 multiline
+                scrollEnabled
                 value={summary}
                 onChangeText={(v: string) => { setSummary(v); summaryTouched.current = true; }}
+                onFocus={() => setSummaryFocused(true)}
+                onBlur={() => setSummaryFocused(false)}
                 placeholder={T('cap.draftPlaceholder')}
                 placeholderTextColor={C.disabled}
                 textAlignVertical="top"
@@ -1291,6 +1316,11 @@ const st = StyleSheet.create({
   stopSquare: { width: 15, height: 15, borderRadius: 3, backgroundColor: C.brand },
   stopT: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.brandDark },
   draftEdit: { fontFamily: F.bodySemi, fontSize: 13.5, color: C.brand },
+  // Bolder and boxed while typing: it is the only way off this keyboard, so it has to
+  // read as a control rather than as the label it replaces. 44pt of touch via hitSlop.
+  draftDone: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 8,
+    backgroundColor: C.brandSoft },
+  draftEditOn: { fontFamily: F.bodyBold, fontSize: 13.5, color: C.brandDark },
   wideBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 56,
     paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: C.line,
     backgroundColor: C.card },
@@ -1310,8 +1340,11 @@ const st = StyleSheet.create({
   draftLabel: { flex: 1, fontFamily: F.bodySemi, fontSize: 13.5, color: C.brand },
   // minHeight, not height: it grows with what he says rather than scrolling a field he
   // is trying to proofread.
+  // maxHeight, not just minHeight: the card stays a fixed object on the screen and the
+  // words move inside it. Without the cap a long recording pushed Add photos and the
+  // primary button off the bottom.
   draftInput: { fontFamily: F.body, fontSize: 16, lineHeight: 22, color: C.ink,
-    minHeight: 96, paddingTop: 2, paddingBottom: 6 },
+    minHeight: 96, maxHeight: 190, paddingTop: 2, paddingBottom: 6 },
 
   // The photo stamp keeps the dark treatment — it is burned onto a photograph.
   stamp: { position: 'absolute', left: 16, bottom: 40, backgroundColor: 'rgba(0,0,0,0.45)',
