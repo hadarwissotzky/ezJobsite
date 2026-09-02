@@ -42,7 +42,7 @@ const EN: Record<string, string> = {
   'cap.photo': 'Photo',
   'cap.snapTalk': 'Snap + Talk',
   'cap.noLoc': 'location unavailable',
-  'cap.needCamera': 'EZChangeOrders needs the camera to capture a jobsite decision.',
+  'cap.needCamera': 'EZChangeOrders needs the camera to capture what changed on site.',
   'cap.allowCamera': 'Allow camera',
   'cap.speakLouder': 'Speak louder',
   'cap.done': 'Done ✓',
@@ -102,18 +102,18 @@ const EN: Record<string, string> = {
   // width of a phone, and a segment label that wraps stops being a label.
   'flow.pctDone': '{n}% done',
   'flow.s1': 'Record',
-  'flow.s2': 'Job',
+  'flow.s2': 'Location',
   'flow.s3': 'Client',
   'flow.s4': 'Write-up',
   // The step he SENDS from. Named for what he does there, not for what the screen
   // is — 'Draft' would describe the record's state and tell him nothing about why he
   // is looking at it.
   'flow.s5': 'Review',
-  'assign.title': 'Which job is this for?',
-  'assign.sub': 'Saved safe on this phone. A change order belongs to a job — pick one, or make it.',
-  'assign.search': 'Search jobs or address',
-  'assign.newHere': 'New job right here',
-  'assign.newJobName': 'New job (no address yet)',
+  'assign.title': 'Which location is this for?',
+  'assign.sub': 'Saved safe on this phone. A change order belongs to a location — pick one, or make it.',
+  'assign.search': 'Search locations or address',
+  'assign.newHere': 'New location right here',
+  'assign.newJobName': 'New location (no address yet)',
   'assign.later': 'Later — keep it in the Inbox',
   'cap.pick': 'Pick',
   'cap.orType': 'Or type it',
@@ -123,23 +123,23 @@ const EN: Record<string, string> = {
   'cap.notSaved': 'Not saved: {why}',
 
   // --- consent (REQ-CON1) ---
-  'consent.notSetTitle': 'Recording isn’t set up for this job',
+  'consent.notSetTitle': 'Recording isn’t set up for this location',
   'consent.notSetBody': 'One tap to set it. Photos and typed notes work now — only voice waits.',
-  'consent.needed': 'Recording isn’t set up for this job yet. Set it in job setup — it takes one tap.',
-  'consent.no_recording': 'This job is set to no recording. Type it or take a photo instead.',
-  'consent.title': 'Recording on this job',
+  'consent.needed': 'Recording isn’t set up for this location yet. Set it in the location’s setup — it takes one tap.',
+  'consent.no_recording': 'This location is set to no recording. Type it or take a photo instead.',
+  'consent.title': 'Recording on this location',
   'consent.once': 'Decided once, here. The record button will never stop to ask you.',
-  'consent.where': 'Where is this job? (2-letter state)',
+  'consent.where': 'Where is this location? (2-letter state)',
   'consent.everyone': 'Everyone has agreed',
   'consent.imPart': 'I’m part of the conversation',
-  'consent.none': 'No recording on this job',
+  'consent.none': 'No recording on this location',
   'consent.notAdvice': 'This records what you chose. It is not legal advice — recording rules differ by state and by who is in the room.',
 
   // --- Terms acceptance (personal-use consent model, 2026-07-17) ---
   'terms.h1': 'One quick thing',
   'terms.h2': 'before you record',
   'terms.detecting': 'Checking your location…',
-  'terms.body': 'This app records the audio you capture on the job. By continuing you accept the Terms & Conditions, and confirm you are responsible for recording lawfully where you work. You only do this once.',
+  'terms.body': 'This app records the audio you capture on site. By continuing you accept the Terms & Conditions, and confirm you are responsible for recording lawfully where you work. You only do this once.',
   'terms.reminder': 'You’re in {state}, where everyone in a conversation must be told they’re being recorded. Please let people know.',
   'terms.accept': 'I accept',
   // The screen could not record the acceptance. Said out loud rather than left as a
@@ -160,7 +160,7 @@ const EN: Record<string, string> = {
   'ob.h2': 'extra work',
   'ob.h3': 'on a',
   'ob.h4': 'verbal yes.',
-  'ob.lede': 'Create and send clear change orders from the jobsite in minutes.',
+  'ob.lede': 'Create and send clear change orders from the location in minutes.',
   // Outcomes, not mechanisms. He is not buying voice capture; he is buying getting paid.
   'ob.p1t': 'Protect your payment',
   'ob.p1b': 'Get approval before you do the extra work.',
@@ -232,7 +232,7 @@ const EN: Record<string, string> = {
   'gs.g.notSaved': 'Could not save',
   'gs.r.kicker': 'Review before sending',
   'gs.r.lede': "You're in control.",
-  'gs.r.to': 'To', 'gs.r.job': 'Job', 'gs.r.co': 'Change order',
+  'gs.r.to': 'To', 'gs.r.location': 'Location', 'gs.r.co': 'Change order',
   'gs.r.price': 'Price', 'gs.r.sched': 'Schedule impact',
   'gs.r.back': 'Back',
   'gs.r.send': 'Send change order',
@@ -250,7 +250,7 @@ const EN: Record<string, string> = {
   // break lands on the phrase the design chose, not wherever the box runs out.
   'ob.s1h1': 'Record it',
   'ob.s1h2': 'on site.',
-  'ob.s1b': 'Snap photos and say what\nchanged. No forms.\nNo typing on the jobsite.',
+  'ob.s1b': 'Snap photos and say what\nchanged. No forms.\nNo typing on site.',
   'ob.s1a': 'Photos',
   'ob.s1b2': 'Voice',
   'ob.s1c': 'Location',
@@ -378,25 +378,25 @@ const EN: Record<string, string> = {
 
   // --- project resolution (REQ-P1/P2) ---
   'res.atJob': 'You’re at {name}',
-  'res.nearN': 'You’re near {n} jobs — tap to say which',
-  'res.notAtAny': 'Not at any job — nearest is {name}, {km} km away',
-  'res.noJobsYet': 'No jobs yet — saved to your Inbox',
+  'res.nearN': 'You’re near {n} locations — tap to say which',
+  'res.notAtAny': 'Not at any location — nearest is {name}, {km} km away',
+  'res.noJobsYet': 'No locations yet — saved to your Inbox',
   'res.noLocationInbox': 'No location — saved to your Inbox, tap to file it',
-  'res.onlyJob': 'Saved to {name} — your only job',
-  'res.lastUsed': 'No location — saved to {name} (the job you were just on)',
-  'res.noPinned': 'No job has a location yet — saved to your Inbox',
+  'res.onlyJob': 'Saved to {name} — your only location',
+  'res.lastUsed': 'No location — saved to {name} (the location you were just on)',
+  'res.noPinned': 'No location has a location yet — saved to your Inbox',
 
   // --- inbox (REQ-P2) ---
-  'inbox.needJob': '{n} capture(s) need a job →',
+  'inbox.needJob': '{n} capture(s) need a location →',
   'inbox.safe': 'Saved and safe — just not filed yet',
-  'inbox.title': 'Needs a job ({n})',
-  'inbox.body': 'These saved fine — we just couldn’t tell which job. Tap a job to file it.',
+  'inbox.title': 'Needs a location ({n})',
+  'inbox.body': 'These saved fine — we just couldn’t tell which location. Tap a location to file it.',
 
   // --- jobs ---
-  'job.pick': 'No job — tap to pick',
+  'job.pick': 'No location — tap to pick',
   'job.change': 'tap to change',
   // Job screen (mockup 2026-07-23)
-  'job.title': 'Job',
+  'job.title': 'Location',
   'job.acrossReq': 'across {n} requests',
   'job.recordSub': 'Snap it. Say it. Send it.',
   'job.pillWaiting': 'Waiting',
@@ -404,9 +404,9 @@ const EN: Record<string, string> = {
   'job.pillAll': 'All',
   // Names BOTH things you can search on. The old placeholder was the generic
   // 'home.search', which did not say an address would match.
-  'jobs.searchPh': 'Search jobs or address',
+  'jobs.searchPh': 'Search locations or address',
   'jobs.lastActivity': 'Last activity {ago} ago',
-  'job.settings': 'Job settings — colour, status, archive',
+  'job.settings': 'Location settings — colour, status, archive',
   'job.statNeeds': 'Needs approval',
   'job.statApproved': 'Approved',
   'job.statClosed': 'Closed',
@@ -459,7 +459,7 @@ const EN: Record<string, string> = {
   // The JOB screen's empty state — a jobsite with no change orders at all. Distinct
   // from `job.noneInFilter`, which is a full job seen through a narrow pill.
   'job.emptyTitle': 'No change orders yet',
-  'job.emptyBody': 'Record something on this job and it will show up here.',
+  'job.emptyBody': 'Record something on this location and it will show up here.',
   'job.totApproved': 'Approved',
   'job.totAwaiting': 'Pending',
   'job.secWaiting': 'Waiting for a yes',
@@ -467,11 +467,11 @@ const EN: Record<string, string> = {
   'job.secApproved': 'Approved',
   'job.seeAll': 'See all',
   'job.seeLess': 'See less',
-  'job.which': 'Which job?',
-  'job.new': 'New job',
+  'job.which': 'Which location?',
+  'job.new': 'New location',
   // Deleting an EMPTY jobsite (deleteproject.ts). Offered only when it holds
   // nothing; a job with history is archived instead, never deleted.
-  'job.delete': 'Delete this job',
+  'job.delete': 'Delete this location',
   // DOES NOT CLAIM THE JOB IS EMPTY. The button appears when there are no change
   // orders; the server refuses if ANY of twelve tables has a row, photos included. The
   // old copy said "Nothing is saved in it" and was followed, on jobs holding captures,
@@ -480,20 +480,20 @@ const EN: Record<string, string> = {
   'job.delConfirm': 'Delete “{name}”? This can’t be undone — and if any photo or change order was saved to it, it stays.',
   // Names the state, not the mechanism: he does not care which table stopped it,
   // only that this job has work in it and is therefore kept.
-  'job.delNotEmpty': 'Cannot delete — this job already has work saved in it.',
+  'job.delNotEmpty': 'Cannot delete — this location already has work saved in it.',
   // The delete-with-photos chain. STEP ONE states the loss and its forward button is
   // "Continue", never "Delete": nobody may destroy photographs by pressing the button
   // they expected to be the confirmation. STEP TWO names the number again, so the
   // destructive tap is never made against a half-remembered figure.
-  'job.delWithMediaAsk': '“{name}” has {n} photos or recordings saved to it. Deleting the job deletes them too.',
+  'job.delWithMediaAsk': '“{name}” has {n} photos or recordings saved to it. Deleting the location deletes them too.',
   'job.delMediaTitle': 'Permanently delete {n} photos?',
   // The same warning when the phone does not know HOW MANY. `capture_commit` is
   // local-only, so a capture from another device is invisible to it — the server
   // still refuses, and this is the second chance offered on its word rather than ours.
   'job.delMediaTitleSome': 'Delete the photos too?',
-  'job.delMediaGoSome': 'Delete job and photos',
+  'job.delMediaGoSome': 'Delete location and photos',
   'job.delMediaWarn': 'This cannot be undone. They are not recoverable from the app or from support.',
-  'job.delMediaGo': 'Delete job and {n} photos',
+  'job.delMediaGo': 'Delete location and {n} photos',
   'job.delMediaGone': '{n} photos were deleted with it.',
   // Said out loud rather than swallowed: the rows are gone either way, but bytes left
   // in the bucket are a fact the person who asked for the delete should have.
@@ -509,25 +509,25 @@ const EN: Record<string, string> = {
   'job.holdsComment': 'It holds comments.',
   'job.holdsScope': 'It holds scope notes.',
   'job.holdsProcessing': 'Something on it is still being processed.',
-  'job.delNotOwner': 'Only the company owner can delete a job.',
+  'job.delNotOwner': 'Only the company owner can delete a location.',
   // NOT a refusal: the job is still there and trying later is the right advice.
-  'job.delOffline': 'No signal. The job is still here — try again when you have one.',
-  'job.delFailed': 'Could not delete. The job is still here.',
+  'job.delOffline': 'No signal. The location is still here — try again when you have one.',
+  'job.delFailed': 'Could not delete. The location is still here.',
   'job.deleted': 'Deleted “{name}”.',
-  'job.createdTitle': 'Job created!',
-  'job.createdSub': 'You can create a change order for this job now, or do it later from the job.',
+  'job.createdTitle': 'Location created!',
+  'job.createdSub': 'You can create a change order for this location now, or do it later from the location.',
   'job.createdCo': 'Create change order',
-  'job.newSub': 'A job holds every photo, recording and change order for one address.',
+  'job.newSub': 'A location holds every photo, recording and change order for one address.',
   'job.nameLabel': 'What do you call it?',
   'job.addressLabel': 'Address (optional)',
-  'job.newAddressWhy': 'Add an address or use your current location, and photos and extras taken here file themselves to this job.',
-  'home.projects': 'Jobs',
-  'home.newProject': 'New job',
+  'job.newAddressWhy': 'Add an address or use your current location, and photos and extras taken here file themselves to this location.',
+  'home.projects': 'Locations',
+  'home.newProject': 'New location',
   'home.gotOne': 'Got an extra?',
   'home.sayIt': 'Say it now — file it after. Don’t let it slip.',
   'home.waiting': 'Waiting on approval',
   'home.tabExtras': 'Extras',
-  'home.tabJobs': 'Jobs',
+  'home.tabJobs': 'Locations',
   'home.walkthrough': 'Walkthrough',
   'home.stReview': 'Review',
   'home.tapToReview': 'tap to review what it heard',
@@ -544,10 +544,10 @@ const EN: Record<string, string> = {
   'celebrate.approved': '{amount} approved',
   'celebrate.approvedN': '{amount} approved · {n} extras',
   'home.capture': 'Capture',
-  'home.filesItself': 'It files itself to the right job',
-  'home.yourJobs': 'Your jobs',
+  'home.filesItself': 'It files itself to the right location',
+  'home.yourJobs': 'Your locations',
   'home.inbox': 'Inbox ({n})',
-  'home.inboxSub': 'Captures we couldn’t match to a job',
+  'home.inboxSub': 'Captures we couldn’t match to a location',
   // Home dashboard (mockup 2026-07-23)
   'home.title': 'Home',
   'home.menu': 'Menu',
@@ -594,7 +594,7 @@ const EN: Record<string, string> = {
   'home.clientQuestion': 'Client question',
   'home.sentAgo': 'Sent {ago}',
   'home.navHome': 'Home',
-  'home.navJobs': 'Jobs',
+  'home.navJobs': 'Locations',
   'home.navActivity': 'Activity',
   'home.navCompany': 'Company',
   'home.navProfile': 'Profile',
@@ -616,9 +616,9 @@ const EN: Record<string, string> = {
   // drawing saying "no extras yet" over a filtered list is a false statement.
   'act.empty': 'No extras here yet.',
   'act.emptyTitle': 'No change orders yet',
-  'act.emptyBody': 'Everything you capture on this job shows up here, newest first.',
+  'act.emptyBody': 'Everything you capture on this location shows up here, newest first.',
   'feed.emptyTitle': 'Nothing on the board yet',
-  'feed.emptyBody': 'Change orders from every job land here as your crew captures them.',
+  'feed.emptyBody': 'Change orders from every location land here as your crew captures them.',
   // The in-app banner for a client message that arrives while the app is open on some
   // other screen (hadar, 2026-08-18). iOS shows no banner of its own in the foreground,
   // so without this the one event the product exists to surface arrives silently.
@@ -651,8 +651,8 @@ const EN: Record<string, string> = {
   'toast.dismiss': 'Dismiss',
   'r8.emptyTitle': 'You’re all caught up',
   'r8.emptyBody': 'Approvals and questions from your clients land here.',
-  'home.emptyJobsTitle': 'No jobs yet',
-  'home.emptyJobsBody': 'Add your first job and everything you capture files itself under it.',
+  'home.emptyJobsTitle': 'No locations yet',
+  'home.emptyJobsBody': 'Add your first location and everything you capture files itself under it.',
   // ── first-run Home (hadar's design, 2026-08-12) ──
   // Two lines, written as two: the break is typography, not word-wrap.
   'home.emptyHead1': 'No',
@@ -706,21 +706,21 @@ const EN: Record<string, string> = {
   'home.noAddress': 'No address',
   'home.captures': '{n} captures',
   'home.notPinned': 'not pinned',
-  'home.noMatch': 'No jobs match that.',
-  'home.noProjects': 'No jobs yet — make your first one.',
+  'home.noMatch': 'No locations match that.',
+  'home.noProjects': 'No locations yet — make your first one.',
   'detail.noCaptures': 'Nothing captured here yet. Tap record, snap a photo, or type a note.',
-  'job.newTitle': 'New job',
+  'job.newTitle': 'New location',
   'job.name': 'What do you call it?',
   'job.address': 'Address (optional)',
   'addr.useLocation': 'Use my location',
-  'job.pinNote': 'We’ll pin this job to where you are now, so captures here file themselves. You can add the address later.',
-  'job.create': 'Create job',
+  'job.pinNote': 'We’ll pin this location to where you are now, so captures here file themselves. You can add the address later.',
+  'job.create': 'Create location',
   'job.createAnyway': 'Create anyway',
-  'job.dupeHere': 'You already have a job at this address',
+  'job.dupeHere': 'You already have a location at this address',
   'job.dupeOpen': 'Open',
   'job.notPinned': 'not pinned — captures here won’t file themselves',
-  'job.needsName': 'A job needs a name',
-  'job.needsUser': 'Not signed in yet — a job can’t be created until the app has a user',
+  'job.needsName': 'A location needs a name',
+  'job.needsUser': 'Not signed in yet — a location can’t be created until the app has a user',
 
   // --- errors that must never be silent (mandate #1) ---
   'err.refusedTitle': '{n} item(s) the server refused',
@@ -795,7 +795,7 @@ const EN: Record<string, string> = {
   'sent.barFailed': 'Not delivered',
   'sent.retry': 'Send it now →',
   'sent.failNotHanded': 'You closed the sharing screen before it sent.',
-  'sent.job': 'Job',
+  'sent.job': 'Location',
   'sent.request': 'Request',
   'sent.to': 'Send to',
   'sent.status': 'Status',
@@ -807,24 +807,24 @@ const EN: Record<string, string> = {
   'conf.noLogin': 'No login needed — anyone with this link can answer it.',
 
   // --- inbox / jobs, empties ---
-  'inbox.noJobs': 'No jobs to file into yet. Create one first.',
-  'job.noneYet': 'No jobs yet. Create one — it takes a name.',
+  'inbox.noJobs': 'No locations to file into yet. Create one first.',
+  'job.noneYet': 'No locations yet. Create one — it takes a name.',
   'inbox.appendOnly': 'Filing doesn’t rewrite the capture — the original stays exactly as it was recorded, and your choice is kept beside it.',
 
-  'fr.jobTitle': 'What job are you on?',
-  'fr.jobWhy': 'Everything you capture files itself to a job. You can add more later.',
+  'fr.jobTitle': 'What location are you on?',
+  'fr.jobWhy': 'Everything you capture files itself to a location. You can add more later.',
   'fr.consentWhy': 'One question, once. Then the record button never asks you anything again.',
   'fr.ready': 'Ready — tap the green button',
 
   // REQ-X3: one status per item. Plain, and about what to DO.
-  'st.needsJob': 'Needs a job',
+  'st.needsJob': 'Needs a location',
   'st.wontBackUp': 'Won’t back up — needs attention',
   'st.waitingBackup': 'Waiting to back up',
   'st.backedUp': 'Backed up',
   'st.detail.waiting': 'not backed up yet',
   'st.detail.noLocation': 'no location recorded',
-  'st.detail.unfiled': 'not filed to a job',
-  'st.screen.needsYou': '{n} need a job →',
+  'st.detail.unfiled': 'not filed to a location',
+  'st.screen.needsYou': '{n} need a location →',
   'st.screen.notSafe': '{n} won’t back up — tap',
   'st.screen.waiting': '{n} waiting to back up',
 
@@ -834,13 +834,13 @@ const EN: Record<string, string> = {
   'sc.nobody': 'Nobody has said',
   'sc.addBoundary': 'What might fall between trades?',
   'sc.addBoundaryBtn': '+ Add',
-  'sc.addParty': 'Who’s on this job?',
+  'sc.addParty': 'Who’s on this location?',
   'sc.partyName': 'Company',
   'sc.partyTrade': 'Trade (e.g. electrical)',
   'sc.addPartyBtn': '+ Add company',
   'sc.whoOwns': 'Who owns it?',
   'sc.changed': 'changed {n}×',
-  'sc.noParties': 'Add the companies on this job first — then you can say who owns what.',
+  'sc.noParties': 'Add the companies on this location first — then you can say who owns what.',
   'sc.note': 'Nothing here is guessed. If two trades both touch something, we ask — we don’t pick.',
 
   // REQ-PROC4 per-item pipeline state. Plain words -- "queued" is jargon.
@@ -883,16 +883,16 @@ const EN: Record<string, string> = {
   'rep.nothing': 'Nothing new to tell them yet',
 
   // REQ-P5 — propose, never auto-create.
-  'res.newHereFar': 'New job here? The nearest is {name}, {km} km away.',
-  'res.newHereNoJobs': 'New job here?',
-  'p5.create': 'Yes — new job here',
-  'p5.notNew': 'No — it belongs to a job I already have',
+  'res.newHereFar': 'New location here? The nearest is {name}, {km} km away.',
+  'res.newHereNoJobs': 'New location here?',
+  'p5.create': 'Yes — new location here',
+  'p5.notNew': 'No — it belongs to a location I already have',
   'p5.pinned': 'We’ll pin it where you’re standing.',
 
   // PRD R6b — the extra record. Mandate #5: a legal-record screen renders in the
   // reader's language, so none of this may be baked into the component.
   // Prefix is `erec.` because `rec.` already belongs to the RECORDING screen.
-  'erec.back': 'Job',
+  'erec.back': 'Location',
   'erec.untitled': 'Untitled change',
   'erec.more': 'More',
   'erec.moreActions': 'More',
@@ -954,7 +954,7 @@ const EN: Record<string, string> = {
   'erec.errSaveScope': 'That did not save — the extra has been sent, or the text was empty.',
   'erec.errPriceFirst': 'Type the price first. Saving without one would store $0, and $0 tells the client the work is free.',
   'erec.errFollowOn': 'Could not start the follow-on extra: {why}',
-  'erec.errWrongJob': 'Open this extra from its own job to send it — the approver list comes from that job.',
+  'erec.errWrongJob': 'Open this extra from its own location to send it — the approver list comes from that location.',
   'erec.errStillLoading': 'This extra is still loading — try again in a moment.',
   'erec.errDeleteOpen': 'Could not open the delete confirmation: {why}',
   'erec.errNotSignedIn': 'You are not signed in on this phone.',
@@ -1082,7 +1082,7 @@ const EN: Record<string, string> = {
   'co.finish': 'Finish this extra →',
   'cap.transTitle': 'Getting your extra ready',
   'cap.transTitleAug': 'Adding to your extra',
-  'cap.transSub': 'One moment — next you’ll pick the job and check the details.',
+  'cap.transSub': 'One moment — next you’ll pick the location and check the details.',
   'cap.transSaved': 'Saved on this phone',
   'cap.transUpload': 'Backing it up online…',
   'cap.transUploaded': 'Backed up online',
@@ -1131,20 +1131,20 @@ const EN: Record<string, string> = {
   'pm4.archive': 'Archive',
   // Says the two things a person needs before archiving: where it goes, and that
   // nothing is destroyed. The second is the whole difference from Delete.
-  'job.archConfirm': 'Archive “{name}”? It leaves your jobs list. Nothing is deleted and you can bring it back any time.',
+  'job.archConfirm': 'Archive “{name}”? It leaves your locations list. Nothing is deleted and you can bring it back any time.',
   'pm4.archived': 'Archived',
   'pm4.unarchive': 'Unarchive',
   'pm4.activeJobs': 'Active',
-  'pm4.noArchived': 'No archived jobs.',
+  'pm4.noArchived': 'No archived locations.',
   'pm4.delete': 'Delete',
-  'pm4.errPermission': 'You don’t have permission to change this job.',
-  'pm4.errGeneric': 'Couldn’t update the job — try again.',
+  'pm4.errPermission': 'You don’t have permission to change this location.',
+  'pm4.errGeneric': 'Couldn’t update the location — try again.',
   'feed.title': 'Company feed',
-  'feed.empty': 'No activity yet. Extras across all your jobs show up here.',
+  'feed.empty': 'No activity yet. Extras across all your locations show up here.',
   'feed.today': 'Today',
   'feed.yesterday': 'Yesterday',
   'feed.earlier': 'Earlier',
-  'feed.sub': 'Everything across your jobs',
+  'feed.sub': 'Everything across your locations',
   // Who RAISED the extra (not who touched it last) — the company stream's row meta.
   // The card sets the NAME in ink and keeps the label quiet, so the two halves are
   // separate strings rather than one interpolated sentence.
@@ -1316,7 +1316,7 @@ const EN: Record<string, string> = {
 
   'quota.title': 'You’ve reached your plan limit',
   'quota.body.members': 'Your free plan includes up to {limit} team members. Upgrade to add more.',
-  'quota.body.jobs': 'Your free plan includes up to {limit} jobs. Archive one you’re done with, or upgrade to add more.',
+  'quota.body.jobs': 'Your free plan includes up to {limit} locations. Archive one you’re done with, or upgrade to add more.',
   // Bodies for the three caps added 2026-08-04. Each names the cap, then the way
   // forward — a wall with no door is how a free user simply stops using the app.
   'quota.body.changeOrders': 'Your free plan includes {limit} sent change orders. Upgrade to send as many as you need.',
@@ -1377,12 +1377,12 @@ const EN: Record<string, string> = {
   'usage.left.photos': '{n} of {limit} photos left',
   'usage.left.recordingMinutes': '{n} of {limit} recording minutes left',
   'usage.left.members': '{n} of {limit} team seats left',
-  'usage.left.jobs': '{n} of {limit} jobs left',
+  'usage.left.jobs': '{n} of {limit} locations left',
   'usage.none.changeOrders': 'No change orders left this plan',
   'usage.none.photos': 'No photos left this plan',
   'usage.none.recordingMinutes': 'No recording time left this plan',
   'usage.none.members': 'No team seats left this plan',
-  'usage.none.jobs': 'No jobs left this plan',
+  'usage.none.jobs': 'No locations left this plan',
   'quota.seePlans': 'See plans',
   'quota.notNow': 'Not now',
   'plan.free': 'Free',
@@ -1429,8 +1429,8 @@ const EN: Record<string, string> = {
   'paywall.legal.terms': 'Terms of Use',
   'paywall.legal.privacy': 'Privacy Policy',
   'paywall.restoreNone': 'No purchase found to restore.',
-  'paywall.f.jobs2': 'Up to 2 active jobs',
-  'paywall.f.jobsUnlim': 'Unlimited jobs & extras',
+  'paywall.f.jobs2': 'Up to 2 active locations',
+  'paywall.f.jobsUnlim': 'Unlimited locations & extras',
   'paywall.f.evidence': 'Photo + voice evidence, timestamped',
   // ── the tier bullets ──
   // These six rendered as RAW KEYS on the live paywall ("paywall.f.free1") until
@@ -1620,8 +1620,8 @@ const EN: Record<string, string> = {
   'ewa.err.selfSettle': 'An authorization cannot settle itself. Price the work as a new extra.',
   'ewa.rowTm': 'T&M, capped',
   'ewa.rowHold': 'Hold until priced',
-  'quick.create': 'Create job',
-  'quick.willBeCalled': 'This job will be called “{name}”',
+  'quick.create': 'Create location',
+  'quick.willBeCalled': 'This location will be called “{name}”',
   'r1.draft.audio': '{mmss} recorded',
   'r1.draft.blurb': 'The app closed before this walk was filed. Nothing was lost.',
   'r1.draft.confirmDiscard': 'Discard? The photos and audio are deleted for good.',
@@ -1652,8 +1652,8 @@ const EN: Record<string, string> = {
   'r1.sendto.noPhone': 'No phone number yet — add one before sending',
   'r1.sendto.quickAdd': 'New (name + phone)',
   'r1.sendto.detected': 'Detected — you’re at {name}',
-  'r1.sendto.twoInRange': 'You’re near {n} jobs — tap the one this goes to',
-  'r1.sendto.notAtAnyJob': 'Not at any of your jobs — pick who this goes to',
+  'r1.sendto.twoInRange': 'You’re near {n} locations — tap the one this goes to',
+  'r1.sendto.notAtAnyJob': 'Not at any of your locations — pick who this goes to',
   'r1.sendto.noLocation': 'No location — pick who this goes to',
   'r1.sendto.nothingYet': 'Nobody to send to yet — add a name and a phone',
   'r1.quickadd.needName': 'Needs a name — an address works too',
@@ -1713,8 +1713,8 @@ const EN: Record<string, string> = {
   // The reason is SHOWN, never just logged: R5c pre-fills the recipient, and a
   // pre-filled recipient the sender cannot check is an inference carrying a price.
   'r5c.becauseRole': '{type} → {name}, your {role}',
-  'r5c.becauseFallback': 'No {type} approver on this job → {name}, your {role}',
-  'r5c.becauseRecent': '{name} — who you last sent to on this job',
+  'r5c.becauseFallback': 'No {type} approver on this location → {name}, your {role}',
+  'r5c.becauseRecent': '{name} — who you last sent to on this location',
   'r5c.unconfirmedAuthority':
     'Check this person can approve costs on this job.',
   'r5c.becauseRoleUnconfirmed':
@@ -1745,7 +1745,7 @@ const EN: Record<string, string> = {
   'r5c.savedNoContact': '{name} is on this change order, but has no phone or email yet.',
   // The guess, in one line, with WHY compressed to the fact that matters: this person
   // is the client on this job, not on this change order.
-  'r5c.suggested': '{name} — client on this job',
+  'r5c.suggested': '{name} — client on this location',
   'r5c.useThem': 'Use them',
   'r5c.useSuggested': 'Send it to {name}',
   'r5c.chooseSomeoneElse': 'Choose someone else',
@@ -1776,7 +1776,7 @@ const EN: Record<string, string> = {
   'r5c.docNo': 'Change Order',
   // Split from the old single-line `r5c.noRoster`: the first line says what is wrong,
   // the second says the one act that fixes it.
-  'r5c.noSignerH': 'No one is on this job yet.',
+  'r5c.noSignerH': 'No one is on this location yet.',
   'r5c.noSignerB': 'Add the person who signs off before sending.',
   'r5c.sendIt': 'Send it',
   // Shown WHILE it sends. Minting the instrument, freezing its text and pushing the
@@ -2157,29 +2157,29 @@ const EN: Record<string, string> = {
   'clientpick.save': 'Save client',
   'clientpick.later': "I'll do this later",
   'clientpick.backToList': 'Back to the list',
-  'cap.transHeldForJob': 'Saved to this extra. It will back up once the extra has a job \u2014 nothing to do now.',
-  'cap.transNoJob': 'This is not filed to a job yet, so it cannot go up. Pick the job and it uploads on its own — everything is saved on this phone in the meantime.',
-  'cap.transPickJob': 'Choose the job',
+  'cap.transHeldForJob': 'Saved to this extra. It will back up once the extra has a location \u2014 nothing to do now.',
+  'cap.transNoJob': 'This is not filed to a location yet, so it cannot go up. Pick the location and it uploads on its own — everything is saved on this phone in the meantime.',
+  'cap.transPickJob': 'Choose the location',
   'send.blocked.noPhotos': 'Add at least one photo — the evidence is what makes an extra believable.',
   'send.recommended.noCost': 'No price yet — they will be agreeing to the work, with the cost settled after.',
-  'jobpick.sub': 'Pick an existing job or create a new one.',
-  'jobpick.search': 'Search jobs or address',
-  'jobpick.newSub': 'Enter job name and contact',
+  'jobpick.sub': 'Pick an existing location or create a new one.',
+  'jobpick.search': 'Search locations or address',
+  'jobpick.newSub': 'Enter location name and contact',
   'jobpick.usingGps': 'Using GPS',
   // The closest-job hero (hadar's artboard, 2026-08-25). GPS still only SUGGESTS —
   // the card promotes one job to the top of the screen and then waits for a tap.
-  'jobpick.closest': 'Closest job',
-  'jobpick.fileHere': 'File it to this job',
+  'jobpick.closest': 'Closest location',
+  'jobpick.fileHere': 'File it to this location',
   // Said ONLY inside `STANDING_ON_M`. Outside it the pill carries the distance alone,
   // because a phone that is 200 m out has no business telling him where he is standing.
   'jobpick.standingOn': '{d} away · you are standing on it',
   'jobpick.away': '{d} away',
   'jobpick.notThisOne': 'Not this one?',
-  'jobpick.searchN': 'Search all {n} jobs by name or address',
+  'jobpick.searchN': 'Search all {n} locations by name or address',
   'jobpick.newPrefilled': 'Pre-filled with {addr}',
-  'jobpick.none': 'No jobs yet — create the first one above.',
+  'jobpick.none': 'No locations yet — create the first one above.',
   'jobpick.tip': 'Tip',
-  'jobpick.tipBody': 'You can always change the job later before sending the extra.',
+  'jobpick.tipBody': 'You can always change the location later before sending the extra.',
   'stuck.filesTitle': 'Files still going up',
   // Offline is not a fault — status.ts: "no signal is the expected condition, so this is
   // not a problem, it is Tuesday". Title and row label both say WAITING, never FAILED.
@@ -2196,7 +2196,7 @@ const EN: Record<string, string> = {
   'net.weak': 'Weak signal — {n} taking a while to send. Nothing is lost.',
   // A2P 10DLC consent, ticked once per recipient before the first text goes to them.
   // Names the person, because "this person" is vague at the moment it matters.
-  'sms.consent': 'I have {name}’s permission to text them about this job. They can reply STOP at any time.',
+  'sms.consent': 'I have {name}’s permission to text them about this location. They can reply STOP at any time.',
   // The silent-recording sheet (hadar, 2026-08-19: the inline line "is too subtle").
   // NEVER the word "failed": a recording with no speech in it is a legitimate thing to
   // have made. It reports, then offers the two things that help.
@@ -2242,9 +2242,9 @@ const EN: Record<string, string> = {
   'client.howInvolved': 'How is {name} involved?',
   'client.whyType': 'This decides who signs off on the extra, and how it reads to them — a homeowner sees "your approval", a GC sees "the sub is asking".',
   'client.searchPlaceholder': 'Search a name',
-  'client.emptyBody': 'Nobody on this job yet. Get them from your phone.',
-  'client.onThisJob': 'ON THIS JOB',
-  'client.fromOtherJobs': 'FROM YOUR OTHER JOBS',
+  'client.emptyBody': 'Nobody on this location yet. Get them from your phone.',
+  'client.onThisJob': 'ON THIS LOCATION',
+  'client.fromOtherJobs': 'FROM YOUR OTHER LOCATIONS',
   'client.fromContacts': 'Get from my phone',
   // The second way in, added 2026-08-23: a person who is not in the app AND not in
   // the phone's contacts. On a jobsite that is most of them.
@@ -2273,11 +2273,11 @@ const EN: Record<string, string> = {
   // instrument somebody has signed. The word on the screen changes; the data does not.
   'client.unnamed': 'Client',
   'client.othersLater': 'You can add others later.',
-  'client.removePerson': 'Remove {name} from this job',
-  'client.removeTitle': 'Remove {name} from this job?',
+  'client.removePerson': 'Remove {name} from this location',
+  'client.removeTitle': 'Remove {name} from this location?',
   'client.removeBody': 'They stay on any extra already sent to them. You can add them again later.',
   'client.removeConfirm': 'Remove',
-  'client.removed': '{name} is off this job',
+  'client.removed': '{name} is off this location',
   'client.addContact': 'Add someone else',
   'co.doc.title': 'Change Order',
   'co.doc.number': 'No.',
@@ -2570,7 +2570,7 @@ const ES: Record<string, string> = {
   'gs.g.notSaved': 'No se pudo guardar',
   'gs.r.kicker': 'Revisa antes de enviar',
   'gs.r.lede': 'Tú tienes el control.',
-  'gs.r.to': 'Para', 'gs.r.job': 'Trabajo', 'gs.r.co': 'Orden de cambio',
+  'gs.r.to': 'Para', 'gs.r.location': 'Trabajo', 'gs.r.co': 'Orden de cambio',
   'gs.r.price': 'Precio', 'gs.r.sched': 'Impacto en el plazo',
   'gs.r.back': 'Atrás',
   'gs.r.send': 'Enviar orden de cambio',

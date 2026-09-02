@@ -125,7 +125,7 @@ export function ReviewScreen({
             )}
 
             <View style={T.card}>
-              <Text style={label}>Job</Text>
+              <Text style={label}>Location</Text>
               <Text style={[T.body, { fontFamily: F.bodySemi, marginTop: 4 }]}>{projectName}</Text>
             </View>
 
