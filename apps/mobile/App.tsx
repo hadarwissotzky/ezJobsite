@@ -96,6 +96,7 @@ import { sendSms } from './src/sms';
 import { runAutoTags } from './src/autotag';
 import { AddressInput } from './src/ui/addressinput';
 import { FlowRail } from './src/ui/flowrail';
+import { FlowHoldScreen } from './src/ui/flowhold';
 import { MapThumb } from './src/ui/mapthumb';
 import { syncLine, syncState } from './src/syncstate';
 import { OfflineBar } from './src/ui/offlinebar';
@@ -1677,6 +1678,31 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
  */
 const [flowRecordId, setFlowRecordId] = React.useState<string | null>(null);
 /**
+ * THE SEQUENCE MUST NOT BLINK (hadar, 2026-09-03: "when i move between the steps it
+ * keeps displaying the home screen between next and rendering the next screens").
+ *
+ * Every step of the create flow is a screen selected by its OWN state — `assign`,
+ * `clientPick`, `transition`, the record. Moving between two of them is an async
+ * handler: commit the captures, read the roster, mint the extra. For the whole of that
+ * await the previous state is already null and the next one is not set yet, so nothing
+ * in the chain matches and the render falls through to HOME.
+ *
+ * The contractor sees his dashboard — "$0 waiting", the upgrade banner — flash between
+ * every step of making a change order. It reads as the flow collapsing and restarting,
+ * four times in a row, and it is the same defect as the ack landing on Home: a screen
+ * appearing at a moment when the app is in the middle of something else.
+ *
+ * `flowHold` is raised by each hand-off and dropped the moment any flow screen mounts.
+ * The step it carries is the one being ENTERED, so the rail keeps counting up instead
+ * of resetting.
+ *
+ * IT SELF-HEALS. A hand-off that throws, or one added later that forgets to raise it,
+ * must never strand a man on a placeholder — the backstop below drops it after 2.5s no
+ * matter what. Being wrong for two seconds beats being stuck.
+ */
+const [flowHold, setFlowHold] = React.useState<null | 1 | 2 | 3 | 4 | 5>(null);
+
+/**
  * THE FLOW SURVIVES A RE-RECORD (hadar, 2026-09-02: "in preview mode if I record a
  * change, get me back to the preview — the user stays in a loop until he chooses to
  * send or closes for now").
@@ -2274,6 +2300,13 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
   for (const id of ids) {
     await fileCapture(db, { captureId: id, projectId: projId, by: OWNER });
   }
+  /**
+   * RAISE THE CORRIDOR BEFORE TEARING DOWN THE ROOM. Between this line and
+   * `setClientPick` below there is `rehomeDraftExtra`, a full `refresh()`, and two
+   * roster queries — seconds on a real database, all of it with `assign` already null
+   * and `clientPick` not yet set. That whole time the app rendered HOME.
+   */
+  setFlowHold(3);
   setAssign(null); setAssignQ(''); setFiled(null);
   setHereAddr(undefined); hereAddrKey.current = null;
   setProjectId(projId);
@@ -3909,6 +3942,13 @@ const checkClientMessages = async () => {
                * place; only the promise changes.
                */
               void (async () => {
+                /**
+                 * STEP 5's CORRIDOR. This block hydrates (up to 3s) and then opens the
+                 * record, and `setTransition(null)` has already run — so without the
+                 * hold this is the LONGEST flash of Home in the whole sequence, and I
+                 * lengthened it myself when I added the hydrate above.
+                 */
+                setFlowHold(5);
                 /**
                  * PULL THE WRITE-UP DOWN BEFORE JUDGING IT (hadar, 2026-09-03: "I gave
                  * it a whole description of cabinet — it claims that it couldn't hear
@@ -7987,7 +8027,40 @@ const checkClientMessages = async () => {
   // database opens and the durability profile is asserted.
   // Fonts gate with the durability gate: never flash unstyled text, never flash the
   // capture screen before the database is up.
+/**
+   * DROP THE HOLD THE MOMENT A REAL STEP IS UP, and drop it anyway after 2.5 seconds.
+   *
+   * The first half is the normal path: the next screen's state lands, this fires, the
+   * corridor is gone in the same commit.
+   *
+   * The second half is the one that matters. A hand-off that throws between clearing the
+   * old state and setting the new one would otherwise leave a man looking at a rail and a
+   * spinner with no way out — worse than the flash this replaces, because a flash ends.
+   * The backstop means the failure mode of this whole mechanism is "you see Home a beat
+   * later than you should", which is exactly where we started.
+   */
+  React.useEffect(() => {
+    if (!flowHold) return;
+    if (assign || clientPick || transition || review || record) { setFlowHold(null); return; }
+    const id = setTimeout(() => setFlowHold(null), 2500);
+    return () => clearTimeout(id);
+  }, [flowHold, assign, clientPick, transition, review, record]);
+
   if (!ready || !fontsLoaded) return <SplashScreen />;
+
+  /**
+   * THE HOLD, RESOLVED IN ONE PLACE. It sits at the TOP of the chain rather than the
+   * bottom, because the gap it covers is exactly the moment when no other branch
+   * matches — putting it last would work too, but only until somebody adds a branch
+   * above Home and quietly reintroduces the flash.
+   *
+   * A flow screen being up always wins: the hold is dropped in the effect below the
+   * moment one mounts, so this can only render while the app is genuinely between two
+   * steps of the sequence.
+   */
+  if (flowHold && !assign && !clientPick && !transition && !review && !record) {
+    return <FlowHoldScreen step={flowHold} />;
+  }
 
   // REQ-PROC8: reviewing what the model proposed for a capture. Overlays everything.
   if (review) {
