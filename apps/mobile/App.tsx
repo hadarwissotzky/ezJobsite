@@ -773,7 +773,9 @@ export default function App() {
      * Optional because the OTHER caller — the parked-capture path on the processing
      * screen — is filing captures that committed long ago and passes `ids` directly.
      */
-    ready?: Promise<{ ids: string[]; anchorCoId: string; anchorCaptureId: string | null }>;
+    ready?: Promise<{ ids: string[]; anchorCoId: string; anchorCaptureId: string | null;
+                      /** Settles when the change order row exists — see `fileWalkTo`. */
+                      extraReady?: Promise<unknown> }>;
     ids?: string[]; lat: number | null; lng: number | null;
     uris: string[]; secs: number;
     /** The change order behind this walk — filing continues the flow into it. */
@@ -2330,7 +2332,41 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
   setProjectId(projId);
   const anchorCoId = done?.anchorCoId ?? a.anchorCoId;
   const anchorCapId = done?.anchorCaptureId ?? a.anchorCaptureId ?? null;
-  if (anchorCoId) await rehomeDraftExtra(db, anchorCoId, projId);
+  if (anchorCoId) {
+    /**
+     * WAIT FOR THE ROW TO EXIST BEFORE MOVING IT (Codex, 2026-09-03: "wrong job due to
+     * change-order creation race").
+     *
+     * `anchorCoId` is derived — `co-<captureId>` — and was handed out before
+     * `startExtraFromCapture` had inserted anything. Racing it meant the UPDATE matched
+     * no row, returned silently, and the extra was created moments later under the GPS
+     * GUESS while its captures had already been filed to the job the human picked.
+     *
+     * Awaiting here costs nothing the contractor can feel: he has just read a screen and
+     * tapped a jobsite, and this is a local SQLite insert that finished long ago in
+     * every ordinary case. The 4s race is only so a wedged promise cannot strand step 2
+     * — the same rule as the hydrate on step 4.
+     */
+    if (done?.extraReady) {
+      await Promise.race([done.extraReady, new Promise((r) => setTimeout(r, 4000))]);
+    }
+    const moved = await rehomeDraftExtra(db, anchorCoId, projId);
+    /**
+     * AND IF IT STILL DID NOT MOVE, SAY SO. This is the one outcome that used to be
+     * indistinguishable from success. The captures are already on the chosen job, so a
+     * failure here means the change order is on a DIFFERENT one — a split record on the
+     * screen that decides where a priced document lives. Mandate #8 says GPS may suggest
+     * and never decide; silence here is GPS deciding.
+     *
+     * Loud rather than logged: `setAck` renders, and the man is standing in front of the
+     * phone right now with the right answer one tap away.
+     */
+    if (!moved) {
+      void logDiag(db, 'rehome.missed', `${anchorCoId} -> ${projId}`);
+      setAck({ kind: 'no', title: T('job.rehomeFailedTitle'),
+               detail: T('job.rehomeFailedBody'), okLabel: T('common.ok') });
+    }
+  }
   await refresh();
   const startProcessing = () => {
     if (!anchorCoId) return;
@@ -6303,7 +6339,25 @@ const checkClientMessages = async () => {
       // AFTER durability, never awaited into the UI path — the same two rules
       // as the voice-only path, for the same reasons.
       const anchorId = a.audioSegments.length ? ids[a.photos.length] : ids[0];
-      void startExtraFromCapture(db, {
+      /**
+       * KEPT AS A PROMISE, STILL NOT AWAITED HERE (Codex, 2026-09-03).
+       *
+       * The rule above stands: this must not sit between the contractor and his
+       * "saved ✓". But the promise was thrown away with `void`, and the object this
+       * function returns carries `anchorCoId` — a DERIVED id, `co-<captureId>`, for a
+       * row that does not exist yet.
+       *
+       * Step 2 then files to whichever job the human picked and calls
+       * `rehomeDraftExtra` with that id. Win the race and the extra moves; lose it and
+       * the UPDATE matched nothing, said nothing, and the row was inserted moments later
+       * under `res.projectId` — THE GPS GUESS. The captures had already been filed to the
+       * chosen job, so the evidence sat on one jobsite and the change order on another,
+       * and mandate #8 was inverted: GPS decided.
+       *
+       * Handing the promise to the filer costs the capture path nothing — by the time
+       * anyone awaits it, a human has read a screen and tapped a job.
+       */
+      const extraReady = startExtraFromCapture(db, {
         captureId: anchorId, projectId: res.projectId, ownerId: OWNER,
       }).then(async (x) => {
         if (!x.ok) { console.log('startExtra (fused) failed:', x.reason); return; }
@@ -6340,6 +6394,9 @@ const checkClientMessages = async () => {
         ids,
         anchorCoId: anchorCapId ? `co-${anchorCapId}` : `co-${ids[0]}`,
         anchorCaptureId: anchorCapId,
+        // Resolves when the change order EXISTS (or is known to have failed). Never
+        // rejects — the `.catch` below settles it.
+        extraReady,
       };
     })();
 

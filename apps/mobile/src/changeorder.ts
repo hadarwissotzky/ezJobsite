@@ -1404,17 +1404,36 @@ export async function setDraftClient(
 /** Move a DRAFT to the job a human picked (flow step 2). The queued INSERT
  *  payload follows, same rules as priceDraftExtra: refresh under the same
  *  mutation_id while the server has never seen it. */
+/**
+ * RETURNS WHETHER IT ACTUALLY MOVED THE ROW (Codex, 2026-09-03).
+ *
+ * This returned `void`, so "the change order was moved to the job the human picked" and
+ * "there was no such row and nothing happened" were the same call. The second case is
+ * real and it is not rare: the extra is minted by a fire-and-forget
+ * `startExtraFromCapture`, and the capture promise resolves with a DERIVED id
+ * (`co-<captureId>`) before that row necessarily exists. Lose that race and this
+ * silently updates nothing while the row is later inserted under the GPS GUESS.
+ *
+ * That is mandate #8 inverted — GPS deciding instead of suggesting — and it splits the
+ * record: `fileCapture` has already moved the EVIDENCE to the chosen job, so the photos
+ * sit on one jobsite and the change order on another.
+ *
+ * The boolean does not fix the race (the caller awaits the creation now). It makes the
+ * failure REPORTABLE, so it can never be silent again.
+ */
 export async function rehomeDraftExtra(
   db: AbstractPowerSyncDatabase, changeOrderId: string, projectId: string
-): Promise<void> {
+): Promise<boolean> {
   const upd = await db.execute(
     `UPDATE change_order SET project_id = ? WHERE id = ? AND status = 'draft'`,
     [projectId, changeOrderId]);
-  if (!upd.rowsAffected) return;
+  if (!upd.rowsAffected) return false;
   const q = await db.getAll<{ mutation_id: string; payload_json: string }>(
     `SELECT mutation_id, payload_json FROM change_order_outbox WHERE change_order_id = ?`,
     [changeOrderId]);
-  if (!q.length) return;
+  // The row moved; a queued INSERT may or may not exist to amend. Both are success —
+  // this function's answer is about the CHANGE ORDER, not about the outbox.
+  if (!q.length) return true;
   try {
     const p = JSON.parse(q[0].payload_json);
     p.project_id = projectId;
@@ -1423,6 +1442,7 @@ export async function rehomeDraftExtra(
       `UPDATE change_order_outbox SET payload_json = ?, payload_sha256 = ? WHERE mutation_id = ?`,
       [json, sha256(json), q[0].mutation_id]);
   } catch { /* corrupt payload: the drain parks it loudly */ }
+  return true;
 }
 
 export type ApplyApprovalResult =
