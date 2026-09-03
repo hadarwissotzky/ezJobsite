@@ -57,6 +57,18 @@ begin
       'refusing: this file merges two specific dev accounts and they are not both here';
   end if;
 
+  -- SAY OUT LOUD THAT THIS IS A REPAIR (review, 2026-09-03).
+  --
+  -- `427_office_writes.sql` added `change_order_owner_immutable`, which refuses ANY
+  -- change to `owner_id` — correctly, because ownership is fixed at capture and this is
+  -- the only file in the repository with a reason to move it. Without this line the
+  -- merge below aborts with 42501 on the `change_order` update, on a fresh database
+  -- replayed in file order, and the two dev accounts can never be joined.
+  --
+  -- `true` makes it LOCAL to this transaction: it dies with the commit or the rollback,
+  -- so nothing after this file inherits an open door.
+  perform set_config('app.owner_repair', 'on', true);
+
   update public.project        set owner_id = v_email, company_id = v_cemail where owner_id = v_phone;
   get diagnostics v_moved = row_count; raise notice 'project        %', v_moved;
 
