@@ -131,23 +131,41 @@ export const REMIND_DDL = [
 
 export async function ensureRemindSchema(db: AbstractPowerSyncDatabase) {
   for (const s of REMIND_DDL) await db.execute(s);
-  /**
-   * WHETHER THE CLIENT WAS ACTUALLY TOLD — a separate fact from whether the change
-   * order was sent (Codex, 2026-09-03).
-   *
-   * `sendPricedApproval` mints the instrument on the server, marks the extra sent, and
-   * writes the 'sent' actor — and only THEN tries the SMS or the share sheet. When that
-   * last step fails, the send is still real (the link is live and signable) but nobody
-   * has been told about it. The sheet said so once, and the moment it was dismissed
-   * nothing anywhere remembered.
-   *
-   * Two columns rather than one boolean: "delivered at 14:02" and "failed because
-   * Twilio returned 21610" are both worth keeping, and a null in both means the older
-   * rows written before this existed — which is honestly unknown, not a failure.
-   */
+}
+
+/**
+ * WHETHER THE CLIENT WAS ACTUALLY TOLD — a separate fact from whether the change order
+ * was sent (Codex, 2026-09-03). `sendPricedApproval` mints the instrument, marks the
+ * extra sent and writes the 'sent' actor, and only THEN tries the SMS. When that last
+ * step fails the send is still real, but nobody has been told — and until these columns
+ * existed, one dismissible sheet said so and then nothing anywhere remembered.
+ *
+ * ─── OFF THE LAUNCH PATH, DELIBERATELY (hadar, 2026-09-03: "the app is crashing now") ─
+ *
+ * These two ALTERs lived in `ensureRemindSchema`, which `ensureLocalSchema` awaits while
+ * the app starts. I guarded them by rethrowing anything that was not literally
+ * "duplicate column" — copied from `approvers.ts` without asking what it costs when the
+ * guess about the message is wrong. It was wrong, and the app died on launch before it
+ * drew a pixel, over two bookkeeping columns that record whether a text message landed.
+ *
+ * So they are not on that path any more. This runs on the FIRST WRITE, which only ever
+ * happens after a real send, from a `void`-ed call that already cannot propagate. Two
+ * independent reasons it can no longer take the app down, and the launch sequence is
+ * byte-for-byte what it was before this feature existed.
+ *
+ * It also swallows everything now. A device that cannot add these columns should show
+ * one fewer line on a waiting card; it should not fail.
+ */
+let deliveryColumnsTried = false;
+async function ensureDeliveryColumns(db: AbstractPowerSyncDatabase): Promise<void> {
+  if (deliveryColumnsTried) return;
+  deliveryColumnsTried = true;   // set FIRST: one attempt per launch, success or not
   for (const col of ['delivered_at_ms INTEGER', 'deliver_fail_why TEXT']) {
     try { await db.execute(`ALTER TABLE co_live_link ADD COLUMN ${col}`); }
-    catch (e: any) { if (!/duplicate column/i.test(String(e?.message ?? e))) throw e; }
+    catch (e: any) {
+      // Expected once the column exists. Logged, never raised, whatever it says.
+      console.log('[co_live_link] add column skipped:', col, String(e?.message ?? e));
+    }
   }
 }
 
@@ -162,6 +180,7 @@ export async function noteLinkDelivery(
   o: { changeOrderId: string; ok: boolean; why?: string | null; atMs?: number }
 ): Promise<void> {
   const now = o.atMs ?? Date.now();
+  await ensureDeliveryColumns(db);
   await db.execute(
     `UPDATE co_live_link
         SET delivered_at_ms  = ?,
@@ -175,11 +194,18 @@ export async function noteLinkDelivery(
 export async function linkDelivery(
   db: AbstractPowerSyncDatabase, changeOrderId: string
 ): Promise<null | { deliveredAtMs: number | null; failWhy: string | null }> {
-  const r = await db.getAll<{ delivered_at_ms: number | null; deliver_fail_why: string | null }>(
-    `SELECT delivered_at_ms, deliver_fail_why FROM co_live_link WHERE change_order_id = ?`,
-    [changeOrderId]);
-  if (!r.length) return null;
-  return { deliveredAtMs: r[0].delivered_at_ms, failWhy: r[0].deliver_fail_why };
+  try {
+    const r = await db.getAll<{ delivered_at_ms: number | null; deliver_fail_why: string | null }>(
+      `SELECT delivered_at_ms, deliver_fail_why FROM co_live_link WHERE change_order_id = ?`,
+      [changeOrderId]);
+    if (!r.length) return null;
+    return { deliveredAtMs: r[0].delivered_at_ms, failWhy: r[0].deliver_fail_why };
+  } catch {
+    // The columns are optional by construction (see ensureRemindSchema). "I cannot tell"
+    // is a valid answer here and reads the same as "it was delivered" — silence — which
+    // is the safe direction: never invent a delivery failure that was not recorded.
+    return null;
+  }
 }
 
 /** Remember the link that just went out. Overwrites: one live link per extra (250). */
@@ -208,15 +234,31 @@ export type LiveLink = {
 export async function liveLinkFor(
   db: AbstractPowerSyncDatabase, changeOrderId: string
 ): Promise<LiveLink | null> {
-  const r = await db.getAll<{
+  /**
+   * `deliver_fail_why` IS AN OPTIONAL COLUMN. `ensureRemindSchema` swallows a failed
+   * ALTER rather than killing the app, so this read must not assume the column is there
+   * — naming it in the SELECT unconditionally would turn a cosmetic gap into "no record
+   * opens". The wide read is tried first and the original read is the fallback, so a
+   * device without the column behaves exactly as it did before this feature existed.
+   */
+  type Row = {
     url: string; token: string; remind_count: number; last_remind_ms: number | null;
-  }>(
-    `SELECT url, token, remind_count, last_remind_ms, deliver_fail_why
-       FROM co_live_link WHERE change_order_id = ?`, [changeOrderId]);
+    deliver_fail_why?: string | null;
+  };
+  const BASE = `url, token, remind_count, last_remind_ms`;
+  let r: Row[];
+  try {
+    r = await db.getAll<Row>(
+      `SELECT ${BASE}, deliver_fail_why FROM co_live_link WHERE change_order_id = ?`,
+      [changeOrderId]);
+  } catch {
+    r = await db.getAll<Row>(
+      `SELECT ${BASE} FROM co_live_link WHERE change_order_id = ?`, [changeOrderId]);
+  }
   if (!r.length) return null;
   return { url: r[0].url, token: r[0].token,
            remindCount: r[0].remind_count, lastRemindMs: r[0].last_remind_ms,
-           deliverFailWhy: (r[0] as any).deliver_fail_why ?? null };
+           deliverFailWhy: r[0].deliver_fail_why ?? null };
 }
 
 /**
