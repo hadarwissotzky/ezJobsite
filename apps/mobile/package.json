@@ -46,6 +46,10 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.10",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react-hooks": "^4.6.2",
     "typescript": "~5.9.2"
   },
   "overrides": {
@@ -61,7 +65,8 @@
     "check:i18n": "node ../../scripts/check-i18n-coverage.mjs src/i18n.ts",
     "test": "node --test src/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "bundle:check": "expo export --platform ios --output-dir /tmp/ezjs-bundle-check"
+    "bundle:check": "expo export --platform ios --output-dir /tmp/ezjs-bundle-check",
+    "lint:hooks": "eslint --no-eslintrc -c ./.eslintrc.hooks.json --ext .ts,.tsx App.tsx src"
   },
   "private": true
 }
