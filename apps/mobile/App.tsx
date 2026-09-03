@@ -133,7 +133,7 @@ import { cacheMirroredPhotos, ensureMirrorSchema, hydrateEvidence } from './src/
 import { ensureLogoCached, pickLogo, removeCompanyLogo,
          saveCompanyLogo } from './src/companylogo';
 import { configureBilling, entitledPlanNow, entitledProductNow } from './src/billing';
-import { LABELS, labelHex } from './src/labels';
+import { labelHex } from './src/labels';
 import { companyFeed, type FeedItem } from './src/feed';
 import { ExtraCard, ExtraList } from './src/ui/extracard';
 import { setDraftClient,
@@ -885,7 +885,6 @@ export default function App() {
   // The Job screen's pill filter (hadar, 2026-07-23 mockup): null = all extras.
   const [jobFilter, setJobFilter] =
     React.useState<null | 'needs' | 'waiting' | 'approved' | 'closed'>(null);
-  const [labelFilter, setLabelFilter] = React.useState<string | null>(null); // REQ-PM14 Jobs-list filter
   // The Jobs list filters by STATE now, not only by colour (design, 2026-08-31). It is
   // the same three buckets the job screen and every job card already use, so the pill
   // you press and the number you pressed it because of cannot disagree.
@@ -11548,11 +11547,6 @@ const checkClientMessages = async () => {
     const now = Date.now();
     const q = search.trim().toLowerCase();
     const jobsSrc = jobsArchived ? archivedCards : cards;
-    const usedLabels = LABELS.filter((l) => jobsSrc.some((p) => p.label === l.key));
-    // The filter's controls live inside the usedLabels block, which unmounts when a
-    // color stops being used — so a raw labelFilter could freeze the list empty with
-    // no reset (review 2026-07-25, QA lens). Ignore a filter whose color is gone.
-    const activeLabel = usedLabels.some((l) => l.key === labelFilter) ? labelFilter : null;
     const loadArchived = async () => setArchivedCards(await projectCards(db, await listProjects(db, 'archived')));
     // EVERYTHING EXCEPT THE STATE FILTER. The pill counts are taken from here, not
     // from `shown`, or selecting a pill would rewrite every other pill's number to
@@ -11561,8 +11555,7 @@ const checkClientMessages = async () => {
     const jobsBase = jobsSrc
       .filter((p) => p.id !== INBOX_ID)
       .filter((p) => !q || p.name.toLowerCase().includes(q) ||
-                     (p.address ?? '').toLowerCase().includes(q))
-      .filter((p) => !activeLabel || p.label === activeLabel);
+                     (p.address ?? '').toLowerCase().includes(q));
     // A STATE PILL KEEPS THE JOBS THAT HAVE SOMETHING IN THAT STATE — it does not
     // reduce the cards to that state. "Needs approval" answers "which jobs want me",
     // and the card still shows all three counts, because the answer to "which jobs
@@ -11682,32 +11675,6 @@ const checkClientMessages = async () => {
               );
             })}
           </ScrollView>
-          {/* REQ-PM14 — filter by color label. Chips carry the color NAME (not color
-              alone — color-blind ICP) and are full-height taps (gloves, mandate #3). */}
-          {usedLabels.length > 0 && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 10, flexWrap: 'wrap' }}>
-              <Pressable onPress={() => setLabelFilter(null)} hitSlop={6}
-                style={{ minHeight: 40, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 20, borderWidth: 1,
-                  borderColor: activeLabel === null ? '#151A1E' : '#D5D0C7',
-                  backgroundColor: activeLabel === null ? '#151A1E' : '#fff' }}>
-                <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13,
-                  color: activeLabel === null ? '#fff' : '#5E666E' }}>{T('label.all')}</Text>
-              </Pressable>
-              {usedLabels.map((l) => {
-                const on = activeLabel === l.key;
-                return (
-                  <Pressable key={l.key} onPress={() => setLabelFilter(on ? null : l.key)} hitSlop={6}
-                    style={{ minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 7,
-                      paddingHorizontal: 12, borderRadius: 20, borderWidth: on ? 2 : 1,
-                      borderColor: on ? '#151A1E' : '#D5D0C7', backgroundColor: '#fff' }}>
-                    <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: l.hex }} />
-                    <Text style={{ fontFamily: 'Barlow_600SemiBold', fontSize: 13,
-                      color: on ? '#151A1E' : '#5E666E' }}>{T(('label.' + l.key) as any)}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
           {/* ── THE JOB CARD (design, 2026-08-11) ──────────────────────────────
               A one-line row with a capture count told a contractor nothing he acts
               on: how many photographs are on a job is not a state. The card answers
