@@ -12233,6 +12233,21 @@ const checkClientMessages = async () => {
             const ready = row ? sendReadiness({
               kind: 'extra',
               scope: row.scope,
+              /**
+               * THE SCOPE OF WORK, NOT JUST THE TITLE (Codex, 2026-09-03).
+               *
+               * This call omitted `scopeOfWork`, so `hasWrittenScope` fell back to
+               * `scope` — the TITLE — and its 40-character floor was satisfied by a long
+               * title over an empty client-facing scope. The canonical path (App.tsx:
+               * 1627) has always passed it, so the same change order was refused on the
+               * record screen and allowed here: two paths answering one question
+               * differently, on the gate that guards a priced document.
+               *
+               * The consequence is not merely a lenient gate. What the gate approves is
+               * what gets frozen, so this path could seal a TITLE as the entire binding
+               * scope of a signed instrument.
+               */
+              scopeOfWork: row.scope_of_work,
               amountCents: row.amount_cents,
               nteCents: row.nte_cents,
               priceMode: row.nte_cents == null ? 'fixed' : 'nte',

@@ -75,6 +75,12 @@ export function SendPreview(p: {
         ? t({ k: 'draft.vSchedDays', p: { n: String(p.scheduleDays) } } as any)
         : t('co.schedAdds'))
     : p.scheduleEffect === 'no_change' ? t('co.schedNo')
+    // "NOT SURE" IS A TERM THE DOCUMENT CARRIES (Codex, 2026-09-03). `flowterms.ts:72`
+    // prints "Schedule impact: to be confirmed." into the FROZEN instrument, and this
+    // preview dropped it — so a contractor who answered "not sure" was shown a document
+    // missing a line the client then received and signed. A preview that omits a term of
+    // the thing being signed is worse than no preview: it is a wrong one.
+    : p.scheduleEffect === 'not_sure' ? t('co.schedUnsure')
     : null;
 
   const excl = (p.exclusions ?? '').trim();

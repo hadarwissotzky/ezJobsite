@@ -420,7 +420,14 @@ export function ClientPickScreen(props: {
               onPress={() => props.onAdd(name.trim(), phone.trim())}
               disabled={!canAdd || !!props.busy}
             />
-          : <Button label={t('clientpick.later')} variant="neutral" onPress={props.onSkip} />}
+          : <Button label={t('clientpick.later')} variant="neutral" onPress={props.onSkip}
+              /* BUSY BLOCKS THE FOOTER TOO (Codex, 2026-09-03). The inline "Later" row
+                 already respected `busy`; this one did not. Tapping it while a client
+                 write was still running started the processing screen anyway, and the
+                 original handler then called `finish()` a second time — advancing a flow
+                 that had already advanced, and settling a recipient onto a step that was
+                 no longer on screen. */
+              disabled={!!props.busy} />}
       </View>
     </View>
   );

@@ -231,11 +231,29 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
         {/* REFUSAL RIDES INSIDE THE BUTTON, as its second line. A dead Send with a
             separate red sentence above it is a control explaining somebody else's job;
             the button that cannot be pressed should be the thing that says why. */}
-        {/* `refused` rather than `disabled`: it dims the button the same way but keeps
-            it pressable-looking enough to be understood as blocked-for-a-reason, and the
-            reason is printed directly beneath rather than as a separate red sentence
-            somewhere above. A refused Send must always SAY why. */}
-        <Button label={t('erec.send')} icon="send" onPress={p.onSend}
+        {/* `refused` DIMS BUT DOES NOT BLOCK — and I did not read the kit before using
+            it (Codex, 2026-09-03).
+
+            `Button`'s `refused` prop deliberately leaves `onPress` live: the kit's rule
+            is that a refused control must SAY why rather than swallow the touch
+            (kit.tsx:812-825). Only `disabled` blocks. I wrote `refused={!canSendNow}`
+            with `onPress={p.onSend}` believing it behaved like the draft screen's Send,
+            which is a raw Pressable with a real `disabled` (extradraft.tsx:1742).
+
+            So on THIS screen a refused Send still ran `p.onSend` → `openSendPrep`, and
+            that function gathers recipients WITHOUT re-checking readiness (App.tsx:2673)
+            — its sheet gates on recipient and SMS consent only. A change order with no
+            scope of work, no photos, or still mid-pipeline could be sent to a client in
+            two taps, straight past the gate this screen exists to enforce.
+
+            That is mandate #2 — anything carrying a price takes a human confirmation
+            before it commits or sends — defeated by the screen built to hold it.
+
+            The guard goes on the handler, not the prop: the button must keep looking
+            pressable and the reason must stay printed beneath it (the kit's rule is
+            right), but a refused tap must not reach the send path. */}
+        <Button label={t('erec.send')} icon="send"
+          onPress={() => { if (canSendNow) p.onSend(); }}
           refused={!canSendNow} />
         {!canSendNow && !!refusalLine(p, gate) && (
           <Text style={st.refused}>{refusalLine(p, gate)}</Text>
