@@ -120,6 +120,8 @@ export function ClientPickScreen(props: {
   // known from any other location. Before the known list existed this fired on every
   // freshly-made location, which is exactly when the account is most likely to already
   // know the person.
+  // Shut on arrival; stays open for the rest of the visit once he asks for it.
+  const [knownOpen, setKnownOpen] = React.useState(false);
   const [adding, setAdding] = React.useState(
     props.roster.length === 0 && (props.known ?? []).length === 0);
   const [name, setName] = React.useState('');
@@ -234,8 +236,36 @@ export function ClientPickScreen(props: {
             off a list is entitled to know he is about to put that name on this job. */}
         {!adding && !!known.length && (
           <>
-            <Text style={st.group}>{t('clientpick.knownHead')}</Text>
-            {known.map((k) => {
+            {/* COLLAPSED, AND SHUT BY DEFAULT (hadar, 2026-09-02: "from your other
+                locations need to collapse so another client, add a client and i'll do
+                this later will be visible").
+
+                `listKnownPeople` returns up to 60. Sixty 92pt cards is five thousand
+                pixels of suggestion sitting on top of the three things that are not
+                suggestions — the contacts card, "add a client", and the way out. I gave
+                this group the whole screen because it was new, and buried the actual
+                controls under it.
+
+                SHUT rather than capped at three, which is what step 2 does for recent
+                locations. The two are not the same list: step 2's rows ARE the answer
+                most of the time, so its top three earn their space. These people are on
+                OTHER jobs — a genuinely useful shortcut, and still a guess. A guess
+                announces itself with a count and opens when asked.
+
+                The count is on the closed header so it is never a mystery drawer: he
+                can see there are eleven people in there without opening it. */}
+            <Pressable onPress={() => setKnownOpen((v) => !v)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: knownOpen }}
+              style={({ pressed }) => [st.groupRow, pressed && st.cardDown]}>
+              <Text style={st.groupInline}>{t('clientpick.knownHead')}</Text>
+              <View style={st.groupCount}>
+                <Text style={st.groupCountT}>{known.length}</Text>
+              </View>
+              <View style={{ flex: 1 }} />
+              <Text style={[st.groupChev, knownOpen && st.groupChevOpen]}>⌄</Text>
+            </Pressable>
+            {knownOpen && known.map((k) => {
               const tile = tileFor(k.role);
               return (
                 <Pressable
@@ -435,6 +465,19 @@ const st = StyleSheet.create({
 
   group: { fontFamily: 'Inter_600SemiBold', fontSize: 12.5, letterSpacing: 1.1,
     textTransform: 'uppercase', color: C.steel, marginTop: 26, marginBottom: -2 },
+  // 48pt of height on the toggle (mandate #3) — it is a control, not a caption.
+  groupRow: { flexDirection: 'row', alignItems: 'center', gap: 9, minHeight: 48,
+    marginTop: 18 },
+  // The same caption as `group`, minus the top margin — that margin belongs to the ROW
+  // here, and leaving it on the text meant every sibling needed a matching offset to
+  // sit level with it.
+  groupInline: { fontFamily: 'Inter_600SemiBold', fontSize: 12.5, letterSpacing: 1.1,
+    textTransform: 'uppercase', color: C.steel },
+  groupCount: { minWidth: 24, height: 22, borderRadius: 11, paddingHorizontal: 7,
+    backgroundColor: C.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+  groupCountT: { fontFamily: 'Inter_600SemiBold', fontSize: 12.5, color: C.steel },
+  groupChev: { fontFamily: F.body, fontSize: 19, color: C.steel },
+  groupChevOpen: { transform: [{ rotate: '180deg' }] },
   rule: { height: 1, backgroundColor: C.line, marginTop: 26 },
   laterRow: { flexDirection: 'row', alignItems: 'center', gap: 15, minHeight: 76,
     paddingVertical: 12, marginTop: 6 },
