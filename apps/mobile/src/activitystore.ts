@@ -131,6 +131,55 @@ export const REMIND_DDL = [
 
 export async function ensureRemindSchema(db: AbstractPowerSyncDatabase) {
   for (const s of REMIND_DDL) await db.execute(s);
+  /**
+   * WHETHER THE CLIENT WAS ACTUALLY TOLD — a separate fact from whether the change
+   * order was sent (Codex, 2026-09-03).
+   *
+   * `sendPricedApproval` mints the instrument on the server, marks the extra sent, and
+   * writes the 'sent' actor — and only THEN tries the SMS or the share sheet. When that
+   * last step fails, the send is still real (the link is live and signable) but nobody
+   * has been told about it. The sheet said so once, and the moment it was dismissed
+   * nothing anywhere remembered.
+   *
+   * Two columns rather than one boolean: "delivered at 14:02" and "failed because
+   * Twilio returned 21610" are both worth keeping, and a null in both means the older
+   * rows written before this existed — which is honestly unknown, not a failure.
+   */
+  for (const col of ['delivered_at_ms INTEGER', 'deliver_fail_why TEXT']) {
+    try { await db.execute(`ALTER TABLE co_live_link ADD COLUMN ${col}`); }
+    catch (e: any) { if (!/duplicate column/i.test(String(e?.message ?? e))) throw e; }
+  }
+}
+
+/**
+ * Record what happened to the NOTIFICATION, after the send itself succeeded.
+ *
+ * Never called with the send's own outcome: a change order that failed to mint has no
+ * link row to annotate. This is only ever the last mile.
+ */
+export async function noteLinkDelivery(
+  db: AbstractPowerSyncDatabase,
+  o: { changeOrderId: string; ok: boolean; why?: string | null; atMs?: number }
+): Promise<void> {
+  const now = o.atMs ?? Date.now();
+  await db.execute(
+    `UPDATE co_live_link
+        SET delivered_at_ms  = ?,
+            deliver_fail_why = ?
+      WHERE change_order_id = ?`,
+    [o.ok ? now : null, o.ok ? null : (o.why ?? 'delivery failed').slice(0, 200),
+     o.changeOrderId]);
+}
+
+/** What the record needs to say about the last mile. Null when there is no link row. */
+export async function linkDelivery(
+  db: AbstractPowerSyncDatabase, changeOrderId: string
+): Promise<null | { deliveredAtMs: number | null; failWhy: string | null }> {
+  const r = await db.getAll<{ delivered_at_ms: number | null; deliver_fail_why: string | null }>(
+    `SELECT delivered_at_ms, deliver_fail_why FROM co_live_link WHERE change_order_id = ?`,
+    [changeOrderId]);
+  if (!r.length) return null;
+  return { deliveredAtMs: r[0].delivered_at_ms, failWhy: r[0].deliver_fail_why };
 }
 
 /** Remember the link that just went out. Overwrites: one live link per extra (250). */
@@ -151,6 +200,9 @@ export async function noteLinkSent(
 
 export type LiveLink = {
   url: string; token: string; remindCount: number; lastRemindMs: number | null;
+  /** Why the SMS/share did not reach them, when it did not. Null = it did, or we
+   *  never recorded either way (rows written before 2026-09-03). */
+  deliverFailWhy: string | null;
 };
 
 export async function liveLinkFor(
@@ -159,11 +211,12 @@ export async function liveLinkFor(
   const r = await db.getAll<{
     url: string; token: string; remind_count: number; last_remind_ms: number | null;
   }>(
-    `SELECT url, token, remind_count, last_remind_ms
+    `SELECT url, token, remind_count, last_remind_ms, deliver_fail_why
        FROM co_live_link WHERE change_order_id = ?`, [changeOrderId]);
   if (!r.length) return null;
   return { url: r[0].url, token: r[0].token,
-           remindCount: r[0].remind_count, lastRemindMs: r[0].last_remind_ms };
+           remindCount: r[0].remind_count, lastRemindMs: r[0].last_remind_ms,
+           deliverFailWhy: (r[0] as any).deliver_fail_why ?? null };
 }
 
 /**

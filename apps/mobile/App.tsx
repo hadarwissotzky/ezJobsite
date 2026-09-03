@@ -186,7 +186,7 @@ import { displayPhone } from './src/sendto';
 // nothing but the rows already on the device, and without it there is no path at
 // all from "a client asked something" to the contractor noticing.
 import { ensureActivitySchema, activityFor, markRead,
-         ensureRemindSchema, noteLinkSent, liveLinkFor, noteReminded } from './src/activitystore';
+         ensureRemindSchema, noteLinkSent, noteLinkDelivery, liveLinkFor, noteReminded } from './src/activitystore';
 // THE CREDIT GATE (hadar, 2026-08-17: "queue it — but needs to prompt the user letting
 // them know that they cannot send if they don't have credits"). Three modules, three
 // jobs, and they are deliberately not one: `credits` asks the server what is available
@@ -398,6 +398,9 @@ type RecordLcState = {
    *  question count that changes under the open record. */
   remindCount: number;
   remindLastMs: number | null;
+  /** Why the notification did not reach the client, when it did not. Null means it did,
+   *  or that this extra was sent before the outcome was being recorded. */
+  deliverFailWhy: string | null;
   /** The live client link's URL, for the copy row on the waiting card. Null until an
    *  extra has been sent; `co_live_link` holds one live token per extra. */
   linkUrl: string | null;
@@ -1617,6 +1620,9 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
       remindCount: link?.remindCount ?? 0,
       remindLastMs: link?.lastRemindMs ?? null,
       linkUrl: link?.url ?? null,
+      // WHETHER THE TEXT ACTUALLY LANDED. Carried onto the record so the waiting card
+      // can stop implying the client was told — see `noteLinkDelivery`.
+      deliverFailWhy: link?.deliverFailWhy ?? null,
       view: {
         version,
         // REQ-LC12. recordactors.ts states the derivation and it holds here for the
@@ -3042,9 +3048,39 @@ const deliverLink = async (a: {
  * the walkthrough would show its "on its way" screen over a change order still sitting on
  * the phone. So the outcome is a value, and every caller has to look at it.
  */
+/**
+ * `delivered` IS A SEPARATE ANSWER FROM `sent` (Codex, 2026-09-03).
+ *
+ * This returned a bare `{ sent: true }` after `deliverLink` had failed, because by then
+ * the send genuinely HAD happened: the instrument is minted on the server, the link is
+ * live and signable, and the extra is marked sent. What failed was the last mile — the
+ * SMS or the share sheet — so the client has a document waiting and no idea it exists.
+ *
+ * One boolean could not carry both facts, so no caller could tell them apart and every
+ * caller assumed the good one.
+ */
+/**
+ * A REFUSAL THE CONTRACTOR CAN READ (Codex, 2026-09-03).
+ *
+ * The send path reported its failures with `setUi({ k: 'refused', why })`, and that
+ * channel is WRITE-ONLY: the only consumer of `ui.k === 'refused'` in this whole file is
+ * `signalFailed()` at the effect around line 4716 — a haptic. `why` is never rendered
+ * anywhere. So a send that could not reserve a credit, or could not mint the instrument,
+ * produced a buzz, an open sheet, and no words at all.
+ *
+ * `setUi` is kept because the buzz is right and something should be felt. `setAck` is
+ * added because a refusal that cannot be read is not a refusal — and `ackEl` now renders
+ * over the flow screens too, so this reaches him wherever he is standing.
+ */
+const refuseSend = (why: string) => {
+  setUi({ k: 'refused', why });
+  setAck({ kind: 'no', title: T('r5c.sendFailedTitle'), detail: why,
+           okLabel: T('common.ok') });
+};
+
 const sendPricedApproval = async (
   c: LedgerRow, to: RosterMember | null,
-): Promise<{ sent: boolean; held?: boolean }> => {
+): Promise<{ sent: boolean; held?: boolean; delivered?: boolean; why?: string | null }> => {
   /**
    * HOLD A CREDIT FIRST — before anything is minted, sent or marked.
    *
@@ -3076,7 +3112,7 @@ const sendPricedApproval = async (
   // A reservation that FAILED (not refused — failed) is a server problem, and it must not
   // become a silent free send. It is reported the way every other refusal on this path
   // is, with the reason.
-  if (!res.ok) { setUi({ k: 'refused', why: res.reason }); return { sent: false }; }
+  if (!res.ok) { refuseSend(res.reason); return { sent: false }; }
 
   // R3: an EWA is a DIFFERENT INSTRUMENT and takes a different sender — no price, no
   // running total, kind='ewa'. Branching inside sendForConfirmation would have put a
@@ -3108,7 +3144,7 @@ const sendPricedApproval = async (
       // does not exist. Idempotent, and a failed release is not worth failing the report
       // of the failure he is already being shown.
       if (res.reserved) void releaseCredit(connector.client, c.id);
-      setUi({ k: 'refused', why: T(re.reason as any) });
+      refuseSend(T(re.reason as any));   // the EWA branch, same rule
       return { sent: false };
     }
     await markLocalSent(db, c.id);
@@ -3271,6 +3307,14 @@ const sendPricedApproval = async (
              amountText: c.amount },
     });
     setSendPrep(null);
+    /**
+     * WRITE DOWN WHETHER HE WAS TOLD. The sheet below says it once; this is what
+     * remembers after the sheet is dismissed. Best-effort on purpose — a bookkeeping
+     * failure must not turn a live approval into a reported failure.
+     */
+    void noteLinkDelivery(db, { changeOrderId: c.id, ok: d.ok,
+                                why: d.ok ? null : String(d.why ?? '') })
+      .catch(() => { /* the sheet already said it; this is only the durable copy */ });
     if (d.ok) void signalSaved();  // felt confirmation the commitment WENT OUT (gap #7)
     setSentLink({ url: r.url, shown: r.shownContent,
       scope: c.scope, amount: c.amount,
@@ -3283,13 +3327,16 @@ const sendPricedApproval = async (
     await clearHold(db, c.id);
     setHeldN((await heldSends(db)).length);
     await refresh();
-    return { sent: true };
+    // SENT is true — the instrument exists. DELIVERED is the other half, and it is the
+    // half a contractor acts on: a live approval nobody was told about needs a nudge,
+    // not a celebration.
+    return { sent: true, delivered: d.ok, why: d.ok ? null : String(d.why ?? '') };
   }
   // The instrument was never minted. Same reasoning as the EWA branch above: hand the
   // credit back rather than hold it against a send that did not happen.
   if (res.reserved) void releaseCredit(connector.client, c.id);
-  setUi({ k: 'refused', why: r.reason });
-  return { sent: false };
+  refuseSend(String(r.reason));
+  return { sent: false, why: String(r.reason) };
 };
 
 /**
@@ -9606,6 +9653,13 @@ const checkClientMessages = async () => {
               // screen, so stepping to 'done' here would put "it's on its way" over a
               // change order still sitting on the phone.
               const out = await sendPricedApproval(row, owner as any);
+              // "It's on its way" is a claim about the CLIENT, not about the server.
+              // A send whose text never landed reaches 'done' with nobody told, so it
+              // says the other true thing instead (Codex, 2026-09-03).
+              if (out.sent && out.delivered === false) {
+                setAck({ kind: 'no', title: T('r5c.notTold'),
+                         detail: T('r5c.notToldBody'), okLabel: T('common.ok') });
+              }
               if (out.sent) setGStep('done');
             } catch (e: any) {
               setAck({ kind: 'no', title: T('gs.r.failed'), detail: String(e?.message ?? e) });
@@ -9775,6 +9829,9 @@ const checkClientMessages = async () => {
           // The URL itself, so the waiting card can offer it for an email. Same link
           // Remind texts — `liveLinkFor` reads the one live token.
           linkUrl: recordLc.linkUrl,
+          // The card already exists for "the text did not land". Now it knows when that
+          // is actually true instead of leaving him to infer it from silence.
+          deliverFailWhy: recordLc.deliverFailWhy,
         }}
         approval={approval}
         thread={recordThread}
@@ -13357,7 +13414,25 @@ const checkClientMessages = async () => {
                     // The client half FIRST: it is the one that changes the record's
                     // stage, and if it fails there is nothing to tell anybody about.
                     if (plan.kind === 'approval' && chosen) {
-                      await sendPricedApproval(sp.co, chosen);
+                      /**
+                       * READ THE ANSWER (Codex, 2026-09-03). This called the send and
+                       * threw the result away, then cleared `busy` — so a refusal was a
+                       * spinner that stopped, a sheet that stayed, and nothing said. The
+                       * review-request path three lines below has always reported its
+                       * failure; the SEND path, which is the one carrying a price, did
+                       * not.
+                       *
+                       * A refusal already speaks for itself now (`refuseSend`), so the
+                       * only thing left to say here is the case that is neither success
+                       * nor failure: SENT BUT NOT DELIVERED. The document is live and
+                       * signable and the client has not been told it exists — which is
+                       * an action for him, not a result to celebrate.
+                       */
+                      const out = await sendPricedApproval(sp.co, chosen);
+                      if (out.sent && out.delivered === false) {
+                        setAck({ kind: 'no', title: T('r5c.notTold'),
+                                 detail: T('r5c.notToldBody'), okLabel: T('common.ok') });
+                      }
                     }
                     if (memberRows.length) {
                       const r = await requestExtraReview(connector.client, sp.co.id,

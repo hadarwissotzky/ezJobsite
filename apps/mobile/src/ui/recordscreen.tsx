@@ -100,6 +100,9 @@ export type RecordLifecycle = {
   /** The live client link, so the waiting card can offer it for an email (2026-08-24).
    *  Null before the extra is sent. */
   linkUrl?: string | null;
+  /** Why the client was never told, when the send succeeded but its SMS/share did not.
+   *  Null means they were told, or that this extra predates the outcome being kept. */
+  deliverFailWhy?: string | null;
   /** Which version this row is (1 = original), derived from the supersession lineage
    *  by `versionNumber` — never stored. */
   version: number;
@@ -377,6 +380,7 @@ export function RecordScreen(props: RecordScreenProps) {
         undelivered={props.undelivered}
         remind={lifecycle.remind}
         linkUrl={lifecycle.linkUrl ?? null}
+        deliverFailWhy={lifecycle.deliverFailWhy ?? null}
         openMessages={props.openMessages}
         unreadMessages={props.unreadMessages}
         onMessagesSeen={props.onMessagesSeen}

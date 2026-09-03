@@ -179,6 +179,8 @@ export type ExtraNegotiationProps = {
    * never minted; the row then says so instead of offering a Copy that does nothing.
    */
   linkUrl?: string | null;
+  /** Why the client was never told, when the send itself succeeded. */
+  deliverFailWhy?: string | null;
   onOpenDetail: (field: ExtraDetailField) => void;
   /** Which version this row is (1 = the original), derived from the supersession
    *  lineage. Shown here for the same reason it is shown on the sealed screen: the
@@ -403,6 +405,7 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
           canRevise={thread.canRevise}
           onRemind={() => { void remind(); }}
           linkUrl={props.linkUrl ?? null}
+          deliverFailWhy={props.deliverFailWhy ?? null}
           onReply={toReply}
           onRevise={props.onRevise}
           note={actionNote}
@@ -591,6 +594,8 @@ function WaitingBlock(props: {
   /** The live client link, for the copy row. Absent on an extra whose link never
    *  minted — the row then says that rather than offering a dead Copy. */
   linkUrl?: string | null;
+  /** Why the client was never told, when the send itself succeeded. */
+  deliverFailWhy?: string | null;
   onReply: () => void;
   onRevise: () => void;
   note: string | null;
@@ -669,6 +674,18 @@ function WaitingBlock(props: {
             not the only way a link travels — an email address, an assistant, a lender.
             Inside this card and under Remind on purpose: this is what he reaches for
             when the text did not land, which is the state this whole card is about. */}
+        {/* THE TEXT DID NOT LAND, SAID OUT LOUD (Codex, 2026-09-03).
+            `sendPricedApproval` marks the extra sent, writes the 'sent' actor and
+            returns success as soon as the INSTRUMENT exists — which is correct, it does
+            exist and it is signable. The SMS is the last mile and it can fail on its
+            own. When it did, one dismissible sheet said so and then nothing anywhere
+            remembered: the record read "waiting on them", which quietly blames a client
+            who was never told there was anything to look at.
+            Above the copy row on purpose — that row is the fix, and this is the reason
+            he needs it. */}
+        {props.waiting !== 'settled' && !!props.deliverFailWhy && (
+          <Text style={[st.mechanism, st.mechanismWarn]}>{t('r5c.notTold')}</Text>
+        )}
         {props.waiting !== 'settled' && <CopyLinkRow url={props.linkUrl ?? null} />}
       </View>
 
