@@ -2306,8 +2306,26 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
    * roster queries — seconds on a real database, all of it with `assign` already null
    * and `clientPick` not yet set. That whole time the app rendered HOME.
    */
+  /**
+   * THE LOCATION SCREEN STAYS UP UNTIL THE CLIENT SCREEN IS READY (hadar, 2026-09-03:
+   * "between location and client selection i can see the home screen").
+   *
+   * Tearing `assign` down here and setting `clientPick` sixty lines later left a window
+   * containing `rehomeDraftExtra`, a full `refresh()` and two roster queries — seconds
+   * on a real database — in which NO flow screen matched and the app rendered Home.
+   *
+   * The corridor (`flowHold`) covers it, but covering it is second best. This is the
+   * same fix `onFusedCapture` already uses one step earlier — "DO NOT close the capture
+   * screen here... the job sheet is checked BEFORE showCapture in the render, so it
+   * takes over the instant it is set" (2026-07-25). `clientPick` is likewise checked
+   * before `assign`, so the handover is a single frame with nothing in between and no
+   * placeholder at all.
+   *
+   * `a` was captured as an argument, so nothing below reads this state; holding it is
+   * purely what keeps the screen on the glass.
+   */
   setFlowHold(3);
-  setAssign(null); setAssignQ(''); setFiled(null);
+  setAssignQ(''); setFiled(null);
   setHereAddr(undefined); hereAddrKey.current = null;
   setProjectId(projId);
   const anchorCoId = done?.anchorCoId ?? a.anchorCoId;
@@ -2370,6 +2388,8 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
          * definition the writer uses, so the two cannot drift apart.
          */
         .filter((r) => isNamedClient(r.name));
+      // The handover: step 3 goes up and step 2 comes down in the same commit.
+      setAssign(null);
       setClientPick({ coId: anchorCoId, projectId: projId,
                       // `role` rides along now: step 3 prints it under the name
                       // ("Property owner", "General contractor / You"). It was being
@@ -2381,6 +2401,8 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
       return;
     } catch { /* no roster readable — never let this stand between him and the upload */ }
   }
+  // No client step on this path — step 4 takes over instead, same single commit.
+  setAssign(null);
   startProcessing();
 };
 
@@ -3910,7 +3932,24 @@ const checkClientMessages = async () => {
             t ? { kind: t.isGenerate ? 'gen' : t.isAugment ? 'aug' : 'new',
                   coId: t.coId, ids: t.ids }
               : null;
-          setTransition(null);
+          /**
+           * STEP 4 STAYS UP THROUGH THE HAND-OFF (hadar, 2026-09-03: "between write-up
+           * and preview i can see the home screen").
+           *
+           * On the 'new' path this block hydrates the write-up (up to 3s) and then opens
+           * the record. Clearing the processing screen here left all of that with no flow
+           * screen matching, so the app rendered HOME between step 4 and step 5 — the
+           * longest of the flashes, and I lengthened it myself this morning when I added
+           * the hydrate.
+           *
+           * The screen it holds on is the honest one: every checkmark ticked, 100% done.
+           * Another second of that reads as the last step finishing, which is exactly
+           * what is happening. It comes down in the same commit that opens the record.
+           *
+           * `gen` and `aug` clear immediately as before — they have their own
+           * destinations and no rail to keep counting.
+           */
+          if (handoff?.kind !== 'new') setTransition(null);
           if (handoff) {
             const h: { kind: 'gen' | 'aug' | 'new'; coId: string; ids: string[] } = handoff;
             if (h.kind === 'gen') void finishGenerateById(h.coId);
@@ -3948,7 +3987,7 @@ const checkClientMessages = async () => {
                  * hold this is the LONGEST flash of Home in the whole sequence, and I
                  * lengthened it myself when I added the hydrate above.
                  */
-                setFlowHold(5);
+                setFlowHold(5);   // backstop only; step 4 above is what he actually sees
                 /**
                  * PULL THE WRITE-UP DOWN BEFORE JUDGING IT (hadar, 2026-09-03: "I gave
                  * it a whole description of cabinet — it claims that it couldn't hear
@@ -4053,6 +4092,9 @@ const checkClientMessages = async () => {
                  * existed — telling him he is on step 5 of making one would be a rail
                  * describing a journey he never started.
                  */
+                // THE HANDOVER: step 4 comes down as step 5 goes up, one commit, nothing
+                // in between. `setTransition(null)` was deferred above for exactly this.
+                setTransition(null);
                 setFlowRecordId(h.coId);
                 /**
                  * DISPATCHED, NOT AWAITED (review, 2026-09-02).
