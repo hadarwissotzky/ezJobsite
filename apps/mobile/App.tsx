@@ -3909,6 +3909,70 @@ const checkClientMessages = async () => {
                * place; only the promise changes.
                */
               void (async () => {
+                /**
+                 * PULL THE WRITE-UP DOWN BEFORE JUDGING IT (hadar, 2026-09-03: "I gave
+                 * it a whole description of cabinet — it claims that it couldn't hear
+                 * enough write ups which cannot be the case. In the preview when I close
+                 * the preview and open the record it's all there").
+                 *
+                 * He was right and the diagnosis is a RACE I built in.
+                 *
+                 * `analyzedSeen` latches when a proposal EXISTS ON THE SERVER — that is
+                 * the readiness gate, and it was correct. But since sql/394 the scope of
+                 * work is written by `apply_proposal_v1` SERVER-SIDE, and this device
+                 * only learns it through `hydrateChangeOrders`, which runs on its own
+                 * sweep. So the order of events was:
+                 *
+                 *   1. proposal appears on the server            → ready
+                 *   2. hand-off reads the LOCAL change_order row → still empty
+                 *   3. "We couldn't make out the work"
+                 *   4. hydrate runs seconds later                → the scope lands
+                 *   5. he opens the record and it is all there
+                 *
+                 * The message was never about the recording. It was this device
+                 * reporting on a column it had not fetched yet — and it accused the
+                 * contractor's own dictation of being inaudible to do it.
+                 *
+                 * Hydrating first is not a new mechanism: it is the SAME call that fixes
+                 * it fifteen seconds later, moved to before the sentence that depends on
+                 * it. Scoped to this one project, and to a `getSession()` that is local
+                 * (no round trip — the same reason `kickDrain` above uses it). It also
+                 * means the review screen he lands on has the write-up ON it rather than
+                 * filling in underneath him.
+                 *
+                 * BEST-EFFORT BY CONSTRUCTION. If it fails or he is offline, `wrote`
+                 * falls back to whatever the local row already holds — never worse than
+                 * before, and mandate #7 keeps its promise that no message here waits on
+                 * the network to be correct.
+                 */
+                try {
+                  const { data: sess } = await connector.client.auth.getSession();
+                  const uid = sess?.session?.user?.id;
+                  // The project comes off the row rather than the transition state,
+                  // which does not carry one. A local read, and the scoped hydrate is
+                  // one job's extras rather than the account's.
+                  const pid = (await db.getAll<{ p: string | null }>(
+                    `SELECT project_id AS p FROM change_order WHERE id = ?`, [h.coId]))[0]?.p;
+                  if (uid && pid) {
+                    /**
+                     * BOUNDED, because this is the same trap I fell into yesterday with
+                     * `await openRecord` — a correct-looking await that puts the network
+                     * between a contractor and his acknowledgement. Three seconds is far
+                     * more than a scoped hydrate needs on any working connection, and on
+                     * a dead one he gets the old behaviour instead of a silent screen.
+                     *
+                     * The window is narrow by construction: reaching this branch at all
+                     * required `analyzedSeen`, which only latches on a SUCCESSFUL server
+                     * read of the proposal seconds earlier. A phone that was offline
+                     * leaves this poll through the 90-second stall branch, not here.
+                     */
+                    await Promise.race([
+                      hydrateChangeOrders(db, connector.client, pid, uid),
+                      new Promise((r) => setTimeout(r, 3000)),
+                    ]);
+                  }
+                } catch { /* offline or refused: read what we have */ }
+
                 let wrote = false;
                 try {
                   const row = (await db.getAll<{ s: string | null; t: string | null }>(
