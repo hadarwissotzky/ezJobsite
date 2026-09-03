@@ -46,7 +46,21 @@ const CODE_LEN = 6;
 type Method = 'phone' | 'email';
 type Step = 'form' | 'code' | 'linkSent';
 type Fail =
-  | { kind: 'net' | 'notArrived' | 'badCode' | 'cantSend' | 'signupFailed' }
+  /**
+   * `why` CARRIES THE REAL REASON (hadar, 2026-09-03: reinstalled the app and could not
+   * get past sign-in — "we couldn't text that number check it or try again in a
+   * moment", about a number that is fine).
+   *
+   * `classify` returns `cantSend` for ANY send-phase failure that is not a network or
+   * rate-limit error, and the friendly sentence then tells him to check the number and
+   * wait. When the truth is something he cannot act on — an SMS provider misconfigured,
+   * a suspended Twilio account, phone auth switched off in the project — that sentence
+   * sends him round in circles retyping a correct number.
+   *
+   * The headline stays friendly; the reason rides underneath it. Same rule the send
+   * path just learned: a refusal that will not say why is not a refusal, it is a wall.
+   */
+  | { kind: 'net' | 'notArrived' | 'badCode' | 'cantSend' | 'signupFailed'; why?: string }
   | { kind: 'other'; text: string }
   | null;
 
@@ -56,7 +70,7 @@ function classify(e: any, phase: 'send' | 'verify' | 'oauth'): Fail {
   if (/network|fetch|timed? ?out|connection|offline/i.test(text)) return { kind: 'net' };
   if (String(status) === '429' || /rate|too many|limit/i.test(text)) return { kind: 'notArrived' };
   if (phase === 'verify' && /invalid|expired|incorrect|token/i.test(text)) return { kind: 'badCode' };
-  if (phase === 'send') return { kind: 'cantSend' };
+  if (phase === 'send') return { kind: 'cantSend', why: text || undefined };
   return { kind: 'other', text };
 }
 
@@ -209,6 +223,14 @@ export function AuthScreen({ connector, initialSignUp = false, notice, onReplayI
       : fail.kind === 'cantSend' ? 'auth.errCantSend'
       : fail.kind === 'signupFailed' ? 'auth.errCantSend'
       : 'auth.errBadCode');
+  /**
+   * The provider's own words, under the friendly line and only when there are any.
+   * Nobody has to read it — but the one person who needs it (whoever is holding the
+   * phone when sign-in will not work) can now report something better than "it says it
+   * cannot text me".
+   */
+  const failWhy = fail && 'why' in fail && fail.why && fail.why !== failText
+    ? String(fail.why).slice(0, 180) : null;
 
   const Brand = () => <Text style={st.brand}>EZChangeOrders</Text>;
 
@@ -226,6 +248,7 @@ export function AuthScreen({ connector, initialSignUp = false, notice, onReplayI
 
           {noticeText && <Text style={st.err}>{noticeText}</Text>}
           {failText && <Text style={st.err}>{failText}</Text>}
+          {!!failWhy && <Text style={st.errWhy}>{failWhy}</Text>}
 
           <Text style={st.didNot}>{T('auth.didNotReceive')}</Text>
           {/* Outline, not filled: resending is the SECONDARY action here. The primary
@@ -266,6 +289,7 @@ export function AuthScreen({ connector, initialSignUp = false, notice, onReplayI
           />
           {noticeText && <Text style={st.err}>{noticeText}</Text>}
           {failText && <Text style={st.err}>{failText}</Text>}
+          {!!failWhy && <Text style={st.errWhy}>{failWhy}</Text>}
           {busy && <ActivityIndicator color="#4E6243" style={{ marginBottom: 10 }} />}
           <Pressable style={st.link} disabled={left > 0 || busy}
             onPress={() => { setCode(''); triedRef.current = null; void sendCode(); }}>
@@ -349,6 +373,7 @@ export function AuthScreen({ connector, initialSignUp = false, notice, onReplayI
 
           {noticeText && <Text style={st.err}>{noticeText}</Text>}
           {failText && <Text style={st.err}>{failText}</Text>}
+          {!!failWhy && <Text style={st.errWhy}>{failWhy}</Text>}
 
           <Pressable style={[st.btn, (!signUpOk || busy) && st.btnOff]}
             disabled={!signUpOk || busy} onPress={startSignUp}>
@@ -517,6 +542,10 @@ const st = StyleSheet.create({
   btnGhostT: { color: '#151A1E', fontSize: 17, fontWeight: '700' },
   linkStrong: { color: '#151A1E', fontSize: 17, fontWeight: '700' },
   err: { color: '#8B5148', fontSize: 15, marginBottom: 10, textAlign: 'center' },
+  // The provider's own words: quieter and smaller than the sentence written for a
+  // human, because it is there to be REPORTED rather than acted on.
+  errWhy: { color: '#8c837c', fontSize: 12.5, lineHeight: 17, marginTop: -6,
+            marginBottom: 10, textAlign: 'center' },
   btn: {
     backgroundColor: '#1F3128', borderRadius: 999, paddingVertical: 18,
     alignItems: 'center', marginTop: 4,
