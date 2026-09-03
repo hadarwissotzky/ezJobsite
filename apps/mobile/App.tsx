@@ -44,7 +44,7 @@ import * as ImagePickerPerm from 'expo-image-picker';
 import { photoCapture, pickFromLibrary, snapPhoto, textCapture, voiceCapture } from './src/modality';
 import { publishReplyMedia } from './src/replymediapublish';
 import { checkJobs, checkMembers, checkSendQuota, currentPlan, currentProductId, rememberEntitledPlan,
-         rememberEntitledProduct, type QuotaKind } from './src/quota';
+         rememberEntitledProduct, checkChangeOrders, type QuotaKind } from './src/quota';
 import { usageSummary, type UsageSummary } from './src/usage';
 import { UsageCard, UsageNudge } from './src/ui/usagecard';
 import { QuotaModal } from './src/ui/quotamodal';
@@ -4565,6 +4565,42 @@ const checkClientMessages = async () => {
     next();
   }, [terms]);
 
+  /**
+   * THE DOOR INTO A NEW CHANGE ORDER, AND THE CAP THAT GUARDS IT.
+   *
+   * hadar, 2026-09-03: "it still lets me create new CO ... although the account run out
+   * of CO for free." He was right, and the reason is that every cap in this app was
+   * pointed at the wrong end of the act.
+   *
+   * `usageSummary` computes `anyReached` correctly and the Home banner READS it — that
+   * is the "You've used up your free plan / No change orders left this plan" card in his
+   * screenshot. Nothing ever BLOCKED on it. The credit system refuses at SEND, which
+   * stops a change order reaching a client but only after he has recorded it, priced it
+   * and walked five screens. A wall you meet at the end of the work is not a wall, it is
+   * a punishment.
+   *
+   * SO THE ASK HAPPENS BEFORE ANYTHING IS CAPTURED — which is also the only place it can
+   * happen. Refusing after the recording exists would strand evidence mandate #1 has
+   * already promised to keep; refusing before it exists costs nothing and lands him on
+   * the plans page, which is the point of a wall.
+   *
+   * AUGMENT IS DELIBERATELY NOT ROUTED THROUGH HERE. Adding a photo or a correction to
+   * an extra that already exists is not creating a change order, and charging him a
+   * change order to fix one would be indefensible. Its photo and minute caps are asked
+   * at the shutter, where they belong.
+   *
+   * FAILS OPEN. An unreadable count lets him record. A quota is a business rule; the
+   * capture is the product.
+   */
+  const openCapture = React.useCallback(async () => {
+    try {
+      const q = await checkChangeOrders(db);
+      if (!q.ok) { setQuota({ kind: q.kind, limit: q.limit }); return; }
+    } catch { /* cannot count — never let bookkeeping cost him the capture */ }
+    void gateTerms(() => setShowCapture(true));
+  }, [gateTerms]);
+
+
   /** `openTerms` is defined below this point; a ref keeps `gateTerms` from depending on
    *  declaration order, which is how the previous attempt at this file's gates went
    *  wrong (see `afterTerms`). */
@@ -4599,7 +4635,7 @@ const checkClientMessages = async () => {
   React.useEffect(() => {
     if (!pendingCapture || !ready) return;
     setPendingCapture(false);
-    void gateTerms(() => setShowCapture(true));
+    void openCapture();
   }, [pendingCapture, ready, terms]);
 
   // REQ-SET1/EVID2. Null until the first job exists -- a new user has no jobs, and
@@ -7127,7 +7163,7 @@ const checkClientMessages = async () => {
     // The SAME consent gate every capture button passes through. Deliberately does NOT
     // mark the walkthrough seen — backing out of the recorder lands here again, which is
     // the honest place to land when nothing was created.
-    void gateTerms(() => setShowCapture(true));
+    void openCapture();   // the guided first extra is still a new extra
   };
 
   // `devTools`, not `__DEV__`: the drawer row that sets `forceFirstExtra` is now visible
@@ -7699,8 +7735,7 @@ const checkClientMessages = async () => {
                 await openCreatedJob(id);
                 // The same gate the capture button everywhere else passes through:
                 // recording consent is asked once per job, before anything records.
-                void gateTerms(() => setShowCapture(true));
-                setShowCapture(true);
+                void openCapture();
               })();
             }}>
             <Icon name="addSquare" size={19} color="#fff" />
@@ -9691,8 +9726,7 @@ const checkClientMessages = async () => {
         onView={() => { setGStep(null); setGuidedOn(false); void markFirstExtraSeen(db); setNav('home'); }}
         onAnother={() => {
           setGStep(null); setGuidedOn(false); void markFirstExtraSeen(db);
-          if (!terms) { openTerms(() => setShowCapture(true)); return; }
-          setShowCapture(true);
+          void openCapture();
         }}
       />
     );
@@ -10228,8 +10262,7 @@ const checkClientMessages = async () => {
         onCreateLinkedExtra={() => {
           closeRecord();
           setNav('home');
-          if (!terms) { openTerms(() => setShowCapture(true)); return; }
-          setShowCapture(true);
+          void openCapture();
         }}
         // Mandate #2: this writes a file and opens the OS share sheet. It does not
         // transmit anything to a client, and must never be changed to.
@@ -10383,7 +10416,7 @@ const checkClientMessages = async () => {
       <Pressable style={[s.fab, (!!gate || !!initError) && s.fabOff]}
         disabled={!!gate || !!initError} hitSlop={8}
         accessibilityLabel={T('home.recordExtra')}
-        onPress={() => { if (!terms) { openTerms(() => setShowCapture(true)); return; } setShowCapture(true); }}>
+        onPress={() => void openCapture()}>
         {/* A FILLED DARK PUCK WITH A WHITE MIC (hadar, 2026-08-27: "make the + circle
             bigger and darker with a white mic inside").
 
@@ -11194,7 +11227,7 @@ const checkClientMessages = async () => {
     // left the phone, so it is NOT "waiting for approval" and must not inflate this.
     const outstanding = [...questioned, ...waitingList].reduce((sum, e) => sum + (e.amount_cents ?? 0), 0);
     const outstandingN = questioned.length + waitingList.length;
-    const startCapture = () => { if (!terms) { openTerms(() => setShowCapture(true)); return; } setShowCapture(true); };
+    const startCapture = () => void openCapture();
     // Tapping a summary chip filters the list BELOW IT — no navigation. Tapping the
     // live chip again clears the filter.
     const disabled = !!gate || !!initError;
@@ -12152,7 +12185,7 @@ const checkClientMessages = async () => {
     ? (jobMaps[jobProj.id]
         ?? mapUrlFor(process.env.EXPO_PUBLIC_STATIC_MAP_URL, jobProj.lat, jobProj.lng))
     : null;
-  const startCaptureJob = () => { if (!terms) { openTerms(() => setShowCapture(true)); return; } setShowCapture(true); };
+  const startCaptureJob = () => void openCapture();
   return (
     <View style={s.c}>
       {offlineEl}{quotaEl}{heldEl}{celebrateEl}{msgToastEl}{silentEl}
