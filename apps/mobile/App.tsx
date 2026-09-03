@@ -160,6 +160,7 @@ import { sendEwa } from './src/ewasend';
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
 import { fetchLatestProposalForCaptures, type Proposal } from './src/proposals';
 import { discardCapture, discardExtra, drainServerDiscards, drainDiscardedExtras, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
+import { pickAnchor } from './src/captureanchor';
 import { startExtraFromCapture, titleExtraIfUntitled, retitleDraft, setDraftSummary,
          saveScopeOfWork, SCOPE_OF_WORK_MAX_CHARS,
          SCOPE_MAX_CHARS, isNamedClient } from './src/startextra';
@@ -6273,6 +6274,14 @@ const checkClientMessages = async () => {
       const res = await resolveFor(a.stamp);
       const pairId = `pair-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const ids: string[] = [];
+      /**
+       * KEPT BY KIND, not inferred from position (Codex, 2026-09-03). `ids` is the
+       * durable list in commit order and stays exactly that; these three say WHAT each
+       * one is, so `pickAnchor` never has to guess from an index again.
+       */
+      const photoIds: string[] = [];
+      const voiceIds: string[] = [];
+      let textId: string | null = null;
       for (const ph of a.photos) {
         const pr = await performCapture(db, {
           ownerId: OWNER, projectId: res.projectId,
@@ -6286,7 +6295,7 @@ const checkClientMessages = async () => {
         await enqueuePair(db, { pairId, captureId: pr.captureId, role: 'photo',
                                 atMs: ph.atMs, projectId: res.projectId });
         await noteCapturedBy(db, pr.captureId);
-        ids.push(pr.captureId);
+        ids.push(pr.captureId); photoIds.push(pr.captureId);
       }
       /**
        * WHAT HE TYPED, committed as a capture of its own (REQ-CAP2 text modality).
@@ -6307,7 +6316,7 @@ const checkClientMessages = async () => {
         });
         if (!tr.ok) throw new Error(tr.reason);
         await noteCapturedBy(db, tr.captureId);
-        ids.push(tr.captureId);
+        ids.push(tr.captureId); textId = tr.captureId;
       }
       // The narration, possibly split by a phone call: every segment commits, in order.
       // A failed later segment refuses loudly but never un-saves the earlier ones.
@@ -6322,7 +6331,7 @@ const checkClientMessages = async () => {
         await enqueuePair(db, { pairId, captureId: vr.captureId, role: 'voice',
                                 atMs: seg.startedAtMs, projectId: res.projectId });
         await noteCapturedBy(db, vr.captureId);
-        ids.push(vr.captureId);
+        ids.push(vr.captureId); voiceIds.push(vr.captureId);
       }
       if (!ids.length) throw new Error('nothing to save');
       setUi({ k: 'saved', id: ids[0] });
@@ -6338,7 +6347,16 @@ const checkClientMessages = async () => {
       //
       // AFTER durability, never awaited into the UI path — the same two rules
       // as the voice-only path, for the same reasons.
-      const anchorId = a.audioSegments.length ? ids[a.photos.length] : ids[0];
+      /**
+       * `ids[a.photos.length]` WAS A GUESS ABOUT ORDER, and typed text made it wrong
+       * (Codex, 2026-09-03 — see `captureanchor.ts` for the whole failure). With a
+       * typed correction present that index landed on the TEXT capture: the extra hung
+       * off a capture with no `capture_pair` row, so the record's evidence walk started
+       * somewhere it could reach neither the voice nor a single photo, and the
+       * transcriber was handed a text file as though it were M4A.
+       */
+      const anchor = pickAnchor({ photoIds, voiceIds, textId });
+      const anchorId = anchor.captureId ?? ids[0];
       /**
        * KEPT AS A PROMISE, STILL NOT AWAITED HERE (Codex, 2026-09-03).
        *
@@ -6367,18 +6385,29 @@ const checkClientMessages = async () => {
         await refresh();
       }).catch(() => { /* capture is safe; the ledger row is not owed */ });
 
-      if (a.audioSegments.length) {
+      /**
+       * GATED ON THE VOICE ANCHOR, not on `a.audioSegments.length` (Codex, 2026-09-03).
+       *
+       * The two used to be the same question, and the anchor bug is what separated them:
+       * with a typed correction present, `audioSegments.length` was truthy while
+       * `anchorId` pointed at the TEXT capture — so this block read that capture's
+       * `media_relpath` and handed a text file to `transcribeOnDevice` as though it were
+       * M4A. Asking for the voice id directly makes the guard and the subject the same
+       * fact, so they cannot come apart again.
+       */
+      const voiceAnchorId = anchor.voiceCaptureId;
+      if (voiceAnchorId) {
         void (async () => {
           // transcribeOnDevice wants the stored file, not the in-memory bytes:
           // the committed copy is the evidence, so it is the thing transcribed.
           const row = await db.getAll<{ media_relpath: string }>(
-            `SELECT media_relpath FROM capture_commit WHERE capture_id = ?`, [anchorId]);
+            `SELECT media_relpath FROM capture_commit WHERE capture_id = ?`, [voiceAnchorId]);
           if (!row.length) return;
-          const t = await transcribeOnDevice(db, anchorId,
+          const t = await transcribeOnDevice(db, voiceAnchorId,
             `${FS.documentDirectory}${row[0].media_relpath}`);
           if (!t.ok) return;
           const said = await db.getAll<{ text: string }>(
-            `SELECT text FROM voice_transcript_cache WHERE capture_id = ?`, [anchorId]);
+            `SELECT text FROM voice_transcript_cache WHERE capture_id = ?`, [voiceAnchorId]);
           const first = (said[0]?.text ?? '').split(/(?<=[.!?])\s/)[0]?.trim();
           if (first) await titleExtraIfUntitled(db, `co-${anchorId}`, first);
           await refresh();
@@ -6389,10 +6418,19 @@ const checkClientMessages = async () => {
       // always picks the job, and nothing is uploaded/processed to a guessed job
       // first. Filing it (fileAll) then starts the processing transition. The job
       // is ALWAYS picked by a human (mandate #8 — GPS only pre-sorts the list).
-      const anchorCapId = a.audioSegments.length ? ids[a.photos.length] : null;
+      // The VOICE anchor, and only that: it is what step 4 waits on for a transcript.
+      // Null on a photos-only or typed-only walkthrough, where there is nothing to wait
+      // for and claiming otherwise would hang the processing screen for its full 90s.
+      const anchorCapId = anchor.voiceCaptureId;
       return {
         ids,
-        anchorCoId: anchorCapId ? `co-${anchorCapId}` : `co-${ids[0]}`,
+        /**
+         * DERIVED FROM THE ANCHOR ITSELF, not re-derived beside it. `startExtraFromCapture`
+         * mints `co-${o.captureId}` (startextra.ts:102) from `anchorId`, so any second
+         * expression for this id is a chance for the two to disagree — which is the exact
+         * class of defect the anchor bug was. One value, one derivation.
+         */
+        anchorCoId: `co-${anchorId}`,
         anchorCaptureId: anchorCapId,
         // Resolves when the change order EXISTS (or is known to have failed). Never
         // rejects — the `.catch` below settles it.
