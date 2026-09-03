@@ -34,7 +34,21 @@ import { C, F } from './theme';
 
 export function SendPreview(p: {
   amount: string;
+  /**
+   * False when `amount_cents` is null. REQUIRED, because `amount` renders the literal
+   * string '—' in that case (record.ts:143) and every other MoneyBlock caller in the app
+   * branches on this. Without it the screen mandate #2 governs previewed a priceless
+   * change order as "—  Fixed price": a dash posing as an amount, on the document a
+   * client is being asked to approve.
+   */
+  priced: boolean;
   nte: string | null;
+  /** True when the price is a not-to-exceed cap rather than a fixed figure. */
+  isNte: boolean;
+  /** The caller's `no_description` answer — the ONE scope predicate (`hasWrittenScope`).
+   *  Never re-derived here from a non-empty string: that is the 40-character
+   *  disagreement that put "Not written up yet" directly above a written scope. */
+  scopeWritten: boolean;
   scopeOfWork: string | null;
   /**
    * ALREADY PARSED, by `record.ts`. This does NOT re-read `line_items` — that column is
@@ -64,7 +78,8 @@ export function SendPreview(p: {
     : null;
 
   const excl = (p.exclusions ?? '').trim();
-  const sow = (p.scopeOfWork ?? '').trim();
+  // The words to print. Whether they COUNT as a scope is the caller's answer, above.
+  const sow = p.scopeWritten ? (p.scopeOfWork ?? '').trim() : '';
 
   return (
     <View style={st.wrap}>
@@ -75,14 +90,25 @@ export function SendPreview(p: {
         <Text style={st.eyebrowT}>{t('r5c.clientSees')}</Text>
       </View>
 
-      <MoneyBlock
-        amount={p.amount}
-        subtitle={p.nte ? t({ k: 'erec.nte', p: { amount: p.nte } } as any) : t('erec.fixed')}
-      />
+      {/* NO PRICE IS A STATE, NOT A DASH. The same branch `extradraft`, `extralocked`
+          and `extranegotiation` all take — this was the only MoneyBlock in the app
+          that did not, and it was the one on the send screen.
+          The NTE label follows the VALUE, not the mode: an extra set to not-to-exceed
+          whose cap has not been typed would otherwise be labelled "Fixed price". */}
+      {p.priced ? (
+        <MoneyBlock
+          amount={p.amount}
+          subtitle={p.isNte && p.nte
+            ? t({ k: 'erec.nte', p: { amount: p.nte } } as any)
+            : t('erec.fixed')}
+        />
+      ) : (
+        <MoneyBlock amount={t('erec.priceToCome')} muted />
+      )}
 
       <CostBreakdown
         lines={lines}
-        total={p.amount}
+        total={p.priced ? p.amount : null}
         label={t('cost.breakdown')}
         totalLabel={t('cost.total')}
       />
@@ -125,8 +151,8 @@ export function SendPreview(p: {
           <Text style={st.secH}>{t('r5c.scopeHead')}</Text>
           {!!p.onEditScope && <Text style={st.secEdit}>{t('r5c.editScope')}</Text>}
         </View>
-        <Text style={[st.body, !sow && st.bodyEmpty]}>
-          {sow || t('draft.notWrittenUp')}
+        <Text style={[st.body, !p.scopeWritten && st.bodyEmpty]}>
+          {p.scopeWritten ? sow : t('draft.notWrittenUp')}
         </Text>
       </Pressable>
 

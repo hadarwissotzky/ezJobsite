@@ -162,7 +162,11 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
           <View style={{ marginTop: 18 }}>
             <SendPreview
               amount={p.rec.amount}
-              nte={p.priceMode === 'nte' ? p.rec.nte : null}
+              priced={p.rec.priced}
+              nte={p.rec.nte}
+              isNte={p.priceMode === 'nte'}
+              // ONE answer to "is there a scope", shared with the banner above it.
+              scopeWritten={scopeWritten}
               scopeOfWork={p.rec.scopeOfWork}
               lines={p.rec.costLines}
               photos={p.rec.photos}

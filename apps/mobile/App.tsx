@@ -6354,6 +6354,10 @@ const checkClientMessages = async () => {
     // and showing the last walk's street under "Pre-filled with" would be a promise
     // about the wrong address.
     setHereAddr(undefined); hereAddrKey.current = null;
+    // A FRESH VISIT STARTS COLLAPSED (review, 2026-09-03). `showAllJobs` was only ever
+    // set true, so "for the rest of the visit" was really "for the rest of the process":
+    // one tap on See all, weeks ago, and every later capture opened onto the full wall.
+    setShowAllJobs(false);
     setAssign({
       ready: commit,
       lat: a.stamp.lat, lng: a.stamp.lng,
@@ -8083,7 +8087,29 @@ const checkClientMessages = async () => {
    */
   React.useEffect(() => {
     if (!flowHold) return;
-    if (assign || clientPick || transition || review || record) { setFlowHold(null); return; }
+    /**
+     * THE DESTINATION, NOT ANY SCREEN (review, 2026-09-03: "flowHold is cleared before
+     * it can ever cover a gap; FlowHoldScreen is effectively dead").
+     *
+     * This read `assign || clientPick || transition || …` — any flow screen at all. But
+     * both call sites raise the hold while the OUTGOING screen is still mounted, on
+     * purpose: that is what stops step 2 and step 4 blinking out early. So the effect
+     * fired on the very next commit, saw the screen being LEFT, and dropped the hold
+     * before it had covered anything.
+     *
+     * The corridor then never rendered, and the gap it exists for — `setTransition(null)`
+     * to `setRecord`, one local read wide — showed HOME. Which is exactly what hadar
+     * reported twice, and I attributed to a stale bundle. It was not stale; the fix was
+     * inert.
+     *
+     * A hold is a journey to a NAMED step, so only that step's screen ends it.
+     */
+    const arrived =
+      (flowHold === 2 && !!assign) ||
+      (flowHold === 3 && !!clientPick) ||
+      (flowHold === 4 && !!transition) ||
+      (flowHold === 5 && !!record);
+    if (arrived) { setFlowHold(null); return; }
     const id = setTimeout(() => setFlowHold(null), 2500);
     return () => clearTimeout(id);
   }, [flowHold, assign, clientPick, transition, review, record]);
@@ -8436,6 +8462,7 @@ const checkClientMessages = async () => {
                   const ids = t.ids, coId = t.coId, anchor = t.anchorCaptureId;
                   setTransition(null);
                   setHereAddr(undefined); hereAddrKey.current = null;
+                  setShowAllJobs(false);
                   setAssign({ ids, lat: null, lng: null, uris: [], secs: 0,
                               anchorCoId: coId, anchorCaptureId: anchor });
                 }}>
@@ -8543,6 +8570,9 @@ const checkClientMessages = async () => {
         .then((a) => setHereAddr(a)).catch(() => setHereAddr(null));
     }
     const q = assignQ.trim().toLowerCase();
+    // A query means he is HUNTING for one location, not browsing recent ones. Several
+    // things below read differently in that mode — the cap, the heading, the hero.
+    const searching = q.length > 0;
     const matches = (p: { name: string; address: string | null }) =>
       !q || p.name.toLowerCase().includes(q) || (p.address ?? '').toLowerCase().includes(q);
     const candidates = projects
@@ -8733,8 +8763,10 @@ const checkClientMessages = async () => {
               else is a screen that can lose his place. */}
           {!!others.length && (
             <View style={s.jpRecentHead}>
-              <Text style={s.jpRecentH}>{T('jobpick.recent')}</Text>
-              {others.length > RECENT_CAP && !showAllJobs && (
+              <Text style={s.jpRecentH}>
+                {searching ? T('jobpick.matches') : T('jobpick.recent')}
+              </Text>
+              {searching ? null : others.length > RECENT_CAP && !showAllJobs && (
                 <Pressable onPress={() => setShowAllJobs(true)} accessibilityRole="button"
                   hitSlop={12} style={s.jpSeeAll}>
                   <Text style={s.jpSeeAllT}>{T('job.seeAll')}</Text>
@@ -8743,7 +8775,13 @@ const checkClientMessages = async () => {
               )}
             </View>
           )}
-          {(showAllJobs ? others : others.slice(0, RECENT_CAP)).map((p) => jobRow(p))}
+          {/* SEARCH RESULTS ARE NEVER CAPPED (review, 2026-09-03).
+              The cap exists so a long recent list does not wall off "add a location" and
+              the way out. A QUERY is the opposite situation: he has already told the app
+              what he is looking for, and hiding the 4th match behind "See all" on the
+              screen he reached BECAUSE the list was too long to scan is the same defect
+              the cap was meant to fix, pointed the other way. */}
+          {(searching || showAllJobs ? others : others.slice(0, RECENT_CAP)).map((p) => jobRow(p))}
 
           {/* DASHED because it MAKES a thing rather than choosing one. Below the list
               now (the artboard, 2026-08-25): it used to sit above every job, which put
