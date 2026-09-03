@@ -152,7 +152,13 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
             hadar, 2026-09-03: "the breakdown is not by labor and materials but more
             reflecting the different line items we have" — so the breakdown is
             `rec.costLines`, parsed once in record.ts, never two buckets. */}
-        {scopeWritten && (
+        {/* RENDERED EVEN WHEN THE SCOPE IS MISSING. It used to be gated on
+            `scopeWritten`, which was fine while a separate card carried the empty case
+            — but that card is gone, and gating it now would leave a man with nothing to
+            tap on the one screen where he needs to write the thing. The preview shows
+            the document as it stands, missing scope included; that IS the state, and
+            hiding it would not change it. */}
+        {(
           <View style={{ marginTop: 18 }}>
             <SendPreview
               amount={p.rec.amount}
@@ -164,31 +170,28 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
               scheduleEffect={p.scheduleEffect}
               scheduleDays={p.scheduleDays}
               onPhoto={p.onPressPhoto}
+              onEditScope={p.onEditDescription}
             />
           </View>
         )}
 
-        {/* The scope card stays for the UNWRITTEN case, and only that case: it is the
-            one state SendPreview cannot render, because there is no document yet. */}
-        <Card style={{ marginTop: scopeWritten ? 0 : 18 }}>
-          <Text style={st.cardLabel}>{t('draft.ckDescription')}</Text>
-          {!scopeWritten && (
-            <Text style={st.scope}>{t('draft.notWrittenUp')}</Text>
-          )}
-          {/* THE TWO WAYS THIS PRODUCT TAKES INPUT, offered where the words are. The mic
-              is not decoration: gloves on a ladder cannot type, and talking being the
-              fast path is the whole premise (mandate #3). */}
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-            <View style={{ flex: 1 }}>
-              <Button label={t('draft.editText')} icon="edit" variant="secondary"
-                onPress={p.onEditDescription} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Button label={t('draft.recordChange')} icon="microphone" variant="secondary"
-                onPress={p.onAddPhotos} />
-            </View>
-          </View>
-        </Card>
+        {/* THE DESCRIPTION CARD IS GONE (hadar, 2026-09-03: "remove edit description
+            and record change from the review stage — the description section should not
+            be there. the user should be able to edit the scope of work not the
+            description at this point").
+
+            It was one field said three ways. The card was headed "Description"; its
+            "Edit text" button opened the SCOPE editor (`onOpenDetail('scope')`), so the
+            label and the control already disagreed; and the preview above printed the
+            same scope a third time. On the screen where that text becomes the binding
+            instrument, three spellings of one field is the drift this project keeps
+            paying for.
+
+            Nothing is lost. Editing moved INTO the preview, on the words themselves,
+            where the man is already reading them — including when there is no scope yet,
+            which is the state that most needs a way in. "Record change" is unchanged and
+            still in the footer, where every step of this sequence keeps its actions; it
+            was only ever duplicated here. */}
 
         {/* THE READ-BACK STAYS, even though the preview above now shows the price and
             the schedule. It is not a duplicate: the preview is the DOCUMENT and the
@@ -283,9 +286,6 @@ const st = StyleSheet.create({
   sub: { fontFamily: F.body, fontSize: 15.5, lineHeight: 21, color: C.steel, marginTop: 7 },
   cardLabel: { fontFamily: F.dispSemi, fontSize: 12, letterSpacing: 0.8, color: C.muted,
     textTransform: 'uppercase', marginBottom: 10 },
-  // 17pt and 24 line-height: this is the paragraph a client will read, and it is the one
-  // thing on the screen that must be comfortable rather than compact.
-  scope: { fontFamily: F.body, fontSize: 17, lineHeight: 24, color: C.ink },
   // `caution` from the tint table, not an amber mixed here: "A screen never mixes its
   // own amber" (theme.ts). Peach and a hairline, which is what "say it again" looks
   // like — this is not a failure to be afraid of. The recording is saved.

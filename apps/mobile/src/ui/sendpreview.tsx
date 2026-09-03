@@ -26,7 +26,7 @@
  * `scope_of_work`, `exclusions`, and the schedule effect.
  */
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { t } from '../i18n';
 import { CostBreakdown, MoneyBlock, PhotoGrid } from './kit';
 import { Icon } from './icon';
@@ -48,6 +48,11 @@ export function SendPreview(p: {
   scheduleEffect: string | null;
   scheduleDays: number | null;
   onPhoto?: (uri: string) => void;
+  /**
+   * Opens the SCOPE editor — `onOpenDetail('scope')`, which is what the review screen's
+   * "Edit text" button already called despite being labelled for the description.
+   */
+  onEditScope?: () => void;
 }) {
   const lines = p.lines;
 
@@ -96,12 +101,34 @@ export function SendPreview(p: {
         </View>
       )}
 
-      {!!sow && (
-        <View style={st.sec}>
-          <Text style={st.secH}>{t('draft.ckDescription')}</Text>
-          <Text style={st.body}>{sow}</Text>
+      {/* ── THE SCOPE OF WORK, EDITED IN PLACE ─────────────────────────────────
+          hadar, 2026-09-03: "remove edit description and record change from the review
+          stage — the description section should not be there. the user should be able
+          to edit the scope of work not the description at this point."
+
+          The old screen carried a card headed "Description" with an "Edit text" button
+          under it — and that button already opened the SCOPE editor. So the label said
+          one thing, the control did another, and both sat beside a preview that showed
+          the scope a third time. Three ways of saying one field, on the screen where
+          that field becomes the binding instrument.
+
+          One section now: the client-facing scope, headed as what it is, and the words
+          themselves are the control. It is never truncated and never behind an expand —
+          a scope you have to open to read is a scope nobody proofreads before sending.
+
+          It renders when the scope is MISSING too, because that is the state a man most
+          needs a way out of, and the way out is the same tap. */}
+      <Pressable onPress={p.onEditScope} disabled={!p.onEditScope}
+        accessibilityRole={p.onEditScope ? 'button' : undefined}
+        style={({ pressed }) => [st.sec, pressed && { opacity: 0.6 }]}>
+        <View style={st.secHRow}>
+          <Text style={st.secH}>{t('r5c.scopeHead')}</Text>
+          {!!p.onEditScope && <Text style={st.secEdit}>{t('r5c.editScope')}</Text>}
         </View>
-      )}
+        <Text style={[st.body, !sow && st.bodyEmpty]}>
+          {sow || t('draft.notWrittenUp')}
+        </Text>
+      </Pressable>
 
       {!!excl && (
         <View style={st.sec}>
@@ -132,6 +159,9 @@ const st = StyleSheet.create({
   eyebrowT: { fontFamily: F.dispSemi, fontSize: 12, letterSpacing: 1, color: C.brandDark,
     textTransform: 'uppercase' },
   sec: { marginTop: 14 },
+  secHRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  secEdit: { fontFamily: F.bodySemi, fontSize: 13, color: C.brandDark },
+  bodyEmpty: { color: C.steel, fontStyle: 'italic' },
   secH: { fontFamily: F.dispSemi, fontSize: 11.5, letterSpacing: 0.9, color: C.muted,
     textTransform: 'uppercase', marginBottom: 5 },
   body: { fontFamily: F.body, fontSize: 15.5, lineHeight: 22, color: C.ink },
