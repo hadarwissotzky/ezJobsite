@@ -4304,6 +4304,63 @@ const checkClientMessages = async () => {
   const [record, setRecord] = React.useState<ExtraRecord | null>(null);
 
   /**
+   * HOISTED TO THE HOOK REGION (hadar, 2026-09-03: "right after the log in -- the app
+   * crashes").
+   *
+   * This effect sat near the bottom of the component, immediately above the splash
+   * guard — which is NOT the first early return. `wiping`, `firstRun`, the terms gate,
+   * the picker, `newJob` and `scopeOpen` all return above it. So on any render that
+   * took one of those exits the hook did not run, and on the renders that fell through
+   * it did: the hook COUNT changed between renders, which React kills the app for.
+   *
+   * It never fired for a warm app that stays on one path. A fresh install walks
+   * splash -> first-run -> signed-in main tree in a few seconds, crossing exactly that
+   * boundary — which is why it landed the moment he logged in after reinstalling.
+   *
+   * Hooks live with the state they read. It is here, above every return, permanently.
+   */
+/**
+   * DROP THE HOLD THE MOMENT A REAL STEP IS UP, and drop it anyway after 2.5 seconds.
+   *
+   * The first half is the normal path: the next screen's state lands, this fires, the
+   * corridor is gone in the same commit.
+   *
+   * The second half is the one that matters. A hand-off that throws between clearing the
+   * old state and setting the new one would otherwise leave a man looking at a rail and a
+   * spinner with no way out — worse than the flash this replaces, because a flash ends.
+   * The backstop means the failure mode of this whole mechanism is "you see Home a beat
+   * later than you should", which is exactly where we started.
+   */
+  React.useEffect(() => {
+    if (!flowHold) return;
+    /**
+     * THE DESTINATION, NOT ANY SCREEN (review, 2026-09-03: "flowHold is cleared before
+     * it can ever cover a gap; FlowHoldScreen is effectively dead").
+     *
+     * This read `assign || clientPick || transition || …` — any flow screen at all. But
+     * both call sites raise the hold while the OUTGOING screen is still mounted, on
+     * purpose: that is what stops step 2 and step 4 blinking out early. So the effect
+     * fired on the very next commit, saw the screen being LEFT, and dropped the hold
+     * before it had covered anything.
+     *
+     * The corridor then never rendered, and the gap it exists for — `setTransition(null)`
+     * to `setRecord`, one local read wide — showed HOME. Which is exactly what hadar
+     * reported twice, and I attributed to a stale bundle. It was not stale; the fix was
+     * inert.
+     *
+     * A hold is a journey to a NAMED step, so only that step's screen ends it.
+     */
+    const arrived =
+      (flowHold === 2 && !!assign) ||
+      (flowHold === 3 && !!clientPick) ||
+      (flowHold === 4 && !!transition) ||
+      (flowHold === 5 && !!record);
+    if (arrived) { setFlowHold(null); return; }
+    const id = setTimeout(() => setFlowHold(null), 2500);
+    return () => clearTimeout(id);
+  }, [flowHold, assign, clientPick, transition, review, record]);
+
+  /**
    * THE HAND-OFF INTO STEP 5.
    *
    * Steps 3 and 4 are the app's OWN recorder and job sheet — the guided flow does not
@@ -8234,46 +8291,6 @@ const checkClientMessages = async () => {
   // database opens and the durability profile is asserted.
   // Fonts gate with the durability gate: never flash unstyled text, never flash the
   // capture screen before the database is up.
-/**
-   * DROP THE HOLD THE MOMENT A REAL STEP IS UP, and drop it anyway after 2.5 seconds.
-   *
-   * The first half is the normal path: the next screen's state lands, this fires, the
-   * corridor is gone in the same commit.
-   *
-   * The second half is the one that matters. A hand-off that throws between clearing the
-   * old state and setting the new one would otherwise leave a man looking at a rail and a
-   * spinner with no way out — worse than the flash this replaces, because a flash ends.
-   * The backstop means the failure mode of this whole mechanism is "you see Home a beat
-   * later than you should", which is exactly where we started.
-   */
-  React.useEffect(() => {
-    if (!flowHold) return;
-    /**
-     * THE DESTINATION, NOT ANY SCREEN (review, 2026-09-03: "flowHold is cleared before
-     * it can ever cover a gap; FlowHoldScreen is effectively dead").
-     *
-     * This read `assign || clientPick || transition || …` — any flow screen at all. But
-     * both call sites raise the hold while the OUTGOING screen is still mounted, on
-     * purpose: that is what stops step 2 and step 4 blinking out early. So the effect
-     * fired on the very next commit, saw the screen being LEFT, and dropped the hold
-     * before it had covered anything.
-     *
-     * The corridor then never rendered, and the gap it exists for — `setTransition(null)`
-     * to `setRecord`, one local read wide — showed HOME. Which is exactly what hadar
-     * reported twice, and I attributed to a stale bundle. It was not stale; the fix was
-     * inert.
-     *
-     * A hold is a journey to a NAMED step, so only that step's screen ends it.
-     */
-    const arrived =
-      (flowHold === 2 && !!assign) ||
-      (flowHold === 3 && !!clientPick) ||
-      (flowHold === 4 && !!transition) ||
-      (flowHold === 5 && !!record);
-    if (arrived) { setFlowHold(null); return; }
-    const id = setTimeout(() => setFlowHold(null), 2500);
-    return () => clearTimeout(id);
-  }, [flowHold, assign, clientPick, transition, review, record]);
 
   if (!ready || !fontsLoaded) return <SplashScreen />;
 
