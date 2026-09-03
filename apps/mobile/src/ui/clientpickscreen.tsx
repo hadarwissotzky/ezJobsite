@@ -57,14 +57,20 @@ export type ClientChoice = { id: string; name: string; role?: string; phone?: st
  * screen print, so a man reads "Property owner" in one place and "Property owner" in the
  * other — two spellings of one fact is the drift this codebase keeps paying for.
  *
- * The contractor's own row gets "/ You" appended, because on his own roster his name is
- * the one entry that is not a counterparty and he should not have to work that out.
+ * IT NO LONGER SAYS "/ YOU" (review, 2026-09-02). The artboard shows "Contractor / You"
+ * under hadar's own name, and I implemented that as `role === 'general_contractor'` —
+ * which is not an identity check, it is a guess that happens to be right on his device.
+ * A sub's roster contains the GC he subs for, and the `known` list exists PRECISELY to
+ * surface that person (App.tsx:2313 names them). So the screen that decides who receives
+ * a priced document was labelling a third party "You".
+ *
+ * Nothing here knows who the signed-in user is; no profile is plumbed to this screen.
+ * The honest move is to print the role and stop, rather than assert an identity from a
+ * role name. When a real identity is available the suffix can come back with a real
+ * check behind it — `clientpick.you` is kept for that day.
  */
 function roleLine(role: string): string {
-  const label = t(`role.${role}` as any);
-  return role === 'general_contractor'
-    ? t({ k: 'clientpick.you', p: { role: label } } as any)
-    : label;
+  return t(`role.${role}` as any);
 }
 
 function tileFor(role?: string): { bg: string; fg: string; icon: 'acUser' | 'acHardhat' } {

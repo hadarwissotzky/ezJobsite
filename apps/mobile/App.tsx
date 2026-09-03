@@ -118,7 +118,7 @@ import { FullHistory, PhotosAndProof,
 import type { ExtraDetailField } from './src/ui/extranegotiation';
 // REQ-LC10..13 — the CONTENT half of the send gate. Orthogonal to canSendExtra
 // (the pipeline half): both must pass and they fail for different reasons.
-import { sendReadiness, UNTITLED_SCOPE } from './src/sendreadiness';
+import { sendReadiness, hasWrittenScope, UNTITLED_SCOPE } from './src/sendreadiness';
 import { mergeTimeline, openCount, type MergedEvent } from './src/eventtimeline';
 import { SettingsScreen } from './src/ui/settingsscreen';
 import { extraState, extraBucket, isClosed } from './src/extrabucket';
@@ -3911,10 +3911,19 @@ const checkClientMessages = async () => {
               void (async () => {
                 let wrote = false;
                 try {
-                  const row = (await db.getAll<{ s: string | null }>(
-                    `SELECT scope_of_work AS s FROM change_order WHERE id = ?`, [h.coId]))[0];
-                  const scope = (row?.s ?? '').trim();
-                  wrote = scope.length > 0 && scope !== UNTITLED_SCOPE;
+                  const row = (await db.getAll<{ s: string | null; t: string | null }>(
+                    `SELECT scope_of_work AS s, scope AS t FROM change_order WHERE id = ?`,
+                    [h.coId]))[0];
+                  /**
+                   * `hasWrittenScope`, NOT a rule spelled out again here (review,
+                   * 2026-09-02). This asked its own question — non-empty and not the
+                   * placeholder — while the review screen asked `no_description`, which
+                   * also falls back to the title and demands 40 characters. So a
+                   * twenty-character scope got a green "we wrote up what you said" over
+                   * a screen saying we heard nothing, and a null scope with a long title
+                   * got the reverse plus an empty card. One function decides now.
+                   */
+                  wrote = hasWrittenScope(row?.s, row?.t);
                 } catch { wrote = true; /* cannot tell — do not accuse the pipeline */ }
 
                 /**
@@ -3941,8 +3950,23 @@ const checkClientMessages = async () => {
                  * describing a journey he never started.
                  */
                 setFlowRecordId(h.coId);
-                await openRecord(h.coId);
-                if (!alive) return;
+                /**
+                 * DISPATCHED, NOT AWAITED (review, 2026-09-02).
+                 *
+                 * The bug being fixed was that navigation hung off the ack's `then`, so
+                 * it happened only when he tapped OK and the backdrop was HOME for the
+                 * whole time the message was up. Dispatching it BEFORE the ack fixes
+                 * that completely.
+                 *
+                 * Awaiting it does not fix it better — it introduces a worse bug.
+                 * `openRecord` puts the screen up from a local read and THEN makes three
+                 * network calls (`withEventLog`, `narrationForExtra`, the server ask).
+                 * Awaiting the whole function means that on weak signal — the condition
+                 * mandate #7 says to assume — he lands on the record and is told nothing
+                 * at all until those time out. An acknowledgement gated on connectivity
+                 * is the exact thing that mandate forbids.
+                 */
+                void openRecord(h.coId);
 
                 setAck({
                   /**
@@ -7979,15 +8003,23 @@ const checkClientMessages = async () => {
          * the row he taps stays where it is and a new one is written here. That is the
          * same thing typing their name would do — this only spares him the typing.
          *
-         * THEIR ROLE COMES WITH THEM. `saveClientApprover` defaults to the client role,
-         * and letting that default apply would silently turn the GC he subs for into
-         * this job's owner — the exact relabelling `listRoster` refuses when it drops
-         * rows with unknown roles. The role he already has on record is the one fact
-         * here that must not be invented.
+         * THEIR ROLE COMES WITH THEM ON THE INSERT. `saveClientApprover` defaults to the
+         * client role, and letting that default apply would silently turn the GC he subs
+         * for into this job's owner — the exact relabelling `listRoster` refuses when it
+         * drops rows with unknown roles.
          *
-         * The phone rides along too, so an approval text can actually reach them; a
-         * copied client with no number is one the send sheet will refuse later, and the
-         * number is already known.
+         * ON A NAME COLLISION IT DOES NOT, and that is correct rather than a gap
+         * (review, 2026-09-02): `saveClientApprover`'s existing-row branch updates name,
+         * phone and chain side only. If someone by this name is already on this project,
+         * rewriting their role from another project's record is the same silent
+         * relabelling — so the row keeps the role it has. The claim is scoped to the
+         * insert because that is where it is true.
+         *
+         * The phone rides along so the number is on record. It does NOT make them
+         * sendable: `consentAtMs` is a separate fact ("null = never stated, and a client
+         * send is refused until it is", approvers.ts:132), it is deliberately not copied
+         * — consent given on one job is not consent given on another — and the send
+         * sheet still asks. Carrying the number saves the typing, nothing more.
          */
         onPickKnown={async (c) => {
           setClientPick({ ...cp, busy: true });

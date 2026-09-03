@@ -127,6 +127,30 @@ export const UNTITLED_SCOPE = 'Untitled extra — still being written up';
  */
 export const MIN_SCOPE_OF_WORK_CHARS = 40;
 
+/**
+ * IS THERE A REAL SCOPE OF WORK ON THIS EXTRA — the ONE definition.
+ *
+ * Split out 2026-09-02 after a review found two of them contradicting each other on
+ * one screen. The processing hand-off asked its own question — raw `scope_of_work`
+ * non-empty and not the placeholder — while the review screen asked this one, via the
+ * `no_description` blocker. They disagree in both directions:
+ *
+ *   · a 20-character AI scope → the popup says "we wrote up what you said" with a green
+ *     tick, over a review screen whose subtitle says we couldn't hear enough;
+ *   · `scope_of_work` null but a long title → the popup says nothing was heard while the
+ *     review screen believes there is a scope, and renders an EMPTY card.
+ *
+ * Two spellings of one fact drifting apart is the failure CLAUDE.md names as this
+ * project's recurring defect, and here it was deciding what a contractor is told about
+ * whether his words survived. One function, both callers.
+ */
+export function hasWrittenScope(
+  scopeOfWork: string | null | undefined, scope?: string | null
+): boolean {
+  const sow = (scopeOfWork ?? scope ?? '').trim();
+  return !!sow && sow !== UNTITLED_SCOPE && sow.length >= MIN_SCOPE_OF_WORK_CHARS;
+}
+
 export function sendReadiness(x: {
   kind: 'extra' | 'decision' | 'ewa';
   scope: string;
@@ -154,8 +178,7 @@ export function sendReadiness(x: {
   // "Fix the wall" and accepts a short but real sentence, because this gate must not
   // become a word-count argument with a contractor on a ladder. The banner names what
   // is missing; it does not grade prose.
-  const sow = (x.scopeOfWork ?? x.scope ?? '').trim();
-  if (!sow || sow === UNTITLED_SCOPE || sow.length < MIN_SCOPE_OF_WORK_CHARS) {
+  if (!hasWrittenScope(x.scopeOfWork, x.scope)) {
     blockers.push('no_description');
   }
 

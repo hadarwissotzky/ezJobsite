@@ -21,6 +21,7 @@ import {
   sendReadiness, sendGate, blockerKey, recommendationKey, UNTITLED_SCOPE, RECOMMENDED,
   MIN_SCOPE_OF_WORK_CHARS,
   type SendRecommendation,
+  hasWrittenScope,
 } from './sendreadiness.ts';
 
 /**
@@ -309,4 +310,34 @@ test('a complete extra whose photos are still in the outbox is refused on the pi
 
 test('both clear: complete content over processed evidence', () => {
   assert.deepEqual(sendGate(sendReadiness(full), 'processed'), { ok: true });
+});
+
+
+/**
+ * THE ONE SCOPE PREDICATE — added 2026-09-02 after a review found the processing
+ * hand-off and the review screen asking this question two different ways and
+ * contradicting each other on one screen. These cases are the exact disagreements:
+ * the popup and the rail must never say opposite things about whether his words
+ * survived.
+ */
+test('hasWrittenScope is the single answer both screens read', () => {
+  const long = 'Replaced the rotted subfloor under the tub and reset the tile.';
+  assert.equal(long.length >= MIN_SCOPE_OF_WORK_CHARS, true);
+
+  // The disagreement that showed a green tick over "we couldn't hear enough":
+  // short but non-empty passed the hand-off's old rule and failed the blocker's.
+  assert.equal(hasWrittenScope('Fix the wall'), false);
+  assert.equal(hasWrittenScope(long), true);
+
+  // The reverse: no scope_of_work but a real title. The hand-off said "nothing
+  // heard" while the review screen believed there was a scope and drew an empty card.
+  assert.equal(hasWrittenScope(null, long), true);
+  assert.equal(hasWrittenScope(null, null), false);
+
+  // The placeholder is not a scope, whichever column it arrives in.
+  assert.equal(hasWrittenScope(UNTITLED_SCOPE), false);
+  assert.equal(hasWrittenScope(null, UNTITLED_SCOPE), false);
+
+  // Whitespace is not writing.
+  assert.equal(hasWrittenScope('   '), false);
 });
