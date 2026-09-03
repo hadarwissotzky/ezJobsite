@@ -1832,6 +1832,9 @@ const EN: Record<string, string> = {
   // the reader is a homeowner, and an accounting word for the same idea makes the
   // one section built to answer "what am I paying for" sound like paperwork.
   'cost.breakdown': 'What it costs, by part',
+  'r5c.clientSees': 'Client will see this',
+  'r5c.previewPhotos': 'Photos',
+  'r5c.recipient': 'Goes to',
   'cost.total': 'Total',
   // The record's action bar (design prototype c5). Labels only — the flows they
   // open (remind, revise, send, share) each keep their own strings.
@@ -1902,8 +1905,8 @@ const EN: Record<string, string> = {
   'draft.recordChanges': 'Record changes',
   // Says it is not finished, unlike 'Cancel' — the draft is saved and waiting.
   'draft.closeForNow': 'Close for now',
-  'draft.reviewTitle': 'Review the write-up',
-  'draft.reviewSub': 'We pulled this from your recording. Edit anything that looks off.',
+  'draft.reviewTitle': 'Send to client',
+  'draft.reviewSub': 'Check the recipient and preview exactly what they will see.',
   'draft.nothingSentYet': 'Nothing is sent until you approve it.',
   // The read-back rows. Values, not ticks — mandate #6 wants the number proofread.
   'draft.vPriceType': 'Price type',
@@ -3816,6 +3819,9 @@ const ES: Record<string, string> = {
   'erec.kindDecision': 'Decisión',
   'erec.priceToCome': 'Todavía sin precio',
   'cost.breakdown': 'Lo que cuesta, por parte',
+  'r5c.clientSees': 'El cliente verá esto',
+  'r5c.previewPhotos': 'Fotos',
+  'r5c.recipient': 'Se envía a',
   'cost.total': 'Total',
   'erec.send': 'Enviar para aprobación',
   'erec.process': 'Subir y procesar',
@@ -3872,8 +3878,8 @@ const ES: Record<string, string> = {
   'draft.recordChange': 'Grabar cambio',
   'draft.recordChanges': 'Grabar cambios',
   'draft.closeForNow': 'Cerrar por ahora',
-  'draft.reviewTitle': 'Revise la redacción',
-  'draft.reviewSub': 'Esto lo sacamos de su grabación. Edite lo que no cuadre.',
+  'draft.reviewTitle': 'Enviar al cliente',
+  'draft.reviewSub': 'Revise el destinatario y vea exactamente lo que él verá.',
   'draft.nothingSentYet': 'Nada se envía hasta que usted lo apruebe.',
   'draft.vPriceType': 'Tipo de precio',
   'draft.vNte': 'No pasa de',

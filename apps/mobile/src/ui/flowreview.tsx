@@ -30,6 +30,7 @@ import { sendGate } from '../sendreadiness';
 import { Button, Card, ChecklistRow } from './kit';
 import { Icon } from './icon';
 import { FlowRail } from './flowrail';
+import { SendPreview } from './sendpreview';
 import { C, F } from './theme';
 import { touchTargets } from './tokens';
 import type { ExtraDraftProps } from './extradraft';
@@ -110,14 +111,70 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
           </View>
         )}
 
-        {/* SCOPE OF WORK — the words themselves, never truncated and never behind a tap.
-            A scope you have to expand to read is a scope nobody proofreads before it
-            goes to a client. */}
-        <Card style={{ marginTop: 18 }}>
+        {/* ── WHO IT GOES TO ──────────────────────────────────────────────────────
+            hadar's artboard, 2026-09-03, put the recipient at the TOP of this screen,
+            and that is the correction. Step 3 asked who this was for; four screens
+            later, on the one where a priced document becomes real, this screen never
+            said the answer back. "Send" with no name above it is a button asking for
+            trust it has not earned.
+
+            It shows the name and the role and nothing else, because that is what the
+            record holds. The artboard also draws an email and a phone; those are not
+            on this screen's props, and printing a channel we have not verified next to
+            "Send" would tell him a text is going somewhere it may not. The pencil opens
+            the client drawer, where the real contact details live and can be fixed. */}
+        {!!p.requestedBy && (
+          <Pressable onPress={p.onEditClient ?? p.onEditDetails}
+            accessibilityRole="button"
+            style={({ pressed }) => [st.who, pressed && { opacity: 0.65 }]}>
+            <View style={st.avatar}>
+              <Text style={st.avatarT}>{initials(p.requestedBy)}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={st.whoLabel}>{t('r5c.recipient')}</Text>
+              <Text style={st.whoName} numberOfLines={1}>{p.requestedBy}</Text>
+              {!!p.clientTypeLabel && (
+                <Text style={st.whoRole} numberOfLines={1}>{p.clientTypeLabel}</Text>
+              )}
+            </View>
+            <Icon name="edit" size={19} />
+          </Pressable>
+        )}
+
+        {/* ── EXACTLY WHAT THE CLIENT WILL SEE ────────────────────────────────────
+            The price, the LINE ITEMS behind it, the photos, the scope, the exclusions
+            and the schedule effect — the document, on the screen where he decides to
+            send it. This screen used to show four read-back rows and a scope, so the
+            figure a client would be asked to approve was never actually displayed to
+            the contractor approving it. Mandate #2 does not say confirm the recipient;
+            it says anything carrying a PRICE takes a human confirmation.
+
+            hadar, 2026-09-03: "the breakdown is not by labor and materials but more
+            reflecting the different line items we have" — so the breakdown is
+            `rec.costLines`, parsed once in record.ts, never two buckets. */}
+        {scopeWritten && (
+          <View style={{ marginTop: 18 }}>
+            <SendPreview
+              amount={p.rec.amount}
+              nte={p.priceMode === 'nte' ? p.rec.nte : null}
+              scopeOfWork={p.rec.scopeOfWork}
+              lines={p.rec.costLines}
+              photos={p.rec.photos}
+              exclusions={p.exclusions}
+              scheduleEffect={p.scheduleEffect}
+              scheduleDays={p.scheduleDays}
+              onPhoto={p.onPressPhoto}
+            />
+          </View>
+        )}
+
+        {/* The scope card stays for the UNWRITTEN case, and only that case: it is the
+            one state SendPreview cannot render, because there is no document yet. */}
+        <Card style={{ marginTop: scopeWritten ? 0 : 18 }}>
           <Text style={st.cardLabel}>{t('draft.ckDescription')}</Text>
-          <Text style={st.scope}>
-            {scopeWritten ? p.rec.scopeOfWork : t('draft.notWrittenUp')}
-          </Text>
+          {!scopeWritten && (
+            <Text style={st.scope}>{t('draft.notWrittenUp')}</Text>
+          )}
           {/* THE TWO WAYS THIS PRODUCT TAKES INPUT, offered where the words are. The mic
               is not decoration: gloves on a ladder cannot type, and talking being the
               fast path is the whole premise (mandate #3). */}
@@ -133,6 +190,11 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
           </View>
         </Card>
 
+        {/* THE READ-BACK STAYS, even though the preview above now shows the price and
+            the schedule. It is not a duplicate: the preview is the DOCUMENT and the
+            checklist is where a wrong number gets fixed. Mandate #6 asks for read-back
+            plus on-screen tap-to-correct on exactly these fields, and the artboard —
+            which offers no way to change a figure at all — cannot override that. */}
         <Card style={{ marginTop: 14 }}>
           <Text style={st.cardLabel}>{t('draft.extracted')}</Text>
           <View style={{ marginTop: 2 }}>
@@ -192,6 +254,18 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
   );
 }
 
+/**
+ * Up to two initials for the avatar. Purely decorative — the name is printed beside it,
+ * so a name this cannot reduce (one word, a symbol) costs nothing.
+ */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '';
+  const first = parts[0][0] ?? '';
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? '' : '';
+  return (first + last).toUpperCase();
+}
+
 /** Why Send is refused, in the language of whichever gate refused it. */
 function refusalLine(p: ExtraDraftProps, gate: ReturnType<typeof sendGate>): string | undefined {
   if (gate.ok) return undefined;
@@ -219,6 +293,16 @@ const st = StyleSheet.create({
     paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12,
     backgroundColor: '#FFF3EA', borderWidth: 1, borderColor: '#FFD9C2' },
   heardT: { flex: 1, fontFamily: F.bodySemi, fontSize: 14.5, lineHeight: 20, color: '#7A3A12' },
+  who: { flexDirection: 'row', alignItems: 'center', gap: 13, marginTop: 18,
+    backgroundColor: C.card, borderWidth: 1, borderColor: C.line, borderRadius: 14,
+    paddingHorizontal: 15, paddingVertical: 14, minHeight: 82 },
+  avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: C.brandSoft,
+    alignItems: 'center', justifyContent: 'center' },
+  avatarT: { fontFamily: F.bodyBold, fontSize: 18, color: C.brandDark },
+  whoLabel: { fontFamily: F.dispSemi, fontSize: 11, letterSpacing: 0.9, color: C.muted,
+    textTransform: 'uppercase' },
+  whoName: { fontFamily: F.bodyBold, fontSize: 19, color: C.ink, marginTop: 2 },
+  whoRole: { fontFamily: F.body, fontSize: 14.5, color: C.steel, marginTop: 1 },
   assure: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 18,
     paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12, backgroundColor: C.brandSoft },
   assureT: { flex: 1, fontFamily: F.body, fontSize: 14.5, color: C.ink, lineHeight: 19 },
