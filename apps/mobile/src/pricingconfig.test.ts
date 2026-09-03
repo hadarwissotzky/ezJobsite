@@ -24,7 +24,7 @@ const base: PricingConfig = {
     { id: 'credits_50', credits: 50, web: 14900, iap: 19499 },
   ],
   subs: [
-    { id: 'core', monthly: 2400, annual: 22900, seats: 3, creditsPerMonth: null },
+    { id: 'core', monthly: 2900, annual: 22900, seats: 3, creditsPerMonth: null },
   ],
   linkoutEnabled: true,
   iapEnabled: true,

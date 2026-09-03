@@ -78,8 +78,14 @@ test('annual is cheaper per month than monthly on every paid tier', () => {
 });
 
 test('the advertised saving matches the actual prices', () => {
-  // Core 24 -> 19 is 20.8% -> 21%. Crew 59 -> 49 is 16.9% -> 17%.
-  assert.equal(annualSavingPct('core'), 21);
+  // Core 29 -> 19 is 34.5% -> 34%. Crew 59 -> 49 is 16.9% -> 17%.
+  //
+  // CORE'S DISCOUNT WIDENED FROM 21% TO 34% (hadar, 2026-09-03: "change the program
+  // plan to CORE cost to 29 from 24"). The monthly moved and the annual did not, so the
+  // gap between them grew — the paywall now advertises a third off for paying yearly.
+  // That is arithmetic, not a decision, and this line is where anyone changing one of
+  // the two numbers is forced to look at the other.
+  assert.equal(annualSavingPct('core'), 34);
   assert.equal(annualSavingPct('crew'), 17);
   for (const plan of PAID_TIERS) {
     const m = priceFor(plan, 'monthly')!;
@@ -227,12 +233,12 @@ test('the advertised annual saving is one a reader can actually buy', () => {
   // OFFERED tiers, never across the hidden ones.
   //
   // It matters even though it changes nothing today: Core happens to carry the better
-  // rate (21% vs Crew's 17%), so a version computing over every tier would look correct
+  // rate (34% vs Crew's 17%), so a version computing over every tier would look correct
   // right up until the hidden tier had the bigger discount — and then it would advertise
   // a saving nothing on the screen could deliver (mandate #6).
   const bestOffered = offeredTiers('free')
     .reduce((b, p) => Math.max(b, annualSavingPct(p)), 0);
-  assert.equal(bestOffered, 21);
+  assert.equal(bestOffered, 34);
   assert.ok(bestOffered !== annualSavingPct('crew'),
     'this test is only meaningful while the two rates differ');
 });

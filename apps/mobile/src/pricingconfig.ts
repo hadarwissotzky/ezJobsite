@@ -123,7 +123,7 @@ const FALLBACK: Omit<PricingConfig, 'source'> = {
     { id: 'credits_50', credits: 50, web: 14900, iap: 14900 },
   ],
   subs: [
-    { id: 'core', monthly: 2400, annual: 22900, seats: 3,    creditsPerMonth: null },
+    { id: 'core', monthly: 2900, annual: 22900, seats: 3,    creditsPerMonth: null },
     { id: 'crew', monthly: 5900, annual: 58900, seats: null, creditsPerMonth: null },
   ],
   linkoutEnabled: true,

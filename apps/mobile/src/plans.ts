@@ -83,7 +83,7 @@ export const PLANS: Record<PlanId, Plan> = {
     },
   },
   core: {
-    id: 'core', name: 'Core', priceMonthly: 24, priceAnnualMonthly: 19, priceAnnualTotal: 229,
+    id: 'core', name: 'Core', priceMonthly: 29, priceAnnualMonthly: 19, priceAnnualTotal: 229,
     productIdMonthly: 'ezco_core_monthly', productIdAnnual: 'ezco_core_annual',
     limits: {
       jobs: UNLIMITED, decisionsPerJob: UNLIMITED,
