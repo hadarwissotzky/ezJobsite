@@ -29,3 +29,18 @@ export function personKey(name: string, phone: string | null): string {
   if (digits.length >= 7) return `p:${digits.slice(-10)}`;
   return `n:${name.trim().toLowerCase().replace(/\s+/g, ' ')}`;
 }
+
+/**
+ * The NAME half of `personKey`, on its own — case, surrounding and repeated whitespace
+ * flattened. Exported 2026-09-03 after a review found the client picker deduping with a
+ * plain `.trim().toLowerCase()` while `saveClientApprover` keyed with this rule.
+ *
+ * The mismatch was not cosmetic. A roster row "Sarah  Miller" (double space) did not
+ * filter out the known "Sarah Miller", so the card was offered; tapping it hit
+ * `saveClientApprover`'s EXISTING-ROW branch, which writes `chain_side = ?` with
+ * `o.chainSide ?? null` — silently erasing a recorded homeowner/GC position that the
+ * send path reads. Two spellings of "same name", one of them destructive.
+ */
+export function nameKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}

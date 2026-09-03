@@ -29,6 +29,7 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { t } from '../i18n';
+import { nameKey } from '../personkey';
 import { FlowRail } from './flowrail';
 import { Icon } from './icon';
 import { Button } from './kit';
@@ -136,11 +137,16 @@ export function ClientPickScreen(props: {
    * the screen offering to add somebody it is already showing above.
    */
   const here = React.useMemo(
-    () => new Set(props.roster.map((r) => r.name.trim().toLowerCase())),
+    // `nameKey`, THE SAME RULE THE WRITER USES (review, 2026-09-03). This filtered with
+    // a plain `.trim().toLowerCase()` while `saveClientApprover` keys with `nameKey`, so
+    // "Sarah  Miller" slipped through as a stranger and tapping her hit the writer's
+    // existing-row branch — which rewrites `chain_side` to null and erases a recorded
+    // homeowner/GC position the send path reads.
+    () => new Set(props.roster.map((r) => nameKey(r.name))),
     [props.roster]
   );
   const known = React.useMemo(
-    () => (props.known ?? []).filter((k) => !here.has(k.name.trim().toLowerCase())),
+    () => (props.known ?? []).filter((k) => !here.has(nameKey(k.name))),
     [props.known, here]
   );
 

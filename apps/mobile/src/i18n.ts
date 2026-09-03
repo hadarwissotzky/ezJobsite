@@ -1833,6 +1833,7 @@ const EN: Record<string, string> = {
   // one section built to answer "what am I paying for" sound like paperwork.
   'cost.breakdown': 'What it costs, by part',
   'r5c.clientSees': 'Client will see this',
+  'erec.nteNoCap': 'Not to exceed — no cap set yet',
   'r5c.scopeHead': 'Scope of work',
   'r5c.editScope': 'Tap to edit',
   'r5c.previewPhotos': 'Photos',
@@ -3823,6 +3824,7 @@ const ES: Record<string, string> = {
   'erec.priceToCome': 'Todavía sin precio',
   'cost.breakdown': 'Lo que cuesta, por parte',
   'r5c.clientSees': 'El cliente verá esto',
+  'erec.nteNoCap': 'Tope máximo — aún sin monto',
   'r5c.scopeHead': 'Alcance de trabajo',
   'r5c.editScope': 'Toque para editar',
   'r5c.previewPhotos': 'Fotos',

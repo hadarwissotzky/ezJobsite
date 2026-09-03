@@ -30,11 +30,11 @@
 import { AbstractPowerSyncDatabase } from '@powersync/react-native';
 // The cross-job identity rule lives in its own leaf so it can be unit-tested
 // (this module imports ./i18n, which the node test runner cannot resolve).
-import { personKey } from './personkey.ts';
+import { personKey, nameKey } from './personkey.ts';
 // The ONE definition of "the seed word, not a person". Shared with the reader in
 // App.tsx so the writer and the lookup cannot disagree about what "Owner" means.
 import { isNamedClient } from './startextra.ts';
-export { personKey };
+export { personKey, nameKey };
 // Same reason `personKey` is a leaf: the DDL is needed by tests that run under
 // `node --test`, which cannot resolve this module's own import graph. One definition,
 // re-exported, so nothing gets a hand-copied schema that can drift from the shipped one.
@@ -308,7 +308,7 @@ export async function saveClientApprover(
    * one definition of "is this a real name or the seed", shared with the reader.
    */
   if (!isNamedClient(name)) throw new Error('that is the placeholder, not a client name');
-  const key = name.toLowerCase().replace(/\s+/g, ' ');
+  const key = nameKey(name);
 
   const existing = await db.getAll<{ id: string; name: string }>(
     `SELECT id, name FROM project_approver WHERE project_id = ? AND status = 'active'`,

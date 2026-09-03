@@ -2327,11 +2327,19 @@ const fileWalkTo = async (a: NonNullable<typeof assign>, projId: string) => {
    * `a` was captured as an argument, so nothing below reads this state; holding it is
    * purely what keeps the screen on the glass.
    */
-  setFlowHold(3);
+  // ONLY WHEN THERE IS SOMEWHERE TO GO (review, 2026-09-03). With no anchor the
+  // fallback below runs `startProcessing()`, which returns immediately without setting
+  // any screen — so an unconditional hold left a rail and a spinner up for the full
+  // 2.5s backstop on a path that previously went straight home.
   setAssignQ(''); setFiled(null);
   setHereAddr(undefined); hereAddrKey.current = null;
   setProjectId(projId);
   const anchorCoId = done?.anchorCoId ?? a.anchorCoId;
+  // ONLY WHEN THERE IS SOMEWHERE TO GO (review, 2026-09-03). With no anchor the
+  // fallback below runs `startProcessing()`, which returns immediately without setting
+  // any screen — so an unconditional hold left a rail and a spinner up for the full
+  // 2.5s backstop on a path that previously went straight home.
+  if (anchorCoId) setFlowHold(3);
   const anchorCapId = done?.anchorCaptureId ?? a.anchorCaptureId ?? null;
   if (anchorCoId) {
     /**
@@ -4024,7 +4032,8 @@ const checkClientMessages = async () => {
                  * hold this is the LONGEST flash of Home in the whole sequence, and I
                  * lengthened it myself when I added the hydrate above.
                  */
-                setFlowHold(5);   // backstop only; step 4 above is what he actually sees
+                // (The hold is raised further down, immediately before the gap it
+                //  covers — see the note at `setTransition(null)`.)
                 /**
                  * PULL THE WRITE-UP DOWN BEFORE JUDGING IT (hadar, 2026-09-03: "I gave
                  * it a whole description of cabinet — it claims that it couldn't hear
@@ -4129,8 +4138,18 @@ const checkClientMessages = async () => {
                  * existed — telling him he is on step 5 of making one would be a rail
                  * describing a journey he never started.
                  */
-                // THE HANDOVER: step 4 comes down as step 5 goes up, one commit, nothing
-                // in between. `setTransition(null)` was deferred above for exactly this.
+                /**
+                 * THE HANDOVER: step 4 comes down as step 5 goes up, one commit, nothing
+                 * in between. `setTransition(null)` was deferred above for exactly this.
+                 *
+                 * AND THE HOLD IS RAISED HERE, not at the top of this block (review,
+                 * 2026-09-03). It used to be raised before the hydrate — which can take
+                 * the full 3 seconds — while the backstop that clears it is 2.5. On the
+                 * slow connection the comment tells you to assume, the corridor had
+                 * already expired by the time the gap opened, and Home flashed exactly
+                 * where the fix was supposed to be. A hold must start when the gap does.
+                 */
+                setFlowHold(5);
                 setTransition(null);
                 setFlowRecordId(h.coId);
                 /**
@@ -8278,6 +8297,7 @@ const checkClientMessages = async () => {
     const cp = clientPick;
     const finish = () => { setClientPick(null); cp.onDone(); };
     return (
+      <>
       <ClientPickScreen
         scope={coRowsRef.current.find((c) => c.id === cp.coId)?.scope ?? T('erec.untitled')}
         roster={cp.roster}
@@ -8352,6 +8372,14 @@ const checkClientMessages = async () => {
           finish();
         }}
       />
+      {/* AN ACK RAISED DURING THE FLOW WAS NEVER DRAWN (review, 2026-09-03).
+          `ackEl` first appears at the bottom of the render tree, and every flow branch
+          RETURNS before it — a hazard this codebase already documents at App.tsx:4561
+          ("an ack raised while signed out is never drawn"). So the rehome-failure
+          warning I added yesterday, the whole point of which was that the wrong-job
+          split must never again be silent, was itself silent. */}
+      {ackEl}
+      </>
     );
   }
 
@@ -8420,6 +8448,7 @@ const checkClientMessages = async () => {
     const RING = 148, SW = 12, RAD = (RING - SW) / 2, CIRC = 2 * Math.PI * RAD;
 
     return (
+      <>
       <View style={s.trScreen}>
         <ScrollView contentContainerStyle={s.trScroll} showsVerticalScrollIndicator={false}>
           {/* The mockup's background line-art (house frame, tape measure) is still
@@ -8634,6 +8663,9 @@ const checkClientMessages = async () => {
           </View>
         </ScrollView>
       </View>
+      {/* Same reason as step 3: `ackEl` lives past this return — see the note there. */}
+      {ackEl}
+      </>
     );
   }
 
@@ -8910,6 +8942,12 @@ const checkClientMessages = async () => {
               Nothing was lost from the product, only from this screen. If the choice
               ever does become hard to reverse, this comment is the trail back. */}
         </ScrollView>
+        {/* LAST, so it paints ON TOP — and present at all, which it was not (review,
+            2026-09-03). The rehome-failure warning is raised while THIS screen is still
+            mounted (see `fileWalkTo`), and `ackEl` does not appear in the tree until
+            long past this return. The one message whose whole job was to stop the
+            wrong-job split being silent was itself invisible. */}
+        {ackEl}
       </View>
     );
   }

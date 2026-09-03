@@ -99,14 +99,26 @@ export function SendPreview(p: {
       {/* NO PRICE IS A STATE, NOT A DASH. The same branch `extradraft`, `extralocked`
           and `extranegotiation` all take — this was the only MoneyBlock in the app
           that did not, and it was the one on the send screen.
-          The NTE label follows the VALUE, not the mode: an extra set to not-to-exceed
-          whose cap has not been typed would otherwise be labelled "Fixed price". */}
+
+          AND "FIXED PRICE" IS A CLAIM, so it is only made about a fixed price (review,
+          2026-09-03). My previous comment here said the label follows the VALUE and not
+          the mode — and then the code did the opposite of what it said: `isNte && nte`
+          fell through to "Fixed price" for a not-to-exceed extra whose cap had not been
+          typed. On the block headed "Client will see this", on the screen mandate #2
+          governs, that asserts a fixed commitment on a capped one.
+
+          Three states, not two. The mode decides which sentence; the cap decides only
+          whether the NTE sentence can name a number yet. Send is separately refused
+          while the cap is missing — but the refusal is not a licence to mislabel the
+          document in the meantime. */}
       {p.priced ? (
         <MoneyBlock
           amount={p.amount}
-          subtitle={p.isNte && p.nte
-            ? t({ k: 'erec.nte', p: { amount: p.nte } } as any)
-            : t('erec.fixed')}
+          subtitle={!p.isNte
+            ? t('erec.fixed')
+            : p.nte
+              ? t({ k: 'erec.nte', p: { amount: p.nte } } as any)
+              : t('erec.nteNoCap')}
         />
       ) : (
         <MoneyBlock amount={t('erec.priceToCome')} muted />

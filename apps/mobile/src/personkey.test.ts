@@ -15,7 +15,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 
-import { personKey } from './personkey.ts';
+import { personKey, nameKey } from './personkey.ts';
 
 test('a phone number identifies the person, whatever the name is typed as', () => {
   // One human entered on two jobs, typed differently each time. Same key.
@@ -58,4 +58,29 @@ test('numbers matching in the last 10 digits are one person across country prefi
   // The same US mobile written with and without +1. Storing E.164 makes this rare,
   // but contact-picker imports are not normalised and this is the common shape.
   assert.equal(personKey('Sarah', '+14155550147'), personKey('Sarah', '14155550147'));
+});
+
+
+/**
+ * `nameKey` is the rule BOTH the client picker and `saveClientApprover` must use. When
+ * they disagreed, a double-spaced name slipped past the picker's dedupe and tapping it
+ * hit the writer's existing-row branch, which rewrites `chain_side` to null — erasing a
+ * recorded homeowner/GC position that the send path reads. These cases are the ones the
+ * two spellings answered differently.
+ */
+test('nameKey flattens the whitespace a plain toLowerCase would not', () => {
+  assert.equal(nameKey('Sarah  Miller'), nameKey('Sarah Miller'));
+  assert.equal(nameKey('  Sarah Miller  '), nameKey('Sarah Miller'));
+  assert.equal(nameKey('SARAH MILLER'), nameKey('sarah miller'));
+  assert.equal(nameKey('Sarah\tMiller'), nameKey('Sarah Miller'));
+});
+
+test('nameKey still tells two different people apart', () => {
+  assert.notEqual(nameKey('Sarah Miller'), nameKey('Sarah Millar'));
+  assert.notEqual(nameKey('Sarah'), nameKey('Sarah M'));
+});
+
+test('nameKey agrees with the name half of personKey', () => {
+  // personKey falls back to the loosened name when there is no usable number.
+  assert.equal(personKey('Sarah  Miller', null), `n:${nameKey('Sarah  Miller')}`);
 });
