@@ -47,6 +47,7 @@ import { readRecordingBytes, requestMic, RecordingPresets, useAudioRecorder, use
 // R2 live view: words appear over the camera while he talks. An indicator, not
 // evidence — the recording stays owned by expo-audio; this only listens along.
 import { needsPermissionAsk, requestSpeechPermission, startLive, type LiveHandle } from '../ondevicestt';
+import { checkPhotos, checkRecording } from '../quota';
 import { FlowRail } from './flowrail';
 import { logDiag } from '../diaglog';
 import { signalFailed, signalShutter } from '../feedback';
@@ -135,8 +136,25 @@ type Shot = { uri: string; atMs: number; fromLibrary: boolean };
 const BAKE = Dimensions.get('window');
 
 export function FusedCapture({
-  projectName, onCapture, onClose, resolveLabel, db, ownerId, coachPrompts,
+  projectName, onCapture, onClose, resolveLabel, db, ownerId, coachPrompts, onQuota,
 }: {
+  /**
+   * A FREE-PLAN CAP WAS HIT — raise the upgrade modal and refuse the act.
+   *
+   * WHY IT IS A PROP (hadar, 2026-09-03: "it keeps letting me ... take more pictures
+   * although i am on the free plan and my quota is done"). `checkPhotos` and
+   * `checkRecording` have existed in `quota.ts` since the plans were written, compute
+   * correctly, and had ZERO call sites in every build ever shipped. The limits were
+   * declared in `plans.ts`, the modal and its copy existed for both kinds, and nothing
+   * ever asked. This screen is where the asking has to happen, and the modal lives in
+   * App.tsx — so the screen reports and App decides what to show.
+   *
+   * REFUSED BEFORE THE ACT, NEVER AFTER. Mandate #1 forbids destroying a capture that
+   * has been taken, so the gate sits in front of the shutter and in front of the record
+   * button. A photo already on the card is evidence; refusing it then would be the
+   * unforgivable failure wearing a billing excuse.
+   */
+  onQuota?: (kind: 'photos' | 'recordingMinutes', limit: number) => void;
   /**
    * THE FOUR PROMPTS, KEPT WITHIN REACH WHILE HE TALKS (hadar's storyboard step 3).
    *
@@ -428,6 +446,19 @@ export function FusedCapture({
       resolveLabel(fix)
         .then((r) => { if (live) setPlace(r.place); })
         .catch(() => { /* unresolved stays honest */ });
+      /**
+       * THE RECORDING CAP, ASKED BEFORE THE MIC OPENS (hadar, 2026-09-03).
+       * `checkRecording` measures minutes already banked against the plan's allowance —
+       * 30 on free. Asked before `prepareToRecordAsync` so nothing is ever captured and
+       * then refused, which mandate #1 forbids.
+       *
+       * The screen stays usable when it refuses: he can still type the change and add
+       * photos. A cap on the microphone is not a cap on the product.
+       */
+      try {
+        const q = await checkRecording(db);
+        if (!q.ok) { onQuota?.('recordingMinutes', q.limit); return; }
+      } catch { /* unreadable — let him record; see the shutter for why */ }
       if (await requestMic()) {
         try {
           await recorder.prepareToRecordAsync();
@@ -630,6 +661,20 @@ export function FusedCapture({
      */
     const cam = camRef.current;
     if (!cam) return;
+    /**
+     * THE PHOTO CAP, ASKED BEFORE THE SHUTTER (hadar, 2026-09-03). `checkPhotos` counts
+     * committed, undiscarded photos across every job; the free plan allows 30. Asked
+     * HERE and not in the commit, because a photo that has been taken is evidence and
+     * mandate #1 does not allow billing to destroy it.
+     *
+     * Fails OPEN: if the count cannot be read we take the picture. A quota is a
+     * business rule and a capture is the product — when the two cannot both be
+     * honoured, the capture wins.
+     */
+    try {
+      const q = await checkPhotos(db);
+      if (!q.ok) { onQuota?.('photos', q.limit); return; }
+    } catch { /* unreadable count — never let bookkeeping cost him the shot */ }
     try {
       const atMs = Date.now();
       /**

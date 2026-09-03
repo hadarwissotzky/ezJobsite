@@ -10916,6 +10916,20 @@ const checkClientMessages = async () => {
           ? COACH_PROMPTS.map((p) => ({ label: T(p.title) }))
           : undefined}
         projectName={projects.find((p) => p.id === projectId)?.name ?? 'EZChangeOrders'}
+        /**
+         * THE FREE-PLAN CAPS, FINALLY ASKED (hadar, 2026-09-03: "it keeps letting me
+         * ... take more pictures although i am on the free plan and my quota is done").
+         *
+         * `checkPhotos` and `checkRecording` have existed in `quota.ts` since the plans
+         * were written and had ZERO call sites in every build ever shipped — the limits
+         * were declared, the counters were correct, the modal and both its sentences
+         * existed, and nothing ever asked. This is the ask.
+         *
+         * The screen refuses the act and reports the kind; `quotaEl` is already wired to
+         * open the paywall from here, so hitting a cap lands on the plans rather than on
+         * a dead end.
+         */
+        onQuota={(kind, limit) => setQuota({ kind, limit })}
         onCapture={augId ? (a) => onAugmentCapture(augId, a) : onFusedCapture}
         onClose={() => { setShowCapture(false); setAugmentCoId(null); }}
         resolveLabel={resolveStampLabel}
