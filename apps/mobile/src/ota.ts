@@ -55,6 +55,34 @@ export const OUTBOX_TABLES = [
   'tag_outbox',
 ] as const;
 
+/**
+ * THE OUTBOXES WHOSE LOSS IS REAL — every one EXCEPT stt_outbox (2026-09-04).
+ *
+ * hadar's phone refused to hand over on "(stt_outbox 1)": one on-device transcript that
+ * never uploaded. But the cloud worker RE-TRANSCRIBES every recording from the audio,
+ * and the audio is an ordinary capture that rides `capture_outbox` — so a lost local
+ * transcript costs nothing a server pass does not rebuild. It is a HEAD START, not a
+ * record. Blocking a device handover on it is mandate #1 firing on the one row it does
+ * not apply to.
+ *
+ * The OTA gate still counts stt_outbox (a warm reload losing a transcript is worth a
+ * mention and costs nothing to keep). The HANDOVER — which ERASES — reads this narrower
+ * list, so it refuses only for work that cannot be rebuilt.
+ */
+export const LOSSY_OUTBOX_TABLES = OUTBOX_TABLES.filter((t) => t !== 'stt_outbox');
+
+/** Rows in outboxes whose loss is irreversible — the count a handover may refuse on. */
+export async function lossyPending(db: AbstractPowerSyncDatabase): Promise<number> {
+  let n = 0;
+  for (const t of LOSSY_OUTBOX_TABLES) {
+    try {
+      const r = await db.getAll<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t}`);
+      n += r[0]?.n ?? 0;
+    } catch { /* table absent in this build */ }
+  }
+  return n;
+}
+
 export type InFlight = {
   /** Rows still queued for upload, summed across every outbox. */
   queued: number;

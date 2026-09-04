@@ -14,7 +14,7 @@ import { test } from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { OUTBOX_TABLES, buildLine, inFlight } from './ota.ts';
+import { OUTBOX_TABLES, LOSSY_OUTBOX_TABLES, buildLine, inFlight, lossyPending } from './ota.ts';
 
 /** Minimal stand-in for the PowerSync db: table -> row count, or a thrown error. */
 function fakeDb(counts: Record<string, number | Error>) {
@@ -82,4 +82,33 @@ test('build line distinguishes the embedded bundle from a downloaded update', ()
   // An id present but running embedded still reads as base — the id alone does not
   // mean an update is live, and saying otherwise would misdirect support.
   assert.equal(buildLine({ version: '1.0.0', updateId: 'abcdef12', embedded: true }), 'v1.0.0 (base)');
+});
+
+
+/**
+ * THE LOSSY SET (2026-09-04). The handover refuses only for work the cloud cannot
+ * rebuild; stt_outbox (re-transcribed server-side) is the one exclusion, and it caused
+ * hadar's phone to refuse on "(stt_outbox 1)".
+ */
+test('LOSSY_OUTBOX_TABLES is the full list minus stt_outbox, and nothing else', () => {
+  assert.ok(!(LOSSY_OUTBOX_TABLES as readonly string[]).includes('stt_outbox'),
+    'a re-derivable transcript must not count as lossy work');
+  assert.deepEqual(
+    [...OUTBOX_TABLES].filter((t) => t !== 'stt_outbox').sort(),
+    [...LOSSY_OUTBOX_TABLES].sort(),
+    'the lossy set must differ from the full set ONLY by stt_outbox');
+});
+
+test('lossyPending ignores stt_outbox rows but counts a real one', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(':memory:');
+  raw.exec(`CREATE TABLE stt_outbox (capture_id TEXT PRIMARY KEY)`);
+  raw.exec(`CREATE TABLE change_order_outbox (mutation_id TEXT PRIMARY KEY)`);
+  const db: any = { getAll: async (sql: string) => raw.prepare(sql).all() };
+
+  raw.prepare(`INSERT INTO stt_outbox VALUES ('cap1')`).run();
+  assert.equal(await lossyPending(db), 0, 'a stranded transcript alone is not lossy');
+
+  raw.prepare(`INSERT INTO change_order_outbox VALUES ('m1')`).run();
+  assert.equal(await lossyPending(db), 1, 'a real unsent change order is lossy');
 });

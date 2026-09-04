@@ -61,7 +61,7 @@
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 
 import { purgeLocalData, purgeLocalMedia } from './closeaccount.ts';
-import { OUTBOX_TABLES, inFlight } from './ota.ts';
+import { OUTBOX_TABLES, LOSSY_OUTBOX_TABLES, inFlight, lossyPending } from './ota.ts';
 
 /** Device-level, not account-level: it outlives every session on this handset. */
 const OWNER_KEY = 'device_last_user_id';
@@ -103,7 +103,10 @@ export async function rememberDeviceUser(userId: string): Promise<void> {
  */
 export async function describePendingWork(db: AbstractPowerSyncDatabase): Promise<string> {
   const parts: string[] = [];
-  for (const t of OUTBOX_TABLES) {
+  // The lossy list, matching what `pendingWork` refuses on — so the detail line never
+  // names stt_outbox, which is why "(stt_outbox 1)" showed under a refusal it should
+  // never have caused.
+  for (const t of LOSSY_OUTBOX_TABLES) {
     try {
       const r = await db.getAll<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t}`);
       if ((r[0]?.n ?? 0) > 0) parts.push(`${t} ${r[0].n}`);
@@ -184,7 +187,15 @@ export async function claimDevice(
   const purgeData = deps.purgeData ?? purgeLocalData;
   const purgeMedia = deps.purgeMedia ?? purgeLocalMedia;
   const pendingWork = deps.pendingWork ?? (async (d: AbstractPowerSyncDatabase) => {
+    // LOSSY OUTBOXES ONLY (2026-09-04). A handover erases; it may refuse only for work
+    // the cloud cannot rebuild. stt_outbox is re-derivable (the worker re-transcribes),
+    // so it is excluded here — a device that had never made a change order but held one
+    // stranded transcript used to be un-handoverable forever, which is mandate #1
+    // firing on the one row it does not protect. `inFlight` still reads the full list
+    // for the OTA gate; this reads the narrower one.
     const f = await inFlight(d);
+    if (f.queued < 0) return 1;   // the DB itself is unreadable — never erase blind
+    const lossy = await lossyPending(d);
     // -1 means the count itself failed. Treat "I do not know whether there is unsent
     // evidence" as "there is": the alternative is deleting on a guess.
     if (f.queued < 0) return 1;
@@ -218,7 +229,7 @@ export async function claimDevice(
       drafts = r[0]?.n ?? 0;
     } catch { /* no draft table yet -> nothing is held in one */ }
 
-    return f.queued + drafts;
+    return lossy + drafts;
   });
 
   let previous: string | null;

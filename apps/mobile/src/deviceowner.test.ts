@@ -201,3 +201,24 @@ test('a draft that HOLDS something still blocks', async () => {
   assert.ok('refused' in r);
   assert.ok(!h.calls.includes('purgeData'));
 });
+
+
+/**
+ * THE stt_outbox EXCLUSION (hadar's screenshot, 2026-09-04: a handover refused on
+ * "(stt_outbox 1)"). A stranded on-device transcript is re-derivable — the worker
+ * re-transcribes — so it must NOT block a handover, which erases. The unit here is the
+ * COUNT `pendingWork` produces: this file already tests that count>0 refuses and
+ * count===0 hands over; the behaviour change is that stt_outbox no longer contributes
+ * to that count (proved over a real DB in ota.test.ts's lossy check).
+ */
+test('unsent=0 (a lone re-derivable transcript) hands the device over', async () => {
+  const h = harness('user-a', { unsent: 0 });
+  const r = await claimDevice(DB, 'user-b', h.deps);
+  assert.ok('wiped' in r && r.wiped === true);
+});
+
+test('unsent=1 (an irreplaceable row) still refuses', async () => {
+  const h = harness('user-a', { unsent: 1 });
+  const r = await claimDevice(DB, 'user-b', h.deps);
+  assert.ok('refused' in r && (r as any).refused === true);
+});
