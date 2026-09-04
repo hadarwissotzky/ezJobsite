@@ -701,6 +701,70 @@ let ewaTerms = null;
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+/**
+ * THE PORTAL'S OWN WORDS, in the language the instrument was sent in (LANGUAGE-LAYER
+ * slice 2 — the server stores `lang` on the confirmation since sql/443).
+ *
+ * `shown_content` arrives already written in that language; these are the words AROUND
+ * it — the Approve button, the signature ask, the composer. A Spanish document under
+ * English buttons is a half-translated page shown to the one reader who never chose
+ * this product, so the chrome follows the document, not the browser: the sender knows
+ * his client; navigator.language knows a device.
+ *
+ * DELIBERATELY NOT EXHAUSTIVE. Everything a client must READ OR ACT ON is here; deep
+ * secondary chrome (running-total summaries, photo captions) still reads English and is
+ * listed as known-incomplete in the commit that added this. Adding a string here means
+ * adding it to BOTH languages — a missing key falls back to English, never to blank.
+ */
+const PORTAL_LANG = { current: 'en' };
+const PL_STRINGS = {
+  en: {
+    approve: (amt) => `Approve ${amt}`,
+    decline: 'Decline — do not proceed',
+    approvalBand: 'Approval',
+    authorise: (co) => `By approving this change order, you authorise ${co} to carry out the additional work described above, for the amount and schedule impact stated. This becomes part of the contract.`,
+    signLabel: 'Type your full name to sign',
+    signPlaceholder: 'Your full name',
+    schedBand: 'Schedule impact',
+    termsBand: 'Terms',
+    questions: 'Questions?',
+    writeBack: 'Write back',
+    messageCo: (co) => `Message ${co}`,
+    composerPlaceholder: 'What would you like to ask or change?',
+    sendingApprovesNothing: 'Sending approves nothing.',
+    send: 'Send',
+    sending: 'Sending…',
+    approved: 'Approved',
+    declinedStamp: 'Declined — do not proceed',
+    declined: 'Declined',
+    signedBy: (name) => ` — signed ${name}`,
+  },
+  es: {
+    approve: (amt) => `Aprobar ${amt}`,
+    decline: 'Rechazar — no proceder',
+    approvalBand: 'Aprobación',
+    authorise: (co) => `Al aprobar esta orden de cambio, usted autoriza a ${co} a realizar el trabajo adicional descrito arriba, por el monto y el impacto en el cronograma indicados. Esto pasa a formar parte del contrato.`,
+    signLabel: 'Escriba su nombre completo para firmar',
+    signPlaceholder: 'Su nombre completo',
+    schedBand: 'Impacto en el cronograma',
+    termsBand: 'Condiciones',
+    questions: '¿Preguntas?',
+    writeBack: 'Responder',
+    messageCo: (co) => `Escribir a ${co}`,
+    composerPlaceholder: '¿Qué le gustaría preguntar o cambiar?',
+    sendingApprovesNothing: 'Enviar un mensaje no aprueba nada.',
+    send: 'Enviar',
+    sending: 'Enviando…',
+    approved: 'Aprobado',
+    declinedStamp: 'Rechazado — no proceder',
+    declined: 'Rechazado',
+    signedBy: (name) => ` — firmado ${name}`,
+  },
+};
+const PL = new Proxy({}, { get: (_, k) =>
+  (PL_STRINGS[PORTAL_LANG.current] ?? PL_STRINGS.en)[k] ?? PL_STRINGS.en[k] });
+
+
 // Integer cents -> "$1,850". Money never becomes a float here either.
 const usd = (cents) => {
   if (cents == null) return '';
@@ -795,6 +859,17 @@ async function load() {
     supabase.functions.invoke('letterhead', { body: { token } }).catch(() => null),
   ]);
   if (error) { done('⚠️', 'Could not load this', 'Check your connection and open the link again.'); return; }
+
+  /**
+   * THE PAGE SPEAKS THE DOCUMENT'S LANGUAGE (slice 2, sql/443). Set once, before any
+   * render runs, from the language the SENDER chose — not navigator.language, which
+   * knows the device and not the reader. Rows sent before 443 carry null and read as
+   * English, which is what they were.
+   */
+  if (data?.lang && PL_STRINGS[data.lang]) {
+    PORTAL_LANG.current = data.lang;
+    document.documentElement.lang = data.lang;
+  }
 
   /**
    * WITHDRAWN — checked BEFORE superseded, and that order is the whole point (421).
@@ -1736,12 +1811,12 @@ function threadHtml(d, opts) {
   const composer = closed ? '' : `
     <div class="comp">
       <label class="complab" for="msgbox">${t.length
-        ? 'Write back' : `Message ${esc(firstWord(company))}`}</label>
+        ? PL.writeBack : PL.messageCo(esc(firstWord(company)))}</label>
       <textarea id="msgbox" rows="3"
-        placeholder="What would you like to ask or change?"></textarea>
+        placeholder="${PL.composerPlaceholder}"></textarea>
       <div class="compr">
-        <span class="comphint">Sending approves nothing.</span>
-        <button class="compsend" id="msgsend" disabled>Send</button>
+        <span class="comphint">${PL.sendingApprovesNothing}</span>
+        <button class="compsend" id="msgsend" disabled>${PL.send}</button>
       </div>
       <p class="comperr" id="msgerr" hidden></p>
     </div>`;
@@ -1906,11 +1981,11 @@ async function sendMessage(d) {
   if (!body) return;
 
   const fail = (msg) => {
-    box.disabled = false; btn.disabled = false; btn.textContent = 'Send';
+    box.disabled = false; btn.disabled = false; btn.textContent = PL.send;
     if (err) { err.textContent = msg; err.hidden = false; }
   };
 
-  box.disabled = true; btn.disabled = true; btn.textContent = 'Sending…';
+  box.disabled = true; btn.disabled = true; btn.textContent = PL.sending;
   if (err) { err.textContent = ''; err.hidden = true; }
 
   let data, error;
@@ -2393,14 +2468,14 @@ function renderPriced(d, notice) {
         <div class="band bandsched">
           <div class="sec" style="border:0;padding:0">
             <span class="secico">${SEC_ICONS['SCHEDULE']}</span>
-            <div><div class="sech">Schedule impact</div>
+            <div><div class="sech">${PL.schedBand}</div>
               <div class="secb">${esc(sentence(scheduleLine.replace(/^Schedule:\s*/i, '')))}</div></div>
           </div>
         </div>` : ''}
 
         ${otherTerms.length ? `
         <div class="band">
-          <div class="bandh">Terms</div>
+          <div class="bandh">${PL.termsBand}</div>
           ${otherTerms.map((l) => `<div class="tline">${esc(l)}</div>`).join('')}
         </div>` : ''}
 
@@ -2408,26 +2483,24 @@ function renderPriced(d, notice) {
         ${summaryBand(d)}
 
         <div class="band">
-          <div class="bandh">Approval</div>
+          <div class="bandh">${PL.approvalBand}</div>
           <!-- THE PARAGRAPH IS PART OF THE DOCUMENT, not part of the form. It states
                what approving MEANS, and it is exactly as relevant to someone reading
                back what they agreed to as to someone deciding. It stays on both. -->
-          <p class="apara">By approving this change order, you authorise
-            ${esc(company)} to carry out the additional work described above, for the
-            amount and schedule impact stated. This becomes part of the contract.${answered ? '' : `
+          <p class="apara">${PL.authorise(esc(company))}${answered ? '' : `
             Nothing proceeds until you approve.`}</p>
           ${answered ? stampHtml(d) : `
-          <label class="signlab" for="name">Type your full name to sign</label>
-          <input class="sign" id="name" placeholder="Your full name" autocomplete="name">
+          <label class="signlab" for="name">${PL.signLabel}</label>
+          <input class="sign" id="name" placeholder="${PL.signPlaceholder}" autocomplete="name">
           <div class="acts">
             <button class="approve" id="approve" disabled>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:18px;height:18px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              Approve ${isNte ? esc(usd(d.nte_cents)) : esc(priced)}</button>
+              ${PL.approve(isNte ? esc(usd(d.nte_cents)) : esc(priced))}</button>
             <button class="ghost askbtn" id="ask">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
               <span><b>Have a question?</b><br>Message ${esc(firstWord(company))}</span></button>
           </div>
-          <button class="linkbtn" id="decline">Decline — do not proceed</button>
+          <button class="linkbtn" id="decline">${PL.decline}</button>
           <p class="recordnote">Your response, your name, and the date and time become
             part of the project record. No account needed.</p>`}
         </div>
@@ -2488,7 +2561,7 @@ function stampHtml(d) {
   return `<div class="stamp ${approved ? 'ok' : 'no'}">
     <span class="stampmark">${approved ? '✓' : '✋'}</span>
     <span>
-      <span class="stampt">${approved ? 'Approved' : 'Declined — do not proceed'}</span>
+      <span class="stampt">${approved ? PL.approved : PL.declinedStamp}</span>
       <span class="stampm">${d.signed_name ? `Signed ${esc(d.signed_name)}` : 'Answered'}${when ? ` · ${esc(when)}` : ''}</span>
       <span class="stampm">This is the exact wording, kept as it was when you answered. It does not change.</span>
     </span>
@@ -2509,7 +2582,7 @@ function answeredBanner(d) {
   return `<div class="wrap"><div class="abar ${approved ? 'ok' : 'no'}">
     <span class="amark">${approved ? '✓' : '✋'}</span>
     <span>
-      <span class="awhen">${approved ? 'Approved' : 'Declined'}${d.signed_name ? ` — signed ${esc(d.signed_name)}` : ''}</span>
+      <span class="awhen">${approved ? PL.approved : PL.declined}${d.signed_name ? PL.signedBy(esc(d.signed_name)) : ''}</span>
       <span class="alead">${when ? `Answered ${esc(when)}. ` : ''}Your answer stands. This page keeps the document exactly as it was.</span>
     </span>
   </div></div>`;

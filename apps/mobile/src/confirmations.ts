@@ -25,6 +25,7 @@ import { money } from './changeorder.ts';
 // same sentences. Two copies of a term in a frozen instrument is the drift this
 // file spends thirty lines below documenting the cost of.
 import { flowTermLines, type FlowTerms } from './flowterms.ts';
+import { LANG_PACK, type SendLang } from './langpack.ts';
 
 export type SendKind = 'confirm' | 'acknowledge';
 
@@ -63,63 +64,48 @@ export function renderCard(o: {
   companyName?: string | null;
   // The flow fields (375) arrive through FlowTerms, shared with renderEwaCard.
   // Absent -> no line, so an extra predating them signs the instrument it always did.
+  /**
+   * The language THIS instrument is written in (LANGUAGE-LAYER slice 2 — hadar,
+   * 2026-09-03: "when sent the user is asked what language it should be sent as").
+   * The caller passes `value` already in this language; this parameter makes the
+   * CHROME agree with the body. Every sentence comes from langpack.ts, where a
+   * language exists only after a human who speaks it reviewed it — this text is
+   * frozen and signed (mandate #5). English output is byte-identical to what this
+   * rendered before the parameter existed; the tests pin that.
+   */
+  lang?: SendLang;
 } & FlowTerms): string {
-  const when = new Date(o.whenMs).toLocaleString();
+  const L = LANG_PACK[o.lang ?? 'en'];
+  // The date follows the document's language — a Spanish instrument with an
+  // English-formatted date is a half-translated document.
+  const when = o.lang === 'es'
+    ? new Date(o.whenMs).toLocaleString('es-US')
+    : new Date(o.whenMs).toLocaleString();
   const priced = typeof o.amountCents === 'number';
   const asker = o.companyName ? `${o.companyName}\n` : '';
-  const flowTerms = flowTermLines(o);
+  const flowTerms = flowTermLines(o, o.lang ?? 'en');
   if (priced) {
-    // A NOT-TO-EXCEED IS A DIFFERENT CONTRACTUAL INSTRUMENT, AND THIS TEXT IS THE
-    // INSTRUMENT. shown_content is what the client reads and signs, frozen at send.
-    // This function did not accept nteCents at all, so a capped T&M extra was shown
-    // as a flat "Price: $X": the cap and its clause vanished from the document the
-    // client signed, and their copy then disagreed with what the contractor thought
-    // was agreed -- the exact dispute this product exists to prevent.
-    // PRD R3: NTE is "cap amount + mandatory auto-inserted line". The line is not
-    // decoration; it is the term that stops the cap being read as the final price.
     const nte = typeof o.nteCents === 'number' ? o.nteCents : null;
     const priceBlock = nte === null
-      ? `Price: ${money(o.amountCents as number)}\n`
-      : `Price: ${money(o.amountCents as number)} (time & materials)\n` +
-        `Not to exceed: ${money(nte)}\n` +
-        `Work will not exceed ${money(nte)} without a new approval.\n`;
-    // THE ORDER IS THE POINT (hadar, 2026-08-05: "the recipient needs to be clear
-    // and upfront with the SOW, who is it from and what are the terms — but first
-    // the SOW"). This used to open with the company name and an unlabelled
-    // paragraph, then put the money above the facts and "Directed by / Job / Date"
-    // in an unheaded run at the bottom. A homeowner opening it on a phone met a
-    // wall of prose and had to work out which sentence was the work and which was
-    // the price.
-    //
-    // Now: WHAT THE WORK IS, then WHO IS ASKING, then WHAT IT COSTS AND ON WHAT
-    // TERMS. Scope first because it is the only part the reader can actually judge
-    // — a price means nothing until you know what it buys, and a document that
-    // leads with a figure reads as a bill rather than a request.
-    //
-    // Every existing line survives WORD FOR WORD; only the order and the headings
-    // changed. That is deliberate: 240_shown_content_integrity.sql requires the
-    // displayed figure to appear literally in the frozen text, and the wording of
-    // the NTE clause and the flow terms is contractual language nobody should be
-    // re-drafting as a layout change. Already-sent instruments are untouched —
-    // this runs once, at send, and the frozen copy is what a signer saw.
-    return `CHANGE ORDER — APPROVAL REQUESTED\n` +
-      `An extra outside the original scope.\n\n` +
-      `SCOPE OF WORK\n${o.value}\n\n` +
-      `FROM\n${asker}Job: ${o.projectName}\n` +
-      `Directed by: ${o.directedBy}\nDate: ${when}\n\n` +
-      `TERMS\n` +
+      ? `${L.priceLabel}: ${money(o.amountCents as number)}\n`
+      : `${L.priceLabel}: ${money(o.amountCents as number)}${L.priceTm}\n` +
+        `${L.nteLabel}: ${money(nte)}\n` +
+        `${L.nteSentence(money(nte))}\n`;
+    return `${L.coHeader}\n` +
+      `${L.coSubheader}\n\n` +
+      `${L.scopeHeading}\n${o.value}\n\n` +
+      `${L.fromHeading}\n${asker}${L.jobLabel}: ${o.projectName}\n` +
+      `${L.directedByLabel}: ${o.directedBy}\n${L.dateLabel}: ${when}\n\n` +
+      `${L.termsHeading}\n` +
       priceBlock +
       flowTerms +
-      `\nNothing proceeds until you approve.`;
+      `\n${L.nothingProceeds}`;
   }
-  return o.kind === 'confirm'
-    ? `Please confirm this is what we agreed.\n\n` +
-      `${o.subject}: ${o.value}\n\n` +
-      `Directed by: ${o.directedBy}\nJob: ${o.projectName}\nRecorded: ${when}`
-    : `Please acknowledge you directed this.\n\n` +
-      `${o.subject}: ${o.value}\n\n` +
-      `Directed by: ${o.directedBy}\nJob: ${o.projectName}\nRecorded: ${when}`;
+  return (o.kind === 'confirm' ? L.confirmAsk : L.acknowledgeAsk) + `\n\n` +
+    `${o.subject}: ${o.value}\n\n` +
+    `${L.directedByLabel}: ${o.directedBy}\n${L.jobLabel}: ${o.projectName}\n${L.recordedLabel}: ${when}`;
 }
+
 
 function newToken(): string {
   // The token is the credential, so it needs real entropy. 160 bits.
@@ -162,6 +148,8 @@ export async function sendForConfirmation(
     /** Flow fields — rendered into the frozen instrument by renderCard. */
     billingTiming?: string | null; scheduleEffect?: string | null;
     scheduleDays?: number | null; exclusions?: string | null;
+    /** The instrument's language. `value` must already BE in it — see renderCard. */
+    lang?: SendLang;
   }
 ): Promise<SendResult> {
   // REFUSE BEFORE WRITING. Without a link base the url below comes out as the
@@ -191,6 +179,9 @@ export async function sendForConfirmation(
     p_kind: o.kind,
     p_shown_content: shownContent,          // frozen from here on
     p_shown_sha256: sha256(shownContent),
+    // The portal reads this to set its own chrome's language. Defaulted server-side,
+    // so a build predating 443 keeps working against the new function.
+    p_lang: o.lang ?? 'en',
     p_counterparty: o.counterparty,
     p_channel: o.channel,
     p_destination: o.destination ?? null,

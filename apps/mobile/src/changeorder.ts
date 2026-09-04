@@ -956,6 +956,11 @@ export type LedgerRow = {
    *  frozen into the instrument at send; null on rows created before 391, and the
    *  sender falls back to the title for exactly those. */
   scope_of_work: string | null;
+  /** 443 — the same scope in the speaker's language, for the send sheet's language
+   *  choice. Trust only while scope_of_work = scope_of_work_ai. */
+  scope_of_work_native: string | null;
+  scope_of_work_ai: string | null;
+  scope_native_lang: string | null;
   status: string; is_mini: number; signed_by: string | null;
   approved_running: string; synced: number;
   // Raw cents alongside the formatted string: the c4 ledger totals (approved sum,
@@ -1120,6 +1125,12 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
   const rows = await db.getAll<{
     id: string; decision_id: string; who_directed: string; scope: string;
     scope_of_work: string | null;
+    // 443 — the send sheet offers the instrument in the speaker's language when a
+    // fresh native render exists. Same staleness rule as extraRecord: only trust it
+    // while scope_of_work = scope_of_work_ai (checked by the reader, not here).
+    scope_of_work_native: string | null;
+    scope_of_work_ai: string | null;
+    scope_native_lang: string | null;
     amount_cents: number; nte_cents: number | null;
     status: string; is_mini: number; signed_by: string | null;
     created_at_ms: number; pending: number; extra_type: string | null;
@@ -1129,6 +1140,7 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     photo_relpath: string | null; co_number: number | null;
   }>(
     `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.scope_of_work,
+            co.scope_of_work_native, co.scope_of_work_ai, co.scope_native_lang,
             co.amount_cents, co.nte_cents, co.co_number,
             co.status, co.is_mini, co.signed_by, co.created_at_ms, co.extra_type,
             co.billing_timing, co.schedule_effect, co.schedule_days, co.exclusions,
@@ -1160,6 +1172,9 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     return {
       id: r.id, decision_id: r.decision_id, who_directed: r.who_directed,
       scope: r.scope, scope_of_work: r.scope_of_work ?? null,
+      scope_of_work_native: r.scope_of_work_native ?? null,
+      scope_of_work_ai: r.scope_of_work_ai ?? null,
+      scope_native_lang: r.scope_native_lang ?? null,
       amount: money(r.amount_cents),
       nte: r.nte_cents == null ? null : money(r.nte_cents),
       nte_cents: r.nte_cents,

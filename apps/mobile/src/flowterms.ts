@@ -27,6 +27,8 @@
  *      absent one is visibly absent.
  */
 
+import { LANG_PACK, type SendLang } from './langpack.ts';
+
 export type FlowTerms = {
   /** 375: next_invoice | when_completed | other. Null until the contractor answers. */
   billingTiming?: string | null;
@@ -54,21 +56,21 @@ export type FlowTerms = {
  * they are appended beside the price/cap clauses rather than replacing them, so
  * the figures it does look for are still there.
  */
-export function flowTermLines(o: FlowTerms): string {
-  // Exclusions first: what is NOT covered bounds everything stated after it, and
-  // the mock's review card puts NOT INCLUDED above the payment and schedule rows.
-  const excluded = o.exclusions?.trim() ? `Not included: ${o.exclusions.trim()}\n` : '';
-  const billing = o.billingTiming === 'next_invoice' ? 'Billed on the next invoice.\n'
-    : o.billingTiming === 'when_completed' ? 'Payment is due when the work is completed.\n'
-    : o.billingTiming === 'other' ? 'Payment timing as discussed.\n' : '';
-  // Decision 3 (hadar, 2026-07-23): "not sure yet" is a legal answer and is shown
-  // to the client as an open question, not hidden and not dressed up as no impact.
-  // Hiding it would let a client read the silence as "this does not delay my job".
-  const schedule = o.scheduleEffect === 'no_change' ? 'Schedule: no change.\n'
+export function flowTermLines(o: FlowTerms, lang: SendLang = 'en'): string {
+  // Table-driven since 2026-09-03 (LANGUAGE-LAYER slice 2): the sentences live in
+  // langpack.ts beside every other word a client reads, so a Spanish send cannot ship
+  // an English clause by omission. English output is byte-identical to the literals
+  // this replaced — the tests pin it.
+  const L = LANG_PACK[lang];
+  const excluded = o.exclusions?.trim() ? `${L.notIncluded(o.exclusions.trim())}\n` : '';
+  const billing = o.billingTiming === 'next_invoice' ? `${L.billedNextInvoice}\n`
+    : o.billingTiming === 'when_completed' ? `${L.billedWhenCompleted}\n`
+    : o.billingTiming === 'other' ? `${L.billedAsDiscussed}\n` : '';
+  const schedule = o.scheduleEffect === 'no_change' ? `${L.scheduleNoChange}\n`
     : o.scheduleEffect === 'adds_days'
       ? (typeof o.scheduleDays === 'number' && o.scheduleDays > 0
-          ? `Schedule: adds ${o.scheduleDays} day${o.scheduleDays === 1 ? '' : 's'}.\n`
-          : 'Schedule: adds days.\n')
-    : o.scheduleEffect === 'not_sure' ? 'Schedule impact: to be confirmed.\n' : '';
+          ? `${L.scheduleAddsN(o.scheduleDays)}\n`
+          : `${L.scheduleAdds}\n`)
+    : o.scheduleEffect === 'not_sure' ? `${L.scheduleTbc}\n` : '';
   return excluded + billing + schedule;
 }

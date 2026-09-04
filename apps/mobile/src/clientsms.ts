@@ -50,7 +50,14 @@
 
 export type ClientSmsKind = 'confirm' | 'acknowledge' | 'ewa';
 
+// The ONE import this file allows itself: langpack is a leaf with no imports of its
+// own (same charter as this file), and the words a client reads must live in one
+// place per language rather than be duplicated here.
+import { LANG_PACK, type SendLang } from './langpack.ts';
+
 export type ClientSmsInput = {
+  /** The language the client is written to in — see langpack.ts. */
+  lang?: SendLang;
   /** `confirmation_request.kind`. Decides which sentence describes the document. */
   kind: ClientSmsKind;
   /** The frozen instrument. Used ONLY to verify facts, never quoted into the body. */
@@ -158,10 +165,15 @@ function inInstrument(shownContent: string, fact: string | null | undefined): bo
  * marketing — which is the one thing that gets a link left untapped.
  */
 export function clientSmsBody(o: ClientSmsInput): string {
+  // LANGUAGE-LAYER slice 2: every sentence from the pack, in the send's language. The
+  // opt-out line stays ENGLISH in every language on purpose — STOP/HELP are carrier
+  // keywords processed verbatim by Twilio's compliance layer, and a translated
+  // instruction would tell the reader to text a word the carrier ignores.
+  const L = LANG_PACK[o.lang ?? 'en'];
   const shown = o.shownContent ?? '';
   const who = inInstrument(shown, o.companyName)
     ? (o.companyName as string).trim()
-    : 'Your contractor';
+    : L.yourContractor;
 
   // A price is only named when it is a priced document AND the exact rendering is in
   // the instrument. `240` already refuses to create a send whose displayed figure is
@@ -172,25 +184,23 @@ export function clientSmsBody(o: ClientSmsInput): string {
 
   const what =
     o.kind === 'ewa'
-      ? `${who} sent you an extra work authorization to review and sign${amount}.`
+      ? L.smsEwa(who, amount)
       : o.kind === 'acknowledge'
-      ? `${who} asked you to acknowledge something on your job.`
+      ? L.smsAcknowledge(who)
       : priced
-      ? `${who} sent you a change order to approve${amount}.`
+      ? L.smsChangeOrder(who, amount)
       // A confirm with no price is a Decision (R10): a spec to agree, no money.
-      : `${who} sent you something to check and confirm.`;
+      : L.smsCheckConfirm(who);
 
-  const job = inInstrument(shown, o.jobLabel) ? `\nJob: ${(o.jobLabel as string).trim()}` : '';
+  const job = inInstrument(shown, o.jobLabel) ? L.smsJob((o.jobLabel as string).trim()) : '';
 
   // "No app or account needed" is REQ-VAL3 said out loud, and it is in the SMS rather
   // than only on the page because it answers the objection that stops the tap. The
   // reader's question at this moment is not "what is this" — it is "is this going to
   // make me sign up for something".
-  const cta = `\n\nOpen it here. No app or account needed:\n${o.url}`;
+  const cta = L.smsCta(o.url);
 
-  const closing = o.kind === 'ewa' || !priced
-    ? ''
-    : '\n\nNothing proceeds until you approve.';
+  const closing = o.kind === 'ewa' || !priced ? '' : L.smsClosing;
 
   /**
    * OPT-OUT, ON EVERY MESSAGE (A2P 10DLC, 2026-08-19).
@@ -245,8 +255,7 @@ export function clientSmsBody(o: ClientSmsInput): string {
   let label = (o.jobLabel as string).trim();
   while (label.length > 8) {
     label = label.slice(0, -6);
-    const shorter = `${what}
-Job: ${label}...${cta}${closing}${stop}`;
+    const shorter = `${what}${L.smsJob(`${label}...`)}${cta}${closing}${stop}`;
     if (smsSegments(shorter) <= 2) return shorter;
   }
   // Nothing left to give: drop the job line entirely rather than send three segments.

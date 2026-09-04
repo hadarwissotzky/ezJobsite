@@ -264,6 +264,7 @@ import * as Network from 'expo-network';
 import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisionSchema,
          listDecisions, linkCaptureToDecision, recordDecision, type DecisionRow } from './src/decisions';
 import { renderCard, sendForConfirmation } from './src/confirmations';
+import { asSendLang, type SendLang } from './src/langpack';
 import { publishApprovalPhotos } from './src/approvalphotopublish';
 import {
   ensureApproverSchema, drainR5cOutbox, hydrateApprovers, suggestFor, listRoster, listKnownPeople, addApprover,
@@ -1272,7 +1273,7 @@ export default function App() {
     failWhy?: string | null;
     /** The facts the SMS body needs, carried so the RETRY on this sheet sends the same
      *  short message the first attempt did — not the seven-segment instrument. */
-    sms?: { kind: ClientSmsKind; companyName?: string | null; jobLabel?: string | null;
+    sms?: { kind: ClientSmsKind; lang?: SendLang; companyName?: string | null; jobLabel?: string | null;
             amountText?: string | null } } | null>(null);
   // First send is the natural moment to ask for notifications ("we'll tell you when
   // they respond") — onboarding never asked (audit gap 1c). iOS shows the OS dialog
@@ -2756,7 +2757,8 @@ const openSendPrep = async (c: LedgerRow) => {
     : null;
 
   setSendPrep({ co: c, type: t, suggestion, roster, members, memberIds: [],
-                chosenId: saved?.id ?? null, picking: false, adding: null, busy: false });
+                chosenId: saved?.id ?? null, picking: false, adding: null, busy: false,
+                sendLang: 'en' });
 };
 
 // Fill the add-someone form from the device's contacts. The native picker is
@@ -2982,7 +2984,7 @@ const deliverLink = async (a: {
   url: string; shown: string; phone?: string | null;
   /** Facts for the SMS body. Each is used ONLY if it appears verbatim in `shown`
    *  (REQ-LC40) — `clientSmsBody` does that checking, not this caller. */
-  sms?: { kind: ClientSmsKind; companyName?: string | null; jobLabel?: string | null;
+  sms?: { kind: ClientSmsKind; lang?: SendLang; companyName?: string | null; jobLabel?: string | null;
           amountText?: string | null };
 }): Promise<{ ok: true } | { ok: false; why: string }> => {
   /**
@@ -3007,7 +3009,7 @@ const deliverLink = async (a: {
    * can lose its message by omitting an argument.
    */
   const body = a.sms
-    ? clientSmsBody({ kind: a.sms.kind, shownContent: a.shown, url: a.url,
+    ? clientSmsBody({ kind: a.sms.kind, lang: a.sms.lang, shownContent: a.shown, url: a.url,
                       companyName: a.sms.companyName, jobLabel: a.sms.jobLabel,
                       amountText: a.sms.amountText })
     : `${a.shown}\n\n${a.url}`;
@@ -3079,6 +3081,15 @@ const refuseSend = (why: string) => {
 
 const sendPricedApproval = async (
   c: LedgerRow, to: RosterMember | null,
+  /**
+   * The language the client reads (slice 2). The scope, the instrument's chrome and
+   * the SMS all follow it TOGETHER — a mixed-language document is worse than either
+   * language alone. 'es' is honoured only while the native render is fresh
+   * (scope_of_work = scope_of_work_ai): a human edit to the English after the sheet
+   * opened must not freeze a stale Spanish text under a signature, so it falls back
+   * to English entirely rather than mixing.
+   */
+  sendLang: SendLang = 'en',
 ): Promise<{ sent: boolean; held?: boolean; delivered?: boolean; why?: string | null }> => {
   /**
    * HOLD A CREDIT FIRST — before anything is minted, sent or marked.
@@ -3200,6 +3211,17 @@ const sendPricedApproval = async (
   const approvedCents = coRows
     .filter((x) => x.status === 'approved')
     .reduce((n, x) => n + x.amount_cents, 0);
+  /**
+   * ONE decision, used by the instrument, its chrome and the SMS alike. 'es' only
+   * while the native render is FRESH (scope_of_work = scope_of_work_ai) — a human
+   * edit to the English must not freeze a stale Spanish text under a signature, so
+   * the whole send falls back to English rather than mixing languages.
+   */
+  const nativeFresh = !!c.scope_of_work_native?.trim()
+    && c.scope_native_lang === sendLang
+    && !!c.scope_of_work_ai && c.scope_of_work === c.scope_of_work_ai;
+  const instrumentLang: SendLang = sendLang !== 'en' && nativeFresh ? sendLang : 'en';
+
   const r = await sendForConfirmation(connector.client, {
     kind: 'confirm', decisionId: c.decision_id, projectId,
     projectName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
@@ -3209,7 +3231,10 @@ const sendPricedApproval = async (
     // before 391 whose scope_of_work never got written: that row then signs exactly
     // what it would have signed before, never an empty scope.
     subject: c.scope,
-    value: (c.scope_of_work || '').trim() || c.scope,
+    value: instrumentLang !== 'en'
+      ? c.scope_of_work_native!.trim()
+      : (c.scope_of_work || '').trim() || c.scope,
+    lang: instrumentLang,
     directedBy: c.who_directed || 'Owner',
     // The APPROVER, not who asked for the work. These are different people
     // and conflating them is how a request reaches someone who cannot
@@ -3301,7 +3326,7 @@ const sendPricedApproval = async (
       // `c.amount` is already formatted by `money()` — the one formatter in this app.
       // `clientSmsBody` drops any of these that is not verbatim in the frozen text, so
       // an SMS can never name a figure the signed document does not contain (REQ-LC40).
-      sms: { kind: 'confirm', companyName: prof?.company || prof?.name || null,
+      sms: { kind: 'confirm', lang: instrumentLang, companyName: prof?.company || prof?.name || null,
              jobLabel: projects.find((p) => p.id === projectId)?.name ?? null,
              amountText: c.amount },
     });
@@ -3320,7 +3345,7 @@ const sendPricedApproval = async (
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
       sentTo: to?.name ?? c.who_directed ?? null, atMs: sentAtMs, phone: to?.phone ?? null,
       shared: d.ok, failWhy: d.ok ? null : d.why,
-      sms: { kind: 'confirm', companyName: prof?.company || prof?.name || null,
+      sms: { kind: 'confirm', lang: instrumentLang, companyName: prof?.company || prof?.name || null,
              jobLabel: projects.find((p) => p.id === projectId)?.name ?? null,
              amountText: c.amount } });
     await clearHold(db, c.id);
@@ -3544,6 +3569,15 @@ const checkClientMessages = async () => {
      */
     members: Member[];
     memberIds: string[];
+    /**
+     * WHICH LANGUAGE THE DOCUMENT GOES OUT IN (slice 2 — hadar, 2026-09-03: "when
+     * sent the user is asked what language it should be sent as"). Only offered when
+     * the extra carries a fresh native render; an English-only extra has nothing to
+     * choose. Defaults to English — the counterparty's language is a fact about the
+     * counterparty, and English is the safer guess for a US client until the roster
+     * learns otherwise.
+     */
+    sendLang: SendLang;
     busy: boolean;
   } | null>(null);
 
@@ -13166,6 +13200,29 @@ const checkClientMessages = async () => {
                     matters. Twice is not clearer, it is longer. */}
                 <View style={[s.spSecLab, { marginTop: 2 }]}>
                   <Text style={s.spSecName}>{T('r5c.secClient')}</Text>
+                  {/* ── SEND LANGUAGE (slice 2) ─────────────────────────────────
+                      Offered ONLY when this extra carries a fresh render in another
+                      language — an English-only extra has nothing to choose, and a
+                      row of dead pills teaches people to ignore the live ones. The
+                      choice governs the whole send as one unit: instrument, chrome,
+                      SMS. Never split. */}
+                  {!!sp.co.scope_of_work_native
+                    && sp.co.scope_of_work === sp.co.scope_of_work_ai && (
+                    <View style={s.spLangRow}>
+                      <Text style={s.spLangLabel}>{T('r5c.sendLangQ')}</Text>
+                      {(['en', sp.co.scope_native_lang] as const).map((l) => !!l && (
+                        <Pressable key={l}
+                          onPress={() => setSendPrep((p) => p && { ...p, sendLang: asSendLang(l) })}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: sp.sendLang === l }}
+                          style={[s.spLangPill, sp.sendLang === l && s.spLangPillOn]}>
+                          <Text style={[s.spLangPillT, sp.sendLang === l && s.spLangPillTOn]}>
+                            {l === 'en' ? 'English' : 'Español'}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
                   <View style={[s.spTag, s.spTagReq]}>
                     <Text style={[s.spTagT, { color: '#3A5230' }]}>{T('r5c.required')}</Text>
                   </View>
@@ -13459,7 +13516,7 @@ const checkClientMessages = async () => {
                        * signable and the client has not been told it exists — which is
                        * an action for him, not a result to celebrate.
                        */
-                      const out = await sendPricedApproval(sp.co, chosen);
+                      const out = await sendPricedApproval(sp.co, chosen, sp.sendLang);
                       if (out.sent && out.delivered === false) {
                         setAck({ kind: 'no', title: T('r5c.notTold'),
                                  detail: T('r5c.notToldBody'), okLabel: T('common.ok') });
@@ -14828,6 +14885,17 @@ const s = StyleSheet.create({
   // section names have to out-weigh whatever sits under them, or the loudest NAME on
   // the sheet becomes its apparent answer.
   spSecName: { fontFamily: 'Inter_700Bold', fontSize: 22, color: '#131110', letterSpacing: -0.3 },
+  // ── send language (slice 2). 44pt pills — a language choice made with gloves on. ──
+  spLangRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10,
+    flexWrap: 'wrap' },
+  spLangLabel: { fontFamily: 'Inter_400Regular', fontSize: 14.5, color: '#5E666E',
+    marginRight: 2 },
+  spLangPill: { minHeight: 44, paddingHorizontal: 16, borderRadius: 22, borderWidth: 1.5,
+    borderColor: '#D5D0C7', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#fff' },
+  spLangPillOn: { borderColor: '#2F4F2A', backgroundColor: '#2F4F2A' },
+  spLangPillT: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#3d4a38' },
+  spLangPillTOn: { color: '#fff' },
   // Required vs optional, stated once and visibly, instead of left to the prose.
   spTag: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2.5 },
   spTagReq: { backgroundColor: '#EDF2E9' },

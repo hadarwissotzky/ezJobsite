@@ -1,3 +1,5 @@
+-- NOTE (2026-09-03): the LATEST definitions of confirmation_create and
+-- confirmation_fetch live in 443_confirmation_lang.sql. Edit there.
 -- Priced approval — the client-facing report gets a PRICE, and it is frozen too.
 --
 -- WHY (hadar 2026-07-20): the confirmation page the client opens showed a decision
