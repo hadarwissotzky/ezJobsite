@@ -89,22 +89,41 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
             defect as the old "we wrote up what you said" popup — a sentence that
             outruns its evidence, which CLAUDE.md names as this project's recurring one. */}
         <Text style={st.sub}>
-          {scopeWritten ? t('draft.reviewSub') : t('draft.nothingHeardHere')}
+          {scopeWritten ? t('draft.reviewSub')
+            : p.proc !== 'processed' ? t('lang.writeupPendingSub')
+            : t('draft.nothingHeardHere')}
         </Text>
 
-        {/* ── NOTHING WAS HEARD, SAID ON THE SCREEN THAT CAN FIX IT ─────────────────
-            hadar, 2026-09-02: "why is this section doesn't show up as part of the
-            review screen."
+        {/* ── THE MISSING SCOPE, WITH THE HONEST REASON (hadar, 2026-09-03: "should
+            we not even display the review? or present a big message saying they should
+            reprocess when connected?").
 
-            It was a popup and only a popup. He tapped OK and the reason vanished,
-            leaving a review screen whose scope card said a quiet "Not written up yet"
-            — and the two buttons that solve it, Edit text and Record change, sat
-            underneath with nothing connecting them to what had gone wrong.
+            Neither hiding nor "reprocess". The review stays, because everything on it
+            except Send works offline — he can type the scope, check the price
+            read-back, fix the client, add photos — and sending him home would throw
+            that work away. And nothing ever needs "reprocessing": the queue drains
+            itself the moment signal returns, so telling him to redo something would be
+            a lie about how the system works.
 
-            A modal is for something you acknowledge; this is a STATE the screen is in
-            until he does something about it, so the screen carries it. It disappears
-            the moment a scope exists, because then it is no longer true. */}
-        {!scopeWritten && (
+            TWO STATES, NOT ONE, because the old single band was wrong offline: it said
+            "we couldn't hear enough" whenever the scope was missing — but until the
+            pipeline has actually FINISHED, nothing has been heard YET, and accusing
+            his dictation while his recording sits in the queue is precisely the false
+            verdict this product exists to never give (the same class as the
+            couldn't-make-out-the-work race fixed this morning).
+
+            · pipeline still owes  -> the big blue band: it finishes itself on signal.
+            · pipeline done, empty -> the amber band: genuinely nothing heard, act. */}
+        {!scopeWritten && p.proc !== 'processed' && (
+          <View style={st.offline}>
+            <Icon name="cloud" size={22} />
+            <View style={{ flex: 1 }}>
+              <Text style={st.offlineH}>{t('lang.writeupPendingTitle')}</Text>
+              <Text style={st.offlineT}>{t('lang.writeupPendingBody')}</Text>
+            </View>
+          </View>
+        )}
+        {!scopeWritten && p.proc === 'processed' && (
           <View style={st.heard}>
             <Icon name="ntAttention" size={19} />
             <Text style={st.heardT}>{t('draft.notWrittenUp')}</Text>
@@ -313,6 +332,15 @@ const st = StyleSheet.create({
   // `caution` from the tint table, not an amber mixed here: "A screen never mixes its
   // own amber" (theme.ts). Peach and a hairline, which is what "say it again" looks
   // like — this is not a failure to be afraid of. The recording is saved.
+  // The pending band is BIGGER than the amber one on purpose — hadar asked for "a big
+  // message", and this is the state where reading it changes what he does next (nothing
+  // is wrong; walk to signal and it finishes). Blue-grey, not amber: waiting, not fault.
+  offline: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginTop: 16,
+    paddingHorizontal: 16, paddingVertical: 16, borderRadius: 12,
+    backgroundColor: '#E8EEF3', borderWidth: 1, borderColor: '#C9D8E2' },
+  offlineH: { fontFamily: F.bodyBold, fontSize: 16, color: '#2B4A5E' },
+  offlineT: { fontFamily: F.body, fontSize: 14.5, lineHeight: 20, color: '#3D5A6E',
+    marginTop: 3 },
   heard: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, marginTop: 16,
     paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12,
     backgroundColor: '#FFF3EA', borderWidth: 1, borderColor: '#FFD9C2' },

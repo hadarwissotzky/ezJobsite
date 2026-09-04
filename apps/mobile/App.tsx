@@ -8765,6 +8765,24 @@ const checkClientMessages = async () => {
                   <Text style={s.trFileT}>{T('cap.transPickJob')}</Text>
                 </Pressable>
               )}
+              {/* ── OFFLINE/STALLED IS NOT A DEAD END (hadar, 2026-09-03: "should we
+                  not even display the review?"). The opposite: everything on the
+                  review except Send works with no signal — typing the scope, the
+                  price read-back, the client — and this screen used to strand that
+                  work behind a wall of waiting. One tap goes on to the review, whose
+                  own pending band (flowreview) says the write-up finishes itself on
+                  signal. A NEW extra only: augment/generate have their own returns. */}
+              {(t.offline || t.stalled) && !t.isAugment && !t.isGenerate && !awaitingFiling && !t.heldForFiling && (
+                <Pressable style={s.trFile} onPress={() => {
+                  const coId = t.coId;
+                  setFlowHold(5);
+                  setTransition(null);
+                  setFlowRecordId(coId);
+                  void openRecord(coId);
+                }}>
+                  <Text style={s.trFileT}>{T('cap.transReviewAnyway')}</Text>
+                </Pressable>
+              )}
               {/**
                 * THE SAME RULE AS THE FILING BUTTON ABOVE, APPLIED TO THE OTHER
                 * BLOCKER (hadar, 2026-08-21: "it is asking me to turn cell backup on
