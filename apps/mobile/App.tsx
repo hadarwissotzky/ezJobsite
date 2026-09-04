@@ -1602,7 +1602,29 @@ const lifecycleFor = async (r: ExtraRecord): Promise<{
   // R8's manual-remind verdict at load time. A missing local link is NOT folded in
   // here: `remindExtra` returns `r8.noLink` at press time, which is the refusal the
   // contractor can actually read where he is looking.
-  const link = await liveLinkFor(db, r.id);
+  let link = await liveLinkFor(db, r.id);
+  /**
+   * BACKFILL A MISSING LINK FROM THE SERVER (hadar, 2026-09-04: "why there is no link
+   * make for this CO?"). `co_live_link` is device-local and written only on the phone
+   * that sent it — a change order's STATUS syncs everywhere, its URL does not, so a
+   * reinstall or the sync wedge leaves a sent CO showing "No link yet" while the link
+   * is live. Ask the server (445) for the token and rebuild the row. Best-effort:
+   * offline or no link leaves the honest "no link yet".
+   */
+  if (!link && (r.status === 'sent' || r.status === 'approved' || r.status === 'declined')) {
+    try {
+      const { data } = await connector.client.rpc('confirmation_link_for_co',
+        { p_change_order_id: r.id });
+      const tok = (data as any)?.found ? (data as any).token as string : null;
+      if (tok && CONFIRM_BASE) {
+        const url = `${CONFIRM_BASE}/confirm.html?t=${tok}`;
+        await noteLinkSent(db, { changeOrderId: r.id, token: tok, url,
+                                 lang: (data as any).lang ?? 'en',
+                                 atMs: (data as any).sent_at ? Date.parse((data as any).sent_at) : undefined });
+        link = await liveLinkFor(db, r.id);
+      }
+    } catch { /* offline or no link — "no link yet" is the honest state */ }
+  }
   // Derived from the lineage each load: a revision made on another phone must change
   // this number here too, and a stored counter would not.
   const version = await versionNumber(db, r.id);
