@@ -122,8 +122,18 @@ Deno.serve(async (req) => {
     if (!resp.ok) return json({ ok: false, error: `translator: ${resp.status}` }, 502);
     const out = await resp.json();
     const text = out?.content?.find((b: { type: string }) => b.type === 'text')?.text ?? '[]';
+    /**
+     * THE MODEL WRAPS THE ARRAY — a code fence, a leading sentence — often enough that
+     * the first deploy's strict parse failed on its very first real call. The array is
+     * still in there; take the outermost [...] and parse that. A response with no
+     * bracket pair at all still fails into the wrong-shape branch below.
+     */
     let arr: unknown;
-    try { arr = JSON.parse(text); } catch { arr = null; }
+    try { arr = JSON.parse(text); } catch {
+      const a = text.indexOf('['), b = text.lastIndexOf(']');
+      if (a >= 0 && b > a) { try { arr = JSON.parse(text.slice(a, b + 1)); } catch { arr = null; } }
+      else arr = null;
+    }
     if (!Array.isArray(arr) || arr.length !== misses.length) {
       return json({ ok: false, error: 'translator returned a wrong shape' }, 502);
     }
