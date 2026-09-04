@@ -65,6 +65,8 @@ export function DiscussionLog(props: {
   undelivered?: ReadonlySet<string>;
   /** Tapping through to the live thread. Omitted on a closed record. */
   onOpen?: () => void;
+  /** Show a translated message's exact original (slice 3). */
+  onShowOriginal?: (text: string) => void;
   /** The client's display name — the heading becomes "Discussion with <name>" and
    *  the client's messages are labelled by name, not the generic "Client". */
   clientName?: string | null;
@@ -179,7 +181,18 @@ export function DiscussionLog(props: {
                       it. */}
                   {m.text !== PHOTO_ONLY_BODY && (
                     <Text style={{ fontFamily: F.bodySemi, fontSize: 16, lineHeight: 22,
-                      color: C.ink }}>{m.text}</Text>
+                      color: C.ink }}>{m.displayText ?? m.text}</Text>
+                  )}
+                  {/* TRANSLATED IS SAID, NEVER SILENT (slice 3). The original is the
+                      record; a rendering in another language must announce itself, and
+                      a tap shows the words as written — the reader of a priced
+                      conversation is entitled to the exact original. */}
+                  {!!m.displayText && m.displayText !== m.text && (
+                    <Pressable onPress={() => props.onShowOriginal?.(m.text)}
+                      hitSlop={6} accessibilityRole="button">
+                      <Text style={{ fontFamily: F.body, fontSize: 11.5, color: C.muted,
+                        marginTop: 3 }}>{t('lang.translatedTap')}</Text>
+                    </Pressable>
                   )}
                   {/* THE STAMP, BOTTOM RIGHT, inside the bubble. */}
                   <View style={{ flexDirection: 'row', alignSelf: 'flex-end',
@@ -209,6 +222,8 @@ export function DiscussionLog(props: {
 }
 
 export function ThreadScreen(props: {
+  /** Show a translated message's exact original (slice 3). */
+  onShowOriginal?: (text: string) => void;
   extra: {
     id: string;
     scope: string;
@@ -386,8 +401,15 @@ export function ThreadScreen(props: {
                   fontFamily: F.body, fontSize: 15.5, lineHeight: 22, marginTop: 3,
                   color: mine ? '#fff' : C.ink,
                 }}>
-                  {m.text}
+                  {m.displayText ?? m.text}
                 </Text>
+                {!!m.displayText && m.displayText !== m.text && (
+                  <Pressable onPress={() => props.onShowOriginal?.(m.text)}
+                    hitSlop={6} accessibilityRole="button">
+                    <Text style={{ fontFamily: F.body, fontSize: 11.5, marginTop: 3,
+                      color: mine ? C.onDark : C.muted }}>{t('lang.translatedTap')}</Text>
+                  </Pressable>
+                )}
                 {pending && (
                   <Text style={{
                     fontFamily: F.body, fontSize: 11.5, marginTop: 4,

@@ -47,6 +47,13 @@ export type ThreadMessage = {
   id: string;
   side: ThreadSide;
   text: string;
+  /**
+   * The same words in the READER'S language (slice 3), attached by the display layer
+   * and never stored: `text` is the record, this is what the screen prints when the
+   * two differ. Optional so every producer — the server pull, fixtures, tests — is
+   * untouched; a message without it renders `text` exactly as before.
+   */
+  displayText?: string;
   atMs: number;
   /**
    * Photos sent WITH this message (2026-08-09). Optional because every existing

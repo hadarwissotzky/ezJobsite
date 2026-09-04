@@ -399,6 +399,7 @@
             font-size: 30px; font-weight: 700; }
   .ommark.approved, .ommark.already { background: #E7EFE4; color: var(--approve); }
   .ommark.declined { background: #F6E5E1; color: var(--danger); }
+  .msgtr { font-size: 11px; color: #8c837c; margin-top: 3px; }
   .omh { font-family: var(--body); font-weight: 700; font-size: 21px; margin: 0;
          letter-spacing: -.2px; }
   .omp { font-size: 14.5px; line-height: 1.5; color: var(--steel); margin: 8px 0 18px; }
@@ -738,6 +739,7 @@ const PL_STRINGS = {
     declinedStamp: 'Declined — do not proceed',
     declined: 'Declined',
     signedBy: (name) => ` — signed ${name}`,
+    translatedNote: 'Translated — the original is kept',
   },
   es: {
     approve: (amt) => `Aprobar ${amt}`,
@@ -759,6 +761,7 @@ const PL_STRINGS = {
     declinedStamp: 'Rechazado — no proceder',
     declined: 'Rechazado',
     signedBy: (name) => ` — firmado ${name}`,
+    translatedNote: 'Traducido — se conserva el original',
   },
 };
 const PL = new Proxy({}, { get: (_, k) =>
@@ -1118,6 +1121,39 @@ async function loadThread(d) {
     const { data: th } = await supabase.rpc('confirmation_thread', { p_token: token });
     if (Array.isArray(th)) d.__thread = th;
     else if (!Array.isArray(d.__thread)) d.__thread = [];
+    /**
+     * THE CONTRACTOR'S REPLIES, IN THE DOCUMENT'S LANGUAGE (slice 3). He writes in his
+     * language; this page was sent in the client's. Only HIS side is translated — the
+     * client's own words need no help — and `body` is never replaced: `display` rides
+     * beside it, and the bubble marks itself translated. Best-effort: offline or
+     * function-down, the original renders, exactly as this page always did.
+     */
+    /**
+     * ALWAYS toward the document's language — including English. Scenario 1 is a
+     * Spanish-speaking contractor sending an ENGLISH document: his replies arrive in
+     * Spanish and the client must read them in English, so 'en' is a target like any
+     * other. translate-v1 returns already-English text unchanged and caches it, so
+     * the steady cost of the common case is one lookup.
+     */
+    if (Array.isArray(d.__thread)) {
+      const texts = [...new Set(d.__thread
+        .filter((m) => m.side !== 'client' && m.body && m.body !== '📷')
+        .map((m) => m.body))];
+      if (texts.length) {
+        try {
+          const { data: tr } = await supabase.functions.invoke('translate-v1', {
+            body: { texts, target: PORTAL_LANG.current, token },
+          });
+          if (tr?.ok && Array.isArray(tr.texts)) {
+            const map = new Map(texts.map((t, i) => [t, tr.texts[i]]));
+            for (const m of d.__thread) {
+              const got = map.get(m.body);
+              if (m.side !== 'client' && typeof got === 'string' && got.trim()) m.__display = got;
+            }
+          }
+        } catch { /* originals render */ }
+      }
+    }
   } catch { if (!Array.isArray(d.__thread)) d.__thread = []; }
   return d.__thread;
 }
@@ -1776,7 +1812,9 @@ function threadHtml(d, opts) {
     // so a newline here would print as a blank first line in every bubble. Photos hang
     // below the bubble rather than inside it for the same reason.
     return `<div class="msg ${mine ? 'me' : 'them'}">
-      <div class="msgb">${esc(m.body)}</div>
+      <div class="msgb">${esc(m.__display ?? m.body)}</div>${
+        m.__display && m.__display !== m.body
+          ? `<div class="msgtr">${PL.translatedNote}</div>` : ''}
       ${mine ? '' : messageShots(m.media)}
       <div class="msgm">${mine ? 'You' : esc(company)}${when ? ` · ${esc(when)}` : ''}${
         fresh ? '<span class="msgnew">New</span>' : ''}</div>

@@ -43,7 +43,7 @@
  */
 import React from 'react';
 import { ScopeBlock } from './scopeblock';
-import { ActionSheetIOS, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, ActionSheetIOS, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { ExtraRecord } from '../record';
 import { truncate, type ThreadState } from '../discussion';
 import type { RemindVerdict } from '../remind';
@@ -514,6 +514,10 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
             clientName={approver?.name ?? null}
             clientAvatar={approver?.photoUri ?? null}
             onPressPhoto={props.onPressPhoto}
+            /* The exact original, on tap (slice 3): a translated message in a priced
+               conversation must be checkable against the words as written. Alert is
+               the right weight — a modal of one paragraph, dismissed with one tap. */
+            onShowOriginal={(text) => Alert.alert(t('lang.originalTitle'), text)}
           />
         ) : (
           <Text style={[T.bodySteel, st.empty]}>{t('r5b.noMessages')}</Text>

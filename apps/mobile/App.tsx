@@ -239,7 +239,7 @@ import { describeStamp, ensureLocationPermission, stampNow, type Stamp } from '.
 import { addressFor } from './src/geocode';
 import { resolveJurisdiction } from './src/jurisdiction';
 import { initFeedback, signalApproved, signalArmed, signalFailed, signalSaved, signalReady } from './src/feedback';
-import { getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
+import { currentLang, getLang, setLang, t as T, type Lang, type Msg } from './src/i18n';
 import { addParty, assignBoundary, drainScopeOutbox, ensurePartySchema, listBoundaries,
          listParties, nameBoundary } from './src/parties';
 import { captureStatus, levelColor, screenStatus } from './src/status';
@@ -265,6 +265,8 @@ import { decisionHistory, decisionSyncStatus, drainDecisionOutbox, ensureDecisio
          listDecisions, linkCaptureToDecision, recordDecision, type DecisionRow } from './src/decisions';
 import { renderCard, sendForConfirmation } from './src/confirmations';
 import { asSendLang, type SendLang } from './src/langpack';
+import { translateForDisplay } from './src/translate';
+import { PHOTO_ONLY_BODY } from './src/discussionstore';
 import { publishApprovalPhotos } from './src/approvalphotopublish';
 import {
   ensureApproverSchema, drainR5cOutbox, hydrateApprovers, suggestFor, listRoster, listKnownPeople, addApprover,
@@ -1302,7 +1304,7 @@ export default function App() {
 // R5b. Every message on this extra AND on every version it replaced, plus the price
 // it replaced — a question only makes sense against the number they were shown.
 const openThread = async (c: LedgerRow, focusReply = false) => {
-  const messages = await threadFor(db, c.id);
+  const messages = await localizedThread(c.id);
   const rev = await revisionOf(db, c.id);
   threadIdRef.current = c.id;
   setThread({
@@ -1315,6 +1317,39 @@ const openThread = async (c: LedgerRow, focusReply = false) => {
 // The one destination R8 names: an item's record (R6b). The bell row and the
 // push tap MUST land in the same place -- the AC says "the same destination as
 // the push deep-link", and two code paths drifting is how that stops being true.
+/**
+ * The thread, with client messages readable in the CONTRACTOR'S language (slice 3 —
+ * hadar, 2026-09-03: "the homeowner can respond to the messages in english, and the
+ * user will read them in the app in spanish").
+ *
+ * `text` is never touched — the original is the record and what the send path quotes.
+ * `displayText` is attached for CLIENT-side messages only: the contractor's own words
+ * need no translating for him, and translating them would rewrite what he watched
+ * himself type. Offline or function-down, the map comes back empty and the thread
+ * renders exactly as it always has; the next open fills it in (translate-once, both
+ * on-device and server-side, so the steady cost per message is zero).
+ */
+const localizedThread = async (changeOrderId: string): Promise<ThreadMessage[]> => {
+  const th = await threadFor(db, changeOrderId);
+  const target = currentLang();
+  // English is a target like any other: a Spanish-speaking CLIENT writes Spanish and
+  // an English-profile contractor must read it in English. Already-target text comes
+  // back unchanged and cached, so the common case costs one lookup.
+  if (!th.length) return th;
+  try {
+    const clientTexts = th
+      .filter((m) => m.side === 'client' && m.text !== PHOTO_ONLY_BODY)
+      .map((m) => m.text);
+    if (!clientTexts.length) return th;
+    const map = await translateForDisplay(db, connector.client, clientTexts,
+                                          asSendLang(target));
+    if (!map.size) return th;
+    return th.map((m) =>
+      m.side === 'client' && map.has(m.text.trim())
+        ? { ...m, displayText: map.get(m.text.trim()) } : m);
+  } catch { return th; }
+};
+
 const openRecord = async (changeOrderId: string) => {
   // NOTHING SILENT (hadar, 2026-07-22): a tap that opens nothing looks identical to
   // "still on the job screen", which is exactly what he reported. extraRecord can
@@ -1377,7 +1412,7 @@ const openRecord = async (changeOrderId: string) => {
   } catch { /* no transcript on this device — the record renders without it */ }
   // R5b: the discussion (lineage-walked) and which replies are still queued.
   try {
-    setRecordThread(await threadFor(db, changeOrderId));
+    setRecordThread(await localizedThread(changeOrderId));
     setRecordUndelivered(await undeliveredReplyIds(db));
   } catch { setRecordThread(null); setRecordUndelivered(new Set()); }
   // The forward link on a retired version, so the record can hand the reader on.
@@ -5155,7 +5190,7 @@ const checkClientMessages = async () => {
       // reason the record does: a client can answer while he is reading it.
       const openThreadId = threadIdRef.current;
       if (openThreadId) {
-        const msgs = await threadFor(db, openThreadId);
+        const msgs = await localizedThread(openThreadId);
         const und = await undeliveredReplyIds(db);
         setThread((p) => (p && p.co.id === openThreadId ? { ...p, messages: msgs, undelivered: und } : p));
       }
@@ -5186,7 +5221,7 @@ const checkClientMessages = async () => {
         // just landed must flip the state line and surface the reply bar's context
         // while he is looking at it, same rule as the open thread above.
         try {
-          setRecordThread(await threadFor(db, openId));
+          setRecordThread(await localizedThread(openId));
           setRecordUndelivered(await undeliveredReplyIds(db));
         } catch { /* discussion schema not up yet */ }
       }
@@ -9089,6 +9124,8 @@ const checkClientMessages = async () => {
   if (thread) {
     return (
       <ThreadScreen
+        onShowOriginal={(text) => setAck({ kind: 'ok', title: T('lang.originalTitle'),
+                                           detail: text, okLabel: T('common.ok') })}
         extra={{ id: thread.co.id, scope: thread.co.scope,
                  amount: thread.co.amount, status: thread.co.status }}
         messages={thread.messages}
@@ -10093,7 +10130,7 @@ const checkClientMessages = async () => {
           // postReply reports failure as a value, not a throw. Throwing here is what
           // keeps the typed words in the composer and puts the reason on screen.
           if (!pr.ok) throw new Error(pr.reason);
-          setRecordThread(await threadFor(db, record.id));
+          setRecordThread(await localizedThread(record.id));
           setRecordUndelivered(await undeliveredReplyIds(db));
           // The message is already durable and already queued. Its PHOTOS catch up on
           // their own — deliberately not awaited, and deliberately allowed to fail:
