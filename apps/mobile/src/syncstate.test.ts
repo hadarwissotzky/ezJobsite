@@ -9,7 +9,7 @@ import { syncLine, type SyncState } from './syncstate.ts';
 const NOW = 1_700_000_000_000;
 const base: SyncState = {
   connected: true, everSynced: true, lastSyncedAtMs: NOW - 120_000, projects: 8,
-  queued: 0, struggling: 0,
+  queued: 0, struggling: 0, psPending: 0,
 };
 
 test('a healthy phone says when and how many', () => {
@@ -52,4 +52,18 @@ test('the clock reads in units a person uses', () => {
   assert.match(at(45 * 60_000), /45 min ago/);
   assert.match(at(5 * 3_600_000), /5 h ago/);
   assert.match(at(3 * 86_400_000), /3 d ago/);
+});
+
+
+/**
+ * THE STUCK-SYNC TELL (2026-09-04). A non-empty ps_crud beside a stale sync time is
+ * the frozen-downloads signature — the state hadar's phone was in when core sat
+ * undelivered. It must be VISIBLE, and only when true: a healthy phone never says it.
+ */
+test('stuck sync writes are named, and only when there are any', () => {
+  assert.equal(syncLine({ ...base, psPending: 3 }, NOW),
+    'Synced 2 min ago · 8 jobs on this phone · 3 sync writes stuck');
+  assert.equal(syncLine({ ...base, psPending: 1, queued: 2 }, NOW),
+    'Synced 2 min ago · 8 jobs on this phone · 2 waiting to upload · 1 sync write stuck');
+  assert.ok(!syncLine(base, NOW).includes('stuck'));
 });

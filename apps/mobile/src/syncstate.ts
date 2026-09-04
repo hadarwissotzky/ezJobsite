@@ -40,6 +40,16 @@ export type SyncState = {
    * described by its consequence instead of by a number of bars.
    */
   struggling: number;
+  /**
+   * PENDING POWERSYNC UPLOADS (ps_crud), counted separately from the owned outboxes
+   * (2026-09-04). This is the number that explains a phone that stops receiving:
+   * PowerSync applies no downloaded checkpoint while this queue is non-empty, so a
+   * wedged entry here silently freezes every download — which is exactly how
+   * `company.plan = 'core'` sat undelivered on hadar's phone while PowerSync itself
+   * was verified serving it. The connector now parks a transaction after five failed
+   * attempts; this count is how anyone SEES the state before and after.
+   */
+  psPending: number;
 };
 
 /**
@@ -56,6 +66,12 @@ export async function syncState(db: AbstractPowerSyncDatabase): Promise<SyncStat
 
   // The same eleven outboxes `ota.ts` gates a restart on. Imported rather than
   // re-listed: two copies of this list is how one of them gets forgotten.
+  let psPending = 0;
+  try {
+    const r = await db.getAll<{ n: number }>(`SELECT COUNT(*) AS n FROM ps_crud`);
+    psPending = r[0]?.n ?? 0;
+  } catch { /* no ps_crud in this build — zero is honest */ }
+
   let queued = 0;
   let struggling = 0;
   try {
@@ -83,7 +99,7 @@ export async function syncState(db: AbstractPowerSyncDatabase): Promise<SyncStat
     lastSyncedAtMs: last,
     projects,
     queued,
-    struggling,
+    struggling, psPending,
   };
 }
 
@@ -101,6 +117,10 @@ export function syncLine(s: SyncState, nowMs: number): string {
     : `${Math.floor(ago / 86_400_000)} d ago`;
   const head = s.connected ? `Synced ${when}` : `Offline — last synced ${when}`;
   const tail = `${s.projects} ${s.projects === 1 ? 'job' : 'jobs'} on this phone`;
-  return s.queued > 0 ? `${head} · ${tail} · ${s.queued} waiting to upload`
-                      : `${head} · ${tail}`;
+  // The stuck-sync tell, printed only when true: a non-empty ps_crud beside a stale
+  // sync time is the signature of the frozen-downloads failure. Naming the number is
+  // what turns "it says free" into a diagnosable report.
+  const stuck = s.psPending > 0 ? ` · ${s.psPending} sync write${s.psPending === 1 ? '' : 's'} stuck` : '';
+  return s.queued > 0 ? `${head} · ${tail} · ${s.queued} waiting to upload${stuck}`
+                      : `${head} · ${tail}${stuck}`;
 }

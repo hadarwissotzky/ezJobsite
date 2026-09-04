@@ -105,6 +105,24 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
    * now identifies WHICH row and WHICH fields were refused and WHEN, so the
    * harness can baseline the list and require a NEW, MATCHING rejection.
    */
+  /**
+   * HOW MANY TIMES THE SAME TRANSACTION HAS FAILED IN A ROW (2026-09-04).
+   *
+   * hadar's phone downloaded `company.plan = 'core'` and never applied it — verified
+   * against PowerSync itself, which was serving the row. The mechanism: PowerSync will
+   * not apply a downloaded checkpoint while the local upload queue holds a pending
+   * write, and `uploadData` retried anything outside FATAL_PG_CODES FOREVER. One
+   * poisoned write — an error code the fatal list never anticipated — and every
+   * download after it is received and thrown away, silently, for weeks. Sign-out did
+   * not clear it, because same-user sign-in keeps the local database.
+   *
+   * In-memory on purpose: a restart resets the count and grants a poisoned
+   * transaction five fresh tries, which is the behaviour you want after an app
+   * update may have fixed the cause.
+   */
+  private stuckTxKey: string | null = null;
+  private stuckTxTries = 0;
+
   readonly rejected: Array<{
     table: string;
     op: string;
@@ -434,6 +452,8 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
       }
       // Mandatory: without complete() the upload queue stalls permanently.
       await tx.complete();
+      // A success ends any streak: the next failure starts counting from one.
+      this.stuckTxKey = null; this.stuckTxTries = 0;
     } catch (err: any) {
       const code = err?.code;
       if (FATAL_PG_CODES.has(code)) {
@@ -441,6 +461,47 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
           table: '?', op: '?', rowId: '?', fields: [],
           code, message: err.message ?? String(err), at: new Date().toISOString(),
         });
+        await tx.complete();
+        return;
+      }
+      /**
+       * THE RETRY CAP (2026-09-04). Retrying is right for a transient error and
+       * catastrophic for a permanent one the fatal list did not anticipate: the queue
+       * wedges, and a wedged queue does not just stop uploads — it stops every
+       * DOWNLOAD from being applied, which is how a plan change, a renamed job, and
+       * every other mutable row silently stopped arriving on hadar's phone.
+       *
+       * Five consecutive failures of the SAME transaction is not transience. The ops
+       * are parked durably in sync_rejected — the same ledger the known-fatal path
+       * uses, so one screen can surface both — and the transaction completes so the
+       * queue moves and downloads apply again.
+       *
+       * THIS IS SAFE FOR THIS APP SPECIFICALLY, and the reason is the architecture
+       * split CLAUDE.md §5 locks: EVIDENCE (captures, decisions, change orders) rides
+       * the owned outboxes, which park-and-surface and never discard. PowerSync
+       * carries only mutable relational rows — a project name, a company row. Losing
+       * one of those uploads is an inconvenience the parked record makes visible;
+       * losing every download forever is the product quietly dying.
+       */
+      const key = (tx.crud ?? []).map((o: any) => `${o.table}:${o.id}:${o.op}`).join('|');
+      if (key && key === this.stuckTxKey) this.stuckTxTries += 1;
+      else { this.stuckTxKey = key; this.stuckTxTries = 1; }
+      if (this.stuckTxTries >= 5) {
+        for (const op of tx.crud) {
+          try {
+            await database.execute(
+              `INSERT OR REPLACE INTO sync_rejected
+                 (row_key, tbl, op, row_id, code, message, fields, at_ms)
+               VALUES (?,?,?,?,?,?,?,?)`,
+              [`${op.table}:${op.id}`, op.table, String(op.op), String(op.id),
+               String(code ?? 'stuck'),
+               `parked after ${this.stuckTxTries} attempts: ${String(err?.message ?? err).slice(0, 300)}`,
+               JSON.stringify(Object.keys(op.opData ?? {})), Date.now()]);
+          } catch { /* recording must not stall the unstall */ }
+        }
+        console.warn('[connector] parked a stuck upload tx after', this.stuckTxTries,
+                     'attempts:', String(err?.message ?? err).slice(0, 200));
+        this.stuckTxKey = null; this.stuckTxTries = 0;
         await tx.complete();
         return;
       }
