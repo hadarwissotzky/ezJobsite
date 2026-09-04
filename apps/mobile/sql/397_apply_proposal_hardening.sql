@@ -1,3 +1,5 @@
+-- NOTE (2026-09-03): the LATEST definition of apply_proposal_v1 lives in
+-- 442_native_scope.sql, which is this body plus the native-scope columns. Edit there.
 -- 397 — hardening apply_proposal_v1 after an independent review (Codex, 2026-08-07).
 --
 -- Four real defects in 394/396, in severity order:

@@ -202,6 +202,17 @@ export type ExtraRecord = {
    * signs" must render THIS and not `description`.
    */
   scopeOfWork: string;
+  /**
+   * The SAME scope in the language the contractor spoke (442, LANGUAGE-LAYER slice 1),
+   * already vetted for staleness: null unless the AI authored the current English
+   * (`scope_of_work = scope_of_work_ai`). A human edit to the English orphans the
+   * native render, and showing an orphan would put two different documents in front of
+   * one man. Display material only — the instrument still renders from `scopeOfWork`
+   * unless a send explicitly chooses this language.
+   */
+  scopeOfWorkNative: string | null;
+  /** BCP-47-ish two-letter code for scopeOfWorkNative ('es'), or null. */
+  scopeNativeLang: string | null;
   photos: RecordPhoto[];
   /** True when photos were dropped by the render cap. */
   photosTruncated: number;
@@ -258,6 +269,7 @@ export async function extraRecord(
     co_number: number | null;
   }>(
     `SELECT co.id, co.decision_id, co.scope, co.scope_of_work, co.summary,
+            co.scope_of_work_native, co.scope_of_work_ai, co.scope_native_lang,
             co.amount_cents, co.nte_cents, co.is_mini, co.price_heard, co.line_items,
             co.who_directed, co.numbers_confirmed_at_ms, co.status, co.signed_by,
             co.created_at_ms,
@@ -533,6 +545,14 @@ export async function extraRecord(
   // `co.scope`, the title. Now the field displayed, edited, gated on and frozen is one
   // and the same. Falls back through summary then title so a pre-391 row reads as it did.
   const scopeOfWork = co.scope_of_work?.trim() || co.summary?.trim() || co.scope;
+  // Staleness is decided HERE, once, so no screen can forget to: the native render is
+  // only real while the English it was rendered beside is still the AI's English.
+  const c = co as { scope_of_work_native?: string | null; scope_of_work_ai?: string | null;
+                    scope_native_lang?: string | null };
+  const nativeFresh = !!c.scope_of_work_native?.trim()
+    && !!c.scope_of_work_ai && co.scope_of_work === c.scope_of_work_ai;
+  const scopeOfWorkNative = nativeFresh ? c.scope_of_work_native!.trim() : null;
+  const scopeNativeLang = nativeFresh ? (c.scope_native_lang ?? null) : null;
   const description = [scopeOfWork, ...addenda].join('\n\n');
 
   return {
@@ -540,6 +560,8 @@ export async function extraRecord(
     /** 391 — the detailed client-facing scope, WITHOUT the appended augments that
      *  `description` carries. The editor writes this; the instrument freezes it. */
     scopeOfWork,
+    scopeOfWorkNative,
+    scopeNativeLang,
     title: co.scope,
     status: co.status,
     amount: money(co.amount_cents),

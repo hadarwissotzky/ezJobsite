@@ -27,7 +27,7 @@
  */
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { t } from '../i18n';
+import { currentLang, t } from '../i18n';
 import { CostBreakdown, MoneyBlock, PhotoGrid } from './kit';
 import { Icon } from './icon';
 import { C, F } from './theme';
@@ -50,6 +50,9 @@ export function SendPreview(p: {
    *  disagreement that put "Not written up yet" directly above a written scope. */
   scopeWritten: boolean;
   scopeOfWork: string | null;
+  /** The scope in the speaker's language, pre-vetted for staleness by `extraRecord`. */
+  scopeOfWorkNative?: string | null;
+  scopeNativeLang?: string | null;
   /**
    * ALREADY PARSED, by `record.ts`. This does NOT re-read `line_items` — that column is
    * parsed in exactly one place and every screen shows the same lines from it, including
@@ -84,8 +87,18 @@ export function SendPreview(p: {
     : null;
 
   const excl = (p.exclusions ?? '').trim();
+  /**
+   * HIS LANGUAGE FIRST (mandate #5, slice 1 — hadar 2026-09-03: "scope of work is done
+   * in spanish"). When the profile language matches the language he recorded in and a
+   * fresh native render exists, that is what he proofreads — a man should not have to
+   * check a document in a language he did not choose. The English stays canonical and
+   * stays what the instrument freezes; the small line under the heading says so, so
+   * nobody mistakes the display for the record.
+   */
+  const native = p.scopeWritten && p.scopeOfWorkNative
+    && p.scopeNativeLang === currentLang() ? p.scopeOfWorkNative.trim() : null;
   // The words to print. Whether they COUNT as a scope is the caller's answer, above.
-  const sow = p.scopeWritten ? (p.scopeOfWork ?? '').trim() : '';
+  const sow = native ?? (p.scopeWritten ? (p.scopeOfWork ?? '').trim() : '');
 
   return (
     <View style={st.wrap}>
@@ -172,6 +185,9 @@ export function SendPreview(p: {
         <Text style={[st.body, !p.scopeWritten && st.bodyEmpty]}>
           {p.scopeWritten ? sow : t('draft.notWrittenUp')}
         </Text>
+        {!!native && (
+          <Text style={st.langNote}>{t('lang.shownNative')}</Text>
+        )}
       </Pressable>
 
       {!!excl && (
@@ -206,6 +222,7 @@ const st = StyleSheet.create({
   secHRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   secEdit: { fontFamily: F.bodySemi, fontSize: 13, color: C.brandDark },
   bodyEmpty: { color: C.steel, fontStyle: 'italic' },
+  langNote: { fontFamily: F.body, fontSize: 12.5, color: C.muted, marginTop: 8 },
   secH: { fontFamily: F.dispSemi, fontSize: 11.5, letterSpacing: 0.9, color: C.muted,
     textTransform: 'uppercase', marginBottom: 5 },
   body: { fontFamily: F.body, fontSize: 15.5, lineHeight: 22, color: C.ink },

@@ -319,7 +319,34 @@ LANGUAGE. Write the document in clear professional English a homeowner understan
  * `shown_content` (the frozen instrument), an approval page, a PDF and an SMS-length
  * preview, and the only formatting all four agree on is line breaks.
  */
-export function renderScope(x: ScopeSections): string {
+/**
+ * The document's headings, per language the document can be rendered in.
+ *
+ * LANGUAGE-LAYER (mandate #5), slice 1 — 2026-09-03. The sections may now exist in the
+ * SPEAKER'S language as well as canonical English, and a Spanish body under English
+ * headings is not a Spanish document. Headings live here, not in the model's output,
+ * for the same reason renderScope exists at all: the shape of a binding document is
+ * ours, and a prompt cannot restyle it.
+ *
+ * Only languages listed here can be rendered. That is deliberate: adding a language is
+ * a REVIEWED act (somebody who speaks it signs off on five headings), never a model
+ * emitting headings we cannot read.
+ */
+export const SCOPE_HEADINGS: Record<string, {
+  why: string; done: string; includes: string; excludes: string; conditions: string;
+}> = {
+  en: { why: 'WHY THIS IS NEEDED', done: 'WHAT WILL BE DONE',
+        includes: 'WHAT THIS INCLUDES', excludes: 'WHAT THIS DOES NOT INCLUDE',
+        conditions: 'CONDITIONS' },
+  es: { why: 'POR QUÉ SE NECESITA', done: 'QUÉ SE HARÁ',
+        includes: 'QUÉ INCLUYE', excludes: 'QUÉ NO INCLUYE',
+        conditions: 'CONDICIONES' },
+};
+
+export function renderScope(x: ScopeSections, lang: string = 'en'): string {
+  // An unknown language falls back to English headings rather than failing: the body
+  // is still readable, and a thrown render would cost the whole proposal.
+  const h = SCOPE_HEADINGS[lang] ?? SCOPE_HEADINGS.en;
   const out: string[] = [];
   const list = (heading: string, items: string[], numbered = false) => {
     const clean = items.map((i) => i.trim()).filter(Boolean);
@@ -328,12 +355,51 @@ export function renderScope(x: ScopeSections): string {
     clean.forEach((i, n) => out.push(numbered ? `${n + 1}. ${i}` : `• ${i}`));
     out.push('');
   };
-  if (x.background?.trim()) { out.push('WHY THIS IS NEEDED', x.background.trim(), ''); }
-  list('WHAT WILL BE DONE', x.steps, true);
-  list('WHAT THIS INCLUDES', x.included);
-  list('WHAT THIS DOES NOT INCLUDE', x.excluded);
-  list('CONDITIONS', x.assumptions);
+  if (x.background?.trim()) { out.push(h.why, x.background.trim(), ''); }
+  list(h.done, x.steps, true);
+  list(h.includes, x.included);
+  list(h.excludes, x.excluded);
+  list(h.conditions, x.assumptions);
   return out.join('\n').trim();
+}
+
+/**
+ * The SAME sections, said in another language — the translate-once half of slice 1.
+ *
+ * WHY A SECOND CALL AND NOT A WIDER SCHEMA. Folding "also emit every section in the
+ * source language" into the structuring call doubles its output for every English
+ * recording too (the model cannot know the split is conditional), and couples the
+ * hardest prompt in the product to a concern it does not have. A separate call runs
+ * only when the speaker was not speaking English, translates a FINISHED document, and
+ * can fail without costing the canonical proposal — the catch in the caller makes a
+ * failed translation a missing nicety, never a missing scope.
+ *
+ * NUMBERS ARE COPIED, NEVER TRANSLATED (mandate #6). The prompt says so, and the one
+ * place a figure lives in these sections is inside prose the model is told to carry
+ * digit-for-digit.
+ */
+export async function translateSections(
+  sections: ScopeSections, targetLang: string
+): Promise<ScopeSections | null> {
+  if (!SCOPE_HEADINGS[targetLang]) return null;   // no reviewed headings, no render
+  const client = new Anthropic();
+  const resp = await client.messages.create({
+    model: STRUCTURE_MODEL,
+    max_tokens: 2048,
+    output_config: { format: { type: 'json_schema', schema: SECTIONS_SCHEMA } },
+    system: [{ type: 'text', text:
+      `Translate every string in this change-order scope into ${targetLang === 'es' ? 'Spanish' : targetLang}. ` +
+      `Faithful, plain, professional — the reader is a homeowner. Keep the meaning exactly; ` +
+      `do not add, drop, merge or reorder items. Copy every number, measurement, model number ` +
+      `and price DIGIT FOR DIGIT — never converted, rounded, or spelled out differently. ` +
+      `Keep trade terms a local homeowner would know; translate the rest. ` +
+      `Return the same JSON shape with only the strings translated. null stays null.` }],
+    messages: [{ role: 'user', content: JSON.stringify(sections) }],
+  } as unknown as Anthropic.MessageCreateParamsNonStreaming);
+  if (resp.stop_reason === 'refusal') return null;
+  const block = resp.content.find((b) => b.type === 'text');
+  if (!block || block.type !== 'text') return null;
+  try { return parseSections(JSON.parse(block.text)); } catch { return null; }
 }
 
 function strArray(v: unknown, cap: number, max = 400): string[] {

@@ -188,6 +188,13 @@ async function ensureFlowFields(db: AbstractPowerSyncDatabase) {
     // fixed argument set. It is what lets a second recording rewrite a scope the model
     // produced while leaving a scope the contractor typed alone — see saveScopeOfWork.
     ['scope_of_work_ai', 'TEXT'],
+    // 442 — LANGUAGE-LAYER slice 1: the AI scope rendered in the language the
+    // contractor actually spoke. Display material for HIS eyes; the English
+    // `scope_of_work` stays canonical and stays the instrument. Readers must treat
+    // this as stale whenever scope_of_work != scope_of_work_ai — a human edit to the
+    // English orphans the native render until the next AI pass rewrites both.
+    ['scope_of_work_native', 'TEXT'],
+    ['scope_native_lang', 'TEXT'],
     // 396 — the contractor's own words about cost ("probably $1,800"), verbatim. NOT a
     // price: it exists so the draft screen can read the number back and ask him to
     // confirm it, which is the half of mandate #6 that was missing — the pipeline
@@ -1628,7 +1635,7 @@ export async function hydrateChangeOrders(
 ) {
   const q = supabase
     .from('change_order')
-    .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at, scope_of_work, scope_of_work_ai, price_heard, schedule_effect, schedule_days, billing_timing, exclusions, extra_type, co_number');
+    .select('id, decision_id, project_id, scope, line_items, amount_cents, nte_cents, is_mini, who_directed, ref_estimate, numbers_confirmed_at, status, created_at, scope_of_work, scope_of_work_ai, price_heard, schedule_effect, schedule_days, billing_timing, exclusions, extra_type, co_number, scope_of_work_native, scope_native_lang');
   const { data, error } = await (projectId ? q.eq('project_id', projectId) : q);
   // `ok` SEPARATES "THIS ACCOUNT HAS NO EXTRAS" FROM "I COULD NOT ASK".
   //
@@ -1855,6 +1862,8 @@ export async function hydrateChangeOrders(
       // clobbered a local answer would be the cloud editing his document while he was
       // writing it.
       `UPDATE change_order SET scope_of_work = ?, scope_of_work_ai = ?, scope = ?,
+              scope_of_work_native = ?,
+              scope_native_lang    = ?,
               price_heard      = COALESCE(?, price_heard),
               schedule_effect  = COALESCE(schedule_effect, ?),
               schedule_days    = COALESCE(schedule_days, ?),
@@ -1867,6 +1876,8 @@ export async function hydrateChangeOrders(
                OR (scope_of_work_ai IS NOT NULL AND scope_of_work = scope_of_work_ai))
           AND NOT EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = change_order.id)`,
       [sow, sow, co.scope,
+       (co as { scope_of_work_native?: string | null }).scope_of_work_native ?? null,
+       (co as { scope_native_lang?: string | null }).scope_native_lang ?? null,
        (co as { price_heard?: string | null }).price_heard ?? null,
        (co as { schedule_effect?: string | null }).schedule_effect ?? null,
        (co as { schedule_days?: number | null }).schedule_days ?? null,

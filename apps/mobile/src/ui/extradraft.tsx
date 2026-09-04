@@ -47,7 +47,7 @@ import {
 } from '../sendreadiness';
 import { canDelete, canSend, chipKey, displayStatus, stageOf } from '../extralifecycle';
 import { canSendExtra } from '../extraprocstate';
-import { t } from '../i18n';
+import { currentLang, t } from '../i18n';
 import {
   APP_NAME, Button, Card, CostBreakdown, MoneyBlock, ChecklistRow, PhotoGrid, Row, ScreenHeader, Section,
   StatusBanner, SyncedPill, VoiceClip, type ChecklistState, type PhotoTile, type RowTone,
@@ -697,7 +697,14 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
           // — still being written up" in the box as if a person had written it there,
           // under a caption telling him it was too short. Null hands ScopeBlock the
           // honest input and lets it draw the waiting state.
-          text={scopeWritten ? rec.scopeOfWork : null}
+          /* HIS LANGUAGE FIRST (442, mandate #5 slice 1): a fresh native render in the
+             profile language beats the English for DISPLAY. `extraRecord` already
+             nulls the native copy the moment a human edits the English, so this can
+             never show a document the record has moved past. */
+          text={scopeWritten
+            ? (rec.scopeOfWorkNative && rec.scopeNativeLang === currentLang()
+               ? rec.scopeOfWorkNative : rec.scopeOfWork)
+            : null}
           stage="draft"
           onEdit={props.onEditDescription}
           missing={props.readiness.blockers.includes('no_description')}

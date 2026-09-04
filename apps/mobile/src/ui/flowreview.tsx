@@ -168,6 +168,8 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
               // ONE answer to "is there a scope", shared with the banner above it.
               scopeWritten={scopeWritten}
               scopeOfWork={p.rec.scopeOfWork}
+              scopeOfWorkNative={p.rec.scopeOfWorkNative}
+              scopeNativeLang={p.rec.scopeNativeLang}
               lines={p.rec.costLines}
               photos={p.rec.photos}
               exclusions={p.exclusions}

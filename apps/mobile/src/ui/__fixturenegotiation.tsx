@@ -41,6 +41,8 @@ const rec: ExtraRecord = {
 
 ASSUMING · Both chimney breasts sound · The 1910 piece comes off intact — if not we stop and call you · Paint assumed to contain LEAD until tested.`,
   status: 'sent',
+  scopeOfWorkNative: null,
+  scopeNativeLang: null,
   amount: '$2,400',
   // A PRICED-IN-PARTS extra, so the cost grid is visible in the preview. The parts
   // sum to the $2,400 above; the screen shows that total from `amount` and never

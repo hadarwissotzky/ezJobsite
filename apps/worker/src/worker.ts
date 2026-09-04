@@ -26,7 +26,7 @@ import { isComplete, pendingSteps } from './steps.ts';
 import { hasSttKey, transcribe, type Transcript } from './transcribe.ts';
 import { draftPrice } from './voiceprice.ts';
 import { parseMoney } from './money.ts';
-import { hasLlmKey, structureTranscript, STRUCTURE_MODEL,
+import { hasLlmKey, structureTranscript, translateSections, renderScope, SCOPE_HEADINGS, STRUCTURE_MODEL,
          type StructureResult } from './structure.ts';
 
 export type Job = {
@@ -181,10 +181,41 @@ export async function runStep(
     // A decline or unusable output is RECORDED as a confidence-none proposal —
     // the step ran, and "nothing usable" is its honest answer. proposals.ts
     // rule 2 then guarantees it prefills nothing.
+    /**
+     * THE SPEAKER'S OWN LANGUAGE, AS A SECOND RENDER (mandate #5, slice 1 —
+     * hadar 2026-09-03: "user is spanish and record in spanish ... scope of work is
+     * done in spanish").
+     *
+     * English stays CANONICAL: `proposed_value` is unchanged, it is what
+     * `apply_proposal_v1` writes into `scope_of_work` and what the instrument freezes.
+     * This adds a faithful render in the language the man actually spoke, so the app
+     * can show him his own words' document instead of making him proofread a language
+     * he did not choose.
+     *
+     * BEST-EFFORT BY CONSTRUCTION. A failed translation costs the nicety, never the
+     * proposal — the canonical insert below does not wait on it being good.
+     */
+    let nativeValue: string | null = null;
+    let nativeLang: string | null = null;
+    try {
+      const { data: tr } = await sb.from('capture_transcript')
+        .select('source_language').eq('capture_id', job.capture_id)
+        .order('created_at', { ascending: false }).limit(1);
+      const lang = (tr?.[0]?.source_language ?? 'en').slice(0, 2).toLowerCase();
+      if (lang !== 'en' && SCOPE_HEADINGS[lang] && s?.sections && s.confidence === 'high') {
+        const ns = await translateSections(s.sections, lang);
+        if (ns) { nativeValue = renderScope(ns, lang); nativeLang = lang; }
+      }
+    } catch (e: any) {
+      console.warn('[worker] native render skipped:', String(e?.message ?? e).slice(0, 200));
+    }
+
     const { error } = await sb.from('capture_structured').insert({
       id: `st-${job.capture_id}-${Date.now()}`,
       capture_id: job.capture_id,
       owner_id: job.owner_id,
+      proposed_value_native: nativeValue,
+      proposed_native_lang: nativeLang,
       proposed_subject: s?.subject ?? null,
       proposed_value: s?.value ?? null,
       proposed_who_directed: s?.whoDirected ?? null,
