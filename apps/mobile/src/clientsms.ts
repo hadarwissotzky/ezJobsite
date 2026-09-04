@@ -288,10 +288,11 @@ export function clientSmsBody(o: ClientSmsInput): string {
 export function replyNoticeSmsBody(o: {
   companyName?: string | null;
   url: string;
+  lang?: SendLang;
 }): string {
-  const who = (o.companyName ?? '').trim() || 'Your contractor';
-  return `${who} replied to your question.` +
-    `\n\nRead it and approve or decline here:\n${o.url}`;
+  const L = LANG_PACK[o.lang ?? 'en'];
+  const who = (o.companyName ?? '').trim() || L.yourContractor;
+  return L.replyNotice(who, o.url);
 }
 
 /**
@@ -318,13 +319,16 @@ export function cancelledSmsBody(o: {
   companyName?: string | null;
   jobLabel?: string | null;
   reason?: string | null;
+  lang?: SendLang;
 }): string {
-  const who = (o.companyName ?? '').trim() || 'Your contractor';
+  const L = LANG_PACK[o.lang ?? 'en'];
+  const who = (o.companyName ?? '').trim() || L.yourContractor;
   const job = (o.jobLabel ?? '').trim();
   const why = (o.reason ?? '').trim();
-  return `${who} has withdrawn the change order they sent you.`
-    + (job ? `\nJob: ${job}` : '')
-    + (why ? `\nReason: ${why}` : '')
-    + `\n\nNo approval is needed. Nothing has been agreed and you will not be charged for it.`
+  return L.cancelledBody(who)
+    + (job ? L.cancelledJob(job) : '')
+    + (why ? L.cancelledReason(why) : '')
+    + L.cancelledClosing
+    // English on purpose in every language: STOP is the carrier's keyword.
     + `\n\nReply STOP to opt out.`;
 }

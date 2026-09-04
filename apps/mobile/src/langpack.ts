@@ -65,6 +65,13 @@ type Pack = {
   smsJob: (job: string) => string;
   smsCta: (url: string) => string;
   smsClosing: string;
+  // ── the later texts about a live link (slice 4) ──
+  remindBody: (who: string, scope: string, amount: string, url: string) => string;
+  replyNotice: (who: string, url: string) => string;
+  cancelledBody: (who: string) => string;
+  cancelledJob: (job: string) => string;
+  cancelledReason: (why: string) => string;
+  cancelledClosing: string;
 };
 
 export const LANG_PACK: Record<SendLang, Pack> = {
@@ -101,6 +108,15 @@ export const LANG_PACK: Record<SendLang, Pack> = {
     smsJob: (job) => `\nJob: ${job}`,
     smsCta: (url) => `\n\nOpen it here. No app or account needed:\n${url}`,
     smsClosing: '\n\nNothing proceeds until you approve.',
+    remindBody: (who, scope, amount, url) =>
+      `${who} is waiting on your approval for: ${scope} - ${amount}\n\n${url}\n\n` +
+      `Same link as before. Nothing has changed.`,
+    replyNotice: (who, url) =>
+      `${who} replied to your question.\n\nRead it and approve or decline here:\n${url}`,
+    cancelledBody: (who) => `${who} has withdrawn the change order they sent you.`,
+    cancelledJob: (job) => `\nJob: ${job}`,
+    cancelledReason: (why) => `\nReason: ${why}`,
+    cancelledClosing: '\n\nNo approval is needed. Nothing has been agreed and you will not be charged for it.',
   },
   es: {
     coHeader: 'ORDEN DE CAMBIO — SE SOLICITA APROBACIÓN',
@@ -143,5 +159,15 @@ export const LANG_PACK: Record<SendLang, Pack> = {
     smsJob: (job) => `\nObra: ${job}`,
     smsCta: (url) => `\n\nAbralo aqui. Sin app ni cuenta:\n${url}`,
     smsClosing: '\n\nNada procede hasta que usted apruebe.',
+    // Unaccented on purpose — see the note above the sms* block.
+    remindBody: (who, scope, amount, url) =>
+      `${who} espera su aprobacion para: ${scope} - ${amount}\n\n${url}\n\n` +
+      `Es el mismo enlace de antes. Nada ha cambiado.`,
+    replyNotice: (who, url) =>
+      `${who} respondio a su pregunta.\n\nLeala y apruebe o rechace aqui:\n${url}`,
+    cancelledBody: (who) => `${who} retiro la orden de cambio que le mando.`,
+    cancelledJob: (job) => `\nObra: ${job}`,
+    cancelledReason: (why) => `\nMotivo: ${why}`,
+    cancelledClosing: '\n\nNo se necesita aprobacion. Nada quedo acordado y no se le cobrara.',
   },
 };

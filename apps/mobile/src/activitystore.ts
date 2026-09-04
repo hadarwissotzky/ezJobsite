@@ -160,7 +160,7 @@ let deliveryColumnsTried = false;
 async function ensureDeliveryColumns(db: AbstractPowerSyncDatabase): Promise<void> {
   if (deliveryColumnsTried) return;
   deliveryColumnsTried = true;   // set FIRST: one attempt per launch, success or not
-  for (const col of ['delivered_at_ms INTEGER', 'deliver_fail_why TEXT']) {
+  for (const col of ['delivered_at_ms INTEGER', 'deliver_fail_why TEXT', 'lang TEXT']) {
     try { await db.execute(`ALTER TABLE co_live_link ADD COLUMN ${col}`); }
     catch (e: any) {
       // Expected once the column exists. Logged, never raised, whatever it says.
@@ -211,9 +211,26 @@ export async function linkDelivery(
 /** Remember the link that just went out. Overwrites: one live link per extra (250). */
 export async function noteLinkSent(
   db: AbstractPowerSyncDatabase,
-  o: { changeOrderId: string; token: string; url: string; atMs?: number }
+  o: { changeOrderId: string; token: string; url: string; atMs?: number;
+       /** The language the instrument went out in (slice 4): every LATER text about
+        *  this link — reminders, reply notices, a withdrawal — must speak it too.
+        *  A client who got a Spanish document and an English reminder was written to
+        *  in two voices about one paper. */
+       lang?: string | null }
 ): Promise<void> {
   const now = o.atMs ?? Date.now();
+  await ensureDeliveryColumns(db);
+  try {
+    await db.execute(
+      `INSERT INTO co_live_link (change_order_id, token, url, sent_at_ms, remind_count, last_remind_ms, lang)
+       VALUES (?,?,?,?,0,NULL,?)
+       ON CONFLICT(change_order_id) DO UPDATE SET
+         token = excluded.token, url = excluded.url, sent_at_ms = excluded.sent_at_ms,
+         remind_count = 0, last_remind_ms = NULL, lang = excluded.lang`,
+      [o.changeOrderId, o.token, o.url, now, o.lang ?? null]
+    );
+    return;
+  } catch { /* lang column missing (ALTER failed): fall through to the old shape */ }
   await db.execute(
     `INSERT INTO co_live_link (change_order_id, token, url, sent_at_ms, remind_count, last_remind_ms)
      VALUES (?,?,?,?,0,NULL)
@@ -229,6 +246,8 @@ export type LiveLink = {
   /** Why the SMS/share did not reach them, when it did not. Null = it did, or we
    *  never recorded either way (rows written before 2026-09-03). */
   deliverFailWhy: string | null;
+  /** The language the instrument was sent in; every later text follows it. */
+  lang: string | null;
 };
 
 export async function liveLinkFor(
@@ -246,10 +265,11 @@ export async function liveLinkFor(
     deliver_fail_why?: string | null;
   };
   const BASE = `url, token, remind_count, last_remind_ms`;
+  const EXTRAS = `deliver_fail_why, lang`;
   let r: Row[];
   try {
     r = await db.getAll<Row>(
-      `SELECT ${BASE}, deliver_fail_why FROM co_live_link WHERE change_order_id = ?`,
+      `SELECT ${BASE}, ${EXTRAS} FROM co_live_link WHERE change_order_id = ?`,
       [changeOrderId]);
   } catch {
     r = await db.getAll<Row>(
@@ -258,7 +278,8 @@ export async function liveLinkFor(
   if (!r.length) return null;
   return { url: r[0].url, token: r[0].token,
            remindCount: r[0].remind_count, lastRemindMs: r[0].last_remind_ms,
-           deliverFailWhy: r[0].deliver_fail_why ?? null };
+           deliverFailWhy: r[0].deliver_fail_why ?? null,
+           lang: (r[0] as { lang?: string | null }).lang ?? null };
 }
 
 /**

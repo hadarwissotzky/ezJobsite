@@ -75,11 +75,16 @@ export function canRemind(
  * there is one formatter in this app and a second one here is how the reminder ends
  * up saying a different number than the link it points at (mandate #6).
  */
+import { LANG_PACK, type SendLang } from './langpack.ts';
+
 export function reminderText(o: {
   contractorName: string;
   scope: string;
   amount: string;
   url: string;
+  /** The language the DOCUMENT went out in (slice 4) — a reminder about a Spanish
+   *  instrument speaks Spanish, whatever the contractor's own profile says. */
+  lang?: SendLang;
 }): string {
   /**
    * NO EM DASH. IT IS NOT A TYPOGRAPHIC PREFERENCE — IT IS 3 OF THE 5 SEGMENTS.
@@ -93,9 +98,5 @@ export function reminderText(o: {
    * The same trap is why `clientsms.ts` exists — the 391 instrument layout opens with
    * one, which is what made the old send body seven segments.
    */
-  return (
-    `${o.contractorName} is waiting on your approval for: ${o.scope} - ${o.amount}\n\n` +
-    `${o.url}\n\n` +
-    `Same link as before. Nothing has changed.`
-  );
+  return LANG_PACK[o.lang ?? 'en'].remindBody(o.contractorName, o.scope, o.amount, o.url);
 }

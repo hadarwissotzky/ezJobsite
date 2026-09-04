@@ -1954,6 +1954,8 @@ const remindExtra = async (
   const text = reminderText({
     contractorName: prof?.company || prof?.name || 'Your contractor',
     scope: c.scope, amount: c.amount, url: link.url,
+    // The reminder speaks the DOCUMENT's language (slice 4), remembered at send.
+    lang: asSendLang(link.lang),
   });
 
   /**
@@ -2633,7 +2635,9 @@ const withdrawExtra = async (changeOrderId: string, reason: string | null) => {
 
     const recipients: Array<{ channel: string; destination: string }> =
       ((data as any)?.recipients ?? []).filter((r: any) => r?.destination);
+    const cancelLink = await liveLinkFor(db, changeOrderId).catch(() => null);
     const body = cancelledSmsBody({
+      lang: asSendLang(cancelLink?.lang),
       companyName: prof?.company ?? null,
       jobLabel: proj?.name ?? null,
       reason,
@@ -3326,7 +3330,8 @@ const sendPricedApproval = async (
     // R8: keep the link so a reminder can reuse it. Overwrites — one live link per
     // extra (250), and a new link resets the reminder budget, because nobody has been
     // nagged about the new instrument yet.
-    await noteLinkSent(db, { changeOrderId: c.id, token: r.token, url: r.url });
+    await noteLinkSent(db, { changeOrderId: c.id, token: r.token, url: r.url,
+                             lang: instrumentLang });
 
     const { data: who } = await connector.client.auth.getUser();
     const pr = who?.user
