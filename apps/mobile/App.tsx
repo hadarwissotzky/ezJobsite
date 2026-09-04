@@ -1273,6 +1273,11 @@ export default function App() {
      * the contractor walks away believing a link went out that did not.
      */
     failWhy?: string | null;
+    /** HOW it went: automatic text, or handed over via the share sheet. */
+    via?: 'sms' | 'share' | null;
+    /** When the automatic text failed and the share sheet took over, the reason —
+     *  so the composer's appearance is never a mystery again (2026-09-04). */
+    autoFailWhy?: string | null;
     /** The facts the SMS body needs, carried so the RETRY on this sheet sends the same
      *  short message the first attempt did — not the seven-segment instrument. */
     sms?: { kind: ClientSmsKind; lang?: SendLang; companyName?: string | null; jobLabel?: string | null;
@@ -3025,7 +3030,17 @@ const deliverLink = async (a: {
    *  (REQ-LC40) — `clientSmsBody` does that checking, not this caller. */
   sms?: { kind: ClientSmsKind; lang?: SendLang; companyName?: string | null; jobLabel?: string | null;
           amountText?: string | null };
-}): Promise<{ ok: true } | { ok: false; why: string }> => {
+}): Promise<
+  /**
+   * `via` says HOW it reached the client (hadar, 2026-09-04: "it opens the phone sms
+   * popup — why?"). The share sheet is the designed FALLBACK when the automatic text
+   * cannot go — but it appeared with no explanation, so a backend outage (today: a
+   * suspended Twilio account) was indistinguishable from normal behaviour. The caller
+   * now knows which road was taken and why the automatic one was closed, and the
+   * post-send sheet says it out loud.
+   */
+  | { ok: true; via: 'sms' | 'share'; autoFailWhy: string | null }
+  | { ok: false; why: string }> => {
   /**
    * THE TEXT SAYS WHO, WHAT AND HOW MUCH — IT DOES NOT CARRY THE DOCUMENT.
    *
@@ -3052,16 +3067,17 @@ const deliverLink = async (a: {
                       companyName: a.sms.companyName, jobLabel: a.sms.jobLabel,
                       amountText: a.sms.amountText })
     : `${a.shown}\n\n${a.url}`;
+  let autoFailWhy: string | null = null;
   if (a.phone) {
     const r = await sendSms(connector.client, a.phone, body);
-    if (r.ok) return { ok: true };
-    // Logged, not shown. Twilio being unconfigured is a fact about the deployment,
-    // not about this send — and it is not what stopped the link going out, because
-    // the share sheet below is still open in front of him.
+    if (r.ok) return { ok: true, via: 'sms', autoFailWhy: null };
+    // Kept for the post-send sheet, which now names it — a silent fallback made a
+    // suspended Twilio account look like ordinary behaviour for a whole day.
+    autoFailWhy = r.reason;
     console.log('[send] automatic SMS unavailable: %s', r.reason);
   }
   const s = await shareLink(a.url, a.shown);
-  if (s.ok) return { ok: true };
+  if (s.ok) return { ok: true, via: 'share', autoFailWhy };
   // `shareLink` returns a reason only when it BROKE. No reason means the share sheet
   // came up and was dismissed — the contractor chose not to send, which is not an
   // error and must not be reported to him as one.
@@ -3225,6 +3241,7 @@ const sendPricedApproval = async (
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
       sentTo: to?.name ?? c.who_directed ?? null, atMs: Date.now(), phone: to?.phone ?? null,
       shared: d0.ok, failWhy: d0.ok ? null : d0.why,
+      via: d0.ok ? d0.via : null, autoFailWhy: d0.ok ? d0.autoFailWhy : null,
       sms: { kind: 'ewa', companyName: prof0?.company || prof0?.name || null,
              jobLabel: projects.find((p) => p.id === projectId)?.name ?? null } });
     // It went, so it is no longer waiting. Clearing here and not at the caller keeps the
@@ -3385,6 +3402,7 @@ const sendPricedApproval = async (
       jobName: projects.find((p) => p.id === projectId)?.name ?? 'this job',
       sentTo: to?.name ?? c.who_directed ?? null, atMs: sentAtMs, phone: to?.phone ?? null,
       shared: d.ok, failWhy: d.ok ? null : d.why,
+      via: d.ok ? d.via : null, autoFailWhy: d.ok ? d.autoFailWhy : null,
       sms: { kind: 'confirm', lang: instrumentLang, companyName: prof?.company || prof?.name || null,
              jobLabel: projects.find((p) => p.id === projectId)?.name ?? null,
              amountText: c.amount } });
@@ -13662,6 +13680,23 @@ const checkClientMessages = async () => {
 
           <Text style={s.sentH}>{T(sentLink.shared ? 'sent.title' : 'sent.failTitle')}</Text>
           <Text style={s.sentSub}>{T(sentLink.shared ? 'sent.waiting' : 'sent.failSub')}</Text>
+          {/* WHY THE COMPOSER APPEARED (hadar, 2026-09-04: "it opens the phone sms
+              popup — why?"). When the automatic text failed and he delivered by hand,
+              the send SUCCEEDED — but the fallback was silent, so a suspended Twilio
+              account looked like ordinary behaviour for a day. One amber line, only
+              when it is true, with the provider's reason underneath in the quiet type:
+              the same two-register pattern the sign-in screen learned this morning. */}
+          {sentLink.shared && sentLink.via === 'share' && !!sentLink.autoFailWhy && (
+            <View style={s.sentAutoWarn}>
+              <Text style={s.sentAutoWarnT}>{T('sent.autoSmsDown')}</Text>
+              <Text style={s.sentAutoWarnWhy}>{sentLink.autoFailWhy.slice(0, 160)}</Text>
+            </View>
+          )}
+          {sentLink.shared && sentLink.via === 'share' && !sentLink.autoFailWhy && !sentLink.phone && (
+            <View style={s.sentAutoWarn}>
+              <Text style={s.sentAutoWarnT}>{T('sent.noPhoneShare')}</Text>
+            </View>
+          )}
           {/* THE REASON, VERBATIM. "Couldn't send" with no cause leaves the contractor
               tapping the same button hoping; the number being unreachable and the share
               sheet being dismissed are different problems with different fixes. */}
@@ -13923,6 +13958,14 @@ const s = StyleSheet.create({
   // card, because it is evidence for the retry — not the message itself.
   sentWhyBad: { fontFamily: 'Barlow_400Regular', fontSize: 13.5, color: '#8A1F11',
     textAlign: 'center', marginTop: 6, marginBottom: 2, lineHeight: 19 },
+  // The fallback explainer (2026-09-04): amber, not red — the send SUCCEEDED by hand;
+  // this names why the automatic road was closed.
+  sentAutoWarn: { alignSelf: 'stretch', backgroundColor: '#FFF3EA', borderWidth: 1,
+    borderColor: '#FFD9C2', borderRadius: 10, paddingHorizontal: 13, paddingVertical: 11,
+    marginTop: 10 },
+  sentAutoWarnT: { fontFamily: 'Barlow_600SemiBold', fontSize: 14, color: '#7A3A12' },
+  sentAutoWarnWhy: { fontFamily: 'Barlow_400Regular', fontSize: 12, color: '#9c8a7e',
+    marginTop: 4 },
   sentAmt: { fontFamily: 'Oswald_700Bold', fontSize: 19, color: '#131110', marginLeft: 12 },
   sentWhen: { fontFamily: 'Barlow_400Regular', fontSize: 13.5, color: '#8A93A0', marginTop: 1 },
   // `alignSelf: 'stretch'` because sentCard centres its children: without it this
