@@ -2089,10 +2089,24 @@ const remindExtra = async (
 // (mandate #6: the app never authors a number).
 const startRevision = (c: {
   id: string; decision_id: string; scope: string; who_directed: string;
+  /** Where the composer LIVES. The record's row always carries it; the thread's
+   *  LedgerRow does not (that screen already sits on the job). */
+  project_id?: string;
   amount_cents: number | null; nte_cents: number | null;
   billing_timing: string | null; schedule_effect: string | null;
   schedule_days: number | null; exclusions: string | null;
 }) => {
+  /**
+   * NAVIGATE FIRST (hadar, 2026-09-05: "change and resend bounces me out of the co
+   * details screen to the Home Screen and does nothing"). The priced composer
+   * renders inside the JOB screen's return — the same trap finishExtraById
+   * documents and fixed in 2026-07: setting `priced` alone opens the card on a
+   * screen nobody is looking at. Change & resend from a record reached over Home
+   * closed the record onto Home, where the composer never mounts, and the tap
+   * ended in silence. Only when the caller knows the job: the thread's row does
+   * not carry one, and that screen already sits on the job it belongs to.
+   */
+  if (c.project_id) { setProjectId(c.project_id); setNav('project'); }
   setPriced({
     decisionId: c.decision_id, scope: c.scope, whoDirected: c.who_directed,
     amountText: c.amount_cents == null ? '' : (c.amount_cents / 100).toFixed(2),
