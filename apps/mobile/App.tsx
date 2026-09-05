@@ -223,7 +223,7 @@ import { DraftRecoveryCard } from './src/ui/draftrecovery';
 // rendering change_order.scope — the MUTABLE local row — while the client held
 // shown_content. In a dispute they would each be reading a different document and
 // neither would know it.
-import { ensureEventLogSchema, readEventLog, withEventLog, type ApprovalPanel } from './src/eventlog';
+import { ensureEventLogSchema, hydrateEventLog, readEventLog, withEventLog, type ApprovalPanel } from './src/eventlog';
 import { unreadByChangeOrder, unreadCount, unreadIds, unreadMessageIdsFor,
          unreadMessagesByChangeOrder, type ActivityRow } from './src/activity';
 import { buildApprovalDoc, shareApprovalDoc } from './src/approvalrecordshare';
@@ -4576,6 +4576,38 @@ const checkClientMessages = async () => {
    *  puts unstamped events last on purpose and re-merging its own output would
    *  double every row. */
   const [recordTimeline, setRecordTimeline] = React.useState<MergedEvent[]>([]);
+  /**
+   * LIVE OPENS ON THE OPEN RECORD (hadar, 2026-09-05: "once opened the co record
+   * should change" — visually, while he is looking at it).
+   *
+   * The post-hydrate refresh in openRecord covers opens that happened BEFORE the
+   * record was tapped; this covers the one that happens while it is on screen —
+   * the demo case: portal on one device, record on the other. Every 15s (the same
+   * cadence as the app's drain tick) it pulls the server timeline for the open
+   * record; ONLY when a new event actually landed does it re-derive the stage
+   * layer, so the screen never repaints on a quiet tick and offline ticks cost
+   * nothing (hydrateEventLog swallows network failure by design, mandate #7).
+   * Keyed on id+status, not the record object — the refresh replaces the record
+   * object and a dep on it would re-arm the timer every repaint.
+   */
+  React.useEffect(() => {
+    const rec = record;
+    if (!rec || rec.status !== 'sent') return;
+    const tick = async () => {
+      try {
+        const { added } = await hydrateEventLog(db, connector.client, rec.id);
+        if (added === 0 || recordIdRef.current !== rec.id) return;
+        const lc = await lifecycleFor(rec);
+        if (recordIdRef.current !== rec.id) return;
+        setRecordLc(lc.state); setRecordTimeline(lc.timeline);
+        const w = await withEventLog(db, connector.client, rec);
+        if (recordIdRef.current === rec.id) { setRecord(w); setApproval(w.approval); }
+      } catch { /* an offline tick changes nothing — the record stays as painted */ }
+    };
+    const id = setInterval(() => { void tick(); }, 15_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record?.id, record?.status]);
   /**
    * The open detail subscreen (extradetails.tsx) and its editor buffers.
    *
