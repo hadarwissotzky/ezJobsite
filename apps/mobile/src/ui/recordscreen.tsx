@@ -516,8 +516,16 @@ export function PhotoLightbox({
             // Tapping the picture closes, as it did before. The Pressable is INSIDE
             // the page rather than wrapping the list, because wrapping it swallowed
             // the horizontal drag and the swipe never started.
-            <Pressable onPress={onClose} style={{ width, height }}>
-              <Image source={{ uri: item }} style={{ width, height }} resizeMode="contain" />
+            // The photo gets the height BETWEEN the chrome, not the full screen
+            // (hadar, 2026-09-04: "the image information (gps) is hidden under the
+            // close button"). The stamp is BAKED onto the photo's bottom edge
+            // (mandate #9), so a portrait shot scaled to full height put its one
+            // evidentiary line exactly under the white Close bar. The page keeps
+            // the full width x height (paging geometry must not change); the
+            // padding letterboxes the picture clear of the counter pill above and
+            // the Close bar below, and 'contain' does the rest.
+            <Pressable onPress={onClose} style={{ width, height, paddingTop: 96, paddingBottom: 110 }}>
+              <Image source={{ uri: item }} style={{ flex: 1, width: undefined }} resizeMode="contain" />
             </Pressable>
           )}
         />
