@@ -1397,7 +1397,36 @@ const openRecord = async (changeOrderId: string) => {
   } catch { setRecordLc(null); setRecordTimeline([]); }
   try {
     const w = await withEventLog(db, connector.client, r);
+    /**
+     * THE SENT STAMP, FROM EVIDENCE WHEN THE COLUMN IS EMPTY (hadar, 2026-09-05:
+     * the tracker showed "Sent —" on a row that was visibly sent). REQ-LC4's
+     * `sent_at_ms` is null on rows sent before the column was written on this
+     * path; the server's 'sent' timeline event carries the real moment and has
+     * just been hydrated into the local log. The LATEST sent event is the one
+     * belonging to the current instrument (a resend re-sends).
+     */
+    if (w.sentAtMs === null) {
+      const { events: evs } = await readEventLog(db, r.id);
+      w.sentAtMs = evs.reduce<number | null>(
+        (m, e) => (e.kind === 'sent' && (m === null || e.atMs > m) ? e.atMs : m), null);
+    }
     setRecord(w); setApproval(w.approval);
+    /**
+     * RE-DERIVE THE STAGE LAYER NOW THAT THE SERVER TIMELINE LANDED (hadar,
+     * 2026-09-05: "if it did open it didn't update the co record detail").
+     *
+     * lifecycleFor runs FIRST and local-only, which is right (mandate #7: the
+     * record must paint with no signal) — but it bakes openCount/lastOpenedAtMs
+     * from the PRE-hydrate event log, and nothing recomputed them after
+     * withEventLog pulled the server's timeline. So a client open always showed
+     * up one visit late: hydrated during this view, displayed on the next.
+     * Re-running the (cheap, local) derivation after the hydrate puts the open
+     * on the tracker in the same visit that learned about it.
+     */
+    const lc2 = await lifecycleFor(r);
+    if (recordIdRef.current === changeOrderId) {
+      setRecordLc(lc2.state); setRecordTimeline(lc2.timeline);
+    }
   } catch { setApproval(null); }
   // R2: fetch the voice narration for this extra. The ALIGNMENT it returns is no
   // longer rendered — the three stage screens present evidence their own way — but
