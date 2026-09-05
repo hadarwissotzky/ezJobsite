@@ -396,6 +396,7 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
           who={who}
           openCount={props.openCount}
           lastOpenedAtMs={props.lastOpenedAtMs}
+          sentAtMs={rec.sentAtMs}
           awaitingReply={thread.awaitingReply}
           stateLineKey={rec.stateLineKey}
           stateLineParams={rec.stateLineParams}
@@ -587,6 +588,9 @@ function WaitingBlock(props: {
   who: string | null;
   openCount: number;
   lastOpenedAtMs: number | null;
+  /** When the extra went out — the stepper's first stamp. Null hides the time, not
+   *  the step: the row IS sent, that is what this stage means. */
+  sentAtMs: number | null;
   awaitingReply: boolean;
   stateLineKey: string;
   stateLineParams?: Record<string, string>;
@@ -646,13 +650,62 @@ function WaitingBlock(props: {
             {/* Title with the "no response" pill pinned TOP-RIGHT beside it. */}
             <View style={st.waitTitleRow}>
               <Text style={st.waitTitle}>{title}</Text>
-              {(waiting === 'unopened' || waiting === 'silent') && (
+              {waiting === 'unopened' && (
                 <Chip kind="pending" label={t('neg.noResponsePill')} outline />
               )}
             </View>
             {detail !== '' && <Text style={st.waitDetail}>{detail}</Text>}
           </View>
         </View>
+
+        {/* SENT -> OPENED -> APPROVED, as a tracker (hadar mockup, 2026-09-04). The
+            waiting card used to say where things stand in prose; the stepper says it
+            as shape, legible from across a jobsite. Derived entirely from evidence
+            this screen already holds: `sentAtMs` (REQ-LC4's stamp), `openCount` /
+            `lastOpenedAtMs` (confirmation_open, REQ-LC3). The Approved step is always
+            the empty one here: an approved extra renders the sealed screen, never
+            this card, so it shows as what is OWED, not what happened. Hidden on
+            'settled' (a stale terminal row) because the banner says that state better
+            than a tracker frozen mid-way. */}
+        {waiting !== 'settled' && (
+          <StepTracker
+            sentAtMs={props.sentAtMs}
+            openedAtMs={props.openCount > 0 ? props.lastOpenedAtMs : null}
+            formatAt={props.formatAt}
+          />
+        )}
+
+        {/* The read receipt, as two stat cells (eye: how many opens and what that
+            means; clock: recency). Only when there IS a receipt. An unopened extra
+            keeps the prose lines above, which carry the "check the number" nudge. */}
+        {waiting === 'silent' && (
+          <View style={st.statsRow}>
+            <View style={[st.statCell, st.statCellWide]}>
+              <View style={st.statDisc}><Icon name="eye" size={15} color={C.caution} /></View>
+              <View style={st.statBody}>
+                <Text style={st.statTitle}>
+                  {props.openCount === 1
+                    ? t('neg.openedOnce')
+                    : t({ k: 'neg.openedTimes', p: { n: props.openCount } })}
+                </Text>
+                <Text style={st.statSub}>
+                  {props.openCount === 1 ? t('neg.openedNotApproved') : t('neg.keepReturning')}
+                </Text>
+              </View>
+            </View>
+            <View style={st.statDivider} />
+            <View style={st.statCell}>
+              <View style={st.statDisc}><Icon name="clock" size={15} color={C.caution} /></View>
+              <View style={st.statBody}>
+                <Text style={st.statTitle}>{t('neg.lastSeen')}</Text>
+                <Text style={st.statSub}>
+                  {props.lastOpenedAtMs !== null
+                    ? openedStamp(props.lastOpenedAtMs, props.formatAt) : '\u2014'}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Full-width "Remind Sarah" button at the bottom (no icon). */}
         {props.waiting !== 'settled' && (
@@ -694,6 +747,58 @@ function WaitingBlock(props: {
       </View>
 
       {props.note !== null && <Text style={st.failure}>{props.note}</Text>}
+    </View>
+  );
+}
+
+/**
+ * The Sent -> Opened -> Approved tracker (hadar mockup, 2026-09-04).
+ *
+ * Three discs on one line, joined by segments that fill as the evidence arrives, with
+ * the step name and its stamp under each. The disc row is [pad, disc, seg, disc, seg,
+ * disc, pad] with pads at flex 0.5 and segments at flex 1, which puts the disc centres
+ * at exactly 1/6, 3/6 and 5/6 of the width -- the centres of the three equal label
+ * columns below -- with no absolute positioning to drift when the card resizes.
+ *
+ * A step with no stamp shows an em dash rather than nothing: "Approved  --" is the
+ * card saying that step has not happened, which is the fact the whole card is about.
+ */
+function StepTracker(props: {
+  sentAtMs: number | null;
+  /** Null = nobody has opened the link. The step renders hollow. */
+  openedAtMs: number | null;
+  formatAt: (ms: number) => string;
+}) {
+  const opened = props.openedAtMs !== null;
+  const disc = (done: boolean, key: string) => (
+    <View key={key} style={[st.stepDisc, done && st.stepDiscOn]}>
+      {done && <Icon name="check" size={13} color={C.raised} />}
+    </View>
+  );
+  const cols: { label: string; stamp: string | null }[] = [
+    { label: t('neg.stepSent'), stamp: props.sentAtMs !== null ? props.formatAt(props.sentAtMs) : null },
+    { label: t('neg.stepOpened'), stamp: opened ? props.formatAt(props.openedAtMs as number) : null },
+    { label: t('neg.stepApproved'), stamp: null },
+  ];
+  return (
+    <View style={st.steps}>
+      <View style={st.stepDiscRow}>
+        <View style={st.stepPad} />
+        {disc(true, 'sent')}
+        <View style={[st.stepSeg, opened && st.stepSegOn]} />
+        {disc(opened, 'opened')}
+        <View style={st.stepSeg} />
+        {disc(false, 'approved')}
+        <View style={st.stepPad} />
+      </View>
+      <View style={st.stepLabelRow}>
+        {cols.map((c) => (
+          <View key={c.label} style={st.stepCol}>
+            <Text style={st.stepLabel}>{c.label}</Text>
+            <Text style={st.stepStamp}>{c.stamp ?? '\u2014'}</Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
@@ -747,7 +852,7 @@ function CopyLinkRow({ url }: { url: string | null }) {
           hitSlop={8}
           style={({ pressed }) => [st.linkBtn, pressed && { opacity: 0.6 }, !url && { opacity: 0.4 }]}
         >
-          <Icon name={state === 'copied' ? 'approved' : 'ntClipboard'} size={14} color={C.brand} />
+          <Icon name={state === 'copied' ? 'approved' : 'ntClipboard'} size={14} color={C.caution} />
           <Text style={st.linkBtnText}>
             {state === 'copied' ? t('link.copied') : t('link.copy')}
           </Text>
@@ -844,18 +949,11 @@ function detailLines(o: {
   if (o.waiting === 'unopened') {
     return [t('erec.notOpenedYet'), t('neg.nextIfUnopened')];
   }
-  // Two lines, matching the design: the open count, then the last-opened stamp.
-  // The "no answer yet" fact lives in the pill above, not repeated here (the shared
-  // `erec.openedTimes` carries that suffix for the record screen, so this uses its
-  // own clean string), and the "a nudge is the next move" instruction is dropped —
-  // the prominent Remind button IS that instruction.
-  const lines = [
-    o.openCount === 1 ? t('neg.openedOnce') : t({ k: 'neg.openedTimes', p: { n: o.openCount } }),
-  ];
-  if (o.lastOpenedAtMs !== null) {
-    lines.push(t({ k: 'erec.lastOpened', p: { at: openedStamp(o.lastOpenedAtMs, o.formatAt) } }));
-  }
-  return lines;
+  // The opened state says NOTHING here any more (hadar mockup, 2026-09-04): the
+  // open count and the last-seen stamp moved into the stat cells under the step
+  // tracker, where they read as a receipt rather than a caption. Returning them
+  // here too would say every fact twice in one card.
+  return [];
 }
 
 /** The last-opened stamp reads "today at 8:40 AM" when the client opened it today —
@@ -1339,6 +1437,10 @@ function DocumentSection({ rec, terms, onOpenDetail, onPressPhoto }: {
 
 /* ----------------------------------------------------------------- styles -- */
 
+// The waiting family (tokens.ts statusTints.caution): the card, its hairlines and
+// its dark button ink all draw from this one triple so the amber cannot drift.
+const W = tint('caution');
+
 const st = StyleSheet.create({
   // paddingBottom clears the pinned CAPTURE FAB (72pt + its gap), which floats over
   // the bottom of this viewport. At 60 it covered the approver's row — the one line
@@ -1374,16 +1476,18 @@ const st = StyleSheet.create({
   withdrawBtn: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
   withdrawLabel: { fontFamily: F.bodySemi, fontSize: 15, color: C.danger },
 
-  // The single waiting card (green-tinted), holding disc + title + read-receipt + the
-  // Remind button — the design keeps them in one box.
+  // The single waiting card (AMBER — hadar mockup, 2026-09-04: the waiting state
+  // wears the waiting colour, tokens.ts's statusWaiting family, not the brand green),
+  // holding disc + title + step tracker + read-receipt stats + the Remind button —
+  // the design keeps them in one box.
   waitCard: {
-    backgroundColor: C.brandSoft, borderWidth: 1, borderColor: C.brandLine,
+    backgroundColor: W.soft, borderWidth: 1, borderColor: W.line,
     borderRadius: 12, padding: 11,
   },
   waitTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   waitDisc: {
     // Full CIRCLE (borderRadius = 50% of the size).
-    width: 36, height: 36, borderRadius: 18, backgroundColor: C.brand,
+    width: 36, height: 36, borderRadius: 18, backgroundColor: C.caution,
     alignItems: 'center', justifyContent: 'center',
   },
   waitBody: { flex: 1 },
@@ -1391,17 +1495,21 @@ const st = StyleSheet.create({
   waitTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 30 },
   waitTitle: {
     // Bold (Barlow Condensed 700, was 600) and ~20% larger (17→20).
-    flex: 1, fontFamily: F.disp, fontSize: 20, color: C.brand,
+    flex: 1, fontFamily: F.disp, fontSize: 20, color: C.caution,
     textTransform: 'uppercase', letterSpacing: 0.8,
   },
   waitDetail: { fontFamily: F.body, fontSize: 14, color: C.ink, lineHeight: 21, marginTop: 4 },
   // The full-width Remind button. Height trimmed ~20% (46→37); corners ~20% less round (12→10).
-  remindInCard: { marginTop: 12, minHeight: 37, borderRadius: 10 },
+  remindInCard: {
+    // The waiting family's dark ink, over the green variant's base -- `style` lands
+    // last in Button's array so this wins, and the refused dim (opacity) still shows.
+    marginTop: 12, minHeight: 37, borderRadius: 10, backgroundColor: W.ink,
+  },
 
   // The copy-link row, inside the waiting card under Remind. Separated by a hairline
   // rather than its own box: it is a second way to do the same errand, not a second
   // subject.
-  linkRow: { marginTop: 12, paddingTop: 11, borderTopWidth: 1, borderTopColor: C.brandLine },
+  linkRow: { marginTop: 12, paddingTop: 11, borderTopWidth: 1, borderTopColor: W.line },
   linkLabel: {
     fontFamily: F.body, fontSize: 11, fontWeight: '700', color: C.steel,
     letterSpacing: 0.6, textTransform: 'uppercase',
@@ -1414,10 +1522,45 @@ const st = StyleSheet.create({
   linkBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingVertical: 7, paddingHorizontal: 11,
-    borderRadius: 8, borderWidth: 1, borderColor: C.brandLine, backgroundColor: C.raised,
+    borderRadius: 8, borderWidth: 1, borderColor: W.line, backgroundColor: C.raised,
   },
-  linkBtnText: { fontFamily: F.body, fontSize: 13, fontWeight: '700', color: C.brand },
+  linkBtnText: { fontFamily: F.body, fontSize: 13, fontWeight: '700', color: W.ink },
   linkHint: { fontFamily: F.body, fontSize: 12, color: C.steel, marginTop: 6, lineHeight: 16 },
+
+  // The Sent -> Opened -> Approved tracker. Disc geometry is documented on the
+  // component; these are only the colours and sizes.
+  steps: { marginTop: 14 },
+  stepDiscRow: { flexDirection: 'row', alignItems: 'center' },
+  stepPad: { flex: 0.5 },
+  stepSeg: { flex: 1, height: 2, backgroundColor: W.line },
+  stepSegOn: { backgroundColor: C.caution },
+  stepDisc: {
+    width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.raised, borderWidth: 2, borderColor: W.line,
+  },
+  stepDiscOn: { backgroundColor: C.caution, borderColor: C.caution },
+  stepLabelRow: { flexDirection: 'row', marginTop: 6 },
+  stepCol: { flex: 1, alignItems: 'center' },
+  stepLabel: { fontFamily: F.body, fontSize: 13, fontWeight: '700', color: C.ink },
+  stepStamp: { fontFamily: F.body, fontSize: 11.5, color: C.steel, marginTop: 1 },
+
+  // The two read-receipt stat cells (eye · count | clock · recency), under a hairline.
+  statsRow: {
+    flexDirection: 'row', gap: 10, marginTop: 12, paddingTop: 11,
+    borderTopWidth: 1, borderTopColor: W.line,
+  },
+  statCell: { flex: 1, flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
+  // The count cell carries a sentence; the clock cell a stamp. The design gives the
+  // sentence the wider column.
+  statCellWide: { flex: 1.35 },
+  statDisc: {
+    width: 30, height: 30, borderRadius: 15, backgroundColor: W.line,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  statBody: { flex: 1 },
+  statTitle: { fontFamily: F.body, fontSize: 14, fontWeight: '700', color: C.ink },
+  statSub: { fontFamily: F.body, fontSize: 12, color: C.steel, lineHeight: 16, marginTop: 2 },
+  statDivider: { width: 1, backgroundColor: W.line },
 
   // The Info / Messages / Activity segmented control. One track; the active segment is
   // filled brand-green with light text, the rest are quiet. Tight padding so the active

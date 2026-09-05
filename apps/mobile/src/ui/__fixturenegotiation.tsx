@@ -62,6 +62,7 @@ ASSUMING · Both chimney breasts sound · The 1910 piece comes off intact — if
   jobName: 'Miller — Hall Bath',
   created: 'Jan 18',
   createdAtMs: 1,
+  sentAtMs: 1743264840000,
   capturedAt: 'Jan 18 · 8:32 am',
   capturedPlace: null,
   stateLineKey: 'erec.stSent',

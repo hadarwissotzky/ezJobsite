@@ -184,6 +184,9 @@ export type ExtraRecord = {
   /** When the change order was created = when the price was confirmed. */
   created: string;
   createdAtMs: number;
+  /** When it went out to the client (REQ-LC4's stamp). Null on a row that predates
+   *  the column — the negotiation stepper then shows the step without a time. */
+  sentAtMs: number | null;
   /** The real capture moment, when a capture is linked. Null otherwise. */
   capturedAt: string | null;
   /** Where the earliest capture behind this extra was taken ("37.77490, -122.41940"),
@@ -581,6 +584,7 @@ export async function extraRecord(
     isMini: co.is_mini === 1,
     created: createdLabel(co.created_at_ms),
     createdAtMs: co.created_at_ms,
+    sentAtMs: co.sent_at_ms ?? null,
     capturedAt: capturedLabel,
     capturedPlace,
     stateLineKey: line.key,
