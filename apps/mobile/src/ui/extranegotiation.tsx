@@ -364,12 +364,13 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
             tab bar, which is navigation, wore exactly the same costume as the two cards
             it sits between.
             Three surfaces now do that work, and each one means one thing:
-              · HEADER  — what this is, what it costs, where it stands. Card-coloured,
-                          full-bleed, closed by a rule and a shadow. The green waiting
-                          block lives INSIDE it, because it is status, not content.
+              · HEADER  — what this is and what it costs. Card-coloured, full-bleed,
+                          closed by a rule and a shadow. (The waiting card lived in
+                          here until 2026-09-04, when hadar moved the tab bar above
+                          it — it now LEADS the content instead.)
               · CONTROL — the tab bar, on the muted track, on the cream page. No border,
                           no card: it is the boundary between the two regions.
-              · CONTENT — bordered cards on cream, as before. */}
+              · CONTENT — the amber waiting card first, then bordered cards on cream. */}
         <View style={st.headerSlab}>
         <ScreenHeader
           title={rec.title}
@@ -386,6 +387,29 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
           <Text style={[T.bodySteel, st.onPhone]}>{t('erec.onPhone')}</Text>
         )}
 
+        </View>
+
+        <TabBar active={tab} unreadMessages={props.unreadMessages ?? 0}
+          onChange={(k) => {
+            if (k === 'messages') setMsgOpen(true);
+            // ONE history popup, not two. This briefly had its own Activity sheet
+            // showing `rec.history`, with a button opening the full history over the
+            // top of it — a second sheet on a first, and two different renderings of
+            // the same question. `onViewHistory` opens the richer one (the merged
+            // local+server timeline plus the signed instrument), which is now itself a
+            // bottom sheet, so the tab and the ⋯ and the version row all land in the
+            // same place.
+            else if (k === 'activity') props.onViewHistory();
+            else setTab(k);
+          }} />
+
+        {/* THE TAB BAR SITS ABOVE THE WAITING CARD (hadar, 2026-09-04: "move the
+            sub menu tabs above the notification box"). The card left the header
+            slab with the move: the slab now closes on the money line, the tab bar
+            is still the boundary between header and content, and the amber card
+            leads the content below it — on every tab, not inside 'info', because
+            Messages and Activity open sheets rather than panes and the state of
+            the extra must never scroll away behind a tab. */}
         {/* The state and the moves are ONE block on purpose. The nudge is the act
             this state calls for, so it sits against the sentence that explains why —
             and rendering Remind twice (once "prominently in the banner", once in an
@@ -411,22 +435,6 @@ export function ExtraNegotiationScreen(props: ExtraNegotiationProps) {
           onRevise={props.onRevise}
           note={actionNote}
         />
-
-        </View>
-
-        <TabBar active={tab} unreadMessages={props.unreadMessages ?? 0}
-          onChange={(k) => {
-            if (k === 'messages') setMsgOpen(true);
-            // ONE history popup, not two. This briefly had its own Activity sheet
-            // showing `rec.history`, with a button opening the full history over the
-            // top of it — a second sheet on a first, and two different renderings of
-            // the same question. `onViewHistory` opens the richer one (the merged
-            // local+server timeline plus the signed instrument), which is now itself a
-            // bottom sheet, so the tab and the ⋯ and the version row all land in the
-            // same place.
-            else if (k === 'activity') props.onViewHistory();
-            else setTab(k);
-          }} />
 
         {/* INFO — who is on the record and what the record says. Recent activity is NOT
             here (hadar): it lives under the Activity tab, not on the Info page. */}
