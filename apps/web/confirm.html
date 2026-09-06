@@ -944,6 +944,18 @@ async function load() {
     const live = st.live_token
       ? `${location.pathname}?t=${encodeURIComponent(st.live_token)}`
       : null;
+    /**
+     * FOLLOW THE CHAIN WITHOUT ASKING (hadar, 2026-09-06: "changes in the app to
+     * the co reflect in the link once sent"). Every link ever texted lands on the
+     * CURRENT version: the old token forwards to the live one, and the live page's
+     * own revision banner says what changed. The instrument itself stays frozen —
+     * a revision is a new frozen version, never an edit — so what a client signs
+     * is still exactly what they were shown. The interstitial below survives only
+     * for the no-successor case (retired with nothing sent after it), where there
+     * is nowhere to forward to. An ANSWERED old version never reaches this branch:
+     * it renders in full as the signed evidence it is.
+     */
+    if (live) { location.replace(live); return; }
     screen(`<div class="done"><div class="mark">🔄</div>
       <h2>This version was replaced</h2>
       <p>${live
