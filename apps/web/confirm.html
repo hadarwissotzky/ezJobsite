@@ -129,6 +129,21 @@
 
   /* Actions. Big, thumb-sized — answered one-handed, outdoors. */
   .sign { width: 100%; font-family: var(--body); font-size: 17px; padding: 15px 16px; border: 1.5px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); margin-bottom: 10px; }
+  /* THE SIGNATURE IS A PLACE, NOT A FIELD (hadar, 2026-09-06: "the sign your name
+     section should be more apparent... it needs to be binding"). ESIGN/UETA hang a
+     binding e-signature on visible INTENT: the signer must be doing a thing that
+     reads as signing, not filling a form. So the field lives in its own bordered
+     box headed "Sign here", the typed name is echoed back as an adopted signature,
+     and the consent line states in words that typing + tapping IS signing. */
+  .signbox { border: 1.5px solid var(--line); border-radius: 14px; padding: 14px 16px 16px; margin-bottom: 12px; background: #fffdf8; }
+  .signhead { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; margin-bottom: 10px; }
+  .signhead svg { width: 17px; height: 17px; }
+  .adopted { min-height: 44px; display: flex; align-items: center; padding: 2px 6px 0;
+    font-family: 'Snell Roundhand', 'Savoye LET', 'Segoe Script', 'Brush Script MT', cursive;
+    font-size: 30px; line-height: 1.1; color: var(--ink); border-bottom: 1.5px solid var(--ink);
+    overflow: hidden; white-space: nowrap; }
+  .adopted.empty { color: #b6bcb4; font-size: 15px; font-family: var(--body); }
+  .esign { font-size: 12px; color: var(--steel); line-height: 1.5; margin: 10px 0 0; }
   .sign:focus { outline: none; border-color: var(--ink); }
   /* SENTENCE CASE. The design's actions read as sentences a person says — "Approve
      $3,200", "Have a question?" — not as shouted labels. Condensed caps at 20px is a
@@ -145,7 +160,7 @@
      tap and explains nothing; this one stays tappable, and a tap without a name
      points at the signature field and says what is missing. Same rule the app's
      kit.tsx states for its send button. */
-  .approve.unarmed { opacity: .45; }
+  .approve.unarmed { background: #a6aca4; color: #f2f3f1; opacity: 1; }
   .sign.signneed { border-color: #b45309; box-shadow: 0 0 0 3px rgba(180,83,9,.18); }
   .signhint { color: #7a3a12; font-size: 14px; line-height: 1.4; margin: 8px 0 0; font-weight: 600; }
   /* A BORDER, BECAUSE A CHOICE HAS TO LOOK LIKE ONE.
@@ -734,6 +749,10 @@ const PL_STRINGS = {
     authorise: (co) => `By approving this change order, you authorise ${co} to carry out the additional work described above, for the amount and schedule impact stated. This becomes part of the contract.`,
     signLabel: 'Type your full name to sign',
     signFirst: 'First type your full name above — that is your signature. Then tap the approve button.',
+    signHead: 'Sign here',
+    adoptedEmpty: 'Your signature will appear here',
+    esignConsent: 'By typing your name and tapping the approve button, you are signing this change order electronically, and you agree that your electronic signature is as binding as a handwritten one.',
+    recordNote: 'Your name, the date and time, and an exact fingerprint of this document\u2019s wording are saved together as the signed record. Use \u201cPrint or save as PDF\u201d below to keep your copy. No account needed.',
     signPlaceholder: 'Your full name',
     schedBand: 'Schedule impact',
     termsBand: 'Terms',
@@ -757,6 +776,10 @@ const PL_STRINGS = {
     authorise: (co) => `Al aprobar esta orden de cambio, usted autoriza a ${co} a realizar el trabajo adicional descrito arriba, por el monto y el impacto en el cronograma indicados. Esto pasa a formar parte del contrato.`,
     signLabel: 'Escriba su nombre completo para firmar',
     signFirst: 'Primero escriba su nombre completo arriba — esa es su firma. Después toque el botón de aprobar.',
+    signHead: 'Firme aquí',
+    adoptedEmpty: 'Su firma aparecerá aquí',
+    esignConsent: 'Al escribir su nombre y tocar el botón de aprobar, usted está firmando esta orden de cambio electrónicamente, y acepta que su firma electrónica es tan vinculante como una firma manuscrita.',
+    recordNote: 'Su nombre, la fecha y hora, y una huella exacta del texto de este documento se guardan juntos como el registro firmado. Use \u201cImprimir o guardar como PDF\u201d abajo para conservar su copia. No se necesita cuenta.',
     signPlaceholder: 'Su nombre completo',
     schedBand: 'Impacto en el cronograma',
     termsBand: 'Condiciones',
@@ -2538,9 +2561,22 @@ function renderPriced(d, notice) {
           <p class="apara">${PL.authorise(esc(company))}${answered ? '' : `
             Nothing proceeds until you approve.`}</p>
           ${answered ? stampHtml(d) : `
-          <label class="signlab" for="name">${PL.signLabel}</label>
-          <input class="sign" id="name" placeholder="${PL.signPlaceholder}" autocomplete="name">
-          <div class="signhint" id="signhint" hidden>${PL.signFirst}</div>
+          <div class="signbox">
+            <div class="signhead">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+              ${PL.signHead}
+            </div>
+            <label class="signlab" for="name">${PL.signLabel}</label>
+            <input class="sign" id="name" placeholder="${PL.signPlaceholder}" autocomplete="name">
+            <!-- The ADOPTED SIGNATURE: the typed name echoed back in script on a
+                 signature line. Not decoration — ESIGN/UETA enforceability leans on
+                 demonstrable INTENT, and a person watching their name render as a
+                 signature while a consent line says "this is signing" cannot later
+                 read the act as form-filling. -->
+            <div class="adopted empty" id="adopted" aria-hidden="true">${PL.adoptedEmpty}</div>
+            <div class="signhint" id="signhint" hidden>${PL.signFirst}</div>
+            <p class="esign">${PL.esignConsent}</p>
+          </div>
           <div class="acts">
             <button class="approve unarmed" id="approve" aria-disabled="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:18px;height:18px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -2550,8 +2586,7 @@ function renderPriced(d, notice) {
               <span><b>Have a question?</b><br>Message ${esc(firstWord(company))}</span></button>
           </div>
           <button class="linkbtn" id="decline">${PL.decline}</button>
-          <p class="recordnote">Your response, your name, and the date and time become
-            part of the project record. No account needed.</p>`}
+          <p class="recordnote">${PL.recordNote}</p>`}
         </div>
 
         <div class="band bandfoot">
@@ -2580,7 +2615,11 @@ function renderPriced(d, notice) {
     const approveEl = document.getElementById('approve');
     const hintEl = document.getElementById('signhint');
     const armed = () => nameEl.value.trim().length >= 2;
+    const adoptedEl = document.getElementById('adopted');
     nameEl.addEventListener('input', () => {
+      const v = nameEl.value.trim();
+      adoptedEl.textContent = v || PL.adoptedEmpty;
+      adoptedEl.classList.toggle('empty', !v);
       approveEl.classList.toggle('unarmed', !armed());
       approveEl.setAttribute('aria-disabled', armed() ? 'false' : 'true');
       if (armed()) { hintEl.hidden = true; nameEl.classList.remove('signneed'); }
