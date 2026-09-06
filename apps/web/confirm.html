@@ -160,7 +160,7 @@
      tap and explains nothing; this one stays tappable, and a tap without a name
      points at the signature field and says what is missing. Same rule the app's
      kit.tsx states for its send button. */
-  .approve.unarmed { background: #a6aca4; color: #f2f3f1; opacity: 1; }
+  .approve.unarmed, .yes.unarmed { background: #a6aca4; color: #f2f3f1; opacity: 1; }
   .sign.signneed { border-color: #b45309; box-shadow: 0 0 0 3px rgba(180,83,9,.18); }
   .signhint { color: #7a3a12; font-size: 14px; line-height: 1.4; margin: 8px 0 0; font-weight: 600; }
   /* A BORDER, BECAUSE A CHOICE HAS TO LOOK LIKE ONE.
@@ -2880,8 +2880,20 @@ function renderPlain(d, notice) {
   screen(`
     ${noticeHtml(notice)}
     <div class="wrap" style="padding-top:24px">
+      ${/* THE DOCUMENT SAYS WHO IT IS FROM AND WHAT IT IS (hadar, 2026-09-06: "I
+            don't see the contractor logo information header and what this document
+            is all about"). The priced renderer has carried a letterhead since the
+            parity build; this legacy price-less path — decisions, EWAs, and any
+            instrument frozen before a price existed — showed a bare card with no
+            identity at all. Same letterhead, same tile, null-safe on an account
+            with nothing configured. */ ''}
+      ${letterheadHtml(d)}
       <div class="who">For ${esc(d.counterparty)}</div>
       <h1 class="plain">Please read this and ${verb} it.</h1>
+      <p class="doclede" style="margin:2px 0 14px">${esc(d.company_name || 'Your contractor')} sent
+        this for your written confirmation. It is a record of a decision on your
+        project — no payment is made here — and your answer becomes part of the
+        project record, so both sides stay aligned.</p>
       <div class="plaincard">${esc(d.shown_content)}</div>
       ${/* An EWA (PRD R3 step 1) is "condition description + photos" and carries no
             price, so it renders through here. Leaving the strip off this path would
@@ -2894,9 +2906,20 @@ function renderPlain(d, notice) {
             never see the answer, and have no evidence either had happened. The same
             hole as DEF-5, on the third of the three documents. */''}
       ${threadHtml(d)}
-      <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
+      <div class="signbox">
+        <div class="signhead">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+          Sign here
+        </div>
+        <input class="sign" id="name" placeholder="Type your full name to sign" autocomplete="name">
+        <div class="adopted empty" id="plainadopted" aria-hidden="true">Your signature will appear here</div>
+        <div class="signhint" id="plainhint" hidden>First type your full name above — that is your signature. Then answer below.</div>
+        <p class="esign">By typing your name and answering below, you are signing this
+          confirmation electronically, and you agree that your electronic signature is
+          as binding as a handwritten one.</p>
+      </div>
       <div class="btns">
-        <button class="yes" id="yes" disabled>Yes — that's right</button>
+        <button class="yes unarmed" id="yes" aria-disabled="true">Yes — that's right</button>
         <button class="no" id="no">No — that's not right</button>
         <button class="ghost" id="askp">Ask a question instead</button>
       </div>
@@ -2913,8 +2936,22 @@ function renderPlain(d, notice) {
   // believe it and take the signature back off a decline.
   const plainName = document.getElementById('name');
   const yesEl = document.getElementById('yes');
-  plainName.addEventListener('input', () => { yesEl.disabled = plainName.value.trim().length < 2; });
-  yesEl.onclick = () => answer('confirmed', null, plainName.value.trim());
+  const pAdopted = document.getElementById('plainadopted');
+  const pHint = document.getElementById('plainhint');
+  const pArmed = () => plainName.value.trim().length >= 2;
+  plainName.addEventListener('input', () => {
+    const v = plainName.value.trim();
+    pAdopted.textContent = v || 'Your signature will appear here';
+    pAdopted.classList.toggle('empty', !v);
+    yesEl.classList.toggle('unarmed', !pArmed());
+    yesEl.setAttribute('aria-disabled', pArmed() ? 'false' : 'true');
+    if (pArmed()) { pHint.hidden = true; plainName.classList.remove('signneed'); }
+  });
+  yesEl.onclick = () => {
+    // REFUSED, NOT DEAD — the same rule as the priced document's approve.
+    if (!pArmed()) { pHint.hidden = false; plainName.classList.add('signneed'); plainName.focus(); return; }
+    answer('confirmed', null, plainName.value.trim());
+  };
   // "No" is a real decline (signed, terminal). Asking is its own, unsigned path.
   document.getElementById('no').onclick = () => declineFlow(d);
   document.getElementById('askp').onclick = () => askQuestion(d);
