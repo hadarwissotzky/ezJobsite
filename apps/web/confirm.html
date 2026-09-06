@@ -140,6 +140,14 @@
   .approve { background: var(--approveDeep); color: #fff; display: flex; align-items: center; justify-content: center; gap: 9px; }
   .ghost { display: flex; align-items: center; justify-content: center; gap: 9px; }
   .approve:disabled { opacity: .4; }
+  /* NOT disabled — REFUSED (hadar, 2026-09-06: "the button looks active, it is not
+     clear that you first need to enter your name"). A disabled button swallows the
+     tap and explains nothing; this one stays tappable, and a tap without a name
+     points at the signature field and says what is missing. Same rule the app's
+     kit.tsx states for its send button. */
+  .approve.unarmed { opacity: .45; }
+  .sign.signneed { border-color: #b45309; box-shadow: 0 0 0 3px rgba(180,83,9,.18); }
+  .signhint { color: #7a3a12; font-size: 14px; line-height: 1.4; margin: 8px 0 0; font-weight: 600; }
   /* A BORDER, BECAUSE A CHOICE HAS TO LOOK LIKE ONE.
      `background: none` with no border rendered these as bare text under a large green
      button -- seen for the first time when the page was actually opened in a browser,
@@ -725,6 +733,7 @@ const PL_STRINGS = {
     approvalBand: 'Approval',
     authorise: (co) => `By approving this change order, you authorise ${co} to carry out the additional work described above, for the amount and schedule impact stated. This becomes part of the contract.`,
     signLabel: 'Type your full name to sign',
+    signFirst: 'First type your full name above — that is your signature. Then tap the approve button.',
     signPlaceholder: 'Your full name',
     schedBand: 'Schedule impact',
     termsBand: 'Terms',
@@ -747,6 +756,7 @@ const PL_STRINGS = {
     approvalBand: 'Aprobación',
     authorise: (co) => `Al aprobar esta orden de cambio, usted autoriza a ${co} a realizar el trabajo adicional descrito arriba, por el monto y el impacto en el cronograma indicados. Esto pasa a formar parte del contrato.`,
     signLabel: 'Escriba su nombre completo para firmar',
+    signFirst: 'Primero escriba su nombre completo arriba — esa es su firma. Después toque el botón de aprobar.',
     signPlaceholder: 'Su nombre completo',
     schedBand: 'Impacto en el cronograma',
     termsBand: 'Condiciones',
@@ -2530,8 +2540,9 @@ function renderPriced(d, notice) {
           ${answered ? stampHtml(d) : `
           <label class="signlab" for="name">${PL.signLabel}</label>
           <input class="sign" id="name" placeholder="${PL.signPlaceholder}" autocomplete="name">
+          <div class="signhint" id="signhint" hidden>${PL.signFirst}</div>
           <div class="acts">
-            <button class="approve" id="approve" disabled>
+            <button class="approve unarmed" id="approve" aria-disabled="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:18px;height:18px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
               ${PL.approve(isNte ? esc(usd(d.nte_cents)) : esc(priced))}</button>
             <button class="ghost askbtn" id="ask">
@@ -2567,8 +2578,22 @@ function renderPriced(d, notice) {
   if (!answered) {
     const nameEl = document.getElementById('name');
     const approveEl = document.getElementById('approve');
-    nameEl.addEventListener('input', () => { approveEl.disabled = nameEl.value.trim().length < 2; });
-    approveEl.onclick = () => answer('confirmed', null, nameEl.value.trim());
+    const hintEl = document.getElementById('signhint');
+    const armed = () => nameEl.value.trim().length >= 2;
+    nameEl.addEventListener('input', () => {
+      approveEl.classList.toggle('unarmed', !armed());
+      approveEl.setAttribute('aria-disabled', armed() ? 'false' : 'true');
+      if (armed()) { hintEl.hidden = true; nameEl.classList.remove('signneed'); }
+    });
+    approveEl.onclick = () => {
+      // REFUSED, NOT DEAD: without a name the tap answers — it points at the
+      // signature field and says why, instead of looking active and doing nothing.
+      if (!armed()) {
+        hintEl.hidden = false; nameEl.classList.add('signneed'); nameEl.focus();
+        return;
+      }
+      answer('confirmed', null, nameEl.value.trim());
+    };
     document.getElementById('ask').onclick = () => askQuestion(d);
     document.getElementById('decline').onclick = () => declineFlow(d);
   }
