@@ -1982,6 +1982,9 @@ const EN: Record<string, string> = {
   // The gap interview (SPEC-single-line-co-v1) — at most three questions, only when
   // the backend determination found gaps.
   'ck.add': 'Add',
+  'rec.typedN': 'Typed note {n}',
+  'rec.typedOne': 'Typed note',
+  'rec.oneTyped': '1 typed note',
   'st.dismissRejected': 'Reviewed \u2014 clear these. Everything is safe on the server; these uploads were refused for good.',
   'ota.checking': 'Checking for updates\u2026',
   'ota.updating': 'Updating the app\u2026',
@@ -4002,6 +4005,9 @@ const ES: Record<string, string> = {
   'neg.keepReturning': 'Vuelven al enlace una y otra vez, pero todavía no lo aprueban.',
   'neg.lastSeen': 'Visto por última vez',
   'ck.add': 'Agregar',
+  'rec.typedN': 'Nota escrita {n}',
+  'rec.typedOne': 'Nota escrita',
+  'rec.oneTyped': '1 nota escrita',
   'st.dismissRejected': 'Revisado \u2014 borrar esto. Todo est\u00e1 seguro en el servidor; estas subidas fueron rechazadas definitivamente.',
   'ota.checking': 'Buscando actualizaciones\u2026',
   'ota.updating': 'Actualizando la app\u2026',

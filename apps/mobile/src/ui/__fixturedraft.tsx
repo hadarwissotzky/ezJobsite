@@ -24,9 +24,9 @@ const photo = (id: string, uri: string, at: string): RecordPhoto => ({
 });
 
 const voices: RecordVoice[] = [
-  { captureId: 'v1', uri: houseUri, at: 'Jan 18 · 8:32 am', capturedAtMs: 1, present: true, silent: false,
+  { captureId: 'v1', uri: houseUri, at: 'Jan 18 · 8:32 am', capturedAtMs: 1, present: true, silent: false, modality: 'voice' as const,
     transcript: 'Panel is undersized, needs a full 200 amp upgrade to meet code.' },
-  { captureId: 'v2', uri: houseUri, at: 'Jan 18 · 8:34 am', capturedAtMs: 2, present: true, silent: false,
+  { captureId: 'v2', uri: houseUri, at: 'Jan 18 · 8:34 am', capturedAtMs: 2, present: true, silent: false, modality: 'voice' as const,
     transcript: 'Also relabel the circuits while the cover is off.' },
 ];
 

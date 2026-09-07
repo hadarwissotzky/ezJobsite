@@ -114,6 +114,13 @@ export type RecordVoice = {
    * transcription was still running, forever, about a clip that was finished.
    */
   silent: boolean;
+  /**
+   * 'voice' plays; 'text' was TYPED (hadar, 2026-09-07: the recordings section must
+   * show the words beside the evidence, and a typed note is spoken-with-fingers — the
+   * same raw material the write-up was built from, invisible until now). A text entry
+   * has no playable clip; its transcript IS the capture.
+   */
+  modality: 'voice' | 'text';
 };
 
 /** One row of the cost grid. Pre-formatted: screens render, they do not do money. */
@@ -390,7 +397,9 @@ export async function extraRecord(
     // own playable clip (hadar, 2026-07-25). The voice IS the record (the transcript
     // is derived), so a voice note added to the extra gets a real player, not a
     // dead tile. Oldest first; `caps` is already ordered by captured_at_ms.
-    const voiceCaps = caps.filter((c) => c.modality === 'voice');
+    // Voice AND text: both carry the contractor's words, and the section's job is
+    // showing the words beside the evidence they came from.
+    const voiceCaps = caps.filter((c) => c.modality === 'voice' || c.modality === 'text');
     voices = await Promise.all(voiceCaps.map(async (vc) => {
       const uri = FS.documentDirectory + vc.media_relpath;
       let present = false;
@@ -416,6 +425,7 @@ export async function extraRecord(
       return {
         captureId: vc.capture_id, uri, at: createdLabel(vc.captured_at_ms),
         capturedAtMs: vc.captured_at_ms, present, transcript, silent,
+        modality: (vc.modality === 'text' ? 'text' : 'voice') as 'voice' | 'text',
       };
     }));
   }

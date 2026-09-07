@@ -45,7 +45,7 @@ export function RecordingsCard({ voices, startOpen }: {
       <Row
         icon="microphone"
         label={voices.length === 1
-          ? t('rec.oneRecording')
+          ? t(voices[0].modality === 'text' ? 'rec.oneTyped' : 'rec.oneRecording')
           : t({ k: 'rec.nRecordings', p: { n: voices.length } })}
         // WHEN it was captured — what a contractor recognises the recording by.
         value={voices[0]?.at ?? undefined}
@@ -58,17 +58,28 @@ export function RecordingsCard({ voices, startOpen }: {
       {open && voices.map((v, i) => (
         <View key={v.captureId} style={{ marginTop: 12 }}>
           {voices.length > 1 && (
-            <Text style={labelStyle}>{t({ k: 'erec.voiceN', p: { n: i + 1 } })}</Text>
+            <Text style={labelStyle}>
+              {t({ k: v.modality === 'text' ? 'rec.typedN' : 'erec.voiceN', p: { n: i + 1 } })}
+            </Text>
           )}
-          <VoiceClip
-            uri={v.uri}
-            present={v.present}
-            playLabel={t('erec.voicePlay')}
-            missingLabel={t('erec.voiceMissing')}
-          />
+          {/* A typed capture has no clip to play — its words below ARE the capture.
+              Drawing a dead player over it would claim audio that never existed. */}
+          {v.modality === 'voice' && (
+            <VoiceClip
+              uri={v.uri}
+              present={v.present}
+              playLabel={t('erec.voicePlay')}
+              missingLabel={t('erec.voiceMissing')}
+            />
+          )}
+          {v.modality === 'text' && voices.length === 1 && (
+            <Text style={labelStyle}>{t('rec.typedOne')}</Text>
+          )}
           {v.transcript
-            ? <Text style={[T.body, { fontSize: 15, marginTop: 6 }]} selectable>{v.transcript}</Text>
-            : v.present
+            ? <Text style={[T.body, { fontSize: 16, lineHeight: 23, marginTop: 6 }]} selectable>
+                {v.transcript}
+              </Text>
+            : v.modality === 'voice' && v.present
               ? <Text style={[T.bodySteel, { fontSize: 13.5, marginTop: 6 }]}>
                   {t(v.silent ? 'erec.transcriptSilent' : 'erec.transcriptPending')}
                 </Text>
