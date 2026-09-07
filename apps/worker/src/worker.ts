@@ -49,7 +49,6 @@ export async function runStep(
   sb: SupabaseClient, job: Job, step: string
 ): Promise<StepOutcome> {
   if (step === 'transcribe') {
-    if (!hasSttKey()) return { ok: false, reason: 'needs_api_key' };
     // `capture.payload` holds the storage object key (060 inserts p_object_key
     // into it). The bucket is 'captures', matching uploader.ts. There is NO mime
     // column on the server capture table — this selected one anyway and every
@@ -61,6 +60,34 @@ export async function runStep(
       return { ok: false, reason: 'needs_connection', error: capErr?.message ?? 'no payload key' };
     }
     const ext = String(cap.payload).split('.').pop()?.toLowerCase() ?? '';
+
+    /**
+     * A TYPED CAPTURE NEEDS NO EARS (hadar, 2026-09-06: typed the extra into the
+     * text field and got "we couldn't make out the work"). REQ-CAP2 makes text a
+     * first-class modality — the uploader stores it as .txt — but this step only
+     * knew audio, so the typed words were HANDED TO DEEPGRAM AS AUDIO/M4A: the
+     * provider heard noise, the transcript never existed, the structure pass
+     * starved, and the app told a man who had just written his extra out in full
+     * that it could not hear him. The words ARE the transcript; write them down
+     * verbatim and let every later step (resolve, structure, price) run
+     * unchanged. Before the STT-key check on purpose: a keyless worker can still
+     * process every typed capture.
+     */
+    if (ext === 'txt') {
+      const dl = await sb.storage.from('captures').download(cap.payload);
+      if (dl.error || !dl.data) {
+        return { ok: false, reason: 'needs_connection', error: dl.error?.message ?? 'no text' };
+      }
+      const text = (await dl.data.text()).trim();
+      // Empty typed text cannot be committed (modality.ts refuses it at capture),
+      // so an empty read here is a storage fault, not silence.
+      if (!text) return { ok: false, reason: 'needs_connection', error: 'empty text object' };
+      return writeTranscript(sb, job, {
+        text, language: null, engine: 'typed', model: null, durationSec: null,
+      });
+    }
+
+    if (!hasSttKey()) return { ok: false, reason: 'needs_api_key' };
     const mime = ext === 'wav' ? 'audio/wav'
       : ext === 'mp3' ? 'audio/mpeg'
       : ext === 'caf' ? 'audio/x-caf'
