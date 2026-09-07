@@ -1662,7 +1662,8 @@ function checklist(p: ExtraDraftProps): ChecklistItem[] {
     // 2026-08-07: photos moved to HARD and cost to SOFT — the checklist's marks follow
     // `sendReadiness`, which is the one authority, so the two cannot disagree about
     // which ring a row wears.
-    hard('no_photos', t('draft.photos'), p.onAddPhotos),
+    // soft since 2026-09-07: photos recommend, the typed scope travels without them.
+    soft('no_photos', t('draft.photos'), p.onAddPhotos),
     ...(p.kind === 'extra'
       ? [soft('no_cost', t('draft.cost'), p.onEditCost, p.rec.priced ? p.rec.amount : null)]
       : []),

@@ -42,6 +42,7 @@ export type SendBlocker =
  *  but as of 2026-07-28 they also block Send. */
 export type SendRecommendation =
   | 'no_cost'
+  | 'no_photos'
   | 'no_billing_timing'
   | 'no_schedule_effect'
   | 'no_exclusions';
@@ -53,7 +54,7 @@ export type SendRecommendation =
  *  Photos left this list when they became a blocker (2026-08-07); cost took the slot,
  *  so the fraction still counts four and the checklist keeps its shape. */
 export const RECOMMENDED: readonly SendRecommendation[] = [
-  'no_cost', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions',
+  'no_cost', 'no_photos', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions',
 ];
 
 export type SendReadiness = {
@@ -65,7 +66,7 @@ export type SendReadiness = {
   /** Missing recommended items. Presence here never affects `ok`. */
   recommended: SendRecommendation[];
   /** For the "3 of 4" affordance on the review card. */
-  completeness: { have: number; of: 4 };
+  completeness: { have: number; of: 5 };
 };
 
 /**
@@ -182,13 +183,6 @@ export function sendReadiness(x: {
     blockers.push('no_description');
   }
 
-  // PHOTOS BLOCK (hadar, 2026-08-07: "description and photos are important — the rest
-  // are optional"). This product's whole claim is evidence: a change order describing
-  // rot under a tub, with no picture of the rot, is the text message it was built to
-  // replace. It is also the one gap the contractor can always close standing where he
-  // is, which is what makes it fair to block on.
-  if (!(x.photoCount > 0)) blockers.push('no_photos');
-
   const recommended: SendRecommendation[] = [];
   // COST IS RECOMMENDED, NOT REQUIRED (hadar, 2026-08-07). This reverses the rule that
   // has stood since D3, and the trade is real and stated rather than hidden: an extra
@@ -215,6 +209,15 @@ export function sendReadiness(x: {
     if (noCap) blockers.push('no_cost');
     else if (noAmount) recommended.push('no_cost');
   }
+  // PHOTOS RECOMMEND, NOT BLOCK (hadar, 2026-09-07, reversing his own 2026-08-07
+  // "description and photos are important" — the line that decides it now: a typed
+  // scope is a valid change order, and the pocket-door test could not send at all).
+  // The evidence claim has not been abandoned, it moved surfaces: the checklist and
+  // the review still nudge for the photo, and a dispute-worthy extra still wants
+  // one — but a written scope a client can approve must be able to travel without
+  // it. The single-line CO spec (D2: the questions sit on the path, they do not
+  // gate it) is the standing rationale.
+  if (!(x.photoCount > 0)) recommended.push('no_photos');
   if (!(x.billingTiming ?? '').trim()) recommended.push('no_billing_timing');
   // 'not_sure' IS A COMPLETE ANSWER (FLOW decision 3) and therefore never appears
   // here: it renders to the owner as "Schedule impact: to be confirmed", which is
@@ -257,7 +260,7 @@ export function sendReadiness(x: {
     ok: blockers.length === 0,
     blockers,
     recommended,
-    completeness: { have: RECOMMENDED.length - recommended.length, of: 4 },
+    completeness: { have: RECOMMENDED.length - recommended.length, of: 5 },
   };
 }
 
@@ -286,6 +289,8 @@ const RECOMMENDATION_KEYS: Record<SendRecommendation, string> = {
   // "they agree to the work; the money is settled after" — because a contractor
   // skipping this needs to know he is sending an acknowledgement, not a quote.
   no_cost: 'send.recommended.noCost',
+  // 2026-09-07: photos are soft too — the typed scope travels; the nudge stays.
+  no_photos: 'send.recommended.noPhotos',
   no_billing_timing: 'send.recommended.noBillingTiming',
   no_schedule_effect: 'send.recommended.noScheduleEffect',
   no_exclusions: 'send.recommended.noExclusions',

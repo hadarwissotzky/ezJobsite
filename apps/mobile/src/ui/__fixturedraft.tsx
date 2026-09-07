@@ -102,7 +102,7 @@ const readiness: SendReadiness = {
   ok: false,
   blockers: ['no_schedule_effect', 'no_exclusions'],
   recommended: ['no_schedule_effect', 'no_exclusions'],
-  completeness: { have: 2, of: 4 },
+  completeness: { have: 2, of: 5 },
 };
 
 // Bump this to walk down the screen for screenshots. 0 = top.

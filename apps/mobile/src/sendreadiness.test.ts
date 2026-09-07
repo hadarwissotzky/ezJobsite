@@ -55,24 +55,25 @@ test('a complete extra is ready and complete', () => {
   assert.equal(r.ok, true);
   assert.deepEqual(r.blockers, []);
   assert.deepEqual(r.recommended, []);
-  assert.deepEqual(r.completeness, { have: 4, of: 4 });
+  assert.deepEqual(r.completeness, { have: 5, of: 5 });
 });
 
 // hadar 2026-07-28 reversed D3: ALL SIX items block Send, per the design's "these
 // are required for approval". These three tests asserted the old rule and are
 // rewritten to the new one — the assertions are inverted deliberately, not relaxed.
-test('DESCRIPTION AND PHOTOS BLOCK; the terms only warn (hadar 2026-08-07)', () => {
+test('only the DESCRIPTION blocks; photos and terms warn (hadar 2026-09-07)', () => {
   const r = sendReadiness({
     ...full, photoCount: 0, amountCents: null,
     billingTiming: null, scheduleEffect: null, exclusions: null,
   });
-  // Photos are evidence — without them the document does not show the work.
-  assert.deepEqual(r.blockers, ['no_photos']);
-  assert.equal(r.ok, false);
-  // The terms name themselves, mark the checklist incomplete, and send anyway.
+  // Photos stopped blocking on 2026-09-07 (typed scopes must travel) — the gap
+  // shows up in `recommended`, and a scope-complete extra is SENDABLE.
+  assert.deepEqual(r.blockers, []);
+  assert.equal(r.ok, true);
+  // Every soft item names itself; photos ride with the terms now.
   assert.deepEqual(r.recommended,
-    ['no_cost', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions']);
-  assert.deepEqual(r.completeness, { have: 0, of: 4 });
+    ['no_cost', 'no_photos', 'no_billing_timing', 'no_schedule_effect', 'no_exclusions']);
+  assert.deepEqual(r.completeness, { have: 0, of: 5 });
 });
 
 test('everything soft missing but description and photos present -> SENDABLE', () => {
@@ -88,6 +89,7 @@ test('everything soft missing but description and photos present -> SENDABLE', (
 test('each soft item is detected on its own and none of them blocks Send', () => {
   const spoil: Record<SendRecommendation, object> = {
     no_cost: { amountCents: null },
+    no_photos: { photoCount: 0 },
     no_billing_timing: { billingTiming: null },
     no_schedule_effect: { scheduleEffect: null },
     no_exclusions: { exclusions: null },
@@ -98,7 +100,7 @@ test('each soft item is detected on its own and none of them blocks Send', () =>
     // Soft since 2026-08-07: named and counted, but Send stays live.
     assert.deepEqual(r.blockers, [], item);
     assert.equal(r.ok, true, item);
-    assert.deepEqual(r.completeness, { have: 3, of: 4 }, item);
+    assert.deepEqual(r.completeness, { have: 4, of: 5 }, item);
   }
 });
 
@@ -116,7 +118,7 @@ test("'not sure' about the schedule is a COMPLETE answer, not a missing one", ()
   // contractor into guessing a number he does not have.
   const r = sendReadiness({ ...full, scheduleEffect: 'not_sure' });
   assert.deepEqual(r.recommended, []);
-  assert.deepEqual(r.completeness, { have: 4, of: 4 });
+  assert.deepEqual(r.completeness, { have: 5, of: 5 });
 });
 
 // ── the description ───────────────────────────────────────────────────────────
@@ -256,7 +258,8 @@ test('a description is required on every kind, priced or not', () => {
 
 test('both blockers report together, description first', () => {
   const r = sendReadiness({ ...full, scope: '', scopeOfWork: '', photoCount: 0 });
-  assert.deepEqual(r.blockers, ['no_description', 'no_photos']);
+  assert.deepEqual(r.blockers, ['no_description']);
+  assert.ok(r.recommended.includes('no_photos'));
 });
 
 // ── keys, not sentences ───────────────────────────────────────────────────────

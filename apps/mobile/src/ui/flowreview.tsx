@@ -23,7 +23,7 @@
  * field cannot mean one thing here and another there.
  */
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, Alert } from 'react-native';
 import { t } from '../i18n';
 import { canSend } from '../extralifecycle';
 import { sendGate } from '../sendreadiness';
@@ -291,7 +291,14 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
             pressable and the reason must stay printed beneath it (the kit's rule is
             right), but a refused tap must not reach the send path. */}
         <Button label={t('erec.send')} icon="send"
-          onPress={() => { if (canSendNow) p.onSend(); }}
+          onPress={() => {
+            if (canSendNow) { p.onSend(); return; }
+            // A REFUSED TAP ANSWERS OUT LOUD (hadar, 2026-09-07: "the button does
+            // nothing"). The caption below was the only voice and it reads as
+            // decoration; the tap is the question, so the tap gets the answer.
+            Alert.alert(t('draft.sendBlockedTitle'),
+              refusalLine(p, gate) ?? t('draft.sendBlockedTitle'));
+          }}
           refused={!canSendNow} />
         {!canSendNow && !!refusalLine(p, gate) && (
           <Text style={st.refused}>{refusalLine(p, gate)}</Text>
