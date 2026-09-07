@@ -955,7 +955,10 @@ export default function App() {
      *  question from whether its media has uploaded. */
     record_pending: number;
     /** 0 for a typed-only extra — the card then wears the pencil, not the mic. */
-    has_voice: number }>>([]);
+    has_voice: number;
+    /** REQ-LC4's stamp; null on rows that predate it. Drives the week-long
+     *  recently-declined window on Home. */
+    declined_at_ms: number | null }>>([]);
   // The funnel ABOVE change orders — a walkthrough IS an extra in the making, and the
   // Extras tab must show the whole pipeline, not only the signed paperwork at the end.
   const [captured, setCaptured] = React.useState<Array<{
@@ -5419,6 +5422,7 @@ const checkClientMessages = async () => {
         setHomeExtras(await db.getAll(
           `SELECT co.id, co.scope, co.amount_cents, co.status, co.project_id,
                   COALESCE(p.name, '') AS pname, co.who_directed, co.created_at_ms,
+                  co.declined_at_ms,
                   co.signed_by, co.co_number,
                   ${CO_PHOTO_SUBQUERY} AS photo_relpath,
                   EXISTS (
@@ -11762,6 +11766,17 @@ const checkClientMessages = async () => {
     // `isClosed` covers superseded as well — a retired version is ended, and it used to
     // sit in Waiting because nothing named it.
     const closedList = homeExtras.filter((e) => isClosed(e.status));
+    /**
+     * DECLINED STAYS IN REACH FOR A WEEK (hadar, 2026-09-07 — softening his own
+     * 2026-08-27 "remove everything else": a decline is over, but it is also the
+     * news a contractor acts on THIS week — call the client, revise, or let it
+     * go — and burying it behind Show all the moment it lands hid exactly that).
+     * The stamp when the row carries one; created_at as the honest proxy on rows
+     * that predate REQ-LC4's column. After the week they live where the rest of
+     * the closed records do: the Show all feed.
+     */
+    const declinedRecent = homeExtras.filter((e) => e.status === 'declined'
+      && (e.declined_at_ms ?? e.created_at_ms) > Date.now() - 7 * 86_400_000);
     // The hero totals money still OUT ON THE CLIENT — sent only. A draft has never
     // left the phone, so it is NOT "waiting for approval" and must not inflate this.
     const outstanding = [...questioned, ...waitingList].reduce((sum, e) => sum + (e.amount_cents ?? 0), 0);
@@ -12015,15 +12030,17 @@ const checkClientMessages = async () => {
              *  recent few and the footer offers the rest. "Needs you first" is NOT
              *  capped — see below. */
             const cap = (l: Extra[]) => l.slice(0, REST_ON_HOME);
+            const shownDeclined = Math.min(declinedRecent.length, REST_ON_HOME);
             const hiddenCount = [waitingList, approvedList]
               .reduce((n, l) => n + Math.max(0, l.length - REST_ON_HOME), 0)
-              // The closed records render nowhere on Home now, so ALL of them are
-              // "more to see", not just the tail past the cap.
-              + closedList.length;
+              // Closed records render on Home only through the week-long declined
+              // window; everything else closed is "more to see".
+              + Math.max(0, closedList.length - shownDeclined);
             return (<>
               {bucket('home.needsYouFirst', needs)}
               {bucket('home.waitingOnClient', cap(waitingList))}
               {bucket('home.approvedSec', cap(approvedList))}
+              {bucket('home.declinedSec', cap(declinedRecent))}
               {/* SHOW ALL — the artboard's footer.
                   Home holds the most recent extras; this is the way to the full list
                   across every job, which is what `openFeed` already is. Only when there

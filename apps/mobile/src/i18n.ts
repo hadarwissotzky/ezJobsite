@@ -578,6 +578,7 @@ const EN: Record<string, string> = {
   'home.closedSec': 'Closed \u2014 declined or withdrawn',
   'home.closedChip': 'Closed',
   'home.approvedSec': 'Approved',
+  'home.declinedSec': 'Recently declined',
   /* The home artboard (hadar, 2026-08-25). FIVE buckets became TWO. The old set —
      waiting / needs a response / approved / closed — sorted by STATUS, which is the
      app's vocabulary, not a contractor's. He has one question on opening the phone:
@@ -2880,6 +2881,7 @@ const ES: Record<string, string> = {
   'home.closedSec': 'Cerradas \u2014 rechazadas o retiradas',
   'home.closedChip': 'Cerradas',
   'home.approvedSec': 'Aprobado',
+  'home.declinedSec': 'Rechazados recientemente',
   'home.needsYouFirst': 'Requiere su atención',
   'home.waitingOnClient': 'Esperando al cliente',
   'home.showAllN': 'Ver las {n} órdenes de cambio',
