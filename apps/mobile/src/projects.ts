@@ -93,6 +93,18 @@ export async function listRejected(db: AbstractPowerSyncDatabase): Promise<Rejec
   } catch { return []; }   // table not created yet on a fresh install
 }
 
+/**
+ * He has READ the refusals — clear the notice (hadar, 2026-09-07, staring at
+ * "4 won't upload" with no way to acknowledge it). This deletes only the
+ * BOOKKEEPING of uploads the server refused for good; the refused writes were
+ * discarded when they were parked, and the server's copy of every row is the
+ * standing truth. Nothing evidentiary lives here — the owned outboxes never
+ * write to this table.
+ */
+export async function clearRejected(db: AbstractPowerSyncDatabase): Promise<void> {
+  try { await db.execute(`DELETE FROM sync_rejected`); } catch { /* nothing to clear */ }
+}
+
 export async function ensureProjectSchema(_db: AbstractPowerSyncDatabase, _ownerId: string) {
   // Nothing to create: AppSchema owns the project table. Kept as a named no-op so
   // the call site reads the same as every other schema and nobody re-adds a

@@ -253,7 +253,7 @@ import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          playCapture, stopPlayback, type Note } from './src/annotate';
 import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
          tagMap, tagsFor } from './src/tags';
-import { listRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
+import { listRejected, clearRejected, createProject, ensureProjectSchema, ensureResolutionSchema, fileCapture, inboxCount,
          INBOX_ID, listProjects, resolveProject, touchProject, distanceM, effectiveProject,
          setProjectStatus, type Project } from './src/projects';
 import { canRecordAudio, defaultConsentFor, ensureConsentSchema,
@@ -12875,6 +12875,19 @@ const checkClientMessages = async () => {
               · {r.tbl} {r.code}: {String(r.message ?? '').slice(0, 50)}
             </Text>
           ))}
+          {/* ACKNOWLEDGED IS AN ACTION (hadar, 2026-09-07). These entries record
+              uploads the server refused FOR GOOD — the writes were already
+              discarded when parked, and the server's rows stand. A permanent red
+              band over facts already final is an alarm with no off switch. */}
+          {showDetail && rejected.length > 0 && (
+            <Pressable hitSlop={8} onPress={async () => {
+              await clearRejected(db); setRejected([]); setShowDetail(false);
+            }}>
+              <Text style={[s.oneStatusD, { fontWeight: '700', textDecorationLine: 'underline', marginTop: 6 }]}>
+                {T('st.dismissRejected')}
+              </Text>
+            </Pressable>
+          )}
         </Pressable>
       )}
 
