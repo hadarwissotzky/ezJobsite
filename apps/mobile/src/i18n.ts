@@ -1977,6 +1977,9 @@ const EN: Record<string, string> = {
   // The gap interview (SPEC-single-line-co-v1) — at most three questions, only when
   // the backend determination found gaps.
   'gap.head': 'Quick check before it goes',
+  'gap.priceQ': 'No price is set. In this app\u2019s own history, priced requests get answered \u2014 open-ended ones sit.',
+  'gap.priceSet': 'Set the price',
+  'gap.priceWithout': 'Send it without a price \u2014 the owner authorizes the work, the figure follows',
   'gap.why': 'Answered here, written into the document. Clients say yes faster when nothing is left open.',
   'gap.feeQ': 'Is \u201c{fee}\u201d inside the {total} total, or on top of it?',
   'gap.feeInside': 'Inside the total',
@@ -3986,6 +3989,9 @@ const ES: Record<string, string> = {
   'neg.keepReturning': 'Vuelven al enlace una y otra vez, pero todavía no lo aprueban.',
   'neg.lastSeen': 'Visto por última vez',
   'gap.head': 'Una revisión rápida antes de enviar',
+  'gap.priceQ': 'No hay precio. En la historia de esta app, las solicitudes con precio reciben respuesta \u2014 las abiertas se quedan esperando.',
+  'gap.priceSet': 'Poner el precio',
+  'gap.priceWithout': 'Enviar sin precio \u2014 el cliente autoriza el trabajo y la cifra viene después',
   'gap.why': 'Lo que contestes aquí se escribe en el documento. Los clientes dicen que sí más rápido cuando no queda nada abierto.',
   'gap.feeQ': '¿\u201c{fee}\u201d está dentro del total de {total}, o aparte?',
   'gap.feeInside': 'Dentro del total',

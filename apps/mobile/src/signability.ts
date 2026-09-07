@@ -27,6 +27,13 @@
  */
 
 export type SignabilityGap =
+  /** No total at all. The strongest signal in the project's own history (checked
+   *  2026-09-06): of nine instruments ever sent, the eight priced ones drew every
+   *  answer that was ever given; the one unpriced one was opened and then sat.
+   *  Clients answer a number. Top severity — asked before anything else. The answer
+   *  routes to the COST EDITOR, never an inline field: a total is born in the
+   *  read-back (mandate #6), and this gap only points at the door. */
+  | { kind: 'no_total'; about: null }
   /** A priced line INSIDE the total is also described as billed IN ADDITION — the
    *  document contradicts itself about money, the one thing a client checks.
    *  `sentence` is the exclusion line making the claim, verbatim, so an "inside the
@@ -52,6 +59,9 @@ export type SignabilityInput = {
   /** Parsed line items (title + cents), from the same breakdown the total was
    *  summed from. Empty when the job was priced as one figure. */
   lineItems: readonly { title: string; cents: number }[];
+  /** The row's total, null when no price is set. Distinct from lineItems: a
+   *  whole-job figure has a total and no items. */
+  totalCents: number | null;
   /** Segments whose price WORDS exist but parse to no figure — the caller derives
    *  this with parseMoney over each segment's price span, so the judgement of
    *  "unparseable" lives in the one money parser (mandate #6). */
@@ -115,6 +125,7 @@ function feeConflicts(
  */
 export function deriveSignabilityInput(o: {
   tasks: readonly { title: string; priceWords: string | null }[];
+  totalCents: number | null;
   excluded: readonly string[];
   billingTiming: string | null;
   scheduleEffect: string | null;
@@ -128,13 +139,14 @@ export function deriveSignabilityInput(o: {
     if (m.cents !== null && m.confidence === 'high') lineItems.push({ title: t.title, cents: m.cents });
     else openEndedTitles.push(t.title);
   }
-  return { lineItems, openEndedTitles, excluded: o.excluded,
+  return { lineItems, openEndedTitles, totalCents: o.totalCents, excluded: o.excluded,
            billingTiming: o.billingTiming, scheduleEffect: o.scheduleEffect };
 }
 
 export function evaluateSignability(x: SignabilityInput): Signability {
   const gaps: SignabilityGap[] = [];
 
+  if (x.totalCents === null) gaps.push({ kind: 'no_total', about: null });
   for (const c of feeConflicts(x.lineItems, x.excluded)) {
     gaps.push({ kind: 'fee_conflict', about: c.about, sentence: c.sentence });
   }

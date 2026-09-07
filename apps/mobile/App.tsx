@@ -1583,15 +1583,16 @@ const openRecord = async (changeOrderId: string) => {
            * draft screens. Draft-only: a sent extra's interview moment has passed.
            */
           try {
-            const coNow = (await db.getAll<{ status: string; billing_timing: string | null;
+            const coNow = (await db.getAll<{ status: string; amount_cents: number | null;
+                billing_timing: string | null;
                 schedule_effect: string | null; exclusions: string | null }>(
-              `SELECT status, billing_timing, schedule_effect, exclusions
+              `SELECT status, amount_cents, billing_timing, schedule_effect, exclusions
                  FROM change_order WHERE id = ?`, [changeOrderId]))[0];
             if (coNow?.status === 'draft' && recordIdRef.current === changeOrderId) {
               const excluded = (coNow.exclusions ?? '').split('\n')
                 .map((l) => l.replace(/^[\u2022\-\s]+/, '').trim()).filter(Boolean);
               const sig = evaluateSignability(deriveSignabilityInput({
-                tasks: prop.tasks, excluded,
+                tasks: prop.tasks, totalCents: coNow.amount_cents, excluded,
                 billingTiming: coNow.billing_timing, scheduleEffect: coNow.schedule_effect,
                 parse: parseMoney,
               }));
@@ -2200,6 +2201,11 @@ const answerBallpark = async (about: string, raw: string | null) => {
 };
 
 const gapAnswers: GapAnswers = {
+  // The cost editor is the read-back door; the gap only points at it. The dismissal
+  // mirrors "leave it open": his explicit choice, session-scoped — the D3 authorize
+  // mode ("the owner authorizes the work and the price follows") remains legal.
+  onSetPrice: () => openDetail('cost'),
+  onSendUnpriced: () => setRecordGaps((g) => g.filter((x) => x.kind !== 'no_total')),
   onFeeConflict: (about, sentence, resolution) => { void answerFeeConflict(about, sentence, resolution); },
   onBallpark: (about, raw) => { void answerBallpark(about, raw); },
   onBilling: (v) => { void answerGapTerms({ billing: v }); },

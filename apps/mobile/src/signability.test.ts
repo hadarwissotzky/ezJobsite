@@ -24,7 +24,7 @@ import { parseMoney } from './money.ts';
  *  way the app will. */
 function splitSegments(tasks: { title: string; priceWords: string | null }[]) {
   const { lineItems, openEndedTitles } = deriveSignabilityInput({
-    tasks, excluded: [], billingTiming: null, scheduleEffect: null, parse: parseMoney,
+    tasks, totalCents: 0, excluded: [], billingTiming: null, scheduleEffect: null, parse: parseMoney,
   });
   return { lineItems, openEndedTitles };
 }
@@ -38,6 +38,7 @@ test('a complete one-line CO passes with no questions at all', () => {
   ]);
   const r = evaluateSignability({
     ...seg,
+    totalCents: 560000,
     excluded: ['Painting of the new rail.'],
     billingTiming: 'when_completed',
     scheduleEffect: 'adds_days',
@@ -59,6 +60,7 @@ test("CO #5's one-breath ramble yields exactly its three gaps, in severity order
 
   const r = evaluateSignability({
     ...seg,
+    totalCents: 560000,
     excluded: [
       'Supply of the hardwood flooring, which the client is providing.',
       'The trash and ecology disposal fees, which are charged in addition to the installation.',
@@ -82,6 +84,7 @@ test("CO #5's one-breath ramble yields exactly its three gaps, in severity order
 test('a single whole-job figure with terms is complete', () => {
   const r = evaluateSignability({
     lineItems: [],                // "call it three grand for the whole thing"
+    totalCents: 300000,
     openEndedTitles: [],
     excluded: ['Hidden damage found once the wall is open.'],
     billingTiming: 'next_invoice',
@@ -94,6 +97,7 @@ test('a single whole-job figure with terms is complete', () => {
 test('an explicit not_sure on schedule raises no question', () => {
   const r = evaluateSignability({
     lineItems: [{ title: 'Attic fan swap', cents: 90000 }],
+    totalCents: 90000,
     openEndedTitles: [],
     excluded: [],
     billingTiming: 'when_completed',
@@ -109,6 +113,7 @@ test('gaps are capped at three, and complete stays false past the cap', () => {
       { title: 'Dump run fees', cents: 40000 },
       { title: 'Permit runner fees', cents: 25000 },
     ],
+    totalCents: 65000,
     openEndedTitles: ['Tile (material)', 'Grout (material)'],
     excluded: [
       'Dump run fees are charged in addition to the work.',
@@ -126,10 +131,28 @@ test('gaps are capped at three, and complete stays false past the cap', () => {
 test('"on top of" reads as the same in-addition contradiction', () => {
   const r = evaluateSignability({
     lineItems: [{ title: 'Haul-away and disposal', cents: 35000 }],
+    totalCents: 35000,
     openEndedTitles: [],
     excluded: ['Disposal and haul-away are billed on top of the quoted price.'],
     billingTiming: 'when_completed',
     scheduleEffect: 'no_change',
   });
   assert.equal(r.gaps[0]?.kind, 'fee_conflict');
+});
+
+// ── fixture 7: no price at all — the strongest historical signal ─────────────────
+// Of the nine instruments ever sent on production (checked 2026-09-06), the eight
+// priced ones drew every answer ever given; the one unpriced one was opened and sat.
+test('an unpriced extra is nudged first, above every other gap', () => {
+  const r = evaluateSignability({
+    lineItems: [],
+    totalCents: null,
+    openEndedTitles: ['Tile (material)'],
+    excluded: [],
+    billingTiming: null,
+    scheduleEffect: null,
+  });
+  assert.equal(r.complete, false);
+  assert.equal(r.gaps[0].kind, 'no_total');
+  assert.equal(r.gaps.length, 3);   // the cap still holds with the new kind in front
 });

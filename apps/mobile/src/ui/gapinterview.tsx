@@ -19,6 +19,11 @@ import { t } from '../i18n';
 import { C, F } from './theme';
 
 export type GapAnswers = {
+  /** no_total: opens the COST EDITOR — a price is born in the read-back, never in a
+   *  chip (mandate #6). This card only points at the door. */
+  onSetPrice: () => void;
+  /** no_total's explicit opt-out — his choice, said out loud, session-scoped. */
+  onSendUnpriced: () => void;
   /** 'inside' amends the exclusion sentence; 'on_top' moves the fee out of the total. */
   onFeeConflict: (about: string, sentence: string, resolution: 'inside' | 'on_top') => void;
   /** Raw text from the input — the caller parses. Empty/labelled leave-open = keep as is. */
@@ -53,6 +58,19 @@ export function GapInterview(props: { gaps: readonly SignabilityGap[]; total: st
       <Text style={st.why}>{t('gap.why')}</Text>
 
       {props.gaps.map((g, i) => {
+        if (g.kind === 'no_total') {
+          return (
+            <View key="nt" style={st.row}>
+              <Text style={st.q}>{t('gap.priceQ')}</Text>
+              <View style={st.chips}>
+                <Chip label={t('gap.priceSet')} onPress={answers.onSetPrice} />
+              </View>
+              <Pressable onPress={answers.onSendUnpriced} hitSlop={8}>
+                <Text style={st.leave}>{t('gap.priceWithout')}</Text>
+              </Pressable>
+            </View>
+          );
+        }
         if (g.kind === 'fee_conflict') {
           return (
             <View key={`fc${i}`} style={st.row}>
