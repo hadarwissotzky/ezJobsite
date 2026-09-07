@@ -57,6 +57,12 @@ export const STT_DDL = [
 
 export async function ensureSttSchema(db: AbstractPowerSyncDatabase) {
   for (const s of STT_DDL) await db.execute(s);
+  // TYPED CAPTURES RIDE THIS OUTBOX TOO (2026-09-07): the engine column names how
+  // the words were produced, because 'SFSpeechRecognizer' on words a man typed
+  // would be false evidence. Lazy ALTER, same pattern as co_live_link's columns --
+  // the error once it exists is expected and swallowed.
+  try { await db.execute(`ALTER TABLE stt_outbox ADD COLUMN engine TEXT`); }
+  catch { /* already there */ }
 }
 
 /**
@@ -372,23 +378,72 @@ export async function transcribeOnDevice(
  * and it refuses an empty transcript, a missing engine, and anybody else's
  * capture, so a rejection here is a real answer and worth keeping the row for.
  */
+/**
+ * A TYPED CAPTURE'S WORDS, WRITTEN DOWN AS ITS TRANSCRIPT -- instantly, on device
+ * (hadar, 2026-09-06: typed his extra and was told "we couldn't make out the work").
+ *
+ * The processing job for a capture carries NO transcribe step: the pipeline expects
+ * the device transcript that on-device STT writes for voice. A typed capture never
+ * wrote one, so detect_language parked forever and the write-up starved. The typed
+ * words ARE the transcript -- no engine, no signal, no waiting: cache + outbox in the
+ * same shapes the voice path uses, so every downstream step is identical.
+ *
+ * The language is the PROFILE language -- the same honest proxy the voice path uses
+ * to pick the recogniser's locale: a contractor running the app in Spanish types
+ * Spanish. Wrong for the odd code-switcher, correct for the product's rule that the
+ * app never guesses better than its one stated proxy.
+ */
+export async function storeTypedTranscript(
+  db: AbstractPowerSyncDatabase, captureId: string, text: string, language: string
+): Promise<void> {
+  const clean = text.trim();
+  if (!clean) return;
+  await db.execute(
+    `INSERT OR REPLACE INTO voice_transcript_cache (capture_id, text, segments, cached_at_ms)
+     VALUES (?, ?, NULL, ?)`,
+    [captureId, clean, Date.now()]);
+  try {
+    await db.execute(
+      `INSERT OR REPLACE INTO stt_outbox
+         (capture_id, text, segments, language, duration_sec, queued_at_ms, engine)
+       VALUES (?, ?, NULL, ?, NULL, ?, 'typed')`,
+      [captureId, clean, language, Date.now()]);
+  } catch {
+    // engine column missing (ALTER raced or failed): the row still queues; the
+    // drain then reports the device engine, which is a mislabel, not a loss.
+    await db.execute(
+      `INSERT OR REPLACE INTO stt_outbox
+         (capture_id, text, segments, language, duration_sec, queued_at_ms)
+       VALUES (?, ?, NULL, ?, NULL, ?)`,
+      [captureId, clean, language, Date.now()]);
+  }
+}
+
 export async function drainSttOutbox(
   db: AbstractPowerSyncDatabase, client: SupabaseClient
 ): Promise<{ attempted: number; uploaded: number }> {
-  const rows = await db.getAll<{
-    capture_id: string; text: string; segments: string | null;
-    language: string | null; duration_sec: number | null;
-  }>(`SELECT capture_id, text, segments, language, duration_sec
-        FROM stt_outbox WHERE attempts < 5 ORDER BY queued_at_ms LIMIT 20`);
+  let rows: { capture_id: string; text: string; segments: string | null;
+    language: string | null; duration_sec: number | null; engine?: string | null }[];
+  try {
+    rows = await db.getAll(
+      `SELECT capture_id, text, segments, language, duration_sec, engine
+         FROM stt_outbox WHERE attempts < 5 ORDER BY queued_at_ms LIMIT 20`);
+  } catch {
+    // pre-ALTER device: no engine column, every row is the device recogniser's.
+    rows = await db.getAll(
+      `SELECT capture_id, text, segments, language, duration_sec
+         FROM stt_outbox WHERE attempts < 5 ORDER BY queued_at_ms LIMIT 20`);
+  }
   let uploaded = 0;
   for (const r of rows) {
     const { error } = await client.rpc('transcript_append_own', {
       p_capture_id: r.capture_id,
       p_text: r.text,
-      p_engine: ENGINE,
+      p_engine: r.engine ?? ENGINE,
       p_segments: r.segments ? JSON.parse(r.segments) : null,
       p_language: r.language,
-      p_engine_model: 'SFSpeechRecognizer',
+      // The model claim follows the engine: typed words have no recogniser.
+      p_engine_model: r.engine === 'typed' ? null : 'SFSpeechRecognizer',
       p_duration_sec: r.duration_sec,
     });
     if (error) {

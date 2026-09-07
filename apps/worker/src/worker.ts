@@ -122,12 +122,16 @@ export async function runStep(
     // This step VERIFIES that fact landed rather than re-deriving it — done when
     // a transcript for this capture carries a language, parked when none does.
     const { data: tr, error: trErr } = await sb
-      .from('capture_transcript').select('source_language')
+      .from('capture_transcript').select('source_language, engine')
       .eq('capture_id', job.capture_id)
       .order('created_at', { ascending: false }).limit(1);
     if (trErr) return { ok: false, reason: 'needs_connection', error: trErr.message };
     const lang = tr?.[0]?.source_language;
     if (typeof lang === 'string' && lang.length > 0) return { ok: true };
+    // TYPED words carry no recogniser and may carry no language claim (the worker's
+    // own .txt fallback writes none). That is not a missing fact to wait for: the
+    // translate layer detects per-message where it matters. Done, not parked.
+    if (tr?.[0]?.engine === 'typed') return { ok: true };
     return { ok: false, reason: 'needs_api_key', error: 'no transcript carries a language yet' };
   }
 

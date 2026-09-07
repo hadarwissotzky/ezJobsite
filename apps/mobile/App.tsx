@@ -157,7 +157,7 @@ import { sendEwa } from './src/ewasend';
 // R2 on device. No key, no signal needed — the contractor in a crawlspace gets a
 // filled preview before he stands up. The worker still re-transcribes via the
 // cloud and supersedes this under 150's newest-wins.
-import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
+import { drainSttOutbox, storeTypedTranscript, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
 import { fetchLatestProposalForCaptures, type Proposal } from './src/proposals';
 import { deriveSignabilityInput, evaluateSignability, type SignabilityGap } from './src/signability';
 import type { GapAnswers } from './src/ui/gapinterview';
@@ -6801,6 +6801,11 @@ const checkClientMessages = async () => {
         });
         if (!tr.ok) throw new Error(tr.reason);
         await noteCapturedBy(db, tr.captureId);
+        // The typed words ARE the transcript (2026-09-07): written down on the spot
+        // so the pipeline's no-transcribe job finds them, in the profile language --
+        // the same locale proxy the voice recogniser uses.
+        try { await storeTypedTranscript(db, tr.captureId, a.typedText, currentLang()); }
+        catch { /* the worker's .txt fallback still covers it */ }
         ids.push(tr.captureId); textId = tr.captureId;
       }
       // The narration, possibly split by a phone call: every segment commits, in order.
@@ -7120,6 +7125,9 @@ const checkClientMessages = async () => {
       if (r.ok) {
         setUi({ k: 'saved', id: r.captureId });
         await noteCapturedBy(db, r.captureId);
+        // Same rule as the capture flow's typed field: the words are the transcript.
+        try { await storeTypedTranscript(db, r.captureId, note, currentLang()); }
+        catch { /* the worker's .txt fallback still covers it */ }
         // Capture is SAVED already. The card is about what it MEANS, and it can
         // be dismissed without losing anything -- the evidence is committed.
         const inf = inferDecision(note);
