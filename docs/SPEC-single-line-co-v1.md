@@ -75,6 +75,25 @@ then renders as open WITH the receipts language, chosen, not defaulted.
 
 The questions ARE the interface. No score, no gauge.
 
+### D6 — The balance rule: the backend decides whether the interview exists at all
+*(hadar, 2026-09-06: "if enough information was given in the first pass, no need to
+complicate the process... during the AI process (backend) evaluate the co and make
+that determination.")*
+
+`evaluateSignability` (apps/mobile/src/signability.ts — pure, no imports, vendorable
+to the worker like money.ts) is the determination. It runs over the extraction
+output after the AI pass, deterministically:
+
+- **complete: true → the simple path.** The review screen shows NOTHING new. A
+  contractor who said enough in one breath is never interviewed.
+- **complete: false → at most three questions**, severity-ordered: money
+  contradiction (a summed-in fee also described as "charged in addition") →
+  open-ended cost → missing payment timing → missing schedule. Anything past three
+  waits rather than burdening this send.
+- `not_sure` and `no_change` are ANSWERS, never gaps — only silence asks.
+- The open/priced split uses the one production money parser (mandate #6); price
+  words with no readable figure make a segment open-ended, never a guessed number.
+
 ## Build order
 
 1. **Slice 0 (bug fixes, immediate):** persist spoken segment prices into
@@ -87,6 +106,15 @@ The questions ARE the interface. No score, no gauge.
 4. **Slice 3:** clause library + learning counters.
 
 ## Verification
+
+**The generated one-line CO suite** (signability.test.ts, PASSING since
+2026-09-06): six one-breath fixtures through the real parser — the complete
+one-liner (zero questions), CO #5's actual ramble (exactly its three gaps, and the
+baseboard install/material pair correctly NOT flagged as a contradiction), a
+whole-job single figure (complete), an explicit not-sure (complete), the
+three-question cap, and the "on top of" phrasing. New fixture transcripts get added
+here as new shapes surface.
+
 
 Slice 0: unit tests on the consistency rule; re-run the CO #5 transcript through the
 pipeline and assert 3 line items + no contradiction. Slice 1: fixture transcripts
