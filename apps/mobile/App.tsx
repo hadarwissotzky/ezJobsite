@@ -4529,6 +4529,7 @@ const checkClientMessages = async () => {
                  * accusation is the least.
                  */
                 let owes = !wrote;
+                let hasTypedWords = false;
                 if (!wrote) {
                   try {
                     const did = (await db.getAll<{ d: string }>(
@@ -4536,9 +4537,24 @@ const checkClientMessages = async () => {
                       [h.coId]))[0]?.d;
                     owes = !did
                       || extraProcState(await captureStatesForExtra(db, did)) !== 'processed';
+                    /**
+                     * TYPED WORDS MAKE THE EXTRA VALID (hadar, 2026-09-07: "if there
+                     * is text — even if there is no audio in the recording — it is
+                     * valid, no need to display the notification"). A text capture
+                     * carries its words by construction, so "we couldn't make out
+                     * the work" is false whatever the recording held; the write-up
+                     * comes from the typed words. Same rule silentnotice.ts applies.
+                     */
+                    if (did) {
+                      hasTypedWords = ((await db.getAll<{ n: number }>(
+                        `SELECT COUNT(*) AS n FROM decision_version dv
+                           JOIN capture_commit cc ON cc.capture_id = dv.capture_id
+                          WHERE dv.decision_id = ? AND cc.modality = 'text'`,
+                        [did]))[0]?.n ?? 0) > 0;
+                    }
                   } catch { owes = true; }
                 }
-                if (wrote || !owes) {
+                if (wrote || (!owes && !hasTypedWords)) {
                   setAck({
                     // A GREEN TICK ABOVE "WE COULDN'T MAKE OUT THE WORK" (hadar's
                     // earlier screenshot): the mark has to agree with the sentence,
