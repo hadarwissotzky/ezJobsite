@@ -43,8 +43,12 @@ export type ExtraCardProps = {
   chip: ExtraChip;
   /** The scope. Rendered on ONE line — see the note at `name`. */
   title: string;
-  /** Absolute path to a cover photo, or null for the microphone placeholder. */
+  /** Absolute path to a cover photo, or null for the placeholder glyph. */
   photoUri?: string | null;
+  /** True for a typed-only extra (no voice capture behind it): the placeholder draws
+   *  the pencil, because a microphone over a record with nothing to play promises
+   *  audio that does not exist (hadar, 2026-09-07). */
+  typedOnly?: boolean;
   /** One per line, in order. Nulls are dropped. The caller decides what these say. */
   meta: Array<string | null | undefined>;
   /**
@@ -117,7 +121,7 @@ export type ExtraCardProps = {
 
 export function ExtraCard({
   kicker, chip, title, photoUri, meta, person, personRight, conversation, pending, amount,
-  unread, onPress, accessibilityLabel,
+  unread, onPress, accessibilityLabel, typedOnly,
 }: ExtraCardProps) {
   const metaLines = meta.filter((m): m is string => !!m);
   return (
@@ -134,7 +138,7 @@ export function ExtraCard({
         {photoUri
           ? <Image source={{ uri: photoUri }} style={st.thumb} resizeMode="cover" />
           : <View style={[st.thumb, st.thumbEmpty]}>
-              <Icon name={'microphone' as IconName} size={22} color="#8A93A0" /></View>}
+              <Icon name={(typedOnly ? 'edit' : 'microphone') as IconName} size={22} color="#8A93A0" /></View>}
         {unread && <View style={st.unreadDot} />}
       </View>
 

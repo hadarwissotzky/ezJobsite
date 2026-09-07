@@ -1003,6 +1003,10 @@ export type LedgerRow = {
   /** Relpath of the extra's first PHOTO (for a thumbnail), or null when it has no
    *  photo (voice-only). Joined FS.documentDirectory-relative, same as the grid. */
   photo_relpath: string | null;
+  /** 1 when any VOICE capture sits behind this extra; 0 for a typed-only record.
+   *  Decides the card's placeholder glyph (mic vs pencil) — a play symbol over a
+   *  record with nothing to play promises audio that does not exist (2026-09-07). */
+  has_voice: number;
   /** The extra's real per-job number, for the line that IDENTIFIES the document on
    *  the send sheet. Null on rows created before the column existed (and on rows the
    *  backfill has not reached) — the sheet then prints no number at all, because a
@@ -1137,7 +1141,7 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
     billing_timing: string | null; schedule_effect: string | null;
     schedule_days: number | null; exclusions: string | null; line_items: string | null;
     created_by: string | null;
-    photo_relpath: string | null; co_number: number | null;
+    photo_relpath: string | null; has_voice: number; co_number: number | null;
   }>(
     `SELECT co.id, co.decision_id, co.who_directed, co.scope, co.scope_of_work,
             co.scope_of_work_native, co.scope_of_work_ai, co.scope_native_lang,
@@ -1146,6 +1150,12 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
             co.billing_timing, co.schedule_effect, co.schedule_days, co.exclusions,
             co.line_items,
             ${CO_PHOTO_SUBQUERY} AS photo_relpath,
+            EXISTS (
+              SELECT 1 FROM capture_commit cc2
+               WHERE cc2.modality = 'voice' AND cc2.capture_id IN (
+                 SELECT dv.capture_id FROM decision_version dv
+                  WHERE dv.decision_id = co.decision_id AND dv.capture_id IS NOT NULL)
+            ) AS has_voice,
             EXISTS (SELECT 1 FROM change_order_outbox o WHERE o.change_order_id = co.id) AS pending,
             -- WHO RAISED IT (hadar 2026-08-25: "i cannot see who created it at the
             -- bottom it is missing"). The job screen was the only one of the three card
@@ -1186,7 +1196,7 @@ export async function ledger(db: AbstractPowerSyncDatabase, projectId: string): 
       billing_timing: r.billing_timing, schedule_effect: r.schedule_effect,
       schedule_days: r.schedule_days, exclusions: r.exclusions,
       line_items: r.line_items, created_by: r.created_by,
-      photo_relpath: r.photo_relpath, co_number: r.co_number,
+      photo_relpath: r.photo_relpath, has_voice: r.has_voice, co_number: r.co_number,
       // "on this phone" and "in the cloud" are different facts and the sender is
       // entitled to know which one they are looking at.
       synced: r.pending ? 0 : 1,

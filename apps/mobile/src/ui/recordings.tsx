@@ -43,7 +43,7 @@ export function RecordingsCard({ voices, startOpen }: {
   return (
     <Section title={t('rec.sectionTitle')}>
       <Row
-        icon="microphone"
+        icon={voices.every((v) => v.modality === 'text') ? 'edit' : 'microphone'}
         label={voices.length === 1
           ? t(voices[0].modality === 'text' ? 'rec.oneTyped' : 'rec.oneRecording')
           : t({ k: 'rec.nRecordings', p: { n: voices.length } })}

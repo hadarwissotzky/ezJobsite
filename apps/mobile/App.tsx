@@ -953,7 +953,9 @@ export default function App() {
     pending_upload: number;
     /** The change order ITSELF is still in this device's outbox — a different
      *  question from whether its media has uploaded. */
-    record_pending: number }>>([]);
+    record_pending: number;
+    /** 0 for a typed-only extra — the card then wears the pencil, not the mic. */
+    has_voice: number }>>([]);
   // The funnel ABOVE change orders — a walkthrough IS an extra in the making, and the
   // Extras tab must show the whole pipeline, not only the signed paperwork at the end.
   const [captured, setCaptured] = React.useState<Array<{
@@ -5419,6 +5421,12 @@ const checkClientMessages = async () => {
                   COALESCE(p.name, '') AS pname, co.who_directed, co.created_at_ms,
                   co.signed_by, co.co_number,
                   ${CO_PHOTO_SUBQUERY} AS photo_relpath,
+                  EXISTS (
+                    SELECT 1 FROM capture_commit cc2
+                     WHERE cc2.modality = 'voice' AND cc2.capture_id IN (
+                       SELECT dv.capture_id FROM decision_version dv
+                        WHERE dv.decision_id = co.decision_id AND dv.capture_id IS NOT NULL)
+                  ) AS has_voice,
                   fa.name AS created_by,
                   -- HAS THE RECORD ITSELF REACHED THE SERVER? The EXISTS below asks
                   -- about its MEDIA, which is a different question: an extra can be
@@ -11550,6 +11558,7 @@ const checkClientMessages = async () => {
     const st = stateOf(e);
     const row = (
       <ExtraCard key={e.id} chip={extraChip(st)}
+        typedOnly={!e.has_voice}
         /**
          * THE JOB LEADS, THE NUMBER QUALIFIES (hadar, 2026-08-24: "look at the co
          * numbers in waiting an approved they are the same -- that is a bug").
