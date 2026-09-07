@@ -4508,24 +4508,47 @@ const checkClientMessages = async () => {
                  */
                 void openRecord(h.coId);
 
-                setAck({
-                  /**
-                   * A GREEN TICK ABOVE "WE COULDN'T MAKE OUT THE WORK" (hadar's
-                   * screenshot). `kind` was hard-coded 'ok', so the one case that is NOT
-                   * a success was drawn with the success mark — the icon said it worked
-                   * while the words said it did not, and the icon is read first.
-                   *
-                   * 'no' is the right shape and not an alarm: `ackBoxNo` is an amber
-                   * hairline and `ntAttention`, which is what "say it again and we'll
-                   * have it" looks like. Nothing failed that he needs to fear — the
-                   * recording IS saved, and mandate #1 is intact — but nothing was
-                   * written either, and the mark has to agree with the sentence.
-                   */
-                  kind: wrote ? 'ok' : 'no',
-                  title: T(wrote ? 'proc.readyTitle' : 'proc.nothingHeardTitle'),
-                  detail: T(wrote ? 'proc.readyBody' : 'proc.nothingHeardBody'),
-                  okLabel: T('common.ok'),
-                });
+                /**
+                 * NO VERDICT BEFORE THE PIPELINE FINISHES (hadar, 2026-09-07, same
+                 * screenshot twice: pasted the description, said nothing, and got
+                 * "we couldn't make out the work" — while the write-up landed
+                 * seconds later). `wrote` is read after a ~3s bounded hydrate, but
+                 * the pipeline takes 30-60s: this popup was accusing his dictation
+                 * of a silence the server had not finished judging — the exact
+                 * class the review band fixed ("until the pipeline has FINISHED,
+                 * nothing has been heard YET").
+                 *
+                 * While the pipeline still owes, NO POPUP AT ALL: he lands on the
+                 * review, whose blue band already says the write-up is being made
+                 * and finishes by itself — a second sheet saying the same thing is
+                 * noise, and one saying the opposite is the bug. The nothing-heard
+                 * verdict survives only for a FINISHED pipeline that produced
+                 * nothing — the state where "type it or record again" is true and
+                 * actionable. Unreadable pipeline state counts as still-owing: the
+                 * popup is the most droppable thing in this app, and a false
+                 * accusation is the least.
+                 */
+                let owes = !wrote;
+                if (!wrote) {
+                  try {
+                    const did = (await db.getAll<{ d: string }>(
+                      `SELECT decision_id AS d FROM change_order WHERE id = ?`,
+                      [h.coId]))[0]?.d;
+                    owes = !did
+                      || extraProcState(await captureStatesForExtra(db, did)) !== 'processed';
+                  } catch { owes = true; }
+                }
+                if (wrote || !owes) {
+                  setAck({
+                    // A GREEN TICK ABOVE "WE COULDN'T MAKE OUT THE WORK" (hadar's
+                    // earlier screenshot): the mark has to agree with the sentence,
+                    // so the not-a-success case draws the amber attention shape.
+                    kind: wrote ? 'ok' : 'no',
+                    title: T(wrote ? 'proc.readyTitle' : 'proc.nothingHeardTitle'),
+                    detail: T(wrote ? 'proc.readyBody' : 'proc.nothingHeardBody'),
+                    okLabel: T('common.ok'),
+                  });
+                }
               })();
             }
           }
