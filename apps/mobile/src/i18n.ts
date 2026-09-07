@@ -1981,6 +1981,7 @@ const EN: Record<string, string> = {
   'neg.lastSeen': 'Last seen',
   // The gap interview (SPEC-single-line-co-v1) — at most three questions, only when
   // the backend determination found gaps.
+  'ck.add': 'Add',
   'gap.head': 'Quick check before it goes',
   'gap.priceQ': 'No price is set. Across the industry, unpriced extras are where contractors do the work and never get paid \u2014 a clear number gets a clear yes.',
   'gap.priceSet': 'Set the price',
@@ -3995,6 +3996,7 @@ const ES: Record<string, string> = {
   'neg.openedNotApproved': 'Abrieron el enlace, pero todavía no lo aprueban.',
   'neg.keepReturning': 'Vuelven al enlace una y otra vez, pero todavía no lo aprueban.',
   'neg.lastSeen': 'Visto por última vez',
+  'ck.add': 'Agregar',
   'gap.head': 'Una revisión rápida antes de enviar',
   'gap.priceQ': 'No hay precio. En la industria, los extras sin precio son donde el contratista hace el trabajo y nunca cobra \u2014 una cifra clara recibe un s\u00ed claro.',
   'gap.priceSet': 'Poner el precio',

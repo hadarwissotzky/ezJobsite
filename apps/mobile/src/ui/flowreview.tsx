@@ -68,8 +68,11 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
     { key: 'schedule', label: t('draft.ckSchedule'), onPress: p.onEditSchedule,
       value: schedule,
       state: p.readiness.recommended.includes('no_schedule_effect') ? 'missing' as const : 'done' as const },
+    // A null requested-by is NOT-EXTRACTED, and saying 'done' over it hid the one
+    // affordance that fixes it (hadar, 2026-09-07).
     { key: 'requested_by', label: t('draft.vRequestedBy'), onPress: p.onEditDetails,
-      value: p.requestedBy, state: 'done' as const },
+      value: p.requestedBy,
+      state: p.requestedBy ? 'done' as const : 'missing' as const },
   ];
 
   return (
@@ -234,7 +237,7 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
           <View style={{ marginTop: 2 }}>
             {rows.map((r) => (
               <ChecklistRow key={r.key} state={r.state} label={r.label}
-                value={r.value} onPress={r.onPress} />
+                value={r.value} onPress={r.onPress} addLabel={t('ck.add')} />
             ))}
           </View>
         </Card>

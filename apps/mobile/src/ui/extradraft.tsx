@@ -771,7 +771,7 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             <View>
               {items.map((it) => (
                 <ChecklistRow key={it.key} state={it.state} label={it.label}
-                  value={it.value} onPress={it.onPress} />
+                  value={it.value} onPress={it.onPress} addLabel={t('ck.add')} />
               ))}
             </View>
           </Card>

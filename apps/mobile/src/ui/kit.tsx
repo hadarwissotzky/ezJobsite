@@ -364,7 +364,7 @@ export function Row({
  */
 export type ChecklistState = 'done' | 'missing' | 'blocking';
 
-export function ChecklistRow({ state, label, value, hint, onPress }: {
+export function ChecklistRow({ state, label, value, hint, onPress, addLabel }: {
   state: ChecklistState;
   label: string;
   /**
@@ -384,6 +384,16 @@ export function ChecklistRow({ state, label, value, hint, onPress }: {
   hint?: string;
   /** Jump to the field that fixes it. Omit for a static checklist. */
   onPress?: () => void;
+  /**
+   * THE WAY IN, WHEN NOTHING WAS EXTRACTED (hadar, 2026-09-07: "if it wasn't
+   * extracted, it is unknown to the user that they can edit it"). A row with a value
+   * shows the pencil; a row without one showed only a hollow ring — tappable, but
+   * nothing said so, and a contractor who does not think in software reads an empty
+   * row as a fact, not a door. Passed in words (the kit imports no i18n) and drawn
+   * only while the row is still owed: a done row with no scalar (the description,
+   * read in full above) stays quiet.
+   */
+  addLabel?: string;
 }) {
   const tone = state === 'done' ? 'approved' : state === 'blocking' ? 'danger' : 'caution';
   const hintColor = state === 'done' ? C.steel : tint(tone).ink;
@@ -411,12 +421,17 @@ export function ChecklistRow({ state, label, value, hint, onPress }: {
           showing you, and those are different promises: a chevron says "there is more
           through here", a pencil says "this is wrong, fix it", which is the whole
           reason a read-back exists. */}
-      {value != null && value !== '' && (
+      {value != null && value !== '' ? (
         <View style={st.rowValWrap}>
           <Text style={st.rowVal} numberOfLines={1}>{value}</Text>
           {onPress && <Icon name="edit" size={14} color={C.steel} />}
         </View>
-      )}
+      ) : onPress && addLabel && state !== 'done' ? (
+        <View style={st.rowValWrap}>
+          <Icon name="acPlus" size={14} color={tint(tone).ink} />
+          <Text style={[st.rowVal, { color: tint(tone).ink, fontWeight: '700' }]}>{addLabel}</Text>
+        </View>
+      ) : null}
       {/* No chevron: the design's checklist is marks + labels only. The whole row is
           still tappable to jump to the field; the chevron in a two-column grid landed
           in the middle of the card and read as clutter. */}
