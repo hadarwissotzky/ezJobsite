@@ -12037,6 +12037,57 @@ const checkClientMessages = async () => {
               // window; everything else closed is "more to see".
               + Math.max(0, closedList.length - shownDeclined);
             return (<>
+              {/* WHAT'S NEW — the answer to the question Home is opened with. The
+                  bell already knows every event; this surfaces the three freshest
+                  (unread first, else last 48h) as one-line rows above the work
+                  lists, each a tap from its record, with the bell one more tap for
+                  the rest. Nothing fresh -> nothing rendered: a digest of old news
+                  is furniture. Same title vocabulary and read-marking as the bell,
+                  so the two surfaces cannot drift. */}
+              {(() => {
+                const digestNow = Date.now();
+                const fresh = activity
+                  .filter((a) => !a.read || a.atMs > digestNow - 48 * 3_600_000)
+                  .sort((a, b) => Number(a.read) - Number(b.read) || b.atMs - a.atMs)
+                  .slice(0, 3);
+                if (fresh.length === 0) return null;
+                const ICONS: Record<string, IconName> = {
+                  question: 'ntChat', approved: 'ntCheck', declined: 'ntExcluded',
+                  unpriced: 'ntDollar', sent: 'ntMail',
+                };
+                return (
+                  <View style={s.digest}>
+                    <View style={s.digestHead}>
+                      <Text style={s.digestH}>{T('home.whatsNew')}</Text>
+                      <Pressable onPress={() => setNav('notifications')} hitSlop={8}
+                        accessibilityRole="button" accessibilityLabel={T('nt.title')}>
+                        <Text style={s.digestAll}>{T('home.seeAllActivity')}</Text>
+                      </Pressable>
+                    </View>
+                    {fresh.map((a) => (
+                      <Pressable key={a.id} style={s.digestRow} accessibilityRole="button"
+                        onPress={async () => {
+                          await markRead(db, [a.id]);
+                          await refresh();
+                          void openRecord(a.changeOrderId);
+                        }}>
+                        <Icon name={ICONS[a.kind] ?? ('ntQuestion' as IconName)} size={30} />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={s.digestT} numberOfLines={1}>
+                            {T(('r8.kind.' + a.kind) as any)} — {a.scope}
+                          </Text>
+                          <Text style={s.digestS} numberOfLines={1}>
+                            {[a.jobName || null,
+                              a.amountCents != null ? moneyWhole(a.amountCents) : null,
+                              shortDate(a.atMs, digestNow)].filter(Boolean).join(' · ')}
+                          </Text>
+                        </View>
+                        {!a.read && <View style={s.digestDot} />}
+                      </Pressable>
+                    ))}
+                  </View>
+                );
+              })()}
               {bucket('home.needsYouFirst', needs)}
               {bucket('home.waitingOnClient', cap(waitingList))}
               {bucket('home.approvedSec', cap(approvedList))}
@@ -14710,6 +14761,16 @@ const s = StyleSheet.create({
   tileMeta: { position: 'absolute', bottom: 0, left: 0, right: 0, color: '#fff', fontSize: 10,
     paddingHorizontal: 5, paddingVertical: 3, backgroundColor: '#00000099' },
   // ── capture-first home (prototype c1) ──────────────────────────────────────
+  // The What's-new digest card at the top of Home.
+  digest: { marginHorizontal: 16, marginTop: 4, marginBottom: 10, backgroundColor: '#FBF8F1',
+    borderWidth: 1, borderColor: '#D8D1C4', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
+  digestHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  digestH: { fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#161918' },
+  digestAll: { fontFamily: 'Barlow_600SemiBold', fontSize: 13.5, color: '#506A45', textDecorationLine: 'underline' },
+  digestRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  digestT: { fontFamily: 'Barlow_600SemiBold', fontSize: 15, color: '#161918' },
+  digestS: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#777C78', marginTop: 1 },
+  digestDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#506A45' },
   homeC: { flex: 1, backgroundColor: '#faf7f3', paddingTop: 54 },  // ink-50
   // ── Home dashboard — matched to the design system: Oswald display + Inter body,
   //    ink/sky/mint/butter palette from Website/src/styles/global.css (2026-07-26) ──

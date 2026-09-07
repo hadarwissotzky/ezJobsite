@@ -578,6 +578,8 @@ const EN: Record<string, string> = {
   'home.closedSec': 'Closed \u2014 declined or withdrawn',
   'home.closedChip': 'Closed',
   'home.approvedSec': 'Approved',
+  'home.whatsNew': 'What\u2019s new',
+  'home.seeAllActivity': 'See all',
   'home.declinedSec': 'Recently declined',
   /* The home artboard (hadar, 2026-08-25). FIVE buckets became TWO. The old set —
      waiting / needs a response / approved / closed — sorted by STATUS, which is the
@@ -2881,6 +2883,8 @@ const ES: Record<string, string> = {
   'home.closedSec': 'Cerradas \u2014 rechazadas o retiradas',
   'home.closedChip': 'Cerradas',
   'home.approvedSec': 'Aprobado',
+  'home.whatsNew': 'Novedades',
+  'home.seeAllActivity': 'Ver todo',
   'home.declinedSec': 'Rechazados recientemente',
   'home.needsYouFirst': 'Requiere su atención',
   'home.waitingOnClient': 'Esperando al cliente',
