@@ -14,6 +14,7 @@ import { cachedMaps, mapUrlFor } from './src/mapcache';
 import { REJECT_DDL, SupabaseConnector } from './src/connector';
 import { forgetSeenOnboarding, getSeenOnboarding, setSeenOnboarding } from './src/auth';
 import { buildLine, useOta } from './src/otaclient';
+import * as Updates from 'expo-updates';
 // The same "what is still unfinished" count the OTA gate uses. Reused deliberately:
 // two independent definitions of "unsent" would drift, and this one is the audited
 // list of every owned outbox.
@@ -978,6 +979,44 @@ export default function App() {
   React.useEffect(() => {
     const id = setTimeout(() => setSplashHeld(false), SPLASH_MIN_MS);
     return () => clearTimeout(id);
+  }, []);
+
+  /**
+   * THE LAUNCH-TIME UPDATE, ON THE SPLASH (hadar, 2026-09-07: "when the app opens we
+   * need to check for OTA update and display a progress bar and notification").
+   *
+   * expo-updates' default (ON_LOAD + fallbackToCacheTimeout 0) downloads in the
+   * background and applies at the NEXT cold start — correct for never delaying a
+   * launch, and the reason every fix here has needed the restart-twice dance. This
+   * effect trades a bounded wait for currency: check (capped 3.5s — no signal is
+   * Tuesday, mandate #7, and the splash must never hang on it), and when an update
+   * exists, download (capped 20s) behind a visible "updating" note, then reload
+   * INTO it. Reloading here is safe where it is unsafe anywhere else: nothing is
+   * in flight this early — every queue is durable SQLite and every drain restarts
+   * idempotently on the next boot. Any timeout or error falls through to a normal
+   * launch on the current bundle, which the background default then patches on the
+   * following start — the old behaviour, as the fallback instead of the rule.
+   */
+  const [otaSplash, setOtaSplash] = React.useState<'checking' | 'updating' | null>(null);
+  React.useEffect(() => {
+    if (!Updates.isEnabled) return;
+    let live = true;
+    const capped = <T,>(pr: Promise<T>, ms: number) =>
+      Promise.race([pr, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
+    void (async () => {
+      try {
+        setOtaSplash('checking');
+        const chk = await capped(Updates.checkForUpdateAsync(), 3500);
+        if (!live) return;
+        if (!chk || !chk.isAvailable) { setOtaSplash(null); return; }
+        setOtaSplash('updating');
+        const got = await capped(Updates.fetchUpdateAsync(), 20_000);
+        if (!live) return;
+        if (got && got.isNew) { await Updates.reloadAsync(); return; }
+        setOtaSplash(null);
+      } catch { if (live) setOtaSplash(null); }
+    })();
+    return () => { live = false; };
   }, []);
 
   // Placed after `ready` exists — see `syncLabel` above for why it only runs while
@@ -7581,7 +7620,9 @@ const checkClientMessages = async () => {
   // with __fixturedraft.tsx when the screen matches the mockup.
   // THE SPLASH FLOOR, ahead of every other gate — including the fixtures, so a
   // fixture build opens the same way the real app does. Boot continues underneath.
-  if (splashHeld) return <SplashScreen />;
+  // The splash outlives its minimum while an update is downloading — swapping to the
+  // app moments before a reload would flash the old UI and then tear it down.
+  if (splashHeld || otaSplash === 'updating') return <SplashScreen ota={otaSplash} />;
 
   if (process.env.EXPO_PUBLIC_FIXTURE === '1') return <FixtureDraft />;
   if (process.env.EXPO_PUBLIC_FIXTURE === '2') return <FixtureNegotiation />;

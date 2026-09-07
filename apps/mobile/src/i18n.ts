@@ -1982,6 +1982,9 @@ const EN: Record<string, string> = {
   // The gap interview (SPEC-single-line-co-v1) — at most three questions, only when
   // the backend determination found gaps.
   'ck.add': 'Add',
+  'ota.checking': 'Checking for updates\u2026',
+  'ota.updating': 'Updating the app\u2026',
+  'ota.updatingSub': 'A few seconds \u2014 it restarts by itself.',
   'draft.sendBlockedTitle': 'Not ready to send yet',
   'gap.head': 'Quick check before it goes',
   'gap.priceQ': 'No price is set. Across the industry, unpriced extras are where contractors do the work and never get paid \u2014 a clear number gets a clear yes.',
@@ -3998,6 +4001,9 @@ const ES: Record<string, string> = {
   'neg.keepReturning': 'Vuelven al enlace una y otra vez, pero todavía no lo aprueban.',
   'neg.lastSeen': 'Visto por última vez',
   'ck.add': 'Agregar',
+  'ota.checking': 'Buscando actualizaciones\u2026',
+  'ota.updating': 'Actualizando la app\u2026',
+  'ota.updatingSub': 'Unos segundos \u2014 se reinicia sola.',
   'draft.sendBlockedTitle': 'Todavía no se puede enviar',
   'gap.head': 'Una revisión rápida antes de enviar',
   'gap.priceQ': 'No hay precio. En la industria, los extras sin precio son donde el contratista hace el trabajo y nunca cobra \u2014 una cifra clara recibe un s\u00ed claro.',

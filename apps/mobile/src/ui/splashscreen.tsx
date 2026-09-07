@@ -39,10 +39,43 @@
  * part of the artwork for exactly that reason.
  */
 import React from 'react';
-import { Image, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Animated, Image, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { C } from './theme';
+import { t } from '../i18n';
 
-export function SplashScreen() {
+/**
+ * THE ONE EXCEPTION TO "NO TEXT" (hadar, 2026-09-07: "display a progress bar and
+ * notification letting them know the app is currently being updated"). The no-text
+ * rule exists because custom fonts are not loaded yet — so this line deliberately
+ * uses the SYSTEM face and never switches: no flash, no snap. An update banner that
+ * says nothing is exactly the silent wait it exists to replace.
+ */
+function UpdateNote({ phase }: { phase: 'checking' | 'updating' }) {
+  const x = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(x, { toValue: 1, duration: 900, useNativeDriver: true }),
+      Animated.timing(x, { toValue: 0, duration: 900, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [x]);
+  const slide = x.interpolate({ inputRange: [0, 1], outputRange: [-60, 160] });
+  return (
+    <View style={st.note} accessibilityRole="progressbar"
+      accessibilityLabel={t(phase === 'updating' ? 'ota.updating' : 'ota.checking')}>
+      <Text style={st.noteT}>
+        {t(phase === 'updating' ? 'ota.updating' : 'ota.checking')}
+      </Text>
+      <View style={st.track}>
+        <Animated.View style={[st.fill, { transform: [{ translateX: slide }] }]} />
+      </View>
+      {phase === 'updating' && <Text style={st.noteSub}>{t('ota.updatingSub')}</Text>}
+    </View>
+  );
+}
+
+export function SplashScreen({ ota }: { ota?: 'checking' | 'updating' | null } = {}) {
   // Explicit width/height from the window, not StyleSheet.absoluteFill: a concrete
   // frame is the one thing that guarantees resizeMode has bounds to fit WITHIN. It
   // removes any question of the Image falling back to the source's intrinsic pixel
@@ -52,6 +85,7 @@ export function SplashScreen() {
     <View style={st.screen}>
       <Image source={require('../../assets/splash-screen.png')}
         style={{ width, height }} resizeMode="contain" />
+      {!!ota && <UpdateNote phase={ota} />}
     </View>
   );
 }
@@ -61,4 +95,14 @@ const st = StyleSheet.create({
   // decodes and in the contain letterbox, and it is the native storyboard's colour
   // too, so the native→JS handover is seamless.
   screen: { flex: 1, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center' },
+  // Pinned low so it never sits over the artwork's composition. System font — see
+  // UpdateNote's header.
+  note: { position: 'absolute', bottom: 76, left: 40, right: 40, alignItems: 'center' },
+  noteT: { fontSize: 15, fontWeight: '600', color: '#555B57' },
+  noteSub: { fontSize: 12.5, color: '#777C78', marginTop: 8 },
+  track: {
+    marginTop: 10, width: 160, height: 4, borderRadius: 2,
+    backgroundColor: '#E3DDD1', overflow: 'hidden',
+  },
+  fill: { width: 60, height: 4, borderRadius: 2, backgroundColor: '#506A45' },
 });
