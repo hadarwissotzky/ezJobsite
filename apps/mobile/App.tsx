@@ -1357,7 +1357,7 @@ const localizedThread = async (changeOrderId: string): Promise<ThreadMessage[]> 
   } catch { return th; }
 };
 
-const openRecord = async (changeOrderId: string) => {
+const openRecord = async (changeOrderId: string, opts?: { soft?: boolean }) => {
   // NOTHING SILENT (hadar, 2026-07-22): a tap that opens nothing looks identical to
   // "still on the job screen", which is exactly what he reported. extraRecord can
   // BOTH return null (row gone) AND throw (a local-schema mismatch after the
@@ -1380,8 +1380,17 @@ const openRecord = async (changeOrderId: string) => {
   // while one is open). The layers below load asynchronously — drop the PRIOR
   // record's now, or its evidence renders under the new title until each read
   // lands (Codex review, 2026-07-22).
-  setApproval(null); setRecordLc(null); setRecordTimeline([]); setRecordGaps([]);
-  setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
+  //
+  // UNLESS THIS IS A SOFT REFRESH of the record already on screen (hadar,
+  // 2026-09-07: "we have to display the CO completed at the preview stage") — the
+  // write-up watcher re-runs this whole load in place while the review is open,
+  // and blanking the layers first would flash paper over a screen the contractor
+  // is reading. Same screen, same record: every set below lands over its own
+  // previous value.
+  if (!opts?.soft) {
+    setApproval(null); setRecordLc(null); setRecordTimeline([]); setRecordGaps([]);
+    setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
+  }
   setRecordWriteUp('unknown'); setRecordPrice(null);
   setRecordNextId(null); setDetail(null); setZoomUri(null);
   // SPEC-extra-lifecycle-v1 — the stage layer, and it goes FIRST for a reason: it is
@@ -4799,6 +4808,43 @@ const checkClientMessages = async () => {
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record?.id, record?.status]);
+  /**
+   * THE WRITE-UP LANDS ON THE OPEN REVIEW (hadar, 2026-09-07: "it only assigns the
+   * AI processing after I close the create CO — it must display during the preview,
+   * because that's where the user will send the CO").
+   *
+   * The pipeline finishes 30-60s after capture, but nothing refreshed the open
+   * record: the review sat on "processing now" until a close-and-reopen. While a
+   * DRAFT with no written scope is on screen, this pulls the scoped hydrate and
+   * soft-reloads the record every 7s — scope, price, terms, and the gap interview
+   * all land in place, on the screen with the Send button. Stops by its own deps
+   * the moment the scope is written (or the record closes); offline ticks are
+   * harmless (hydrate rejects, the race resolves, nothing repaints).
+   */
+  React.useEffect(() => {
+    const rec = record;
+    if (!rec || rec.status !== 'draft') return;
+    if (hasWrittenScope(rec.scopeOfWork, rec.title)) return;
+    const tick = async () => {
+      try {
+        if (recordIdRef.current !== rec.id) return;
+        const { data: sess } = await connector.client.auth.getSession();
+        const uid = sess?.session?.user?.id;
+        const pid = (await db.getAll<{ p: string | null }>(
+          `SELECT project_id AS p FROM change_order WHERE id = ?`, [rec.id]))[0]?.p;
+        if (uid && pid) {
+          await Promise.race([
+            hydrateChangeOrders(db, connector.client, pid, uid),
+            new Promise((r) => setTimeout(r, 3000)),
+          ]);
+        }
+        if (recordIdRef.current === rec.id) await openRecord(rec.id, { soft: true });
+      } catch { /* an offline tick changes nothing — the band keeps its promise */ }
+    };
+    const id = setInterval(() => { void tick(); }, 7_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record?.id, record?.status, record && hasWrittenScope(record.scopeOfWork, record.title)]);
   /**
    * The open detail subscreen (extradetails.tsx) and its editor buffers.
    *
