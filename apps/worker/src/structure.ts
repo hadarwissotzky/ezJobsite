@@ -281,6 +281,16 @@ Rules, in order of importance:
    excluded — WHERE IT STOPS. Anything he said is separate, plus the standard exclusions for this work under rule 2. This section is why the document is worth signing.
    assumptions — what this depends on and what would change it: conditions he voiced, access or timing he needs, standard dependencies for this work.
 
+5b. THE LATER STATEMENT IS THE CORRECTION. The transcript may span several
+   recordings and typed notes, joined in the order they were made, and a contractor
+   who mis-spoke fixes it by SAYING IT AGAIN — there is no editing, only appending
+   (hadar, 2026-09-07: "change happens via re-recording again"). When two statements
+   about the SAME fact conflict — a dimension, a material, a who, a when — follow
+   the LATER one and drop the earlier from the document; it was corrected, not
+   contradicted. This applies to facts, never to money: two conflicting figures stay
+   AMBIGUOUS (the price rules below refuse to choose between numbers), because a
+   corrected dimension costs nothing and a guessed price costs the job.
+
 6. TERMS. Report only what he SAID. schedule_effect null and "not_sure" are different answers: null means he never addressed the schedule, not_sure means he said he does not know yet. Same for billing_timing — do not assume a default, because a clause nobody chose ends up in a document somebody signs.
 
 7. TASKS ARE SEGMENTS OF THE JOB, AND THEY ARE HOW THE OWNER UNDERSTANDS IT. Split the work into the pieces a homeowner would recognise as separable — by AREA ("the hall bath", "the kitchen ceiling") or by STAGE ("open up and assess", "rebuild", "patch and paint back"). Group each segment's own materials, price mention, time mention and start mention under THAT segment. A mention belonging to one segment must not leak onto another; when genuinely ambiguous, attach it to the segment discussed nearest to it.
