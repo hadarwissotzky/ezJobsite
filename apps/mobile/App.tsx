@@ -6872,6 +6872,34 @@ const checkClientMessages = async () => {
         // Same fact, the fused path — see the voice path above for why it is here.
         await noteActorNow(db, {
           subjectKind: 'change_order', subjectId: x.changeOrderId, act: 'captured' });
+        /**
+         * EVERY WORD-CARRYING SIBLING JOINS THE DECISION (hadar, 2026-09-07: pasted
+         * the description, said nothing, and got "we couldn't make out the work").
+         *
+         * `startExtraFromCapture` records the decision with the ANCHOR capture only,
+         * and the anchor prefers voice. The worker's `extraTranscript` joins
+         * transcripts by decision_version — so a typed description beside a silent
+         * recording was invisible to the write-up: the model read the empty voice
+         * transcript and starved, while the typed words structured into a proposal
+         * attached to nothing. The augment flow already appends captures as decision
+         * versions (linkCaptureToDecision, idempotent, synced); the fused flow now
+         * does the same for the non-anchor captures that carry words — the typed
+         * text and any voice segment beyond the anchor. Photos attach through their
+         * own path and carry no transcript.
+         */
+        try {
+          const subject = `extra ${anchorId}`;
+          for (const cid of ids) {
+            if (cid === anchorId) continue;
+            const isText = cid === textId;
+            if (!isText && !voiceIds.includes(cid)) continue;
+            await linkCaptureToDecision(db, {
+              decisionId: x.decisionId, captureId: cid,
+              value: isText ? (a.typedText ?? '') : '',
+              projectId: res.projectId, ownerId: OWNER, subject,
+            });
+          }
+        } catch { /* the write-up then reads only the anchor — the pre-fix shape */ }
         await refresh();
       }).catch(() => { /* capture is safe; the ledger row is not owed */ });
 
@@ -10209,6 +10237,7 @@ const checkClientMessages = async () => {
       <RecordScreen
         gaps={recordGaps}
         gapAnswers={gapAnswers}
+        online={online && netReachable !== false}
         /* Step 5 of 5, and only on the record the flow just made. Compared by id so the
            rail cannot outlive the journey — see `flowRecordId`. */
         inFlow={!!record && record.id === flowRecordId}

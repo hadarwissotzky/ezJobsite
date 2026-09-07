@@ -108,6 +108,15 @@ export async function pendingSilentNotices(
             SELECT 1 FROM decision_version dv
               JOIN capture_outbox o ON o.capture_id = dv.capture_id
              WHERE dv.decision_id = co.decision_id)
+          -- A TYPED sibling holds the work in words (2026-09-07: hadar pasted the
+          -- description and said nothing; "we couldn't make out the work" over a
+          -- fully written description is the popup crying wolf). A text capture
+          -- carries its words by construction, so its presence answers the question
+          -- this notice exists to ask.
+          AND NOT EXISTS (
+            SELECT 1 FROM decision_version dv
+              JOIN capture_commit cc ON cc.capture_id = dv.capture_id
+             WHERE dv.decision_id = co.decision_id AND cc.modality = 'text')
         ORDER BY co.created_at_ms DESC`
     );
   } catch {

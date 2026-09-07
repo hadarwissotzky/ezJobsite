@@ -91,7 +91,8 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
             outruns its evidence, which CLAUDE.md names as this project's recurring one. */}
         <Text style={st.sub}>
           {scopeWritten ? t('draft.reviewSub')
-            : p.proc !== 'processed' ? t('lang.writeupPendingSub')
+            : p.proc !== 'processed'
+              ? t(p.online === false ? 'lang.writeupPendingSub' : 'lang.writeupBusySub')
             : t('draft.nothingHeardHere')}
         </Text>
 
@@ -120,7 +121,11 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
             <Icon name="cloud" size={22} />
             <View style={{ flex: 1 }}>
               <Text style={st.offlineH}>{t('lang.writeupPendingTitle')}</Text>
-              <Text style={st.offlineT}>{t('lang.writeupPendingBody')}</Text>
+              {/* The offline sentence only with offline EVIDENCE — online, the honest
+                  reason the scope is missing is that the pipeline is still running. */}
+              <Text style={st.offlineT}>
+                {t(p.online === false ? 'lang.writeupPendingBody' : 'lang.writeupBusyBody')}
+              </Text>
             </View>
           </View>
         )}

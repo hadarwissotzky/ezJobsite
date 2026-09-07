@@ -396,6 +396,10 @@ export type ExtraDraftProps = {
   /** REQ-LC14 / T5: legal in this stage only. Rendered only when the caller offers
    *  it AND `canDelete` agrees — `planDiscard` remains the arbiter of the act. */
   onDelete?: () => void;
+  /** Is the phone online right now? Decides whether the pending write-up band blames
+   *  the network or just the clock (2026-09-07: it said "no reception" to a phone
+   *  with full bars). Undefined reads as online — the offline claim needs evidence. */
+  online?: boolean;
   /** SPEC-single-line-co-v1 D2/D6 — the backend determination's gaps, when it found
    *  any. Absent or empty = the complete one-liner: this screen shows nothing new. */
   gaps?: readonly SignabilityGap[];

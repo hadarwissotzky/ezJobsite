@@ -118,6 +118,8 @@ export type RecordScreenProps = {
    *  Passed through to whichever draft-stage screen renders. */
   gaps?: readonly SignabilityGap[];
   gapAnswers?: GapAnswers;
+  /** Network truth for the pending write-up band's copy. */
+  online?: boolean;
   /**
    * A COUNTER THAT MEANS "LAND ON THE CONVERSATION" (2026-08-25). Bumped by App when a
    * client-message push is tapped, so the record opens with the message sheet already
@@ -325,6 +327,7 @@ export function RecordScreen(props: RecordScreenProps) {
           onDelete={props.onDelete}
           gaps={props.gaps}
           gapAnswers={props.gapAnswers}
+          online={props.online}
         />
       );
     }

@@ -1842,6 +1842,11 @@ const EN: Record<string, string> = {
   'lang.writeupPendingTitle': 'Your write-up is on its way',
   'lang.writeupPendingBody': 'No reception right now, so the recording is waiting to process. It finishes by itself the moment you have signal — nothing to redo. You can write the scope yourself below, or come back to this later from Home.',
   'lang.writeupPendingSub': 'Saved safe. The write-up finishes when you have reception.',
+  // The same band while ONLINE (2026-09-07: it said "no reception" to a phone with
+  // full bars — the write-up was simply still in flight). Same reassurance, honest
+  // reason.
+  'lang.writeupBusyBody': 'The write-up is processing now — usually under a minute. It finishes by itself; you can write the scope yourself below, or come back to this later from Home.',
+  'lang.writeupBusySub': 'Saved safe. The write-up is being made right now.',
   'cap.transReviewAnyway': 'Review it now — it finishes itself later',
   'sent.autoSmsDown': 'The automatic text could not be sent, so you handed it over yourself. The link works either way.',
   'sent.noPhoneShare': 'This client has no mobile number on file, so you handed the link over yourself. Add their number to text them automatically next time.',
@@ -3876,6 +3881,8 @@ const ES: Record<string, string> = {
   'lang.translatedTap': 'Traducido · toque para ver el original',
   'lang.originalTitle': 'Tal como se escribió',
   'lang.writeupPendingTitle': 'Su redacción está en camino',
+  'lang.writeupBusyBody': 'La redacción se está procesando ahora — normalmente menos de un minuto. Termina sola; puede escribir el alcance usted mismo abajo, o volver más tarde desde Inicio.',
+  'lang.writeupBusySub': 'Guardado seguro. La redacción se está haciendo ahora mismo.',
   'lang.writeupPendingBody': 'Sin señal ahora, la grabación espera para procesarse. Termina sola en cuanto tenga señal — no hay nada que rehacer. Puede escribir el alcance usted mismo abajo, o volver a esto después desde Inicio.',
   'lang.writeupPendingSub': 'Guardado seguro. La redacción termina cuando tenga señal.',
   'cap.transReviewAnyway': 'Revisarlo ahora — termina solo después',
