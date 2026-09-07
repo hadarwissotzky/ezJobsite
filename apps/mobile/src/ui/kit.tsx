@@ -1374,13 +1374,13 @@ const st = StyleSheet.create({
    * `rowSub`'s line height moves with it (16 -> 18) for the same reason the scope's did:
    * a sub-line that wraps is prose, and raising size without leading tightens it.
    */
-  rowLabel: { fontFamily: F.bodyBold, fontSize: 15.5, color: C.ink },
+  rowLabel: { fontFamily: F.bodyBold, fontSize: 16.5, color: C.ink },
   rowSub: { fontFamily: F.body, fontSize: 14, color: C.muted, marginTop: 1, lineHeight: 18 },
   // The value sits right, the pencil beside it. `maxWidth` rather than a fixed width:
   // "Not to exceed $12,400" must be allowed to take the room it needs, and the label
   // has `flex: 1` to give it back.
   rowValWrap: { flexDirection: 'row', alignItems: 'center', gap: 7, maxWidth: '52%', marginLeft: 8 },
-  rowVal: { fontFamily: F.bodyBold, fontSize: 15, color: C.ink, textAlign: 'right', flexShrink: 1 },
+  rowVal: { fontFamily: F.bodyBold, fontSize: 16, color: C.ink, textAlign: 'right', flexShrink: 1 },
   // 58%, not 46%: at the tighter cap a normal value ("View previous versions") wrapped
   // its ROW to two lines, which is what made the locked screen twice as tall as the
   // design. The label side still wins the remaining space.

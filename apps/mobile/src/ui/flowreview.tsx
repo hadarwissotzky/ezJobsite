@@ -343,7 +343,7 @@ function refusalLine(p: ExtraDraftProps, gate: ReturnType<typeof sendGate>): str
 const st = StyleSheet.create({
   title: { fontFamily: F.bodyBold, fontSize: 30, lineHeight: 34, color: C.ink,
     letterSpacing: -0.4, marginTop: 16 },
-  sub: { fontFamily: F.body, fontSize: 15.5, lineHeight: 21, color: C.steel, marginTop: 7 },
+  sub: { fontFamily: F.body, fontSize: 16.5, lineHeight: 22, color: C.steel, marginTop: 7 },
   cardLabel: { fontFamily: F.dispSemi, fontSize: 12, letterSpacing: 0.8, color: C.muted,
     textTransform: 'uppercase', marginBottom: 10 },
   // `caution` from the tint table, not an amber mixed here: "A screen never mixes its
@@ -356,12 +356,12 @@ const st = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 16, borderRadius: 12,
     backgroundColor: '#E8EEF3', borderWidth: 1, borderColor: '#C9D8E2' },
   offlineH: { fontFamily: F.bodyBold, fontSize: 16, color: '#2B4A5E' },
-  offlineT: { fontFamily: F.body, fontSize: 14.5, lineHeight: 20, color: '#3D5A6E',
+  offlineT: { fontFamily: F.body, fontSize: 15.5, lineHeight: 21, color: '#3D5A6E',
     marginTop: 3 },
   heard: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, marginTop: 16,
     paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12,
     backgroundColor: '#FFF3EA', borderWidth: 1, borderColor: '#FFD9C2' },
-  heardT: { flex: 1, fontFamily: F.bodySemi, fontSize: 14.5, lineHeight: 20, color: '#7A3A12' },
+  heardT: { flex: 1, fontFamily: F.bodySemi, fontSize: 15.5, lineHeight: 21, color: '#7A3A12' },
   who: { flexDirection: 'row', alignItems: 'center', gap: 13, marginTop: 18,
     backgroundColor: C.card, borderWidth: 1, borderColor: C.line, borderRadius: 14,
     paddingHorizontal: 15, paddingVertical: 14, minHeight: 82 },
