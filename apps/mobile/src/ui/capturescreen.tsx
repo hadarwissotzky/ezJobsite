@@ -1257,7 +1257,22 @@ export function FusedCapture({
                 scrollEnabled
                 value={summary}
                 onChangeText={(v: string) => { setSummary(v); summaryTouched.current = true; }}
-                onFocus={() => setSummaryFocused(true)}
+                onFocus={() => {
+                  setSummaryFocused(true);
+                  /**
+                   * EDITING PAUSES THE RECORDING (hadar, 2026-09-07: "if the user
+                   * edits the description, make sure the recording is stopped").
+                   * A man typing is not narrating — audio that keeps rolling under
+                   * the keyboard records taps and silence, pads the evidence, and
+                   * the live recogniser keeps appending its guesses into the very
+                   * field he is trying to control. Same act as the pause button, so
+                   * everything pause already guarantees holds (the recogniser's
+                   * words during the pause are swallowed, the segment stays one
+                   * file, resume continues it). He resumes deliberately — leaving a
+                   * field must not hot-mic him, so blur does NOT restart it.
+                   */
+                  if (micOn && !paused) { void togglePause(); }
+                }}
                 onBlur={() => setSummaryFocused(false)}
                 placeholder={T('cap.draftPlaceholder')}
                 placeholderTextColor={C.disabled}
