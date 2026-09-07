@@ -116,3 +116,59 @@ services:
       - path: /*
         name: Referrer-Policy
         value: no-referrer
+
+  # ── the office console ──────────────────────────────────────────────────────
+  #
+  # The manager's read-and-act surface over what the crew captured. A STATIC SITE,
+  # like the approval page above and for a stronger version of the same reason: it
+  # has no server because it must not have one. Every read and write goes straight
+  # to PostgREST under the signed-in user's JWT and RLS decides what comes back, so
+  # the only key this deploy needs is the anon key that is public by design. A Node
+  # tier here would need the service-role key to be worth having, and that key can
+  # read every customer's evidence.
+  #
+  # IT WILL NOT BUILD WITHOUT ITS ENVIRONMENT, deliberately. `src/supabase.ts`
+  # throws when either var is missing rather than shipping a console that returns an
+  # empty list from every query and looks like a company with no work in it — the
+  # confirm.html failure (CLIENT-PORTAL.md §1), which read as a slow server for two
+  # weeks because it had no way to say what was wrong.
+  #
+  # REQUIRES sql/427 AND sql/428. Without them a manager sees change orders they
+  # cannot edit and, worse, no questions at all — so a change order with a client
+  # waiting reads as a calm "Sent". Apply both before pointing anyone at this.
+  - type: web
+    name: ezjobsite-console
+    runtime: static
+    rootDir: apps/console
+    # NO `npm test` IN THE DEPLOY (code review 2026-09-07): agreement.test.ts
+    # byte-compares the vendored shared files against apps/mobile/src and HARD-FAILS
+    # when ../../mobile is absent -- which, per this repo's own rootDir premise (the
+    # worker's money.ts header), is exactly the state of a Render rootDir build. The
+    # deploy would fail on a test that cannot see its subject. The compare runs
+    # locally and in CI, where the full tree exists; the deploy builds.
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: NODE_VERSION
+        value: 22.11.0
+      # Both public by design; see .env.example. NOT sync:false-with-a-secret — these
+      # are inlined into a JavaScript file that anyone can read.
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+    routes:
+      # Single-page app: the hash carries the route, but a hard refresh on any path
+      # must still be served index.html rather than a 404.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      # This surface shows a company's priced commitments and its clients' names.
+      # Nothing about it should ride along in a referrer to any outbound link.
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: X-Frame-Options
+        value: DENY

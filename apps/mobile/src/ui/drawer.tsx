@@ -52,8 +52,8 @@ const SUPPORT_EMAIL = 'support@ezchangeorders.com';
  * prop kept "in case" is a prop that drifts out of meaning. The approval link is built
  * where it is sent, from the same env var, and is untouched.
  */
-const TERMS_URL = 'https://approve.ezchangeorders.com/terms.html';
-const PRIVACY_URL = 'https://approve.ezchangeorders.com/privacy.html';
+export const TERMS_URL = 'https://approve.ezchangeorders.com/terms.html';
+export const PRIVACY_URL = 'https://approve.ezchangeorders.com/privacy.html';
 
 export function Drawer({
   visible, onClose, onProfile, onCompanySettings, onPlans,

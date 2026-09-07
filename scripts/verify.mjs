@@ -345,6 +345,7 @@ console.log('\nverifying…\n');
     confirmation_current_link: 'superseded by live_token on confirmation_state (367)',
     confirmation_questions: 'superseded by confirmation_thread (308), which returns both sides; kept because dropping a granted RPC breaks links already in the wild',
     ingest_project_v1: 'projects.ts reaches project creation through a different path',
+    is_project_office: 'a POLICY predicate, not a client call (427). It is named inside `co_office_update`\'s using/with-check and inside ingest_r5b_v1, both of which run it server-side; the grant exists because RLS evaluates it as the calling role. Same class as is_project_visible (376), which is likewise a policy predicate rather than a listed entry here',
     // ── SPEC-extra-lifecycle-v1, server halves that landed ahead of their callers.
     // Each is recorded here because its own migration header ALREADY states it is
     // owed; this is that statement made executable so it cannot rot into a silent
@@ -352,8 +353,8 @@ console.log('\nverifying…\n');
     claim_reminders_v1: 'D5 server half (388). Its own header: "The WORKER STEP does not exist. Nothing calls claim_reminders_v1 yet." The caps and the claimed/sent/failed ledger are enforced; the scheduler step in apps/worker is unbuilt',
     settle_reminder_v1: 'D5 (388). The worker reports an attempt outcome through this; unreachable until claim_reminders_v1 has a caller, and wiring it alone would record outcomes for attempts nothing makes',
     record_manual_reminder_v1: 'D5 (388). Exists for remindExtra to call after the share sheet returns; 388 states "the device does not call it yet", so the server 1/day gate currently sees only automated attempts. The manual path still counts locally in activitystore.ts',
-    change_order_state_times_v1: 'DEF-8 server half (385). 385 states the DEVICE half is "still owed": change_order on the phone must gain sent_at_ms/approved_at_ms/declined_at_ms write-once first (REQ-LC4), and record.ts still renders "time not recorded" until it does',
-    extra_open_signal_v1: 'REQ-LC3 project-scoped wrapper (387). The app currently derives the same signal per-extra from the merged timeline (App.tsx:648, openCount from eventtimeline.ts), so the number on screen is correct; this wrapper is the one-round-trip-per-project replacement for that and is not wired yet',
+    change_order_state_times_v1: 'DEF-8 server half (385). CALLED BY THE CONSOLE since 2026-09-07 (queries.ts loadStateTimes) — the sweep now sees it, so this entry survives only for a checkout without apps/console; the DEVICE half (REQ-LC4 write-once stamps) is still owed',
+    extra_open_signal_v1: 'REQ-LC3 project-scoped wrapper (387). CALLED BY THE CONSOLE since 2026-09-07 (queries.ts loadOpenSignals); the MOBILE app still derives the same signal per-extra from the merged timeline, which stays correct',
   };
   const dir = join(MOBILE, 'sql');
   const files = run('ls', [dir], ROOT).out.split('\n').map((x) => x.trim()).filter((f) => f.endsWith('.sql'));
@@ -370,7 +371,11 @@ console.log('\nverifying…\n');
   // Every place a client could call one.
   let client = '';
   for (const p of run('sh', ['-c',
-    `find "${join(MOBILE, 'src')}" -name '*.ts' -o -name '*.tsx'; echo "${MOBILE}/App.tsx"; find "${join(ROOT, 'apps/web')}" -type f`],
+    // The CONSOLE is the third client surface (2026-09-07): it calls the signal
+    // RPCs this check exempted as "not wired yet", so leaving it out of the sweep
+    // let those exemptions rot and would flag (or silently exempt) every
+    // console-only grant forever.
+    `find "${join(MOBILE, 'src')}" -name '*.ts' -o -name '*.tsx'; echo "${MOBILE}/App.tsx"; find "${join(ROOT, 'apps/web')}" -type f; find "${join(ROOT, 'apps/console/src')}" -name '*.ts' -o -name '*.tsx' 2>/dev/null`],
     ROOT).out.split('\n').map((x) => x.trim()).filter(Boolean)) {
     try { client += readFileSync(p, 'utf8'); } catch { /* */ }
   }

@@ -63,26 +63,15 @@ grant execute on function public.change_order_open_signal(text) to service_role;
 -- The contractor's read. Project-scoped like `extra_questions_v1` (307) and
 -- `change_order_state_times_v1` (385): the app hydrates a project at a time, and one
 -- round trip per extra on one bar is the whole perceived load time.
-create or replace function public.extra_open_signal_v1(p_project_id text)
-  returns table (
-    change_order_id     text,
-    open_count          bigint,
-    viewed              boolean,
-    first_opened_at_ms  bigint,
-    last_opened_at_ms   bigint
-  )
-  language sql stable security definer set search_path = public as $$
-  select co.id, s.open_count, s.viewed,
-         (extract(epoch from s.first_opened_at) * 1000)::bigint,
-         (extract(epoch from s.last_opened_at)  * 1000)::bigint
-    from public.change_order co
-    cross join lateral public.change_order_open_signal(co.id) s
-   -- NULL-SAFE, stated explicitly (100_projects.sql's habit): auth.uid() is checked
-   -- on its own line so the ownership predicate can never pass by being NULL.
-   where auth.uid() is not null
-     and co.owner_id = auth.uid()
-     and co.project_id = p_project_id
-$$;
-
-revoke all on function public.extra_open_signal_v1(text) from public, anon;
-grant execute on function public.extra_open_signal_v1(text) to authenticated;
+-- `extra_open_signal_v1` is NOT defined here any more [2026-08-26]. It lives in
+-- `428_office_reads.sql`, its single owner.
+--
+-- Why it moved: 428 widens its ownership test from `co.owner_id = auth.uid()` to
+-- that OR `is_project_visible(co.project_id)`, so an active member of the company
+-- that owns the job can read it — which is the rule 376 already chose for the
+-- tables and never applied to the definer functions. Until then "the client opened it and has not answered" is the difference between chasing them
+-- and waiting, and it was invisible on a teammate's change order.
+--
+-- Nothing else about it changed. `create or replace function` has no partial form,
+-- so the widened version is the whole function, and one object defined in two files
+-- is decided by whichever ran last.

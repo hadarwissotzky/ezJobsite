@@ -140,7 +140,9 @@ create index if not exists billing_event_log_by_company
 create table if not exists public.pricing_config (
   id                   int primary key default 1 check (id = 1),
   version              int not null default 1,
-  -- {"credits_5":{"credits":5,"web":2500,"iap":3299}, …} — cents, integers only.
+  -- {"credits_3":{"credits":3,"web":1800,"iap":1800}, …} — cents, integers only.
+  -- (Key set and prices are maintained by UPDATE in the latest pricing migration —
+  -- 410, then 439 (renumbered from 429; 429 is the dev-account merge) — never by this default.)
   pack_prices          jsonb not null default '{}'::jsonb,
   -- {"core":{"monthly":2400,"annual":22900,"credits_per_month":N}, …}
   subscription_prices  jsonb not null default '{}'::jsonb,

@@ -59,35 +59,15 @@
 -- `confirmation_request` grants select only to its owner and `approval` is readable
 -- through 260's narrow policy; definer without the check would hand every signed-in
 -- user every tenant's send and signature times.
-create or replace function public.change_order_state_times_v1(p_project_id text)
-  returns table (
-    change_order_id  text,
-    sent_at_ms       bigint,
-    approved_at_ms   bigint,
-    declined_at_ms   bigint,
-    superseded_at_ms bigint
-  )
-  language sql stable security definer set search_path = public as $$
-  select co.id,
-         (extract(epoch from (
-            select min(r.created_at) from public.confirmation_request r
-             where r.change_order_id = co.id)) * 1000)::bigint,
-         (extract(epoch from (
-            select min(a.signed_at) from public.approval a
-             where a.change_order_id = co.id and a.action = 'approved')) * 1000)::bigint,
-         (extract(epoch from (
-            select min(a.signed_at) from public.approval a
-             where a.change_order_id = co.id and a.action = 'declined')) * 1000)::bigint,
-         (extract(epoch from co.superseded_at) * 1000)::bigint
-    from public.change_order co
-   -- NULL-SAFE, stated explicitly. `co.owner_id = auth.uid()` is NULL for an
-   -- unauthenticated caller and a NULL predicate drops the row, but saying so is the
-   -- habit 100_projects.sql was fixed to keep: the next edit to this predicate might
-   -- not be null-safe by accident.
-   where auth.uid() is not null
-     and co.owner_id = auth.uid()
-     and co.project_id = p_project_id
-$$;
-
-revoke all on function public.change_order_state_times_v1(text) from public, anon;
-grant execute on function public.change_order_state_times_v1(text) to authenticated;
+-- `change_order_state_times_v1` is NOT defined here any more [2026-08-26]. It lives in
+-- `428_office_reads.sql`, its single owner.
+--
+-- Why it moved: 428 widens its ownership test from `co.owner_id = auth.uid()` to
+-- that OR `is_project_visible(co.project_id)`, so an active member of the company
+-- that owns the job can read it — which is the rule 376 already chose for the
+-- tables and never applied to the definer functions. Until then the sent / signed / superseded times are what the console's record header reads,
+-- and they came back empty for anything the reader did not personally capture.
+--
+-- Nothing else about it changed. `create or replace function` has no partial form,
+-- so the widened version is the whole function, and one object defined in two files
+-- is decided by whichever ran last.

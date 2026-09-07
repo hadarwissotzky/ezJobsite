@@ -21,6 +21,12 @@ import { Icon, type IconName } from './icon';
 import { C, F } from './theme';
 import { touchTargets } from './tokens';
 
+/** The legal pages, as filed with the App Store listing. Constants, not env-derived —
+ *  see drawer.tsx for the time a derived one shipped as `https://https://…`. */
+// ONE source (code review 2026-09-07): these are filed with the App Store listing
+// and the 10DLC campaign; a same-valued copy here is the version that goes stale.
+import { TERMS_URL, PRIVACY_URL } from './drawer';
+
 // Which feature bullets each tier shows (i18n keys under paywall.f.*).
 //
 // KEPT HONEST AGAINST plans.ts (2026-08-04). These previously read "Up to 2 active
@@ -597,6 +603,30 @@ export function PaywallScreen(props: {
             style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 }}>
             <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.steel }}>{t('paywall.restore')}</Text>
           </Pressable>
+
+          {/* APP REVIEW GUIDELINE 3.1.2. A screen that sells an auto-renewable subscription
+              must state that it renews, and carry working Terms of Use and Privacy Policy
+              links IN THE BINARY, not only in the listing. Missing either is one of the
+              most common rejections there is, and it is a rejection of the whole build.
+              Same constants the drawer uses — the URLs are filed with the App Store
+              listing and the 10DLC campaign, so they must not depend on the env. */}
+          <Text style={{ fontFamily: F.body, fontSize: 12, color: C.muted, textAlign: 'center',
+            marginTop: 14, paddingHorizontal: 12, lineHeight: 17 }}>
+            {t('paywall.legal.renews')}
+          </Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18, marginTop: 6,
+            marginBottom: 8 }}>
+            <Pressable onPress={() => { void Linking.openURL(TERMS_URL).catch(() => {}); }}
+              style={{ minHeight: 44, justifyContent: 'center' }} accessibilityRole="link">
+              <Text style={{ fontFamily: F.body, fontSize: 12, color: C.steel,
+                textDecorationLine: 'underline' }}>{t('paywall.legal.terms')}</Text>
+            </Pressable>
+            <Pressable onPress={() => { void Linking.openURL(PRIVACY_URL).catch(() => {}); }}
+              style={{ minHeight: 44, justifyContent: 'center' }} accessibilityRole="link">
+              <Text style={{ fontFamily: F.body, fontSize: 12, color: C.steel,
+                textDecorationLine: 'underline' }}>{t('paywall.legal.privacy')}</Text>
+            </Pressable>
+          </View>
         </ScrollView>
       </View>
     </Modal>

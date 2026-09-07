@@ -38,36 +38,19 @@
 -- A question on a SUPERSEDED link still counts. She asked; nobody answered; issuing
 -- a new link did not answer her. Filtering those out would make a revision look
 -- like a reply.
-create or replace function public.extra_questions_v1(p_project_id text)
-  returns table (
-    change_order_id text,
-    question_id     bigint,
-    note            text,
-    asked_at_ms     bigint
-  )
-  language sql stable security definer set search_path = public as $$
-  select r.change_order_id,
-         q.id,
-         q.note,
-         (extract(epoch from q.asked_at) * 1000)::bigint
-    from public.confirmation_question q
-    join public.confirmation_request r on r.token = q.token
-    join public.change_order co on co.id = r.change_order_id
-   -- NULL-SAFE. `co.owner_id = auth.uid()` is NULL, not false, for an unauthenticated
-   -- caller, and a NULL where-clause drops the row -- but saying so explicitly is the
-   -- habit 100_projects.sql was fixed to keep, because the next edit to this predicate
-   -- might not be null-safe by accident.
-   where auth.uid() is not null
-     and co.owner_id = auth.uid()
-     and co.project_id = p_project_id
-     and not exists (
-       select 1 from public.confirmation_response x where x.token = q.token
-     )
-   order by q.asked_at
-$$;
-
-revoke all on function public.extra_questions_v1(text) from public;
-grant execute on function public.extra_questions_v1(text) to authenticated;
+-- `extra_questions_v1` is NOT defined here any more [2026-08-26]. It lives in
+-- `428_office_reads.sql`, its single owner.
+--
+-- Why it moved: 428 widens its ownership test from `co.owner_id = auth.uid()` to
+-- that OR `is_project_visible(co.project_id)`, so an active member of the company
+-- that owns the job can read it — which is the rule 376 already chose for the
+-- tables and never applied to the definer functions. Until then the manager could not see the questions a client asked on a crew member's change
+-- order, so `displayStatus` derived 'Sent' for a record with a client waiting on an
+-- answer.
+--
+-- Nothing else about it changed. `create or replace function` has no partial form,
+-- so the widened version is the whole function, and one object defined in two files
+-- is decided by whichever ran last.
 
 -- ── a revision retires the version before it ────────────────────────────────
 --

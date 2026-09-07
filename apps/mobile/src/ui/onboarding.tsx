@@ -16,12 +16,16 @@
  *   * THE THREE PAGES ARE THE THREE STEPS, in order, and they are the product: record
  *     on site → we turn it into a change order → get the yes before you do the work.
  *
- * ─── TWO GROUNDS ON PURPOSE ─────────────────────────────────────────────────────
- * Page 1 is dark over a photograph — it is the cover, and it has to stop someone. Pages
- * 2-4 are the app's own cream, because they are showing the app and a dark chrome around
- * a light screenshot would read as a different product. The gold accent carries across
- * both, at two values: bright on the dark cover, and a deeper ochre on cream where the
- * bright one would not hold its weight against black type.
+ * ─── ONE GROUND (2026-08-26) ────────────────────────────────────────────────────
+ * The cover used to be dark over a full-bleed photograph, on the argument that a cover
+ * has to stop someone. It is cream now, because hadar's App Store artwork is — and the
+ * artwork is the stronger argument: the same photograph reads as a jobsite rather than a
+ * mood when it is not sitting under an 80% scrim, and the headline gets to be ink at
+ * poster size instead of white at 38pt. It also ends the seam. Pages 2-4 were already
+ * cream, and the two grounds meant the first swipe changed the whole world.
+ *
+ * Gold survives as the accent — the rule under the headline — but it is no longer the
+ * primary: on cream the ink button is the loudest thing that can be pressed, and it is.
  *
  * ─── ASSETS ─────────────────────────────────────────────────────────────────────
  * `assets/onboard/*` are all cut from hadar's drops:
@@ -30,22 +34,38 @@
  *     sparkle's star, the plane, the chat bubble, the approve disc). Circles rather than
  *     squares because the source sits on black and a square shows its corners on cream.
  *   * the three cover icons are the same sheet's gold line art, recoloured flat with
- *     alpha from luminance: that column sits on a blurred screenshot, not clean black,
- *     so sampling colour directly would drag a grey haze onto the photograph.
+ *     alpha from luminance. Flat-with-alpha is what lets the cover tint them WHITE for
+ *     the forest discs it draws them in now; the gold is still what pages 2-4 use.
+ *   * `onboard/coverHero.jpg` is the cover photograph, cut out of the App Store artwork
+ *     itself (`assets/appstore/…_852x1846.png`) rather than shot separately, so the man
+ *     and the framing are the ones hadar signed off. See the note in that folder's
+ *     README: the file it came from is a downscaled copy, so this cut is roughly 2x and
+ *     wants re-cutting from the 1290x2796 export when that lands.
  *   * the three phone mockups are border-flood-keyed off white, so the screenshots' own
  *     white areas survive the key.
- * `assets/onboard-hero.png` is the cover photograph.
+ * `assets/onboard-hero.png` (2.1MB) was orphaned by this redesign and is DELETED with
+ * it (code review 2026-09-07) — the cover photograph is `onboard/coverHero.jpg` above.
  */
 import React from 'react';
 import {
   Dimensions, Image, Pressable, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
 import { Icon } from './icon';
 import { t as T } from '../i18n';
 
 const { width, height } = Dimensions.get('window');
+
+/**
+ * THE ARTWORK'S RULER.
+ *
+ * hadar's cover file is 852pt wide (`assets/appstore/EZChangeOrder_DontDoExtraWork_B`).
+ * Every measurement on page 1 is taken off that file and passed through here, so the
+ * composition holds its proportions on a 375pt SE and a 430pt Max instead of being tuned
+ * for one device and drifting on the rest. Read `A(100)` as "100 artwork points".
+ */
+const A = (n: number) => Math.round((n * width) / 852 * 10) / 10;
 
 /** Bright gold — the cover only, where it sits on near-black. */
 const GOLD = '#EDB93F';
@@ -53,25 +73,9 @@ const GOLD = '#EDB93F';
  *  this is the same hue carried down until it holds its own against the headline. */
 const OCHRE = '#C08A2B';
 const INK = '#0C0D0D';
+/** The artwork's forest green — the logo tile, the promise discs, the wordmark. */
+const FOREST = '#1A4A2F';
 const CREAM = '#F7F5F0';
-
-/**
- * HOW MUCH OF THE SCREEN THE PHOTOGRAPH FILLS (hadar, 2026-08-12: "its size is too big
- * … he looks too zoomed in"). ONE NUMBER TO TUNE — 1 is edge-to-edge, lower pulls back.
- *
- * WHY IT IS NOT A CROP OR A resizeMode CHANGE. The file is 852x1846 and the screen is
- * 375x812 — aspect 0.4615 against 0.4618 — so `cover` already scales it 1:1 with no crop
- * at all. He is simply large IN THE FILE, and there are no pixels beyond its edges to
- * reveal. The only way to make him smaller is to draw the photograph into a smaller box
- * and let the ground show around it.
- *
- * ANCHORED TOP-RIGHT, which is the whole trick: he stands on the right and his head is
- * near the top, so anchoring there keeps him where the design puts him while the empty
- * strips fall on the LEFT and the BOTTOM — the two edges the scrim already darkens to
- * 0.88 and 0.92. The seam lands where it cannot be seen. Anchoring centre would have put
- * a visible hard edge across the top-right, which is the brightest part of the frame.
- */
-const HERO_FILL = '86%';
 
 /**
  * THE MOCKUP'S WIDTH (hadar, 2026-08-12: "the slides are misaligned").
@@ -155,77 +159,25 @@ const COVER_PROMISES: { src: any; title: string; body: string }[] = [
 ];
 
 /**
- * The cover's scrim, as a real gradient rather than a flat overlay.
+ * The wordmark, as the artwork draws it: the app's own mark, white, in a forest tile.
  *
- * A flat 60% black over a photograph dims the FACE as much as the background, which is
- * the one part worth keeping. Two gradients instead: dark from the left (where every
- * line of text sits) and dark from the bottom (under the buttons), both fading out
- * through the middle-right where the subject is. SVG because react-native-svg is already
- * a dependency and expo-linear-gradient is not — one less package for one rectangle.
+ * `android-icon-monochrome.png` is the white cut that already ships for the Android
+ * adaptive icon — the same artwork as the store listing's tile, so this is the real mark
+ * rather than a drawing of one. It replaces the hand-built speech bubble, which predates
+ * the current logo and was the only place in the app still using it.
+ *
+ * ONE TREATMENT ON ALL FOUR PAGES. The old mark had a light and a dark variant because
+ * the cover was dark; every page is cream now, so a variant would be a switch with one
+ * position.
  */
-function Scrim() {
-  return (
-    <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
-      <Defs>
-        {/* THE TWO RECTS MULTIPLY (hadar, 2026-08-12: "I cannot see the image").
-            I wrote these as if each were the whole scrim, then stacked them — so
-            top-left was 1-(1-0.94)(1-0.45) = 0.97, i.e. effectively opaque, and the
-            photograph the page is built around was invisible everywhere text sat.
-            The numbers below are the COMBINED result I wanted, worked backwards:
-              top-left    ~0.81  — white headline over a busy frame
-              mid-right   ~0.31  — the subject, visible, which is the point
-              bottom band ~0.95  — under the button, where nothing must compete */}
-        {/* STOPS CHOSEN BY COMPUTING WHERE THEY LAND ON THE SUBJECT, not by eye — the
-            first two passes were guesses and both left him murky. The two rects
-            MULTIPLY, so what matters is the combined value at each point:
-
-                              before   now
-              his face         0.46    0.15
-              his torso        0.36    0.10
-              top-right wood   0.37    0.12
-              headline         0.71    0.77
-              lede             0.70    0.80
-              under button     0.88    0.84
-
-            The left gradient now falls off FAST between 28% and 52% of the width, which
-            is the edge of the text column — everything right of it is nearly untouched,
-            which is what makes him look lit rather than dimmed. The photo is naturally
-            dark behind the headline (a shadowed doorway), so the text does not need the
-            scrim to carry it there. */}
-        <LinearGradient id="left" x1="0" y1="0" x2="1" y2="0">
-          <Stop offset="0" stopColor={INK} stopOpacity="0.88" />
-          <Stop offset="0.28" stopColor={INK} stopOpacity="0.74" />
-          <Stop offset="0.52" stopColor={INK} stopOpacity="0.20" />
-          <Stop offset="0.72" stopColor={INK} stopOpacity="0.04" />
-          <Stop offset="1" stopColor={INK} stopOpacity="0" />
-        </LinearGradient>
-        <LinearGradient id="down" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={INK} stopOpacity="0.12" />
-          <Stop offset="0.40" stopColor={INK} stopOpacity="0.02" />
-          <Stop offset="0.78" stopColor={INK} stopOpacity="0.50" />
-          <Stop offset="1" stopColor={INK} stopOpacity="0.92" />
-        </LinearGradient>
-      </Defs>
-      <Rect x="0" y="0" width="100%" height="100%" fill="url(#left)" />
-      <Rect x="0" y="0" width="100%" height="100%" fill="url(#down)" />
-    </Svg>
-  );
-}
-
-/** The wordmark: a checked speech bubble, then EZChange bold and Order light. Drawn
- *  rather than imported — it is two shapes and a word, and an image of text cannot be
- *  read by a screen reader or re-coloured for the cream pages. */
-function Wordmark({ dark }: { dark?: boolean }) {
-  const c = dark ? '#131110' : '#fff';
+function Wordmark() {
   return (
     <View style={st.mark}>
-      <View style={[st.markBox, { borderColor: c }]}>
-        <Icon name="check" size={12} color={c} />
-        <View style={[st.markTail, { backgroundColor: c }]} />
+      <View style={st.markTile}>
+        <Image source={require('../../assets/android-icon-monochrome.png')}
+          style={st.markGlyph} resizeMode="contain" />
       </View>
-      <Text style={[st.markT, { color: c }]}>
-        EZChange<Text style={st.markTLight}>Orders</Text>
-      </Text>
+      <Text style={st.markT}>EZChangeOrders</Text>
     </View>
   );
 }
@@ -245,12 +197,14 @@ export function Onboarding({ onDone }: { onDone: (intent?: 'signup' | 'login') =
 
   return (
     <View style={st.c}>
-      {/* The cover art is the ROOT background and the cream pages paint over it, rather
-          than each page owning its own — a page-sized image inside the pager would slide
-          with the finger and the photograph would visibly track the swipe. */}
-      <Image source={require('../../assets/onboard-hero.png')}
-        style={st.hero} resizeMode="cover" />
-      <Scrim />
+      {/* THE PHOTOGRAPH BELONGS TO PAGE 1 NOW, not to the root.
+
+          It used to be the root background with the cream pages painted over it, because
+          the cover was dark and full-bleed: a page-sized image inside the pager slides
+          with the finger, and a backdrop that tracks the swipe reads as a bug. The cover
+          is cream too since the 2026-08-26 artwork, and the photograph is no longer a
+          backdrop — it is one element in the top-right corner of the first page. So it
+          SHOULD travel with that page, and living inside it is what makes it do that. */}
 
       <ScrollView
         ref={ref}
@@ -259,24 +213,89 @@ export function Onboarding({ onDone }: { onDone: (intent?: 'signup' | 'login') =
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={(e) => setI(Math.round(e.nativeEvent.contentOffset.x / width))}
       >
-        {/* ── PAGE 1 — the cover ── */}
+        {/* ── PAGE 1 — the cover ──
+             hadar's App Store artwork, 2026-08-26
+             (`assets/appstore/EZChangeOrder_DontDoExtraWork_B_852x1846.png`), built as a
+             screen rather than pasted in as one: the file is 852x1846, near enough a
+             phone at 390pt, so the composition reproduces at 1:1 and only needs the
+             controls a first-open page has to carry and a poster does not.
+
+             THE TEXT STAYS TEXT. Shipping the artwork as an image would have been a
+             two-line change and it would have broken Spanish outright — every word here
+             is already an i18n key, and `ob.lede` and the three promises are the
+             artwork's own copy, verbatim. Only the headline was rewritten, and it fits
+             `ob.h1`..`ob.h4` one line per key. */}
         <ScrollView style={{ width }} contentContainerStyle={st.cover}
           showsVerticalScrollIndicator={false}>
+          {/* The photograph, cut from the artwork, bleeding off the top and right. The
+              two gradients are what let the headline cross it: one fading it into the
+              cream on the LEFT where the type sits, one on the BOTTOM so it hands over
+              to the page rather than stopping on an edge. SVG for the same reason the
+              old scrim used it — react-native-svg is already here and
+              expo-linear-gradient is not. */}
+          <View style={st.coverArt} pointerEvents="none">
+            <Image source={require('../../assets/onboard/coverHero.jpg')}
+              style={st.coverPhoto} resizeMode="cover" />
+            <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
+              <Defs>
+                <LinearGradient id="fadeL" x1="1" y1="0" x2="0" y2="0">
+                  <Stop offset="0" stopColor={CREAM} stopOpacity="0" />
+                  <Stop offset="0.76" stopColor={CREAM} stopOpacity="0" />
+                  <Stop offset="0.91" stopColor={CREAM} stopOpacity="0.6" />
+                  <Stop offset="1" stopColor={CREAM} stopOpacity="0.96" />
+                </LinearGradient>
+                <LinearGradient id="fadeD" x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0" stopColor={CREAM} stopOpacity="0" />
+                  <Stop offset="0.70" stopColor={CREAM} stopOpacity="0" />
+                  <Stop offset="0.88" stopColor={CREAM} stopOpacity="0.86" />
+                  <Stop offset="1" stopColor={CREAM} stopOpacity="1" />
+                </LinearGradient>
+              </Defs>
+              <Rect x="0" y="0" width="100%" height="100%" fill="url(#fadeL)" />
+              <Rect x="0" y="0" width="100%" height="100%" fill="url(#fadeD)" />
+            </Svg>
+          </View>
+
+          {/* The device mockup — `onboard/phone1.png`, the same file page 2 uses. It is
+              the artwork's own phone, so nothing here is a redraw of a screen. */}
+          <Image source={require('../../assets/onboard/phone1.png')}
+            style={st.coverPhone} resizeMode="contain" />
+
+          {/* THE GUTTER LIVES HERE, NOT ON THE SCROLL CONTAINER.
+
+              Whether an absolutely-positioned child is offset by its parent's padding is
+              exactly the kind of thing that differs between Yoga versions, and the
+              photograph and the device both depend on `right: 0` and `left:` meaning the
+              SCREEN edge. Padding the flowing content instead makes that unambiguous:
+              the two absolute elements measure against the full width, and nothing about
+              the bleed rests on a layout detail that could change under us. */}
+          <View style={st.coverBody}>
           <Wordmark />
+
           <View style={st.headWrap}>
             <Text style={st.coverHead}>{T('ob.h1')}</Text>
             <Text style={st.coverHead}>{T('ob.h2')}</Text>
             <Text style={st.coverHead}>{T('ob.h3')}</Text>
-            <Text style={[st.coverHead, { color: GOLD }]}>{T('ob.h4')}</Text>
+            <Text style={st.coverHead}>{T('ob.h4')}</Text>
           </View>
           <View style={[st.rule, { backgroundColor: GOLD }]} />
           <Text style={st.coverLede}>{T('ob.lede')}</Text>
 
+          {/* THE TWO LANGUAGES THE APP ACTUALLY SHIPS (hadar, 2026-08-26). The later
+              artwork carries seven flags; `Lang` is 'en' | 'es' and `DICT` has two
+              dictionaries, so five of those would be a promise broken on the next
+              screen. Words rather than flags because a flag is a country. */}
+          <View style={st.langRow}>
+            <View style={st.langChip}><Text style={st.langT}>English</Text></View>
+            <View style={st.langChip}><Text style={st.langT}>Español</Text></View>
+          </View>
+
           <View style={st.promises}>
-            {COVER_PROMISES.map((p) => (
-              <View key={p.title} style={st.promise}>
+            {COVER_PROMISES.map((p, n) => (
+              <View key={p.title} style={[st.promise, n > 0 && st.promiseRule]}>
                 <View style={st.promiseDisc}>
-                  <Image source={p.src} style={st.promiseIcon} resizeMode="contain" />
+                  <Image source={p.src} style={st.promiseIcon} resizeMode="contain"
+                    tintColor="#FFFFFF" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={st.promiseT}>{T(p.title)}</Text>
@@ -284,6 +303,14 @@ export function Onboarding({ onDone }: { onDone: (intent?: 'signup' | 'login') =
                 </View>
               </View>
             ))}
+          </View>
+
+          <View style={st.captureChip}>
+            <Icon name="approved" size={17} color={FOREST} />
+            <View style={{ flex: 1 }}>
+              <Text style={st.captureT}>{T('ob.captureH')}</Text>
+              <Text style={st.captureB}>{T('ob.captureB')}</Text>
+            </View>
           </View>
 
           <View style={st.coverFoot}>
@@ -303,13 +330,28 @@ export function Onboarding({ onDone }: { onDone: (intent?: 'signup' | 'login') =
               </Text>
             </Pressable>
           </View>
+          </View>
+
+          {/* The ridge and treeline the artwork closes on. Drawn, not imported: it is
+              flat shapes, and an image would be one more file to keep in step with the
+              page's cream. */}
+          <Svg width={width} height={92} style={st.ridge}>
+            <Path d={`M0 56 L${width * 0.12} 25 L${width * 0.22} 54 L${width * 0.31} 17
+                      L${width * 0.45} 58 L${width * 0.54} 35 L${width * 0.67} 64
+                      L${width * 0.79} 29 L${width * 0.90} 58 L${width} 38 L${width} 92 L0 92 Z`}
+              fill="#E0DACE" />
+            <Path d={`M0 72 L${width * 0.10} 50 L${width * 0.19} 70 L${width * 0.30} 44
+                      L${width * 0.42} 72 L${width * 0.54} 52 L${width * 0.66} 76
+                      L${width * 0.78} 50 L${width * 0.89} 74 L${width} 56 L${width} 92 L0 92 Z`}
+              fill="#D2CBBC" />
+          </Svg>
         </ScrollView>
 
         {/* ── PAGES 2-4 — the three steps, on the app's own cream ── */}
         {SLIDES.map((sl) => (
           <View key={sl.body} style={[st.page, { width }]}>
             <ScrollView contentContainerStyle={st.pageBody} showsVerticalScrollIndicator={false}>
-              <Wordmark dark />
+              <Wordmark />
               <View style={st.headWrap}>
                 {sl.head.map((ln) => (
                   <Text key={ln.k} style={[st.pageHead, ln.gold && { color: OCHRE }]}>
@@ -379,8 +421,10 @@ export function Onboarding({ onDone }: { onDone: (intent?: 'signup' | 'login') =
             {Array.from({ length: PAGES }, (_, d) => (
               <View key={d} style={[
                 st.dot,
-                { backgroundColor: i > 0 ? 'rgba(19,17,16,0.18)' : 'rgba(255,255,255,0.32)' },
-                d === i && { backgroundColor: i > 0 ? OCHRE : GOLD },
+                // One treatment for all four: the cover is cream now, and the white
+                // dots it used to need were invisible the moment it stopped being dark.
+                { backgroundColor: 'rgba(19,17,16,0.18)' },
+                d === i && { backgroundColor: OCHRE },
               ]} />
             ))}
           </View>
@@ -401,43 +445,70 @@ export function Onboarding({ onDone }: { onDone: (intent?: 'signup' | 'login') =
 }
 
 const st = StyleSheet.create({
-  c: { flex: 1, backgroundColor: INK },
-  // Same aspect as the screen, so shrinking the box does not crop — it only pulls back.
-  hero: { position: 'absolute', top: 0, right: 0, width: HERO_FILL, height: HERO_FILL },
-  // paddingBottom clears the absolute bar (64) PLUS the home indicator. In the first
-  // build it did not, and the dot rail landed on top of "Already have an account?".
-  cover: { paddingHorizontal: 20, paddingTop: 38, paddingBottom: 96, minHeight: height },
+  c: { flex: 1, backgroundColor: CREAM },
+
+  /**
+   * THE COVER'S GEOMETRY, SCALED OFF THE ARTWORK.
+   *
+   * The file is 852 wide, the screen is `width`, so every number below is the artwork's
+   * own measurement times `A`. That is the whole reason the page looks like the poster
+   * rather than like an interpretation of it: the left column, the photograph and the
+   * device all land where hadar put them, at any screen size.
+   *
+   * `paddingBottom` is NOT for the bar — the ridge is drawn inside the page and carries
+   * the last 92pt itself. It clears the home indicator only.
+   */
+  cover: { paddingTop: A(96), paddingBottom: 8, minHeight: height },
+  coverBody: { paddingHorizontal: A(50) },
+  // Top-right, bleeding off both edges, exactly as the artwork crops it.
+  coverArt: { position: 'absolute', top: 0, right: 0, width: A(382), height: A(830) },
+  coverPhoto: { width: '100%', height: '100%' },
+  /**
+   * The device sits OVER the photograph and beside the left column — the artwork's one
+   * piece of overlap, and what stops the page reading as two stacked halves.
+   *
+   * `left`, not `right`: the column's width is what it must clear, and pinning it to the
+   * left edge of its own gap keeps that relationship on a narrow screen instead of
+   * letting the two slide into each other.
+   */
+  coverPhone: { position: 'absolute', left: A(378), top: A(780),
+    width: A(434), height: A(434) / (760 / 1410) },
   page: { backgroundColor: CREAM },
   pageBody: { paddingHorizontal: 32, paddingTop: 62, paddingBottom: 76 },
 
   // ── wordmark ──
-  mark: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 30 },
-  markBox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2,
+  mark: { flexDirection: 'row', alignItems: 'center', gap: A(24), marginBottom: A(66) },
+  markTile: { width: A(76), height: A(76), borderRadius: A(20), backgroundColor: FOREST,
     alignItems: 'center', justifyContent: 'center' },
-  // The bubble's tail, a rotated square tucked under the left corner — cheaper than an
-  // SVG path and it scales with the box.
-  markTail: { position: 'absolute', bottom: -3.5, left: 3, width: 7, height: 7,
-    transform: [{ rotate: '45deg' }] },
-  markT: { fontFamily: 'Inter_700Bold', fontSize: 16.5, letterSpacing: -0.3 },
-  markTLight: { fontFamily: 'Inter_400Regular' },
+  markGlyph: { width: A(54), height: A(54) },
+  markT: { fontFamily: 'Oswald_700Bold', fontSize: A(54), color: FOREST, letterSpacing: -0.3 },
 
   // ── headlines ──
   headWrap: { marginBottom: 4 },
-  coverHead: { fontFamily: 'Oswald_700Bold', fontSize: 38, lineHeight: 40, color: '#fff',
-    textTransform: 'uppercase', letterSpacing: -0.2 },
+  // Ink, not white, and it runs across the photograph — the left fade is what carries
+  // it. maxWidth is the artwork's column: the break after "EXTRA WORK" is a design
+  // decision, not wherever the box happens to run out.
+  coverHead: { fontFamily: 'Oswald_700Bold', fontSize: A(100), lineHeight: A(98),
+    color: INK, textTransform: 'uppercase', letterSpacing: -0.6, maxWidth: A(430) },
   pageHead: { fontFamily: 'Oswald_700Bold', fontSize: 38, lineHeight: 43, color: '#131110',
     textTransform: 'uppercase', letterSpacing: -0.2 },
-  rule: { width: 42, height: 3, borderRadius: 2, marginTop: 12, marginBottom: 14 },
+  rule: { width: A(135), height: A(9), borderRadius: 2, marginTop: A(48), marginBottom: A(36) },
   // maxWidth is what makes it break where the design breaks it — three short lines
   // clear of the subject, not two that run across his chest.
   // maxWidth 155 is what breaks it into the design's THREE short lines, clear of the
   // subject — at any wider it runs across his chest as two.
-  coverLede: { fontFamily: 'Inter_400Regular', fontSize: 13.5, lineHeight: 19.5,
-    color: '#E4E1DB', maxWidth: 155 },
+  coverLede: { fontFamily: 'Inter_400Regular', fontSize: A(35), lineHeight: A(50),
+    color: '#3D3733', maxWidth: A(300) },
   // maxWidth 186 is measured, and it is what produces the design's line breaks:
   // "Snap photos and say what / changed. No forms. / No typing on the jobsite."
   pageLede: { fontFamily: 'Inter_400Regular', fontSize: 15, lineHeight: 23,
     color: '#3B3733', marginBottom: 22 },
+
+  // ── the two languages ──
+  langRow: { flexDirection: 'row', gap: A(14), marginTop: A(44) },
+  langChip: { borderWidth: 1, borderColor: '#D8D1C4', backgroundColor: '#FFFDF8',
+    borderRadius: A(14), paddingHorizontal: A(22), paddingVertical: A(11) },
+  langT: { fontFamily: 'Inter_600SemiBold', fontSize: A(26), color: '#3D3733' },
 
   // ── the three glyphs ──
   steps: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center',
@@ -462,34 +533,45 @@ const st = StyleSheet.create({
     justifyContent: 'flex-start' },
 
   // ── the cover's promises ──
-  promises: { marginTop: 'auto', paddingTop: 24, gap: 24 },
-  promise: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  // A ring, not a filled puck: a solid gold disc three times down the page would
-  // outweigh the button, which is the only gold thing meant to be pressed.
-  promiseDisc: { width: 42, height: 42, borderRadius: 21, borderWidth: 1.2,
-    borderColor: 'rgba(237,185,63,0.42)', backgroundColor: 'rgba(255,255,255,0.05)',
+  // A NARROW COLUMN, RULED. The artwork stops this list well short of the device and
+  // divides the three with hairlines rather than gaps; both are what keep it from
+  // colliding with the phone on a 375pt screen.
+  promises: { marginTop: A(48), width: A(300) },
+  promise: { flexDirection: 'row', alignItems: 'flex-start', gap: A(18),
+    paddingVertical: A(20) },
+  promiseRule: { borderTopWidth: 1, borderTopColor: '#DFD9CF' },
+  // A FILLED FOREST PUCK, not the old gold ring: on cream a ring reads as an empty
+  // shape, and the artwork's discs are the one solid mark down the left column.
+  promiseDisc: { width: A(62), height: A(62), borderRadius: A(31), backgroundColor: FOREST,
     alignItems: 'center', justifyContent: 'center' },
-  promiseIcon: { width: 19, height: 19 },
-  promiseT: { fontFamily: 'Inter_700Bold', fontSize: 12.5, color: '#fff',
+  promiseIcon: { width: A(32), height: A(32) },
+  promiseT: { fontFamily: 'Inter_700Bold', fontSize: A(27), color: FOREST,
     textTransform: 'uppercase', letterSpacing: 0.4 },
-  // maxWidth so the body wraps to the design's two short lines instead of one long one
-  // that would run under the subject.
-  promiseB: { fontFamily: 'Inter_400Regular', fontSize: 11.5, lineHeight: 17,
-    color: '#B9B5AE', marginTop: 2, maxWidth: 128 },
+  promiseB: { fontFamily: 'Inter_400Regular', fontSize: A(25), lineHeight: A(33),
+    color: '#3D3733', marginTop: 2 },
+
+  // ── "Capture it on site." ──
+  captureChip: { flexDirection: 'row', alignItems: 'flex-start', gap: A(20),
+    backgroundColor: '#EFE9DF', borderRadius: A(22), padding: A(26),
+    marginTop: A(40), width: A(300) },
+  captureT: { fontFamily: 'Inter_700Bold', fontSize: A(29), color: FOREST },
+  captureB: { fontFamily: 'Inter_400Regular', fontSize: A(28), color: '#3D3733', marginTop: 1 },
 
   // ── the ask ──
-  coverFoot: { marginTop: 30 },
-  cta: { flexDirection: 'row', gap: 11, minHeight: 55, borderRadius: 11,
-    backgroundColor: GOLD, alignItems: 'center', justifyContent: 'center' },
-  // DARK text on gold. White on this yellow fails contrast at any size, and this is the
-  // one control the whole screen exists to get pressed.
-  ctaT: { fontFamily: 'Inter_700Bold', fontSize: 15.5, color: '#141210' },
-  ctaArrow: { fontSize: 17, color: '#141210', marginTop: -2 },
-  login: { alignItems: 'center', paddingVertical: 15 },
-  loginT: { fontFamily: 'Inter_400Regular', fontSize: 12.5, color: '#CFCBC4' },
-  // Underlined, as drawn. On a dark page a gold word without a rule under it reads as
-  // emphasis, not as a link — and this is the door a returning user is looking for.
-  loginLink: { fontFamily: 'Inter_700Bold', color: GOLD, textDecorationLine: 'underline' },
+  coverFoot: { marginTop: A(56) },
+  // INK, NOT GOLD. On the dark cover gold was the only thing bright enough to be the
+  // one control; on cream it is the quietest fill on the page. The artwork puts nothing
+  // here at all — it is a poster — so this follows the app's own primary instead.
+  cta: { flexDirection: 'row', gap: 11, minHeight: 55, borderRadius: 13,
+    backgroundColor: INK, alignItems: 'center', justifyContent: 'center' },
+  ctaT: { fontFamily: 'Inter_700Bold', fontSize: 16.5, color: '#FFFFFF' },
+  ctaArrow: { fontSize: 17, color: '#FFFFFF', marginTop: -2 },
+  login: { alignItems: 'center', paddingVertical: 13 },
+  loginT: { fontFamily: 'Inter_400Regular', fontSize: 14.5, color: '#3D3733' },
+  loginLink: { fontFamily: 'Inter_700Bold', color: FOREST },
+  // The ridge closes the page. Negative margins cancel `cover`'s gutter so it runs edge
+  // to edge, and it is the last child, so it also supplies the bottom padding.
+  ridge: { marginTop: A(60), marginBottom: -8 },
 
   // ── the one bar ──
   bar: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 58,

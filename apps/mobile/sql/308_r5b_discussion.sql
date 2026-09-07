@@ -195,41 +195,17 @@ grant execute on function public.confirmation_thread to anon, authenticated;
 --
 -- Returned per CHANGE ORDER, not per token, because a revision moves the token and
 -- the contractor is looking at an extra, not at a link.
-create or replace function public.discussion_threads(p_project_id text)
-  returns jsonb language plpgsql security definer set search_path = public as $$
-declare out jsonb;
-begin
-  if auth.uid() is null then
-    raise exception 'not signed in' using errcode = '42501';
-  end if;
-
-  select coalesce(jsonb_agg(x order by x->>'at'), '[]'::jsonb) into out from (
-    select jsonb_build_object(
-             'id', 'q-' || q.id, 'change_order_id', cr.change_order_id,
-             'side', 'client', 'body', q.note, 'at', q.asked_at) as x
-      from public.confirmation_question q
-      join public.confirmation_request cr on cr.token = q.token
-      join public.change_order co on co.id = cr.change_order_id
-     where co.project_id = p_project_id and co.owner_id = auth.uid()
-    union all
-    -- A reply keeps its OWN id, unprefixed. The device authored that id and already
-    -- has the message stored under it; prefixing here would hand the pull a
-    -- different key for a message the contractor is looking at, and INSERT OR
-    -- IGNORE would not ignore it -- his own reply would appear twice. Questions are
-    -- prefixed because their id is a bigint from a different sequence entirely.
-    select jsonb_build_object(
-             'id', r.id, 'change_order_id', cr.change_order_id,
-             'side', 'contractor', 'body', r.body, 'at', r.written_at)
-      from public.confirmation_reply r
-      join public.confirmation_request cr on cr.token = r.token
-      join public.change_order co on co.id = cr.change_order_id
-     where co.project_id = p_project_id and co.owner_id = auth.uid()
-  ) s;
-  return out;
-end $$;
-
-revoke all on function public.discussion_threads from public, anon;
-grant execute on function public.discussion_threads to authenticated;
+-- `discussion_threads` is NOT defined here any more [2026-08-26]. It lives in
+-- `428_office_reads.sql`, its single owner.
+--
+-- Why it moved: 428 widens its ownership test from `co.owner_id = auth.uid()` to
+-- that OR `is_project_visible(co.project_id)`, so an active member of the company
+-- that owns the job can read it — which is the rule 376 already chose for the
+-- tables and never applied to the definer functions. Until then the client conversation itself returned nothing on a teammate's change order.
+--
+-- Nothing else about it changed. `create or replace function` has no partial form,
+-- so the widened version is the whole function, and one object defined in two files
+-- is decided by whichever ran last.
 
 -- ── transport ───────────────────────────────────────────────────────────────
 create table if not exists public.r5b_mutation (
@@ -239,69 +215,18 @@ create table if not exists public.r5b_mutation (
 );
 alter table public.r5b_mutation enable row level security;
 
+-- `ingest_r5b_v1` is NOT defined here any more [2026-08-26]. It lives in
+-- `427_office_writes.sql`, its single owner.
+--
+-- Why it moved: 427 widens the reply arm's ownership test so a company OWNER can
+-- answer the client on a change order one of their crew raised — the check that used
+-- to read `co.owner_id = p_owner_id` and refuse everyone else. `create or replace
+-- function` has no partial form, so the widened version is the whole function, and two
+-- files defining one function means whichever ran last wins silently. Everything else
+-- about it — the mutation replay guard, the server-resolves-the-live-token rule, the
+-- `no_live_link` return that is deliberately not an exception — is unchanged and is
+-- explained in 427 where the code now is.
+--
 -- ONE KIND TODAY ('reply'), and the kind parameter stays anyway: ingest_r5c_v1 grew
 -- from one kind to four, and retrofitting the dispatch afterwards would mean a
 -- second RPC and a second mutation ledger for the same feature.
-create or replace function public.ingest_r5b_v1(
-  p_mutation_id text, p_kind text, p_id text, p_owner_id uuid,
-  p_change_order_id text, p_body text,
-  p_at_ms bigint, p_request_sha256 text
-) returns jsonb language plpgsql security definer set search_path = public as $$
-declare prior text;
-        live  text;
-begin
-  if auth.uid() is null or p_owner_id is distinct from auth.uid() then
-    raise exception 'owner mismatch' using errcode = '42501';
-  end if;
-
-  select request_sha256 into prior from public.r5b_mutation where mutation_id = p_mutation_id;
-  if found then
-    if prior is distinct from p_request_sha256 then
-      raise exception 'mutation % replayed with a different payload', p_mutation_id
-        using errcode = '23505';
-    end if;
-    return jsonb_build_object('status','already_applied','id',p_id);
-  end if;
-
-  if p_kind = 'reply' then
-    if not exists (select 1 from public.change_order co
-                    where co.id = p_change_order_id and co.owner_id = p_owner_id) then
-      raise exception 'not your change order' using errcode = '42501';
-    end if;
-
-    -- THE DEVICE DOES NOT CHOOSE THE TOKEN. It names the extra; the server resolves
-    -- the one live link. A device holding a stale token (it revised on another
-    -- phone, or the pull has not landed) would otherwise reply against a retired
-    -- version -- the two-different-numbers failure 270 describes, from the other
-    -- side of the conversation.
-    select cr.token into live
-      from public.confirmation_request cr
-     where cr.change_order_id = p_change_order_id
-       and cr.superseded_at is null
-       and not exists (select 1 from public.confirmation_response x where x.token = cr.token)
-     order by cr.created_at desc
-     limit 1;
-
-    if live is null then
-      -- Not an exception: there is nothing to retry TOWARDS. The reply stays on the
-      -- device as part of the record; the caller parks the transport intent with
-      -- this reason rather than retrying forever or, worse, dropping the message.
-      return jsonb_build_object('status','no_live_link','id',p_id);
-    end if;
-
-    insert into public.confirmation_reply (id, token, body, author_id, written_at)
-    values (p_id, live, btrim(p_body), p_owner_id, to_timestamp(p_at_ms / 1000.0))
-    on conflict (id) do nothing;
-
-  else
-    raise exception 'unknown kind %', p_kind using errcode = '23514';
-  end if;
-
-  insert into public.r5b_mutation (mutation_id, request_sha256)
-  values (p_mutation_id, p_request_sha256);
-
-  return jsonb_build_object('status','applied','id',p_id);
-end $$;
-
-revoke all on function public.ingest_r5b_v1 from public, anon;
-grant execute on function public.ingest_r5b_v1 to authenticated;

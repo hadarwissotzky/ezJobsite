@@ -46,3 +46,6 @@ apps/mobile/.c2.cjs
 apps/mobile/.fx.cjs
 apps/mobile/.go.cjs
 apps/mobile/.shot.cjs
+
+# per-session AI tool state (codex session ids etc.)
+.context/
