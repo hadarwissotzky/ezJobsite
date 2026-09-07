@@ -41,6 +41,29 @@ export type StepOutcome =
   | { ok: false; reason: 'needs_api_key' | 'needs_connection'; error?: string };
 
 /**
+ * A typed capture's transcript, read straight out of its .txt object. Shared by two
+ * steps: `transcribe` (belt — jobs that carry the step) and `detect_language`'s
+ * SELF-HEAL below (the real path — typed-capture jobs carry NO transcribe step, so
+ * a phone that did not write the device transcript starved the job forever; hadar
+ * hit it twice, 2026-09-06 and again pasting text on 2026-09-07 before the app fix
+ * reached his phone). Empty typed text cannot be committed (modality.ts refuses it
+ * at capture), so an empty read here is a storage fault, not silence.
+ */
+async function typedFromStorage(
+  sb: SupabaseClient, job: Job, objectKey: string
+): Promise<StepOutcome> {
+  const dl = await sb.storage.from('captures').download(objectKey);
+  if (dl.error || !dl.data) {
+    return { ok: false, reason: 'needs_connection', error: dl.error?.message ?? 'no text' };
+  }
+  const text = (await dl.data.text()).trim();
+  if (!text) return { ok: false, reason: 'needs_connection', error: 'empty text object' };
+  return writeTranscript(sb, job, {
+    text, language: null, engine: 'typed', model: null, durationSec: null,
+  });
+}
+
+/**
  * Run ONE step. Split out so the loop below has no knowledge of what a step
  * does, and so each step's failure is parked with its own reason rather than a
  * generic one.
@@ -73,19 +96,7 @@ export async function runStep(
      * unchanged. Before the STT-key check on purpose: a keyless worker can still
      * process every typed capture.
      */
-    if (ext === 'txt') {
-      const dl = await sb.storage.from('captures').download(cap.payload);
-      if (dl.error || !dl.data) {
-        return { ok: false, reason: 'needs_connection', error: dl.error?.message ?? 'no text' };
-      }
-      const text = (await dl.data.text()).trim();
-      // Empty typed text cannot be committed (modality.ts refuses it at capture),
-      // so an empty read here is a storage fault, not silence.
-      if (!text) return { ok: false, reason: 'needs_connection', error: 'empty text object' };
-      return writeTranscript(sb, job, {
-        text, language: null, engine: 'typed', model: null, durationSec: null,
-      });
-    }
+    if (ext === 'txt') return typedFromStorage(sb, job, String(cap.payload));
 
     if (!hasSttKey()) return { ok: false, reason: 'needs_api_key' };
     const mime = ext === 'wav' ? 'audio/wav'
@@ -132,6 +143,22 @@ export async function runStep(
     // own .txt fallback writes none). That is not a missing fact to wait for: the
     // translate layer detects per-message where it matters. Done, not parked.
     if (tr?.[0]?.engine === 'typed') return { ok: true };
+    /**
+     * SELF-HEAL THE TYPED CAPTURE (2026-09-07). A typed capture's job has no
+     * transcribe step — the pipeline expects the DEVICE transcript, and a phone on
+     * an older build never wrote one. Waiting here waited for something nothing
+     * would ever produce. If this capture IS a .txt object, its words are sitting
+     * in storage: write them down now and pass.
+     */
+    if (!tr?.length) {
+      const { data: cap } = await sb
+        .from('capture').select('payload').eq('id', job.capture_id).single();
+      if (cap?.payload && String(cap.payload).toLowerCase().endsWith('.txt')) {
+        const healed = await typedFromStorage(sb, job, String(cap.payload));
+        if (healed.ok) return { ok: true };
+        return healed;
+      }
+    }
     return { ok: false, reason: 'needs_api_key', error: 'no transcript carries a language yet' };
   }
 
