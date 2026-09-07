@@ -8672,6 +8672,7 @@ const checkClientMessages = async () => {
   // REQ-PROC8: reviewing what the model proposed for a capture. Overlays everything.
   if (review) {
     return (
+      <>
       <ReviewScreen
         db={db}
         client={connector.client}
@@ -8698,6 +8699,9 @@ const checkClientMessages = async () => {
           });
         }}
       />
+      {/* The no-reception bar, same as the main screens (hadar, 2026-09-06: inform the user in similar fashion when there is no reception). Info only — pointerEvents none. */}
+      {offlineEl}
+      </>
     );
   }
 
@@ -8804,6 +8808,8 @@ const checkClientMessages = async () => {
           warning I added yesterday, the whole point of which was that the wrong-job
           split must never again be silent, was itself silent. */}
       {ackEl}
+      {/* The no-reception bar, same as the main screens (hadar, 2026-09-06: inform the user in similar fashion when there is no reception). Info only — pointerEvents none. */}
+      {offlineEl}
       </>
     );
   }
@@ -9108,6 +9114,8 @@ const checkClientMessages = async () => {
       </View>
       {/* Same reason as step 3: `ackEl` lives past this return — see the note there. */}
       {ackEl}
+      {/* The no-reception bar, same as the main screens (hadar, 2026-09-06: inform the user in similar fashion when there is no reception). Info only — pointerEvents none. */}
+      {offlineEl}
       </>
     );
   }
@@ -9399,6 +9407,7 @@ const checkClientMessages = async () => {
   // R5b: the discussion thread. Overlays everything, same as the record.
   if (thread) {
     return (
+      <>
       <ThreadScreen
         onShowOriginal={(text) => setAck({ kind: 'ok', title: T('lang.originalTitle'),
                                            detail: text, okLabel: T('common.ok') })}
@@ -9428,6 +9437,9 @@ const checkClientMessages = async () => {
         }}
         onBack={() => { threadIdRef.current = null; setThread(null); }}
       />
+      {/* The no-reception bar, same as the main screens (hadar, 2026-09-06: inform the user in similar fashion when there is no reception). Info only — pointerEvents none. */}
+      {offlineEl}
+      </>
     );
   }
 
@@ -10677,6 +10689,8 @@ const checkClientMessages = async () => {
       {/* LAST. It is an overlay, not a modal, so paint order IS its z-order — declared
           before RecordScreen it would render behind the screen it is confirming. */}
       {ackEl}
+      {/* The no-reception bar, same as the main screens (hadar, 2026-09-06: inform the user in similar fashion when there is no reception). Info only — pointerEvents none. */}
+      {offlineEl}
       </>
     );
   }
@@ -11288,6 +11302,7 @@ const checkClientMessages = async () => {
     // one. Everything else about the screen is identical.
     const augId = augmentCoId;
     return (
+      <>
       <FusedCapture
         db={db}
         ownerId={OWNER}
@@ -11315,6 +11330,9 @@ const checkClientMessages = async () => {
         onClose={() => { setShowCapture(false); setAugmentCoId(null); }}
         resolveLabel={resolveStampLabel}
       />
+      {/* The no-reception bar, same as the main screens (hadar, 2026-09-06: inform the user in similar fashion when there is no reception). Info only — pointerEvents none. */}
+      {offlineEl}
+      </>
     );
   }
 
