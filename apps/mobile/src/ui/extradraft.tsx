@@ -40,6 +40,8 @@
 import React from 'react';
 import { ActionSheetIOS, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ExtraRecord } from '../record';
+import { GapInterview, type GapAnswers } from './gapinterview';
+import type { SignabilityGap } from '../signability';
 import type { ProcState } from '../status';
 import {
   blockerKey, recommendationKey, sendGate,
@@ -394,6 +396,11 @@ export type ExtraDraftProps = {
   /** REQ-LC14 / T5: legal in this stage only. Rendered only when the caller offers
    *  it AND `canDelete` agrees — `planDiscard` remains the arbiter of the act. */
   onDelete?: () => void;
+  /** SPEC-single-line-co-v1 D2/D6 — the backend determination's gaps, when it found
+   *  any. Absent or empty = the complete one-liner: this screen shows nothing new. */
+  gaps?: readonly SignabilityGap[];
+  /** The taps that answer them, writing real columns. Both or neither. */
+  gapAnswers?: GapAnswers;
   /** DEV ONLY (__fixturedraft). Scrolls the content to this Y after mount so the
    *  simulator can be screenshotted below the fold without tap access. Never passed
    *  by production; removed with the fixture. */
@@ -765,6 +772,14 @@ export function ExtraDraftScreen(props: ExtraDraftProps) {
             </View>
           </Card>
         </View>
+
+        {/* THE GAP INTERVIEW (SPEC-single-line-co-v1). Only when the backend
+            determination found gaps — the complete one-breath capture never sees it. */}
+        {isDraft && !!props.gaps?.length && props.gapAnswers && (
+          <View style={{ paddingHorizontal: 18 }}>
+            <GapInterview gaps={props.gaps} total={rec.amount} answers={props.gapAnswers} />
+          </View>
+        )}
 
         {/* "NOTHING IS SENT UNTIL YOU APPROVE IT" (hadar's mockup, 2026-09-01).
             IN-FLOW ONLY. It answers a question a person has exactly once — the first

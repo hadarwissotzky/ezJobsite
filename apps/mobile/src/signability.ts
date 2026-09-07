@@ -28,8 +28,10 @@
 
 export type SignabilityGap =
   /** A priced line INSIDE the total is also described as billed IN ADDITION — the
-   *  document contradicts itself about money, the one thing a client checks. */
-  | { kind: 'fee_conflict'; about: string }
+   *  document contradicts itself about money, the one thing a client checks.
+   *  `sentence` is the exclusion line making the claim, verbatim, so an "inside the
+   *  total" answer can amend exactly that line and nothing else. */
+  | { kind: 'fee_conflict'; about: string; sentence: string }
   /** A segment was priced in words that carry no figure ("at cost", "whatever the
    *  material runs") — an unbounded clause nobody signs. Ask for a ballpark. */
   | { kind: 'open_cost'; about: string }
@@ -88,8 +90,8 @@ function subjectWords(text: string): Set<string> {
 function feeConflicts(
   lineItems: readonly { title: string; cents: number }[],
   excluded: readonly string[],
-): string[] {
-  const out: string[] = [];
+): { about: string; sentence: string }[] {
+  const out: { about: string; sentence: string }[] = [];
   const inAddition = excluded.filter((e) => /\bin addition\b|\bon top of\b/i.test(e));
   for (const li of lineItems) {
     const subj = subjectWords(li.title);
@@ -98,17 +100,43 @@ function feeConflicts(
       const exWords = subjectWords(ex);
       let shared = 0;
       for (const w of subj) if (exWords.has(w)) shared++;
-      if (shared > 0) { out.push(li.title); break; }
+      if (shared > 0) { out.push({ about: li.title, sentence: ex }); break; }
     }
   }
   return out;
 }
 
+/**
+ * From the AI pass's raw material to the evaluator's input. The parser is INJECTED
+ * (voiceprice.ts's MoneyParser pattern) so this file keeps zero imports and the
+ * caller decides which parseMoney it is — there is exactly one (mandate #6). A
+ * segment whose price words carry no high-confidence figure is OPEN-ENDED, never a
+ * guessed number.
+ */
+export function deriveSignabilityInput(o: {
+  tasks: readonly { title: string; priceWords: string | null }[];
+  excluded: readonly string[];
+  billingTiming: string | null;
+  scheduleEffect: string | null;
+  parse: (text: string) => { cents: number | null; confidence: 'high' | 'low' | 'none' };
+}): SignabilityInput {
+  const lineItems: { title: string; cents: number }[] = [];
+  const openEndedTitles: string[] = [];
+  for (const t of o.tasks) {
+    if (t.priceWords === null) continue;
+    const m = o.parse(t.priceWords);
+    if (m.cents !== null && m.confidence === 'high') lineItems.push({ title: t.title, cents: m.cents });
+    else openEndedTitles.push(t.title);
+  }
+  return { lineItems, openEndedTitles, excluded: o.excluded,
+           billingTiming: o.billingTiming, scheduleEffect: o.scheduleEffect };
+}
+
 export function evaluateSignability(x: SignabilityInput): Signability {
   const gaps: SignabilityGap[] = [];
 
-  for (const about of feeConflicts(x.lineItems, x.excluded)) {
-    gaps.push({ kind: 'fee_conflict', about });
+  for (const c of feeConflicts(x.lineItems, x.excluded)) {
+    gaps.push({ kind: 'fee_conflict', about: c.about, sentence: c.sentence });
   }
   for (const about of x.openEndedTitles) {
     gaps.push({ kind: 'open_cost', about });

@@ -159,6 +159,8 @@ import { sendEwa } from './src/ewasend';
 // cloud and supersedes this under 150's newest-wins.
 import { drainSttOutbox, ensureSttSchema, startLive, transcribeOnDevice } from './src/ondevicestt';
 import { fetchLatestProposalForCaptures, type Proposal } from './src/proposals';
+import { deriveSignabilityInput, evaluateSignability, type SignabilityGap } from './src/signability';
+import type { GapAnswers } from './src/ui/gapinterview';
 import { discardCapture, discardExtra, drainServerDiscards, drainDiscardedExtras, ensureDiscardSchema, ensureDiscardSyncSchema, previewDiscard } from './src/discardstore';
 import { pickAnchor } from './src/captureanchor';
 import { startExtraFromCapture, titleExtraIfUntitled, retitleDraft, setDraftSummary,
@@ -1378,7 +1380,7 @@ const openRecord = async (changeOrderId: string) => {
   // while one is open). The layers below load asynchronously — drop the PRIOR
   // record's now, or its evidence renders under the new title until each read
   // lands (Codex review, 2026-07-22).
-  setApproval(null); setRecordLc(null); setRecordTimeline([]);
+  setApproval(null); setRecordLc(null); setRecordTimeline([]); setRecordGaps([]);
   setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
   setRecordWriteUp('unknown'); setRecordPrice(null);
   setRecordNextId(null); setDetail(null); setZoomUri(null);
@@ -1571,6 +1573,31 @@ const openRecord = async (changeOrderId: string) => {
             if (!res.ok) void logDiag(db, 'price.autofill', res.reason.slice(0, 200));
             else if (recordIdRef.current === changeOrderId) { await openRecord(changeOrderId); }
           }
+
+          /**
+           * THE BACKEND DETERMINATION (SPEC-single-line-co-v1 D6). Runs over the AI
+           * pass's extraction the moment it is in hand: the same deterministic
+           * evaluator the fixture suite proves, over the same tasks and the row's
+           * current terms. Complete -> the gaps stay empty and the review shows
+           * nothing new; gaps -> at most three questions render on the review and
+           * draft screens. Draft-only: a sent extra's interview moment has passed.
+           */
+          try {
+            const coNow = (await db.getAll<{ status: string; billing_timing: string | null;
+                schedule_effect: string | null; exclusions: string | null }>(
+              `SELECT status, billing_timing, schedule_effect, exclusions
+                 FROM change_order WHERE id = ?`, [changeOrderId]))[0];
+            if (coNow?.status === 'draft' && recordIdRef.current === changeOrderId) {
+              const excluded = (coNow.exclusions ?? '').split('\n')
+                .map((l) => l.replace(/^[\u2022\-\s]+/, '').trim()).filter(Boolean);
+              const sig = evaluateSignability(deriveSignabilityInput({
+                tasks: prop.tasks, excluded,
+                billingTiming: coNow.billing_timing, scheduleEffect: coNow.schedule_effect,
+                parse: parseMoney,
+              }));
+              setRecordGaps(sig.gaps);
+            }
+          } catch { /* no determination -> no interview: the quiet failure is the simple path */ }
         }
       } catch { /* could not ask -> stays 'unknown' -> stays a wait */ }
     }
@@ -1824,7 +1851,7 @@ const closeRecord = () => {
   // of anything, so the rail must not survive the exit.
   setFlowRecordId(null);
   recordIdRef.current = null;
-  setRecord(null); setApproval(null); setRecordLc(null); setRecordTimeline([]);
+  setRecord(null); setApproval(null); setRecordLc(null); setRecordTimeline([]); setRecordGaps([]);
   setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
   setRecordWriteUp('unknown'); setRecordPrice(null);
   setRecordNextId(null); setDetail(null); setZoomUri(null);
@@ -2076,6 +2103,108 @@ const remindExtra = async (
   // not read the same on a screen where the difference is whether anyone was told.
   return { ok: true, sent, of: targets.length,
            why: sent === 0 ? T(fellBackWhy as any) : undefined };
+};
+
+/**
+ * THE GAP ANSWERS (SPEC-single-line-co-v1 D2/D3). Each writes the CONTRACTOR'S
+ * choice into real columns through the existing draft write paths, then re-opens the
+ * record so every layer — including the determination itself — re-derives. Nothing
+ * here authors a number: the ballpark is typed by him and parsed by the one parser;
+ * "on top" is subtraction over figures already on the row (mandate #6).
+ */
+const gapExclusionLines = (x: string | null): string[] => (x ?? '').split('\n');
+const stripBullet = (l: string): string => l.replace(/^[\u2022\-\s]+/, '').trim();
+
+const answerGapTerms = async (o: {
+  billing?: 'when_completed' | 'next_invoice'; schedule?: 'no_change' | 'not_sure';
+}) => {
+  const c = recordLc?.co; if (!c) return;
+  // setDraftFlowFields writes all four columns, so the unchanged three are passed
+  // back exactly as the row holds them — an answer must not erase its neighbours.
+  const r = await setDraftFlowFields(db, {
+    changeOrderId: c.id,
+    billingTiming: (o.billing ?? c.billing_timing ?? null) as BillingTiming | null,
+    scheduleEffect: (o.schedule ?? c.schedule_effect ?? null) as ScheduleEffect | null,
+    scheduleDays: c.schedule_days ?? null,
+    exclusions: c.exclusions ?? null,
+  });
+  if (!r.ok) { setFiled(r.reason); return; }
+  await openRecord(c.id);
+};
+
+const answerFeeConflict = async (
+  about: string, sentence: string, resolution: 'inside' | 'on_top'
+) => {
+  const c = recordLc?.co; if (!c) return;
+  if (resolution === 'inside') {
+    // Amend EXACTLY the sentence the evaluator flagged: the "charged in addition"
+    // claim becomes a statement that the fee sits inside the total above.
+    const next = gapExclusionLines(c.exclusions ?? null)
+      .map((l) => stripBullet(l) === sentence.trim()
+        ? `\u2022 ${T({ k: 'gap.inclLine', p: { item: about } })}` : l)
+      .join('\n');
+    const r = await setDraftFlowFields(db, {
+      changeOrderId: c.id,
+      billingTiming: (c.billing_timing ?? null) as BillingTiming | null,
+      scheduleEffect: (c.schedule_effect ?? null) as ScheduleEffect | null,
+      scheduleDays: c.schedule_days ?? null,
+      exclusions: next,
+    });
+    if (!r.ok) { setFiled(r.reason); return; }
+  } else {
+    // ON TOP: the fee leaves the total. Subtraction over his own figures; the
+    // exclusion sentence already says it is billed in addition and now tells the truth.
+    const items = c.lineItems ?? [];
+    const idx = items.findIndex((li) => li.description === about);
+    if (idx < 0 || c.amount_cents == null) {
+      setFiled(T('gap.openBad')); return;
+    }
+    const rest = items.filter((_, i) => i !== idx);
+    const r = await priceDraftExtra(db, {
+      changeOrderId: c.id,
+      amountCents: c.amount_cents - items[idx].total_cents,
+      nteCents: c.nte_cents ?? null,
+      lineItems: rest,
+      whoDirected: c.who_directed || 'Owner',
+      numbersConfirmedAt: new Date(),
+    });
+    if (!r.ok) { setFiled(r.reason); return; }
+  }
+  await openRecord(c.id);
+};
+
+const answerBallpark = async (about: string, raw: string | null) => {
+  const c = recordLc?.co; if (!c) return;
+  if (raw === null) {
+    // Leave it open — HIS choice, session-scoped: the row leaves the card, the
+    // clause stays as spoken, and a fresh open may ask once more.
+    setRecordGaps((g) => g.filter((x) => !(x.kind === 'open_cost' && x.about === about)));
+    return;
+  }
+  const m = parseMoney(/\$/.test(raw) ? raw : `$${raw.trim()}`);
+  if (m.cents === null || m.cents <= 0) { setFiled(T('gap.openBad')); return; }
+  const items = [...(c.lineItems ?? []), {
+    description: T({ k: 'gap.estLine', p: { item: about } }),
+    qty: 1, unit_cents: m.cents, total_cents: m.cents,
+  }];
+  const r = await priceDraftExtra(db, {
+    changeOrderId: c.id,
+    amountCents: (c.amount_cents ?? 0) + m.cents,
+    nteCents: c.nte_cents ?? null,
+    lineItems: items,
+    whoDirected: c.who_directed || 'Owner',
+    numbersConfirmedAt: new Date(),
+  });
+  if (!r.ok) { setFiled(r.reason); return; }
+  await openRecord(c.id);
+};
+
+const gapAnswers: GapAnswers = {
+  onFeeConflict: (about, sentence, resolution) => { void answerFeeConflict(about, sentence, resolution); },
+  onBallpark: (about, raw) => { void answerBallpark(about, raw); },
+  onBilling: (v) => { void answerGapTerms({ billing: v }); },
+  onSchedule: (v) => { void answerGapTerms({ schedule: v }); },
+  onScheduleAddsDays: () => openDetail('schedule'),
 };
 
 /** R5b/R7 Revise & resend — ONE handoff to the priced read-back composer, shared
@@ -4590,6 +4719,9 @@ const checkClientMessages = async () => {
    *  puts unstamped events last on purpose and re-merging its own output would
    *  double every row. */
   const [recordTimeline, setRecordTimeline] = React.useState<MergedEvent[]>([]);
+  /** SPEC-single-line-co-v1 D6 — what the backend determination found for the OPEN
+   *  draft. Empty = the complete one-liner; the review shows nothing new. */
+  const [recordGaps, setRecordGaps] = React.useState<SignabilityGap[]>([]);
   /**
    * LIVE OPENS ON THE OPEN RECORD (hadar, 2026-09-05: "once opened the co record
    * should change" — visually, while he is looking at it).
@@ -10049,6 +10181,8 @@ const checkClientMessages = async () => {
       {clientSheet}
       {sheets}
       <RecordScreen
+        gaps={recordGaps}
+        gapAnswers={gapAnswers}
         /* Step 5 of 5, and only on the record the flow just made. Compared by id so the
            rail cannot outlive the journey — see `flowRecordId`. */
         inFlow={!!record && record.id === flowRecordId}
@@ -10229,7 +10363,7 @@ const checkClientMessages = async () => {
           // instead of opening it.
           if (!ids.length) { setFiled(T('draft.generateNothing')); return; }
           const coId = r.id;
-          setRecord(null); setApproval(null); setRecordLc(null); setRecordTimeline([]);
+          setRecord(null); setApproval(null); setRecordLc(null); setRecordTimeline([]); setRecordGaps([]);
           setTransition({
             ids, anchorCaptureId: r.voices[0]?.captureId ?? null, coId,
             uploaded: false, transcribed: r.voices.length === 0, analyzed: false,

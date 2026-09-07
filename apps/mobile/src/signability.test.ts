@@ -17,23 +17,15 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateSignability, type SignabilityInput } from './signability.ts';
+import { deriveSignabilityInput, evaluateSignability } from './signability.ts';
 import { parseMoney } from './money.ts';
 
-/** The caller's derivation, mirrored: a priced segment parses to cents; price words
- *  with no readable figure make the segment OPEN-ENDED, never a guessed number. */
+/** The PRODUCTION derivation, not a mirror: fixtures must split segments exactly the
+ *  way the app will. */
 function splitSegments(tasks: { title: string; priceWords: string | null }[]) {
-  const lineItems: { title: string; cents: number }[] = [];
-  const openEndedTitles: string[] = [];
-  for (const t of tasks) {
-    if (t.priceWords === null) continue;
-    const m = parseMoney(t.priceWords);
-    if (m.cents !== null && m.confidence === 'high') {
-      lineItems.push({ title: t.title, cents: m.cents });
-    } else {
-      openEndedTitles.push(t.title);
-    }
-  }
+  const { lineItems, openEndedTitles } = deriveSignabilityInput({
+    tasks, excluded: [], billingTiming: null, scheduleEffect: null, parse: parseMoney,
+  });
   return { lineItems, openEndedTitles };
 }
 
@@ -83,6 +75,7 @@ test("CO #5's one-breath ramble yields exactly its three gaps, in severity order
   // with an exclusion is legitimate (install inside, material out) — only the
   // "charged in addition" phrasing over an already-summed line is a conflict.
   assert.equal(r.gaps[0].kind === 'fee_conflict' && r.gaps[0].about, 'Trash and ecology fees');
+  assert.match(r.gaps[0].kind === 'fee_conflict' ? r.gaps[0].sentence : '', /charged in addition/);
 });
 
 // ── fixture 3: whole-job total, terms spoken — complete without line items ───────

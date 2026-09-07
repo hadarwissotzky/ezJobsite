@@ -34,6 +34,7 @@ import { SendPreview } from './sendpreview';
 import { C, F } from './theme';
 import { touchTargets } from './tokens';
 import type { ExtraDraftProps } from './extradraft';
+import { GapInterview } from './gapinterview';
 
 export function FlowReviewScreen(p: ExtraDraftProps) {
   const gate = sendGate(p.readiness, p.proc);
@@ -232,6 +233,14 @@ export function FlowReviewScreen(p: ExtraDraftProps) {
             ))}
           </View>
         </Card>
+
+        {/* THE GAP INTERVIEW (SPEC-single-line-co-v1 D2) — the same card the draft
+            screen carries, at the same moment: review, before first send. Only when
+            the determination found gaps; the complete one-liner scrolls straight from
+            the read-back to Send. */}
+        {!!p.gaps?.length && p.gapAnswers && (
+          <GapInterview gaps={p.gaps} total={p.rec.amount} answers={p.gapAnswers} />
+        )}
 
         {/* MANDATE #2, PRINTED WHERE IT IS BEING KEPT. Nothing carrying a price commits
             or sends without a human confirming it — and this is the one moment a person

@@ -54,6 +54,8 @@ import { C, F } from './theme';
 import { useRecordFacts } from './recordfacts';
 import { Button } from './kit';
 import { ExtraDraftScreen, type PriceMode } from './extradraft';
+import type { GapAnswers } from './gapinterview';
+import type { SignabilityGap } from '../signability';
 import { FlowReviewScreen } from './flowreview';
 import type { CaptureDelivery } from '../uploader';
 import {
@@ -112,6 +114,10 @@ export type RecordScreenProps = {
   /** Arrived here from the capture flow, so the DRAFT screen draws the progress rail.
    *  Passed straight through: this screen decides nothing about it and reads it once. */
   inFlow?: boolean;
+  /** SPEC-single-line-co-v1 — the determination's gaps + the taps that answer them.
+   *  Passed through to whichever draft-stage screen renders. */
+  gaps?: readonly SignabilityGap[];
+  gapAnswers?: GapAnswers;
   /**
    * A COUNTER THAT MEANS "LAND ON THE CONVERSATION" (2026-08-25). Bumped by App when a
    * client-message push is tapped, so the record opens with the message sheet already
@@ -317,6 +323,8 @@ export function RecordScreen(props: RecordScreenProps) {
           jobPeople={props.jobPeople}
           onRemovePerson={props.onRemovePerson}
           onDelete={props.onDelete}
+          gaps={props.gaps}
+          gapAnswers={props.gapAnswers}
         />
       );
     }
