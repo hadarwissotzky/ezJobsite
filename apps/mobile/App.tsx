@@ -12051,9 +12051,14 @@ const checkClientMessages = async () => {
                   .sort((a, b) => Number(a.read) - Number(b.read) || b.atMs - a.atMs)
                   .slice(0, 3);
                 if (fresh.length === 0) return null;
-                const ICONS: Record<string, IconName> = {
-                  question: 'ntChat', approved: 'ntCheck', declined: 'ntExcluded',
-                  unpriced: 'ntDollar', sent: 'ntMail',
+                // Icon + its tinted disc, per kind — the approved mockup's treatment:
+                // the colour says what happened before the words do.
+                const KIND_MARK: Record<string, { icon: IconName; bg: string; fg: string }> = {
+                  question: { icon: 'ntChat', bg: '#E7EDF3', fg: '#3D5A6E' },
+                  approved: { icon: 'ntCheck', bg: '#E8EEE2', fg: '#354B31' },
+                  declined: { icon: 'ntExcluded', bg: '#F6E5E1', fg: '#6B372F' },
+                  unpriced: { icon: 'ntDollar', bg: '#FFF3EA', fg: '#7A3A12' },
+                  sent: { icon: 'ntMail', bg: '#EFEBE3', fg: '#555B57' },
                 };
                 return (
                   <View style={s.digest}>
@@ -12071,13 +12076,24 @@ const checkClientMessages = async () => {
                           await refresh();
                           void openRecord(a.changeOrderId);
                         }}>
-                        <Icon name={ICONS[a.kind] ?? ('ntQuestion' as IconName)} size={30} />
+                        {(() => {
+                          const m = KIND_MARK[a.kind] ?? KIND_MARK.question;
+                          return (
+                            <View style={[s.digestDisc, { backgroundColor: m.bg }]}>
+                              <Icon name={m.icon} size={18} color={m.fg} />
+                            </View>
+                          );
+                        })()}
                         <View style={{ flex: 1, minWidth: 0 }}>
                           <Text style={s.digestT} numberOfLines={1}>
                             {T(('r8.kind.' + a.kind) as any)} — {a.scope}
                           </Text>
+                          {/* A MESSAGE row leads with the client's own words (the
+                              mockup's call): the quote is the news, the job name is
+                              filing. Every other kind keeps job · amount · when. */}
                           <Text style={s.digestS} numberOfLines={1}>
-                            {[a.jobName || null,
+                            {[a.kind === 'question' && a.detail
+                                ? `“${a.detail}”` : (a.jobName || null),
                               a.amountCents != null ? moneyWhole(a.amountCents) : null,
                               shortDate(a.atMs, digestNow)].filter(Boolean).join(' · ')}
                           </Text>
@@ -14768,6 +14784,7 @@ const s = StyleSheet.create({
   digestH: { fontFamily: 'Barlow_700Bold', fontSize: 15.5, color: '#161918' },
   digestAll: { fontFamily: 'Barlow_600SemiBold', fontSize: 13.5, color: '#506A45', textDecorationLine: 'underline' },
   digestRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  digestDisc: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   digestT: { fontFamily: 'Barlow_600SemiBold', fontSize: 15, color: '#161918' },
   digestS: { fontFamily: 'Barlow_400Regular', fontSize: 13, color: '#777C78', marginTop: 1 },
   digestDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#506A45' },
