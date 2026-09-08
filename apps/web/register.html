@@ -15,11 +15,13 @@
     margin: 0; color: #161918; background: #F5F1E8; min-height: 100vh;
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
-  .split { display: flex; min-height: 100vh; }
+  /* The brand panel floats as an inset card (the reference pattern): the page
+     shows around it on all sides, so it reads as an object, not a wall. */
+  .split { display: flex; min-height: 100vh; padding: 26px; box-sizing: border-box; gap: 8px; }
   /* ── the brand panel ── */
   .side {
     flex: 1.6; background: #354B31; color: #F5F1E8; padding: 48px 56px;
-    display: flex; flex-direction: column; border-radius: 0 22px 22px 0;
+    display: flex; flex-direction: column; border-radius: 24px;
   }
   .side .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; }
   .side .mark {
@@ -90,8 +92,8 @@
   }
   /* ── phones: brand strip on top, form under it ── */
   @media (max-width: 860px) {
-    .split { flex-direction: column; }
-    .side { border-radius: 0 0 22px 22px; padding: 28px 22px; }
+    .split { flex-direction: column; padding: 12px; gap: 0; }
+    .side { border-radius: 18px; padding: 28px 22px; }
     .side h2 { margin-top: 22px; font-size: 26px; }
     .proof { margin-top: 22px; }
     .main { padding: 28px 20px 48px; align-items: flex-start; }
