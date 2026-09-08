@@ -247,7 +247,22 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   async storedSession(): Promise<Session | null> {
     try {
       const key = `sb-${new URL(SUPABASE_URL).hostname.split('.')[0]}-auth-token`;
-      const raw = await AsyncStorage.getItem(key);
+      let raw = await AsyncStorage.getItem(key);
+      /**
+       * ONE-TIME CARRY-OVER (2026-09-08, custom auth domain): the storage key is
+       * derived from the URL's first host label, so moving to
+       * auth.ezchangeorders.com orphaned every session stored under the
+       * project-ref key - a silent sign-out for anyone already signed in. Copy
+       * the legacy session forward once; supabase-js then finds it under the
+       * key it now expects and refreshes as normal.
+       */
+      if (!raw) {
+        const legacy = await AsyncStorage.getItem('sb-wwhfgsijnlpajvdiopfd-auth-token');
+        if (legacy) {
+          await AsyncStorage.setItem(key, legacy);
+          raw = legacy;
+        }
+      }
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       // supabase-js has stored this under two shapes across versions; accept both
