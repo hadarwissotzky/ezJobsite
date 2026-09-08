@@ -242,3 +242,36 @@ jobs:
           echo "this workflow's artifact. Check:  gh api repos/OWNER/REPO/pages"
           echo "It must report build_type: workflow — not legacy."
           exit 1
+
+  # ── THE MAIN DOMAIN. www.ezchangeorders.com is its own Pages repo
+  # (ezchangeorders-www) because a repo carries exactly one custom domain and
+  # this repo's is approve.ezchangeorders.com, the client portal. The marketing
+  # files are the same bytes in both places; this job is what keeps that true.
+  # A scoped deploy key (secret WWW_DEPLOY_KEY, write access to that one repo)
+  # does the push - not a personal token.
+  publish-www:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push the marketing site to ezchangeorders-www
+        env:
+          WWW_DEPLOY_KEY: ${{ secrets.WWW_DEPLOY_KEY }}
+        run: |
+          [ -n "$WWW_DEPLOY_KEY" ] || { echo "::error::WWW_DEPLOY_KEY secret is unset"; exit 1; }
+          mkdir -p ~/.ssh
+          echo "$WWW_DEPLOY_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          mkdir _www
+          cp website/index.html website/styles.css website/script.js _www/
+          cp -R website/assets website/videos _www/
+          echo 'www.ezchangeorders.com' > _www/CNAME
+          touch _www/.nojekyll
+          cd _www
+          git init -b main
+          git config user.name "ezJobsite deploy"
+          git config user.email "deploy@ezchangeorders.com"
+          git add -A
+          git commit -m "Sync marketing site from ezJobsite@${GITHUB_SHA}" \
+            -m "WHY: single-publisher rule - www must carry the same bytes approve does." \
+            -m "GOALS: mirror website/ marketing files. COMPLETION: 100%. BLAST RADIUS: www repo only."
+          git push --force git@github.com:hadarwissotzky/ezchangeorders-www.git main
