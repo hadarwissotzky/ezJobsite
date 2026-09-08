@@ -275,3 +275,44 @@ jobs:
             -m "WHY: single-publisher rule - www must carry the same bytes approve does." \
             -m "GOALS: mirror website/ marketing files. COMPLETION: 100%. BLAST RADIUS: www repo only."
           git push --force git@github.com:hadarwissotzky/ezchangeorders-www.git main
+
+  # ── THE PRODUCT SUBDOMAIN. app.ezchangeorders.com is the web-app surface
+  # (hadar, 2026-09-08: "why approve? it should be app.ezchangeorders.com") -
+  # registration serves as its ROOT, the pattern of every field-software signup.
+  # approve stays the client portal. Same one-publisher rule, same scoped-key
+  # push, third Pages repo (one custom domain per repo).
+  publish-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push the registration surface to ezchangeorders-app
+        env:
+          APP_DEPLOY_KEY: ${{ secrets.APP_DEPLOY_KEY }}
+        run: |
+          [ -n "$APP_DEPLOY_KEY" ] || { echo "::error::APP_DEPLOY_KEY secret is unset"; exit 1; }
+          mkdir -p ~/.ssh
+          echo "$APP_DEPLOY_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          mkdir _app
+          # register.html IS the root page here, and also keeps its own name so
+          # both spellings work. Same substitution rule as confirm.html: an
+          # unsubstituted copy signs nobody up.
+          sed -e "s|__SUPABASE_URL__|${{ vars.SUPABASE_URL }}|g" \
+              -e "s|__ANON_KEY__|${{ vars.SUPABASE_ANON_KEY }}|g" \
+              apps/web/register.html > _app/index.html
+          cp _app/index.html _app/register.html
+          case "$(cat _app/index.html)" in
+            *__SUPABASE_URL__*|*__ANON_KEY__*)
+              echo "::error::register.html still holds placeholders"; exit 1;;
+          esac
+          echo 'app.ezchangeorders.com' > _app/CNAME
+          touch _app/.nojekyll
+          cd _app
+          git init -b main
+          git config user.name "ezJobsite deploy"
+          git config user.email "deploy@ezchangeorders.com"
+          git add -A
+          git commit -m "Sync registration surface from ezJobsite@${GITHUB_SHA}" \
+            -m "WHY: single-publisher rule - app.ezchangeorders.com mirrors apps/web/register.html." \
+            -m "GOALS: substituted registration at the subdomain root. COMPLETION: 100%. BLAST RADIUS: app repo only."
+          git push --force git@github.com:hadarwissotzky/ezchangeorders-app.git main

@@ -25,13 +25,15 @@ SUPABASE_ACCESS_TOKEN=${SUPABASE_ACCESS_TOKEN:-$(envget SUPABASE_ACCESS_TOKEN)}
 REF=wwhfgsijnlpajvdiopfd
 # Site URL is the fallback for any unlisted redirect AND {{ .SiteURL }} in the
 # email templates - it must be a page that exists on a phone.
-SITE_URL="https://approve.ezchangeorders.com"
+# app.ezchangeorders.com per hadar 2026-09-08 ("why approve? it should be
+# app.ezchangeorders.com") - needs the GoDaddy CNAME for app to resolve.
+SITE_URL="https://app.ezchangeorders.com"
 # The three real redirect targets: web registration, anything else on the two
 # public hosts, and the app's deep link (authscreen.tsx builds
 # Linking.createURL('auth-callback') under scheme "ezchangeorders").
 # ezjobsite://* stays through the transition: installed builds still REQUEST
 # that redirect until they update to the ezchangeorders-scheme binary.
-ALLOW="https://approve.ezchangeorders.com/*,https://www.ezchangeorders.com/*,ezchangeorders://*,ezchangeorders:///*,ezjobsite://*,ezjobsite:///*"
+ALLOW="https://app.ezchangeorders.com/*,https://approve.ezchangeorders.com/*,https://www.ezchangeorders.com/*,ezchangeorders://*,ezchangeorders:///*,ezjobsite://*,ezjobsite:///*"
 
 resp=$(curl -s -w '\n%{http_code}' -X PATCH "https://api.supabase.com/v1/projects/$REF/config/auth" \
   -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \

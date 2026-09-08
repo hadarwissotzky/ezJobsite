@@ -244,7 +244,9 @@ const oauth = (provider) => async () => {
   $('err').style.display = 'none';
   const { error } = await supabase.auth.signInWithOAuth({
     provider,
-    options: { redirectTo: 'https://approve.ezchangeorders.com/register.html' },
+    // Host-relative on purpose: this page serves at app.ezchangeorders.com (its
+    // home) and approve.../register.html (legacy) - each copy returns to itself.
+    options: { redirectTo: location.origin + location.pathname },
   });
   if (error) fail('Could not start ' + provider + ' sign-in — ' + (error.message ?? 'try again.'));
 };
@@ -258,7 +260,7 @@ $('go').addEventListener('click', async () => {
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: 'https://approve.ezchangeorders.com/register.html',
+      emailRedirectTo: location.origin + location.pathname,
       shouldCreateUser: true,
       // The name rides as metadata so the app can greet a web registrant; company
       // and phone are the app's profile questions — two fields here, on purpose.
