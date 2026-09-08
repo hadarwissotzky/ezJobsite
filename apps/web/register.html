@@ -3,100 +3,140 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EZchangeorders — create your account</title>
+<title>EZChangeOrder — create your account</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  /* Split-panel signup (structure studied from best-in-class field-software
-     signups, 2026-09-08): brand + proof on the left, a minimal form on the right,
-     OAuth first, as few fields as possible. The SKIN stays this product's own —
-     warm cream, olive, ink — and the proof panel states what the product does
-     rather than borrowing anyone's numbers. */
+  /* Styled to the main site's system (website/styles.css): Archivo Black display,
+     DM Sans body, ink/paper/olive/mustard tokens, 9px controls, and the site's
+     rotated hard-shadow card. The signup a visitor lands on from the site should
+     read as the same product. Layout stays the inset-card split (hadar,
+     2026-09-08: the brand panel floats, it does not engulf the page). */
+  :root {
+    --ink: #111514;
+    --paper: #f3f0e8;
+    --white: #fffdf8;
+    --olive: #526d3f;
+    --olive-dark: #2c4525;
+    --mustard: #edb91d;
+    --line: #d9d4c9;
+    --muted: #5d625e;
+  }
   * { box-sizing: border-box; }
   body {
-    margin: 0; color: #161918; background: #F5F1E8; min-height: 100vh;
-    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0; color: var(--ink); background: var(--paper); min-height: 100vh;
+    font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16px; line-height: 1.55;
   }
-  /* The brand panel floats as an inset card (the reference pattern): the page
-     shows around it on all sides, so it reads as an object, not a wall. */
-  .split { display: flex; min-height: 100vh; padding: 26px; box-sizing: border-box; gap: 8px; }
+  .split { display: flex; min-height: 100vh; padding: 26px; gap: 8px; }
   /* ── the brand panel ── */
   .side {
-    flex: 1.6; background: #354B31; color: #F5F1E8; padding: 48px 56px;
+    flex: 1.6; background: var(--olive-dark); color: var(--white); padding: 48px 56px;
     display: flex; flex-direction: column; border-radius: 24px;
   }
-  .side .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; }
+  .side .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 20px; letter-spacing: -0.04em; }
   .side .mark {
-    width: 40px; height: 40px; border-radius: 10px; background: #506A45;
-    display: flex; align-items: center; justify-content: center;
+    display: grid; place-items: center; width: 38px; height: 38px; border-radius: 8px;
+    background: var(--olive); color: #fff; font-family: "Archivo Black", sans-serif; font-size: 17px;
+  }
+  .side .eyebrow {
+    margin: 56px 0 0; color: #d3dca9; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.15em; text-transform: uppercase;
   }
   .side h2 {
-    font-size: 46px; line-height: 1.15; letter-spacing: -0.8px; margin: 72px 0 0;
-    max-width: 540px; font-weight: 800;
+    font-family: "Archivo Black", sans-serif; font-weight: 400; text-transform: uppercase;
+    letter-spacing: -0.055em; line-height: 0.95; font-size: clamp(34px, 3.6vw, 52px);
+    margin: 18px 0 0; max-width: 620px;
+    /* Own stacking context, or the underline's z-index:-1 falls behind the olive
+       panel and vanishes (the main site is saved by its entrance animation). */
+    position: relative; z-index: 0;
+  }
+  .side h2 span { position: relative; white-space: nowrap; }
+  .side h2 span::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -4px; height: 11px;
+    background: var(--mustard); z-index: -1; transform: rotate(-1deg);
   }
   .proof {
-    margin-top: auto; background: #40573B; border-radius: 14px; padding: 24px 26px;
-    max-width: 520px;
+    margin-top: auto; align-self: flex-start; background: var(--white); color: var(--ink);
+    border-radius: 13px; padding: 26px 28px; max-width: 500px;
+    transform: rotate(1.2deg); box-shadow: 9px 10px 0 var(--mustard);
   }
-  .proof .row { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 12px; }
+  .proof .row { display: flex; gap: 12px; align-items: flex-start; margin: 0 0 14px; }
   .proof .row:last-child { margin-bottom: 0; }
   .proof .n {
-    width: 24px; height: 24px; border-radius: 12px; background: #506A45; flex: none;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 13px; font-weight: 800; color: #F5F1E8;
+    display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+    background: var(--olive); flex: none; font-size: 13px; font-weight: 800; color: #fff;
   }
-  .proof p { margin: 0; font-size: 16.5px; line-height: 1.55; color: #E4E9E0; }
-  .proof b { color: #FFFFFF; }
+  .proof p { margin: 0; font-size: 16px; line-height: 1.5; color: #343936; }
+  .proof b { color: var(--ink); }
   /* ── the form panel ── */
   .main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
   .box { width: 100%; max-width: 400px; }
-  h1 { font-size: 24px; line-height: 1.25; margin: 0 0 20px; letter-spacing: -0.3px; }
+  h1 {
+    font-family: "Archivo Black", sans-serif; font-weight: 400; text-transform: uppercase;
+    letter-spacing: -0.04em; line-height: 1.02; font-size: 30px; margin: 0 0 22px;
+  }
   .oauth { display: flex; gap: 10px; }
   .oauth button {
-    flex: 1; min-height: 48px; border: 1.5px solid #D8D1C4; border-radius: 10px;
-    background: #FBF8F1; color: #161918; font: inherit; font-size: 15px; font-weight: 600;
+    flex: 1; min-height: 50px; border: 1px solid var(--line); border-radius: 9px;
+    background: var(--white); color: var(--ink); font: inherit; font-size: 15px; font-weight: 700;
     cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
   }
-  .oauth button:hover { background: #F1EDE3; }
+  .oauth button:hover { background: #f6f2e9; }
   .or {
     display: flex; align-items: center; gap: 12px; margin: 18px 0;
-    color: #777C78; font-size: 12.5px; font-weight: 700; letter-spacing: 1px;
+    color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: 0.13em;
   }
-  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: #D8D1C4; }
-  label { display: block; font-size: 13px; font-weight: 700; color: #555B57; margin: 14px 0 5px; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  label { display: block; font-size: 13px; font-weight: 800; color: var(--muted); margin: 15px 0 6px; }
   label:first-of-type { margin-top: 0; }
   input {
-    width: 100%; font: inherit; font-size: 16px; padding: 12px 13px;
-    border: 1.5px solid #D8D1C4; border-radius: 10px; background: #fff; color: #161918;
+    width: 100%; font: inherit; font-size: 16px; padding: 13px 14px;
+    border: 1px solid var(--line); border-radius: 9px; background: var(--white); color: var(--ink);
   }
-  input:focus { outline: 2px solid #506A45; outline-offset: 1px; }
+  input:focus { outline: 2px solid var(--olive); outline-offset: 1px; }
   .go {
-    width: 100%; margin-top: 18px; min-height: 52px; border: 0; border-radius: 12px;
-    background: #161918; color: #fff; font: inherit; font-size: 17px; font-weight: 700;
-    cursor: pointer;
+    width: 100%; margin-top: 20px; min-height: 56px; border: 0; border-radius: 9px;
+    background: var(--ink); color: #fff; font: inherit; font-size: 17px; font-weight: 800;
+    cursor: pointer; transition: transform 0.2s ease;
   }
-  .go:disabled { opacity: 0.5; cursor: default; }
-  .hint { font-size: 12.5px; color: #777C78; margin-top: 8px; }
-  .err { color: #6B372F; background: #F6E5E1; border: 1px solid #DDBAB2;
-    border-radius: 10px; padding: 10px 12px; font-size: 14px; margin-top: 14px; display: none; }
-  .fine { font-size: 12.5px; color: #777C78; margin-top: 16px; line-height: 1.5; }
-  .fine a { color: #506A45; }
-  .big { font-size: 42px; margin: 4px 0 10px; }
+  .go:hover:enabled { transform: translateY(-2px); }
+  .go:disabled { opacity: 0.45; cursor: default; }
+  .hint { font-size: 13px; color: var(--muted); margin-top: 9px; }
+  .err { color: #9d3b30; background: #f4e2de; border: 1px solid #ddb9b0;
+    border-radius: 9px; padding: 10px 12px; font-size: 14px; margin-top: 14px; display: none; }
+  .fine { font-size: 13px; color: var(--muted); margin-top: 16px; line-height: 1.5; }
+  .fine a { color: var(--olive); }
+  .tile {
+    display: grid; place-items: center; width: 64px; height: 64px; border-radius: 12px;
+    background: #e7eadd; margin-bottom: 18px;
+  }
   .appbtn {
-    display: block; text-align: center; text-decoration: none; margin-top: 18px;
-    background: #161918; color: #fff; border-radius: 12px; padding: 15px;
-    font-weight: 700; font-size: 17px;
+    display: flex; align-items: center; justify-content: center; gap: 13px; text-decoration: none;
+    min-height: 56px; background: var(--ink); color: #fff; border-radius: 9px;
+    font-weight: 800; font-size: 17px; transition: transform 0.2s ease;
   }
-  .lede { font-size: 16.5px; color: #3d443f; margin: 0 0 18px; }
-  .quiet { font-size: 14px; color: #555B57; }
+  .appbtn:hover { transform: translateY(-2px); }
+  .appbtn .dl {
+    display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px;
+    background: var(--olive); font-size: 18px; font-weight: 900;
+  }
+  .lede { font-size: 17px; color: #343936; margin: 0 0 16px; line-height: 1.5; }
+  .quiet { font-size: 15px; color: var(--muted); margin: 0; line-height: 1.55; }
   .card {
-    background: #FBF8F1; border: 1px solid #D8D1C4; border-radius: 12px; padding: 20px 18px;
+    background: var(--white); border: 1px solid var(--line); border-radius: 13px; padding: 22px 20px;
   }
   /* ── phones: brand strip on top, form under it ── */
   @media (max-width: 860px) {
     .split { flex-direction: column; padding: 12px; gap: 0; }
-    .side { border-radius: 18px; padding: 28px 22px; }
-    .side h2 { margin-top: 22px; font-size: 26px; }
-    .proof { margin-top: 22px; }
-    .main { padding: 28px 20px 48px; align-items: flex-start; }
+    .side { border-radius: 18px; padding: 26px 22px 30px; }
+    .side .eyebrow { margin-top: 20px; }
+    .side h2 { margin-top: 12px; font-size: 27px; }
+    .side h2 span::after { bottom: -3px; height: 8px; }
+    .proof { margin-top: 24px; transform: rotate(0.8deg); box-shadow: 6px 7px 0 var(--mustard); }
+    .main { padding: 26px 10px 40px; align-items: flex-start; }
+    h1 { font-size: 23px; }
   }
 </style>
 </head>
@@ -105,16 +145,15 @@
 
   <div class="side">
     <div class="brand">
-      <div class="mark">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#F5F1E8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
-      </div>
-      EZchangeorders
+      <div class="mark">EZ</div>
+      <span>ChangeOrder</span>
     </div>
-    <h2>Extra work, signed before you leave the driveway.</h2>
+    <p class="eyebrow">Built for small residential contractors</p>
+    <h2>Extra work, signed before you leave <span>the driveway.</span></h2>
     <div class="proof">
-      <div class="row"><div class="n">1</div><p><b>Say it or snap it</b> on site — the app writes the change order for you.</p></div>
-      <div class="row"><div class="n">2</div><p><b>Your client gets a text.</b> They read the scope, see the photos, and sign. No app, no account for them.</p></div>
-      <div class="row"><div class="n">3</div><p><b>Every word and photo is kept</b> as evidence — priced, time-stamped, and signed.</p></div>
+      <div class="row"><div class="n">1</div><p><b>Say it or snap it</b> on site. The app writes the change order for you.</p></div>
+      <div class="row"><div class="n">2</div><p><b>Your client gets a text.</b> They read the scope, see the photos, and sign. No app for them.</p></div>
+      <div class="row"><div class="n">3</div><p><b>Every word and photo is kept</b> as evidence. Priced, time-stamped, and signed.</p></div>
     </div>
   </div>
 
@@ -128,7 +167,7 @@
           Google
         </button>
         <button id="apple">
-          <svg viewBox="0 0 24 24" fill="#161918" style="width:18px;height:18px"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8.79-.16 2.11-.85 3.6-.72 1.79.14 3.06.85 3.87 2.13-3.42 2.09-2.87 6.53.45 7.87-.65 1.5-1.5 2.98-3 2.89zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+          <svg viewBox="0 0 24 24" fill="#111514" style="width:18px;height:18px"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8.79-.16 2.11-.85 3.6-.72 1.79.14 3.06.85 3.87 2.13-3.42 2.09-2.87 6.53.45 7.87-.65 1.5-1.5 2.98-3 2.89zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
           Apple
         </button>
       </div>
@@ -138,7 +177,7 @@
       <label for="email">Work email</label>
       <input id="email" autocomplete="email" inputmode="email" placeholder="you@company.com">
       <button class="go" id="go" disabled>Get started</button>
-      <div class="hint">One email link — no password to invent or remember.</div>
+      <div class="hint">One email link. No password to invent or remember.</div>
       <div class="err" id="err"></div>
       <p class="fine">By creating an account you agree to the
         <a href="https://approve.ezchangeorders.com/terms.html">terms</a> and
@@ -147,7 +186,9 @@
 
     <!-- ── link sent ── -->
     <div class="box" id="sent" style="display:none">
-      <div class="big">&#9993;</div>
+      <div class="tile">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#2c4525" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:30px;height:30px"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m2 7 10 6 10-6"/></svg>
+      </div>
       <h1>Check your email</h1>
       <p class="lede" id="sentTo">We sent a sign-in link.</p>
       <p class="quiet">Open it on this device or your phone — either finishes your
@@ -156,14 +197,16 @@
 
     <!-- ── registered ── -->
     <div class="box" id="welcome" style="display:none">
-      <div class="big">&#10003;</div>
+      <div class="tile">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#2c4525" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:30px;height:30px"><path d="m4 12.5 5 5L20 6.5"/></svg>
+      </div>
       <h1>You're registered</h1>
       <p class="lede">Your account is ready. Everything you capture in the app files under it.</p>
       <div class="card">
-        <p class="quiet" style="margin-top:0">Next: get the app on your phone and sign in
+        <p class="quiet" style="margin-bottom:16px">Next: get the app on your phone and sign in
           the same way — same email, same link method.</p>
-        <a class="appbtn" href="[APP DOWNLOAD LINK]">Get the app</a>
-        <p class="hint" style="text-align:center; margin-top:10px">iPhone today &#183; Android coming</p>
+        <a class="appbtn" href="[APP DOWNLOAD LINK]"><span class="dl">&#8595;</span>Get the app</a>
+        <p class="hint" style="text-align:center; margin-top:11px; font-weight:600">iPhone today &#183; Android coming</p>
       </div>
     </div>
   </div>
