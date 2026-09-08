@@ -14,7 +14,11 @@
 #                             https://supabase.com/dashboard/account/tokens
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; source .env; set +a
+# Pull ONLY the two keys - .env holds unquoted placeholder values ("<...>")
+# that break a blanket `source`.
+envget() { grep -E "^$1=" .env | head -1 | cut -d= -f2-; }
+RESEND_API_KEY=${RESEND_API_KEY:-$(envget RESEND_API_KEY)}
+SUPABASE_ACCESS_TOKEN=${SUPABASE_ACCESS_TOKEN:-$(envget SUPABASE_ACCESS_TOKEN)}
 
 REF=wwhfgsijnlpajvdiopfd
 SENDER_EMAIL="signin@ezchangeorders.com"
