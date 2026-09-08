@@ -877,7 +877,7 @@ export default function App() {
    *  lost. */
   const [pendingCapture, setPendingCapture] = React.useState(false);
   /** The last home-screen quick action taken, so AppDelegate's cold-start retries of the
-   *  SAME press collapse to one open. See the `ezjobsite://capture` branch below. */
+   *  SAME press collapse to one open. See the `ezchangeorders://capture` branch below. */
   const quickActionNonce = React.useRef<string | null>(null);
   /**
    * Which door the current full-screen overlay (Settings or Plans) was opened through, so
@@ -1242,7 +1242,7 @@ export default function App() {
   const ota = useOta(ready ? db : null);
 
   // THE EMAILED SIGN-IN LINK LANDS HERE (hadar, 2026-08-03). Tapping the link in
-  // Mail opens `ezjobsite://auth-callback#access_token=…`; without this listener the
+  // Mail opens `ezchangeorders://auth-callback#access_token=…`; without this listener the
   // app would foreground and do nothing, which reads as the link being broken.
   // Handles both the cold start (getInitialURL — app was not running) and the warm
   // case (addEventListener). Errors are swallowed deliberately: a stray deep link
@@ -1253,7 +1253,7 @@ export default function App() {
       /**
        * THE HOME SCREEN QUICK ACTION lands here too (hadar, 2026-08-19: "a plugin on the
        * phone desktop — one click create change order"). Long-pressing the app icon posts
-       * `ezjobsite://capture` through the same RCTLinkingManager path the sign-in link
+       * `ezchangeorders://capture` through the same RCTLinkingManager path the sign-in link
        * uses (AppDelegate.swift), so this listener gains one case rather than the app
        * gaining a bridge.
        *
@@ -1264,7 +1264,9 @@ export default function App() {
        *   · on a cold start this URL can arrive before the app is `ready`, and a flag
        *     waits where a function call would simply be lost.
        */
-      if (url.startsWith('ezjobsite://capture')) {
+      if (url.startsWith('ezchangeorders://capture') || url.startsWith('ezjobsite://capture')) {
+        // Legacy prefix accepted: an installed binary's AppDelegate posts the
+        // scheme it was BUILT with, and this JS can arrive ahead of it by OTA.
         /**
          * ONE NONCE, ONE OPEN (code review, 2026-08-23).
          *

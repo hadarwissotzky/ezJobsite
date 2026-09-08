@@ -81,7 +81,7 @@ public class AppDelegate: ExpoAppDelegate {
       return
     }
     let nonce = UUID().uuidString
-    guard let url = URL(string: "ezjobsite://capture?n=\(nonce)") else {
+    guard let url = URL(string: "ezchangeorders://capture?n=\(nonce)") else {
       completionHandler(false)
       return
     }

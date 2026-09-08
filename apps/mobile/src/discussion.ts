@@ -217,7 +217,10 @@ export function revisionDelta(priorCents: number, newCents: number): RevisionDel
 // A custom scheme rather than a universal link: this has to work from the lock
 // screen with no network, and a universal link falls back to a web page — which is
 // the CLIENT's approval page, the last place the contractor should land.
-const SCHEME = 'ezjobsite://extra/';
+const SCHEME = 'ezchangeorders://extra/';
+// Notifications delivered before the rename still carry the old scheme; a tap
+// on one should focus the thread, not silently no-op.
+const LEGACY_SCHEME = 'ezjobsite://extra/';
 
 /** `focusReply` is carried in the URL, not assumed, because the same screen is
  *  reachable from the ledger where popping the keyboard would be rude. */
@@ -228,8 +231,10 @@ export function threadLink(changeOrderId: string, focusReply = true): string {
 export function parseThreadLink(
   url: string
 ): { changeOrderId: string; focusReply: boolean } | null {
-  if (typeof url !== 'string' || !url.startsWith(SCHEME)) return null;
-  const rest = url.slice(SCHEME.length);
+  if (typeof url !== 'string') return null;
+  const scheme = url.startsWith(SCHEME) ? SCHEME : url.startsWith(LEGACY_SCHEME) ? LEGACY_SCHEME : null;
+  if (!scheme) return null;
+  const rest = url.slice(scheme.length);
   const [path, query = ''] = rest.split('?', 2);
   const parts = path.split('/');
   if (parts.length !== 2 || parts[1] !== 'thread') return null;

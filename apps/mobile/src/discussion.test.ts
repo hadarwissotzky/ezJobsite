@@ -132,9 +132,12 @@ test('an id needing escaping survives the round trip', () => {
 
 test('junk links are refused, never guessed at', () => {
   assert.equal(parseThreadLink('https://example.com/extra/co-1/thread'), null);
-  assert.equal(parseThreadLink('ezjobsite://extra/co-1'), null);
-  assert.equal(parseThreadLink('ezjobsite://extra//thread'), null);
-  assert.equal(parseThreadLink('ezjobsite://extra/%E0%A4%A/thread'), null);
+  assert.equal(parseThreadLink('ezchangeorders://extra/co-1'), null);
+  // Pre-rename notifications still resolve.
+  assert.deepEqual(parseThreadLink('ezjobsite://extra/co-1/thread?reply=1'),
+    { changeOrderId: 'co-1', focusReply: true });
+  assert.equal(parseThreadLink('ezchangeorders://extra//thread'), null);
+  assert.equal(parseThreadLink('ezchangeorders://extra/%E0%A4%A/thread'), null);
   assert.equal(parseThreadLink(''), null);
 });
 

@@ -154,7 +154,7 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
    * WHY THE BROWSER FLOW. The native SDK would mean another native module, a reversed
    * client id in Info.plist, and a rebuild every time that changes. This needs neither:
    * Supabase mints the consent URL, iOS opens it in an ASWebAuthenticationSession, and
-   * the app's own scheme (`ezjobsite://`) catches the redirect. Fewer moving native
+   * the app's own scheme (`ezchangeorders://`) catches the redirect. Fewer moving native
    * parts is worth a great deal in a project where every rebuild costs a cable.
    *
    * The caller supplies the opener so this file stays free of UI imports and remains

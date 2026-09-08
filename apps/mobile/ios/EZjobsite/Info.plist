@@ -28,6 +28,10 @@
         <key>CFBundleURLSchemes</key>
         <array>
           <string>com.hilo.ezjobsite</string>
+          <!-- The product's deep-link scheme (auth-callback, extra threads,
+               capture). Absent until 2026-09-08, which is why emailed sign-in
+               links could never open the app from Mail. -->
+          <string>ezchangeorders</string>
         </array>
       </dict>
     </array>
