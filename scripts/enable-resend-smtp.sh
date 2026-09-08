@@ -16,7 +16,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # Pull ONLY the two keys - .env holds unquoted placeholder values ("<...>")
 # that break a blanket `source`.
-envget() { grep -E "^$1=" .env | head -1 | cut -d= -f2-; }
+envget() { grep -E "^$1=" .env | head -1 | cut -d= -f2- || true; }
 RESEND_API_KEY=${RESEND_API_KEY:-$(envget RESEND_API_KEY)}
 SUPABASE_ACCESS_TOKEN=${SUPABASE_ACCESS_TOKEN:-$(envget SUPABASE_ACCESS_TOKEN)}
 
