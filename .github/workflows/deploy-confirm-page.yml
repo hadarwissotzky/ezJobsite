@@ -44,6 +44,7 @@ on:
       # file. A page that takes money is the worst one to leave frozen at whatever it
       # was the last time something else changed.
       - 'apps/web/buy.html'
+      - 'apps/web/register.html'
       - '.github/workflows/deploy-confirm-page.yml'
   workflow_dispatch:
 
@@ -74,7 +75,8 @@ jobs:
         run: |
           for f in website/index.html website/privacy.html website/terms.html \
                    website/sms.html website/support.html \
-                   apps/web/confirm.html apps/web/ewa.js apps/web/buy.html; do
+                   apps/web/confirm.html apps/web/ewa.js apps/web/buy.html \
+                   apps/web/register.html; do
             [ -f "$f" ] || { echo "::error::missing: $f"; exit 1; }
           done
 
@@ -126,6 +128,13 @@ jobs:
           # the file, so rotating it is a settings change and not a commit.
           sed -e "s|__RC_WEB_KEY__|${{ vars.RC_WEB_KEY }}|g" \
               apps/web/buy.html > _site/buy.html
+          # The web registration page (hadar, 2026-09-08: "I would like to be able
+          # to register via web"). Same magic-link signup the app uses, same
+          # Supabase config substitution as confirm.html — an unsubstituted copy
+          # would send every registrant to a dead client.
+          sed -e "s|__SUPABASE_URL__|${{ vars.SUPABASE_URL }}|g" \
+              -e "s|__ANON_KEY__|${{ vars.SUPABASE_ANON_KEY }}|g" \
+              apps/web/register.html > _site/register.html
           # Stops GitHub treating these as Jekyll sources, which silently drops any
           # file whose name begins with an underscore.
           touch _site/.nojekyll
