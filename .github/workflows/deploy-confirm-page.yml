@@ -75,6 +75,14 @@ jobs:
         run: |
           for f in website/index.html website/privacy.html website/terms.html \
                    website/sms.html website/support.html \
+                   website/styles.css website/script.js \
+                   website/assets/hero-verbal-yes.png website/assets/voice-capture.png \
+                   website/assets/landscaping-conversation.webp \
+                   website/assets/electrician-gc-conversation.webp \
+                   website/assets/change-order-flow.png website/assets/app-onboarding.png \
+                   website/assets/client-portal.png \
+                   website/videos/verbal-yes.mp4 website/videos/native-language.mp4 \
+                   website/videos/client-portal.mp4 \
                    apps/web/confirm.html apps/web/ewa.js apps/web/buy.html \
                    apps/web/register.html; do
             [ -f "$f" ] || { echo "::error::missing: $f"; exit 1; }
@@ -110,7 +118,11 @@ jobs:
           # approval link is built as /confirm.html?t=… (mobile, worker and the
           # sms.html samples all agree), so nothing addresses the bare domain.
           cp website/index.html website/privacy.html website/terms.html \
-             website/sms.html website/support.html _site/
+             website/sms.html website/support.html \
+             website/styles.css website/script.js _site/
+          # The landing page's stylesheet, script, images and clips (hadar,
+          # 2026-09-08: the new main site). Static, no substitution.
+          cp -R website/assets website/videos _site/
           # The approval page, WITH its config substituted. This substitution is the
           # whole reason Pages must stay on build_type=workflow: deploy-site.sh
           # copied this file raw, placeholders and all.
@@ -191,6 +203,8 @@ jobs:
             # Every public page must answer 200. terms/privacy/sms are the A2P
             # campaign's filed URLs; a 404 here is a revoked campaign later.
             for p in index.html privacy.html terms.html sms.html support.html \
+                     styles.css script.js assets/hero-verbal-yes.png \
+                     videos/verbal-yes.mp4 \
                      confirm.html ewa.js buy.html; do
               # `|| true` because this step runs under `bash -e`: a transient reset or
               # a DNS blip during Pages propagation would otherwise abort the whole
