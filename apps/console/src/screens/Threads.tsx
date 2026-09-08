@@ -50,6 +50,15 @@ export function ClientThread({ projectId, changeOrderId, company, userId, go }: 
     ?? rows.find((r) => r.display === 'sent')
     ?? rows[0];
 
+  /**
+   * A DRAFT HAS NO CLIENT SIDE (code review 2026-09-08, finding 10). The subject
+   * fallback can land on a never-sent draft; offering the composer there let the
+   * office "reply to the client" on a document no client has seen, and the parked
+   * banner then asserted the client had answered it — both false. Only a change
+   * order that has LEFT the office can carry a client conversation.
+   */
+  const subjectSendable = !!subject && subject.co.status !== 'draft';
+
   const shown = subject ? messages.filter((m) => m.change_order_id === subject.co.id) : [];
 
   async function send() {
@@ -163,7 +172,12 @@ export function ClientThread({ projectId, changeOrderId, company, userId, go }: 
           </div>
         )}
         {problem && <div style={{ marginBottom: 10 }}><Note tone="danger">{problem}</Note></div>}
-        {!mayReply ? (
+        {!subjectSendable ? (
+          <Note tone="neutral">
+            This change order has not been sent to the client yet, so there is no
+            client conversation to reply into. Send it from the phone first.
+          </Note>
+        ) : !mayReply ? (
           <Note tone="neutral">
             Only the company owner can answer the client on a teammate's change order.
             You can read the conversation.

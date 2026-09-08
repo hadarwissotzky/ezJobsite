@@ -1434,9 +1434,13 @@ const openRecord = async (changeOrderId: string, opts?: { soft?: boolean }) => {
   if (!opts?.soft) {
     setApproval(null); setRecordLc(null); setRecordTimeline([]); setRecordGaps([]);
     setRecordThread(null); setRecordUndelivered(new Set()); setRecordDelivery(null);
+    // These three were OUTSIDE this guard (code review 2026-09-08, finding 3): the
+    // 7s write-up watcher's soft refresh was closing any open detail editor and
+    // discarding its unsaved buffer, every tick, until a scope existed. An editor
+    // the contractor opened stays open through a background repaint.
+    setRecordWriteUp('unknown'); setRecordPrice(null);
+    setRecordNextId(null); setDetail(null); setZoomUri(null);
   }
-  setRecordWriteUp('unknown'); setRecordPrice(null);
-  setRecordNextId(null); setDetail(null); setZoomUri(null);
   // SPEC-extra-lifecycle-v1 — the stage layer, and it goes FIRST for a reason: it is
   // the only layer the screen cannot render without (it decides which of D1's three
   // screens this is and whether a priced document may be sent), and it is entirely
@@ -1637,15 +1641,21 @@ const openRecord = async (changeOrderId: string, opts?: { soft?: boolean }) => {
            */
           try {
             const coNow = (await db.getAll<{ status: string; amount_cents: number | null;
-                billing_timing: string | null;
+                billing_timing: string | null; line_items: string | null;
                 schedule_effect: string | null; exclusions: string | null }>(
-              `SELECT status, amount_cents, billing_timing, schedule_effect, exclusions
+              `SELECT status, amount_cents, billing_timing, schedule_effect, exclusions,
+                      line_items
                  FROM change_order WHERE id = ?`, [changeOrderId]))[0];
             if (coNow?.status === 'draft' && recordIdRef.current === changeOrderId) {
               const excluded = (coNow.exclusions ?? '').split('\n')
                 .map((l) => l.replace(/^[\u2022\-\s]+/, '').trim()).filter(Boolean);
+              let settledDescriptions: string[] = [];
+              try {
+                const li = JSON.parse(coNow.line_items ?? '[]');
+                if (Array.isArray(li)) settledDescriptions = li.map((x: any) => String(x?.description ?? ''));
+              } catch { /* unreadable breakdown -> nothing settled */ }
               const sig = evaluateSignability(deriveSignabilityInput({
-                tasks: prop.tasks, totalCents: coNow.amount_cents, excluded,
+                tasks: prop.tasks, totalCents: coNow.amount_cents, excluded, settledDescriptions,
                 billingTiming: coNow.billing_timing, scheduleEffect: coNow.schedule_effect,
                 parse: parseMoney,
               }));
@@ -2211,7 +2221,13 @@ const answerFeeConflict = async (
     const items = c.lineItems ?? [];
     const idx = items.findIndex((li) => li.description === about);
     if (idx < 0 || c.amount_cents == null) {
-      setFiled(T('gap.openBad')); return;
+      // The fee has no matching row line (edited breakdown, or none was ever
+      // written). Saying "digits only, like 450" here blamed typing that never
+      // happened (code review 2026-09-08, finding 9). Say what is true and open
+      // the one editor that can move money.
+      setFiled(T('gap.feeNoLine'));
+      openDetail('cost');
+      return;
     }
     const rest = items.filter((_, i) => i !== idx);
     const r = await priceDraftExtra(db, {
@@ -2237,8 +2253,15 @@ const answerBallpark = async (about: string, raw: string | null) => {
   }
   const m = parseMoney(/\$/.test(raw) ? raw : `$${raw.trim()}`);
   if (m.cents === null || m.cents <= 0) { setFiled(T('gap.openBad')); return; }
+  const estDesc = T({ k: 'gap.estLine', p: { item: about } });
+  // Idempotent (finding 1): a second tap for the same item must not append a
+  // second line and inflate the total again.
+  if ((c.lineItems ?? []).some((li) => li.description === estDesc)) {
+    setRecordGaps((g) => g.filter((x) => !(x.kind === 'open_cost' && x.about === about)));
+    return;
+  }
   const items = [...(c.lineItems ?? []), {
-    description: T({ k: 'gap.estLine', p: { item: about } }),
+    description: estDesc,
     qty: 1, unit_cents: m.cents, total_cents: m.cents,
   }];
   const r = await priceDraftExtra(db, {

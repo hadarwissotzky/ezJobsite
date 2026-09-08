@@ -483,7 +483,20 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
        * one of those uploads is an inconvenience the parked record makes visible;
        * losing every download forever is the product quietly dying.
        */
+      /**
+       * A NETWORK FAILURE IS NOT A POISON WRITE (code review 2026-09-08, finding
+       * 4). Five failed attempts on a jobsite with one bar is Tuesday (mandate
+       * #7), and parking a project edit for it silently reverts the edit when the
+       * server's state re-applies. Only errors that are NOT plain transport
+       * failures count toward the cap; a codeless network error retries forever,
+       * exactly as it did before the cap existed — the wedge class this cap was
+       * built for (the append-only refusals) always carries a message that is not
+       * a transport message.
+       */
+      const looksLikeNetwork = code == null
+        && /network|fetch|timeout|abort|socket|connection/i.test(String(err?.message ?? err));
       const key = (tx.crud ?? []).map((o: any) => `${o.table}:${o.id}:${o.op}`).join('|');
+      if (looksLikeNetwork) { throw err; }
       if (key && key === this.stuckTxKey) this.stuckTxTries += 1;
       else { this.stuckTxKey = key; this.stuckTxTries = 1; }
       if (this.stuckTxTries >= 5) {

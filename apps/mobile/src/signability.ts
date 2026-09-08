@@ -130,14 +130,35 @@ export function deriveSignabilityInput(o: {
   billingTiming: string | null;
   scheduleEffect: string | null;
   parse: (text: string) => { cents: number | null; confidence: 'high' | 'low' | 'none' };
+  /**
+   * The ROW's own line-item descriptions (code review 2026-09-08, finding 1). An
+   * answered ballpark writes an "{title} — estimated…" line onto the change order;
+   * without reading it back, the evaluator re-raised the same open_cost gap from
+   * the unchanged extraction forever, and every further Add appended another line
+   * and inflated the total. A title that already has a row line item starting with
+   * it is SETTLED.
+   */
+  settledDescriptions?: readonly string[];
 }): SignabilityInput {
   const lineItems: { title: string; cents: number }[] = [];
   const openEndedTitles: string[] = [];
+  const settled = (title: string) =>
+    (o.settledDescriptions ?? []).some((d) => d.toLowerCase().startsWith(title.toLowerCase()));
   for (const t of o.tasks) {
     if (t.priceWords === null) continue;
     const m = o.parse(t.priceWords);
-    if (m.cents !== null && m.confidence === 'high') lineItems.push({ title: t.title, cents: m.cents });
-    else openEndedTitles.push(t.title);
+    /**
+     * MULTI-FIGURE SPANS ARE OPEN, NOT PRICED (finding 7). "$95/hr up to $2,000"
+     * parses to a first figure at high confidence, but the pricing layer refuses
+     * to choose between two numbers (voiceprice's rule) — so the evaluator must
+     * not quietly pick one either. Two-plus dollar figures in one span → ask.
+     */
+    const figureCount = (t.priceWords.match(/\$\s?[\d,]+(?:\.\d{1,2})?/g) ?? []).length;
+    if (m.cents !== null && m.confidence === 'high' && figureCount <= 1) {
+      lineItems.push({ title: t.title, cents: m.cents });
+    } else if (!settled(t.title)) {
+      openEndedTitles.push(t.title);
+    }
   }
   return { lineItems, openEndedTitles, totalCents: o.totalCents, excluded: o.excluded,
            billingTiming: o.billingTiming, scheduleEffect: o.scheduleEffect };

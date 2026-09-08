@@ -955,7 +955,12 @@ async function load() {
      * is nowhere to forward to. An ANSWERED old version never reaches this branch:
      * it renders in full as the signed evidence it is.
      */
-    if (live) { location.replace(live); return; }
+    // LOOP-GUARDED AND SAID OUT LOUD (code review 2026-09-08, finding 5): never
+    // forward to the token already being viewed (a stale replica could hand this
+    // same link back and spin the page forever), and carry r=1 so the live page
+    // says an earlier version was replaced even when its own revision banner has
+    // nothing to render.
+    if (live && st.live_token !== token) { location.replace(live + '&r=1'); return; }
     screen(`<div class="done"><div class="mark">🔄</div>
       <h2>This version was replaced</h2>
       <p>${live
@@ -1218,6 +1223,15 @@ async function loadThread(d) {
  * does not survive a reload — a stale "sent ✓" is a claim about the past.
  */
 function renderDocument(d, notice) {
+  /**
+   * ARRIVED FROM A REPLACED LINK (finding 5's other half): the redirect above can
+   * land a client on a document carrying a different figure than the text they
+   * tapped described. The revision banner covers the ordinary case; when nothing
+   * else says it, this line does — before they read a number.
+   */
+  if (!notice && new URLSearchParams(location.search).get('r') === '1') {
+    notice = 'This link was updated \u2014 you are viewing the current version. An earlier version was replaced.';
+  }
   if (d.kind === 'ewa') {
     if (typeof window.renderEwa !== 'function') {
       // ewa.js failed to load. Refuse rather than fall through to a renderer that

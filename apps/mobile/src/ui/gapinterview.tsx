@@ -48,7 +48,10 @@ function Chip({ label, onPress }: { label: string; onPress: () => void }) {
 
 export function GapInterview(props: { gaps: readonly SignabilityGap[]; total: string;
                                       answers: GapAnswers }) {
-  const [ballpark, setBallpark] = React.useState('');
+  // Keyed by item (code review 2026-09-08, finding 2): one shared string meant two
+  // open-cost rows mirrored each other's typing, and grout's Add could submit
+  // tile's figure — a wrong dollar amount on a priced instrument.
+  const [ballparks, setBallparks] = React.useState<Record<string, string>>({});
   if (props.gaps.length === 0) return null;
   const { answers } = props;
 
@@ -91,14 +94,14 @@ export function GapInterview(props: { gaps: readonly SignabilityGap[]; total: st
               <View style={st.chips}>
                 <TextInput
                   style={st.money}
-                  value={ballpark}
-                  onChangeText={setBallpark}
+                  value={ballparks[g.about] ?? ''}
+                  onChangeText={(v) => setBallparks((b) => ({ ...b, [g.about]: v }))}
                   placeholder={t('gap.openPh')}
                   keyboardType="decimal-pad"
                   accessibilityLabel={t({ k: 'gap.openQ', p: { item: g.about } })}
                 />
                 <Chip label={t('gap.openAdd')}
-                  onPress={() => answers.onBallpark(g.about, ballpark)} />
+                  onPress={() => answers.onBallpark(g.about, ballparks[g.about] ?? '')} />
               </View>
               <Pressable onPress={() => answers.onBallpark(g.about, null)} hitSlop={8}>
                 <Text style={st.leave}>{t('gap.openLeave')}</Text>

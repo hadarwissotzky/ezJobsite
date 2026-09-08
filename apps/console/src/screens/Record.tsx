@@ -303,10 +303,14 @@ function PriceCard({ co, mayEdit, onSaved }: {
     if (parsed === null) return;
     setBusy(true); setProblem(null);
     try {
-      // The breakdown has to keep adding up (070's constraint). Editing only the total
-      // while lines exist would be refused by the database, so it is refused here with
-      // a sentence that says which two numbers disagree.
-      await savePrice(co.id, parsed, lines);
+      // The breakdown has to keep adding up (070's constraint), and the console has
+      // no line-item editor — so a new total that disagrees with the lines made this
+      // a dead end: every input except the price the draft already had was refused
+      // (code review 2026-09-08, finding 6). A changed total now CLEARS the
+      // breakdown: the total is the office's statement, the itemisation belonged to
+      // the figure it added up to. The phone's cost editor can rebuild lines.
+      const sum = lines.reduce((n, l) => n + l.total_cents, 0);
+      await savePrice(co.id, parsed, sum === parsed ? lines : []);
       setEditing(false); setConfirming(false);
       onSaved();
     } catch (e) {
