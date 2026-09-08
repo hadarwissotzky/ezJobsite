@@ -33,7 +33,6 @@ import {
   StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
 
 import type { SupabaseConnector } from '../connector';
 import { displayPhone, formatPhoneAsTyped, toE164 } from '../sendto';
@@ -135,7 +134,15 @@ export function AuthScreen({ connector, initialSignUp = false, notice, onReplayI
   }, [step, left]);
 
   const reset = () => setFail(null);
-  const redirectTo = React.useMemo(() => Linking.createURL('auth-callback'), []);
+  /**
+   * PINNED, not derived (hadar 2026-09-08: build 51's email link landed on the
+   * web page). Linking.createURL picks a scheme from the binary's registered
+   * list, and this binary legitimately carries two (the legacy bundle-id scheme
+   * first). Whatever it picks that is not on Supabase's allow-list silently
+   * falls back to the Site URL - the browser, not the app. One fixed value,
+   * matching Info.plist and the allow-list, ends the guessing.
+   */
+  const redirectTo = 'ezchangeorders://auth-callback';
 
   const sendCode = async () => {
     if (!e164 || busy) return;
