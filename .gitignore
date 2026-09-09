@@ -50,3 +50,4 @@ apps/mobile/.shot.cjs
 # per-session AI tool state (codex session ids etc.)
 .context/
 .keys/
+apps/mobile/google-play-service-account.json
