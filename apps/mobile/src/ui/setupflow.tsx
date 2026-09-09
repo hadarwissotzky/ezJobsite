@@ -77,11 +77,11 @@ type ArtSource = number | null;
  * on the last screen reads as progress completed, which is the feeling that screen is
  * for. The words carry the precision; the dots carry the glance.
  */
-function Steps({ step }: { step: 0 | 1 | 2 }) {
+function Steps({ step }: { step: 0 | 1 | 2 | 3 | 4 }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
       gap: 8, marginTop: 22 }}>
-      {[0, 1, 2].map((d) => (
+      {[0, 1, 2, 3, 4].map((d) => (
         <View key={d} style={{
           width: 9, height: 9, borderRadius: 5,
           backgroundColor: d <= step ? ACCENT : C.line,
@@ -95,7 +95,7 @@ function Steps({ step }: { step: 0 | 1 | 2 }) {
 }
 
 function Chrome(props: {
-  step: 0 | 1 | 2;
+  step: 0 | 1 | 2 | 3 | 4;
   art: ArtSource;
   title: string;
   sub: string;
@@ -420,12 +420,137 @@ const HOW: Array<{ icon: IconName; title: string; body: string }> = [
   { icon: 'send', title: 'su.h3t', body: 'su.h3b' },
 ];
 
+/* ─────────────────────────── 2b. about your business ───────────────────────── */
+
+export const TRADES = ['General Contractor', 'Remodeling', 'Handyman', 'Plumbing',
+  'Electrical', 'HVAC', 'Roofing', 'Painting', 'Flooring', 'Landscaping', 'Other'] as const;
+export const CREW_SIZES = ['solo', 'small', 'large'] as const;
+export type CrewSize = (typeof CREW_SIZES)[number];
+
+function Pill({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="radio"
+      accessibilityState={{ selected: on }}
+      style={{
+        paddingHorizontal: 15, paddingVertical: 11, borderRadius: 999,
+        backgroundColor: on ? ACCENT_SOFT : C.raised,
+        borderColor: on ? ACCENT : C.line, borderWidth: 1.5,
+      }}>
+      <Text style={{ fontFamily: on ? F.bodyBold : F.body, fontSize: 15,
+        color: on ? ACCENT : C.steel }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * Trade + crew size (onboarding v2, hadar 2026-09-08 from the reference flow's
+ * qualifying screen — compressed to two questions, both chips, three taps max).
+ * The trade finally gets collected AT setup instead of deferred to Settings;
+ * it shapes vocabulary and examples, and the web flow stores the same keys.
+ */
+export function StepAboutBusiness(props: {
+  trade: string | null;
+  onTrade: (v: string) => void;
+  crew: CrewSize | null;
+  onCrew: (v: CrewSize) => void;
+  onContinue: () => void;
+  art?: ArtSource;
+}) {
+  const crewLabel: Record<CrewSize, string> = {
+    solo: t('su.crewSolo'), small: t('su.crewSmall'), large: t('su.crewLarge'),
+  };
+  return (
+    <Chrome step={2} art={props.art ?? null}
+      title={t('su.aboutTitle')} sub={t('su.aboutSub')}>
+      <View style={{ marginTop: 20 }}>
+        <Text style={{ fontFamily: F.bodyBold, fontSize: 16.5, color: C.ink, marginBottom: 10 }}>
+          {t('su.tradeLabel')}
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {TRADES.map((tr) => (
+            <Pill key={tr} label={tr} on={props.trade === tr} onPress={() => props.onTrade(tr)} />
+          ))}
+        </View>
+        <Text style={{ fontFamily: F.bodyBold, fontSize: 16.5, color: C.ink,
+          marginTop: 22, marginBottom: 10 }}>
+          {t('su.crewLabel')}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {CREW_SIZES.map((cs) => (
+            <Pill key={cs} label={crewLabel[cs]} on={props.crew === cs}
+              onPress={() => props.onCrew(cs)} />
+          ))}
+        </View>
+      </View>
+      <Cta label={t('fr.continue')} tone="accent"
+        disabled={!props.trade || !props.crew} onPress={props.onContinue} />
+    </Chrome>
+  );
+}
+
+/* ───────────────────────────── 2c. how you start ────────────────────────────── */
+
+/**
+ * The plan ladder, in the order the paywall reads it: the free start (which IS
+ * the trial — no card, ends by itself), pay-as-you-go credits, Core. Numbers
+ * are plans.ts/pricingconfig facts, restated as copy — the purchase itself
+ * happens on the real paywall, which the paid buttons open after setup.
+ */
+export function StepHowYouStart(props: {
+  onFree: () => void;
+  onPaid: () => void;
+  onSkip: () => void;
+  art?: ArtSource;
+}) {
+  const card = (nm: string, pr: string, body: string, cta: string,
+    dark: boolean, onPress: () => void, star = false) => (
+    <View style={{ backgroundColor: C.raised, borderRadius: 16, padding: 16, marginBottom: 12,
+      borderWidth: star ? 2 : 1, borderColor: star ? ACCENT : C.line }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between',
+        alignItems: 'baseline', gap: 8 }}>
+        <Text style={{ fontFamily: F.bodyBold, fontSize: 17.5, color: C.ink }}>{nm}</Text>
+        <Text style={{ fontFamily: F.body, fontSize: 13.5, color: C.steel, flexShrink: 1,
+          textAlign: 'right' }}>{pr}</Text>
+      </View>
+      <Text style={{ fontFamily: F.body, fontSize: 14, color: C.steel, marginTop: 6,
+        lineHeight: 20 }}>{body}</Text>
+      <Pressable onPress={onPress} accessibilityRole="button" style={{
+        marginTop: 12, minHeight: 48, borderRadius: 12, alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: dark ? ACCENT : C.raised,
+        borderWidth: dark ? 0 : 1.5, borderColor: C.ink,
+      }}>
+        <Text style={{ fontFamily: F.bodyBold, fontSize: 15.5,
+          color: dark ? '#fff' : C.ink }}>{cta}</Text>
+      </Pressable>
+    </View>
+  );
+  return (
+    <Chrome step={3} art={props.art ?? null}
+      title={t('su.startTitle')} sub={t('su.startSub')}>
+      <View style={{ marginTop: 18 }}>
+        {card(t('su.planFree'), t('su.planFreePr'), t('su.planFreeBody'),
+          t('su.planFreeCta'), false, props.onFree)}
+        {card(t('su.planPayg'), t('su.planPaygPr'), t('su.planPaygBody'),
+          t('su.planPaygCta'), false, props.onPaid)}
+        {card(t('su.planCore'), t('su.planCorePr'), t('su.planCoreBody'),
+          t('su.planCoreCta'), true, props.onPaid, true)}
+        <Pressable onPress={props.onSkip} accessibilityRole="button"
+          style={{ alignItems: 'center', paddingVertical: 12 }}>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: C.steel,
+            textDecorationLine: 'underline' }}>{t('su.planSkip')}</Text>
+        </Pressable>
+      </View>
+    </Chrome>
+  );
+}
+
 export function StepHowItWorks(props: {
   onCreateFirst: () => void;
   art?: ArtSource;
 }) {
   return (
-    <Chrome step={2} art={props.art ?? null}
+    <Chrome step={4} art={props.art ?? null}
       title={t('su.captureTitle')} sub={t('su.captureSub')}>
       <View style={{ marginTop: 18 }}>
         {HOW.map((h, i) => (

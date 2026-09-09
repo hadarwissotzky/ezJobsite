@@ -21,7 +21,7 @@ import * as Updates from 'expo-updates';
 import { inFlight } from './src/ota';
 import { Onboarding } from './src/ui/onboarding';
 import { RecordConsent } from './src/ui/recordconsent';
-import { SETUP_ART, StepHowItWorks, StepLanguage, StepProfile, type Work } from './src/ui/setupflow';
+import { SETUP_ART, StepAboutBusiness, StepHowItWorks, StepHowYouStart, StepLanguage, StepProfile, type CrewSize, type Work } from './src/ui/setupflow';
 import { FirstExtra } from './src/ui/firstextra';
 import { GuidedCoach } from './src/ui/guidedcoach';
 import { StepDone, StepDraft, StepGaps, StepReview, StepTranscript,
@@ -5313,7 +5313,13 @@ const checkClientMessages = async () => {
   // app does, ending in "Create first change order"). The old 'trade' grid is gone
   // from first run; `settingsscreen.tsx` still collects it. See ui/setupflow.tsx.
   const [hasProfileState, setHasProfile] = React.useState(false);
-  const [pSub, setPSub] = React.useState<'lang' | 'who' | 'how'>('lang');
+  const [pSub, setPSub] = React.useState<'lang' | 'who' | 'about' | 'plans' | 'how'>('lang');
+  // Onboarding v2 (hadar 2026-09-08): trade + crew size at setup, then the plan
+  // ladder. `pWantPaywall` opens the real paywall after setup completes when a
+  // paid rung was tapped - the purchase runs on the surface that owns it.
+  const [pTrade, setPTrade] = React.useState<string | null>(null);
+  const [pCrew, setPCrew] = React.useState<CrewSize | null>(null);
+  const pWantPaywall = React.useRef(false);
   const [pName, setPName] = React.useState('');
   /**
    * THREE answers now (review 2026-08-25), not a boolean. 'invited' is the crew member
@@ -7813,11 +7819,17 @@ const checkClientMessages = async () => {
           // it from the join below, not something this person typed. That is what puts
           // his employer on the letterhead instead of a blank.
           company: pWork === 'solo' ? null : pCompany,
-          trade: null,   // asked later, in Settings — see setupflow.tsx header
+          trade: pTrade,   // collected by StepAboutBusiness (onboarding v2)
         // The language picked one screen earlier travels with the account, so a
         // reinstall does not put a Spanish speaker back into English.
         }, lang);
         setHasProfile(true);
+        // A paid rung tapped on How-you-start opens the surface that can
+        // actually sell it. Delayed a beat so the home paints first.
+        if (pWantPaywall.current) {
+          pWantPaywall.current = false;
+          setTimeout(() => setShowPaywall(true), 600);
+        }
       };
 
       /**
@@ -7835,7 +7847,7 @@ const checkClientMessages = async () => {
        * it had happened — the whole reason the old flow was a trap.
        */
       const leaveWho = async () => {
-        if (pWork !== 'invited') { setPSub('how'); return; }
+        if (pWork !== 'invited') { setPSub('about'); return; }
         setPJoining(true); setPInviteErr(null);
         const r = await acceptInvite(db, connector.client, pInvite, pName);
         setPJoining(false);
@@ -7847,7 +7859,7 @@ const checkClientMessages = async () => {
         }
         // The name comes back from the server; it is the one that goes on documents.
         setPCompany(r.companyName);
-        setPSub('how');
+        setPSub('about');
       };
 
       if (pSub === 'lang') {
@@ -7867,6 +7879,36 @@ const checkClientMessages = async () => {
             invite={pInvite} onInvite={(v) => { setPInvite(v); setPInviteErr(null); }}
             inviteError={pInviteErr} joining={pJoining}
             onContinue={() => void leaveWho()} />
+        );
+      }
+
+      if (pSub === 'about') {
+        return (
+          <StepAboutBusiness art={SETUP_ART.setup}
+            trade={pTrade} onTrade={setPTrade}
+            crew={pCrew} onCrew={setPCrew}
+            onContinue={() => {
+              // Crew size and trade mirror to the account like every other
+              // profile answer - the web flow reads/writes the same keys.
+              void connector.client.auth.updateUser({
+                data: { trade: pTrade, crew_size: pCrew } }).catch(() => {});
+              setPSub('plans');
+            }} />
+        );
+      }
+
+      if (pSub === 'plans') {
+        const choose = (choice: 'free' | 'paid' | 'skipped') => {
+          void connector.client.auth.updateUser({
+            data: { plan_choice: choice } }).catch(() => {});
+          pWantPaywall.current = choice === 'paid';
+          setPSub('how');
+        };
+        return (
+          <StepHowYouStart art={SETUP_ART.capture}
+            onFree={() => choose('free')}
+            onPaid={() => choose('paid')}
+            onSkip={() => choose('skipped')} />
         );
       }
 
