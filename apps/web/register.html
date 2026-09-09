@@ -400,6 +400,9 @@ for (const id of ['name', 'company', 'email', 'phone']) $(id).addEventListener('
 $('terms').addEventListener('change', () => { $('go').disabled = !ready(); });
 
 const fail = (msg) => { $('err').textContent = msg; $('err').style.display = 'block'; };
+// Supabase throttles repeat link requests (~60s). That is not a failure the user
+// caused — a link is already on its way — so say that instead of a scary error.
+const isRateLimit = (e) => /after \d+ seconds|security purposes|rate limit|too many/i.test(String(e?.message ?? e ?? ''));
 
 // OAuth first — the same two providers the app itself signs in with.
 const oauth = (provider) => async () => {
@@ -513,8 +516,11 @@ const choosePlan = async (choice, thenHref) => {
       options: { emailRedirectTo: location.origin + location.pathname,
         shouldCreateUser: true, data },
     });
-    if (error) { fail('Could not send the link — ' + (error.message ?? 'try again in a moment.')); show('form'); $('go').disabled = false; return; }
-    $('sentTo').textContent = 'We sent a sign-in link to ' + email + '.';
+    if (error && !isRateLimit(error)) { fail('Could not send the link — ' + (error.message ?? 'try again in a moment.')); show('form'); $('go').disabled = false; return; }
+    // Rate-limited means a link went out moments ago and is valid — send them to
+    // the same check-your-email screen, no red box.
+    $('sentTo').textContent = 'Your sign-in link is on its way to ' + email
+      + (error ? ' — check your inbox (we sent one moments ago).' : '.');
     show('sent');
     return;
   }
