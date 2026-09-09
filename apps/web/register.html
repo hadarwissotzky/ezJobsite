@@ -390,7 +390,9 @@ const ready = () => $('name').value.trim().length >= 2
   && $('terms').checked;
 // US format as they type: (415) 443-2321. Ten digits; the +1 lives in the prefix chip.
 $('phone').addEventListener('input', () => {
-  const d = $('phone').value.replace(/\D/g, '').slice(0, 10);
+  let d = $('phone').value.replace(/\D/g, '');
+  if (d.length > 10 && d.startsWith('1')) d = d.slice(1);
+  d = d.slice(0, 10);
   $('phone').value = d.length > 6 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`
     : d.length > 3 ? `(${d.slice(0,3)}) ${d.slice(3)}` : d;
 });
@@ -447,7 +449,9 @@ const fReady = () => {
   $('fGo').disabled = !ok; return ok;
 };
 $('fPhone').addEventListener('input', () => {
-  const d = $('fPhone').value.replace(/\D/g, '').slice(0, 10);
+  let d = $('fPhone').value.replace(/\D/g, '');
+  if (d.length > 10 && d.startsWith('1')) d = d.slice(1);
+  d = d.slice(0, 10);
   $('fPhone').value = d.length > 6 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`
     : d.length > 3 ? `(${d.slice(0,3)}) ${d.slice(3)}` : d;
 });
