@@ -104,6 +104,25 @@ test('a reinstalled contractor keeps his profile — no setup flow', async () =>
   assert.equal(settings.profile_company, 'Kowalski Bros');
 });
 
+test('a WEB registrant lands with their answers already in place', async () => {
+  // register.html (hadar 2026-09-08: "registration match the mobile experience")
+  // writes full_name + company_name + phone + registered_via into the signup
+  // metadata, and deliberately NOT is_solo - the restore must infer "not solo"
+  // from the company's presence, exactly as it does for older accounts.
+  const WEB_REGISTRANT = {
+    user_metadata: {
+      full_name: 'Mike Alvarez', company_name: 'Alvarez Builders LLC',
+      phone: '+14155550100', registered_via: 'web',
+    },
+  } as any;
+  const { settings, db } = fakeDb();
+  const r = await restoreAccountFlags(db, fakeSupabase().client, WEB_REGISTRANT);
+  assert.equal(r.profile, true, 'the web answers ARE the profile - setup must not re-ask');
+  assert.equal(settings.profile_name, 'Mike Alvarez');
+  assert.equal(settings.profile_company, 'Alvarez Builders LLC');
+  assert.equal(settings.profile_is_solo, 'no');
+});
+
 test('the display language comes back with the profile', async () => {
   // Otherwise a Spanish-speaking contractor reinstalls into an English app and has to
   // find the toggle in a language he does not read.
