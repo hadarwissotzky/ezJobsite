@@ -66,6 +66,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # THE IMAGES ARE WEBP WITH -mobile VARIANTS [2026-09-08]. The landing page serves
+      # them through <picture>, so each one is really two files and BOTH are named here:
+      # a missing -mobile variant does not fail loudly, it just quietly stops being a
+      # mobile build for whoever is on a phone — which is most of this audience.
       # REFUSE TO PUBLISH A HALF-SITE. A missing file here is a page that 404s for
       # a carrier reviewer or a homeowner, and the deploy would otherwise "succeed"
       # quietly — which is exactly how the last four pages disappeared. The list is
@@ -76,11 +80,15 @@ jobs:
           for f in website/index.html website/privacy.html website/terms.html \
                    website/sms.html website/support.html \
                    website/styles.css website/script.js \
-                   website/assets/hero-verbal-yes.png website/assets/voice-capture.png \
+                   website/assets/hero-verbal-yes.webp website/assets/voice-capture.webp \
                    website/assets/landscaping-conversation.webp \
                    website/assets/electrician-gc-conversation.webp \
-                   website/assets/change-order-flow.png website/assets/app-onboarding.png \
+                   website/assets/change-order-flow.webp website/assets/app-onboarding.webp \
                    website/assets/client-portal.png \
+                   website/assets/hero-verbal-yes-mobile.webp \
+                   website/assets/voice-capture-mobile.webp \
+                   website/assets/change-order-flow-mobile.webp \
+                   website/assets/app-onboarding-mobile.webp \
                    website/videos/verbal-yes.mp4 website/videos/native-language.mp4 \
                    website/videos/client-portal.mp4 \
                    apps/web/confirm.html apps/web/ewa.js apps/web/buy.html \
@@ -203,7 +211,8 @@ jobs:
             # Every public page must answer 200. terms/privacy/sms are the A2P
             # campaign's filed URLs; a 404 here is a revoked campaign later.
             for p in index.html privacy.html terms.html sms.html support.html \
-                     styles.css script.js assets/hero-verbal-yes.png \
+                     styles.css script.js assets/hero-verbal-yes.webp \
+                     assets/hero-verbal-yes-mobile.webp \
                      videos/verbal-yes.mp4 \
                      confirm.html ewa.js buy.html; do
               # `|| true` because this step runs under `bash -e`: a transient reset or
