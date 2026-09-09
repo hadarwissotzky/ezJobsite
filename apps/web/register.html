@@ -114,6 +114,19 @@
     border-radius: 9px; padding: 10px 12px; font-size: 14px; margin-top: 14px; display: none; }
   .fine { font-size: 13px; color: var(--muted); margin-top: 16px; line-height: 1.5; }
   .fine a { color: var(--olive); }
+  .phonewrap { display: flex; align-items: center; gap: 0; }
+  .phonewrap .cc {
+    display: grid; place-items: center; min-height: 47px; padding: 0 12px;
+    border: 1px solid var(--line); border-right: 0; border-radius: 9px 0 0 9px;
+    background: #ece7db; font-size: 15px; font-weight: 700; color: var(--muted);
+  }
+  .phonewrap input { border-radius: 0 9px 9px 0; }
+  .agree { display: flex; gap: 10px; align-items: flex-start; margin-top: 14px; cursor: pointer; }
+  .agree input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--olive); flex: none; }
+  .agree span { font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+  .agree a { color: var(--olive); }
+  .agree.optin { margin-top: 10px; padding: 12px 13px; background: var(--white);
+    border: 1px solid var(--line); border-radius: 9px; }
   .tile {
     display: grid; place-items: center; width: 64px; height: 64px; border-radius: 12px;
     background: #e7eadd; margin-bottom: 18px;
@@ -185,13 +198,23 @@
       <label for="email">Work email</label>
       <input id="email" autocomplete="email" inputmode="email" placeholder="you@company.com">
       <label for="phone">Phone</label>
-      <input id="phone" autocomplete="tel" inputmode="tel" placeholder="(555) 555-0100">
+      <div class="phonewrap">
+        <span class="cc">+1</span>
+        <input id="phone" autocomplete="tel" inputmode="tel" placeholder="(555) 555-0100">
+      </div>
+      <label class="agree">
+        <input type="checkbox" id="terms">
+        <span>I agree to the <a href="https://approve.ezchangeorders.com/terms.html">Terms</a> and
+          <a href="https://approve.ezchangeorders.com/privacy.html">Privacy Policy</a>.</span>
+      </label>
+      <label class="agree optin">
+        <input type="checkbox" id="optin">
+        <span>Send me product updates and field tips by email or text. Optional — not a
+          condition of anything.</span>
+      </label>
       <button class="go" id="go" disabled>Get started</button>
       <div class="hint">One email link. No password to invent or remember.</div>
       <div class="err" id="err"></div>
-      <p class="fine">By creating an account you agree to the
-        <a href="https://approve.ezchangeorders.com/terms.html">terms</a> and
-        <a href="https://approve.ezchangeorders.com/privacy.html">privacy policy</a>.</p>
     </div>
 
     <!-- ── link sent ── -->
@@ -247,10 +270,18 @@ const emailOk = () => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($('email').value.trim())
 // The same four answers the app's own onboarding collects (hadar, 2026-09-08:
 // "registration match the mobile experience -- full name, company, email and
 // phone number"). Phone: ten digits somewhere in whatever punctuation they type.
-const phoneOk = () => ($('phone').value.replace(/\D/g, '').length >= 10);
+const phoneOk = () => ($('phone').value.replace(/\D/g, '').length === 10);
 const ready = () => $('name').value.trim().length >= 2
-  && $('company').value.trim().length >= 2 && emailOk() && phoneOk();
+  && $('company').value.trim().length >= 2 && emailOk() && phoneOk()
+  && $('terms').checked;
+// US format as they type: (415) 443-2321. Ten digits; the +1 lives in the prefix chip.
+$('phone').addEventListener('input', () => {
+  const d = $('phone').value.replace(/\D/g, '').slice(0, 10);
+  $('phone').value = d.length > 6 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`
+    : d.length > 3 ? `(${d.slice(0,3)}) ${d.slice(3)}` : d;
+});
 for (const id of ['name', 'company', 'email', 'phone']) $(id).addEventListener('input', () => { $('go').disabled = !ready(); });
+$('terms').addEventListener('change', () => { $('go').disabled = !ready(); });
 
 const fail = (msg) => { $('err').textContent = msg; $('err').style.display = 'block'; };
 
@@ -282,7 +313,9 @@ $('go').addEventListener('click', async () => {
       data: {
         full_name: $('name').value.trim(),
         company_name: $('company').value.trim(),
-        phone: $('phone').value.replace(/[^\d+]/g, ''),
+        phone: '+1' + $('phone').value.replace(/\D/g, ''),
+        marketing_opt_in: $('optin').checked,
+        terms_accepted_at: new Date().toISOString(),
         registered_via: 'web',
       },
     },
