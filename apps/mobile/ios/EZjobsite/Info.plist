@@ -33,7 +33,7 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>51</string>
+    <string>52</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>LSMinimumSystemVersion</key>
@@ -60,7 +60,7 @@
     <key>NSMicrophoneUsageDescription</key>
     <string>EZjobsite records jobsite decisions so nothing gets lost.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>EZjobsite attaches photos you pick to the decision they belong to.</string>
+    <string>EZChangeOrders attaches photos from your library to a change order as evidence — for example, adding a picture of a cracked pipe to the change order that bills the repair, so your client sees exactly what they are approving. Photos stay with that change order and are not used for anything else.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>EZjobsite turns what you said into text on this phone, so your notes fill themselves in.</string>
     <key>RCTNewArchEnabled</key>

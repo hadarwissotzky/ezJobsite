@@ -1016,9 +1016,15 @@ export default function App() {
         if (!live) return;
         if (!chk || !chk.isAvailable) { setOtaSplash(null); return; }
         setOtaSplash('updating');
-        const got = await capped(Updates.fetchUpdateAsync(), 20_000);
-        if (!live) return;
-        if (got && got.isNew) { await Updates.reloadAsync(); return; }
+        // FETCH ONLY, NEVER RELOAD AT LAUNCH (hadar 2026-09-09: build 51 crash-
+        // looped on open). reloadAsync during the first render races expo-updates'
+        // own startup on a REAL device and aborts natively on the
+        // errorRecoveryQueue - a loop that never lets the app open, and one that
+        // NO js try/catch can catch because the abort is native. The fetched
+        // update applies on the next natural cold start, expo's documented-safe
+        // default. The splash still shows the download so the wait is honest; it
+        // just does not force the swap.
+        await capped(Updates.fetchUpdateAsync(), 20_000);
         setOtaSplash(null);
       } catch { if (live) setOtaSplash(null); }
     })();
