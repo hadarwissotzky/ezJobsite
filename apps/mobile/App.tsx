@@ -27,6 +27,7 @@ import { GuidedCoach } from './src/ui/guidedcoach';
 import { StepDone, StepDraft, StepGaps, StepReview, StepTranscript,
          type ScheduleChoice } from './src/ui/guidedsteps';
 import { COACH_PROMPTS } from './src/guidedflow';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthScreen } from './src/ui/authscreen';
 import type { Session } from '@supabase/supabase-js';
 import { readCapture,
@@ -1284,6 +1285,24 @@ export default function App() {
           quickActionNonce.current = n;
         }
         setPendingCapture(true);
+        return;
+      }
+      if (/auth-callback/.test(url)) {
+        /**
+         * A LINK THAT DOES NOT SIGN IN STILL LANDS SOMEWHERE (hadar 2026-09-08).
+         * Spent and expired links open the app too; swallowing them left the
+         * auth screen on the phone tab, blank. Route the miss to the email form
+         * with the last requested address filled in.
+         */
+        void connector.sessionFromUrl(url)
+          .then((got) => {
+            if (!got) throw new Error('no credentials in link');
+          })
+          .catch(async () => {
+            let last: string | null = null;
+            try { last = await AsyncStorage.getItem('last_auth_email'); } catch { /* fine */ }
+            setEmailArrival({ email: last ?? '', n: Date.now() });
+          });
         return;
       }
       connector.sessionFromUrl(url).catch(() => { /* not a sign-in link */ });
@@ -5202,6 +5221,9 @@ const checkClientMessages = async () => {
    * but nothing happens" — where the code HAD verified and `claimDevice` then refused
    * the handover and signed him back out, silently.
    */
+  /** An emailed sign-in link arrived but yielded no session - see the deep-link
+   *  handler. Flips AuthScreen to the email form, prefilled. */
+  const [emailArrival, setEmailArrival] = React.useState<{ email: string; n: number } | null>(null);
   const [authNotice, setAuthNotice] = React.useState<
     null | { title: string; detail?: string | null }>(null);
   /** Rows queued in every owned outbox + open drafts, refreshed when the drawer opens.
@@ -7749,6 +7771,7 @@ const checkClientMessages = async () => {
         <AuthScreen
           connector={connector}
           notice={authNotice}
+          emailArrival={emailArrival}
           initialSignUp={authIntent !== 'login'}
           onReplayIntro={() => { void forgetSeenOnboarding(); setSeen(false); }}
         />

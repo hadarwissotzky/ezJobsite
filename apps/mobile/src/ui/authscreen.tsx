@@ -27,6 +27,7 @@
  * when sending versus verifying, and a failed send once rendered as "that code isn't
  * right" on a screen where no code had been typed.
  */
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React from 'react';
 import {
   ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView,
@@ -75,7 +76,7 @@ function classify(e: any, phase: 'send' | 'verify' | 'oauth'): Fail {
 
 const emailLooksReal = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
 
-export function AuthScreen({ connector, initialSignUp = false, notice, onReplayIntro }: {
+export function AuthScreen({ connector, initialSignUp = false, notice, emailArrival, onReplayIntro }: {
   connector: SupabaseConnector;
   /**
    * A REFUSAL THAT HAPPENED AFTER THE CODE WAS ACCEPTED — shown here because there
@@ -94,6 +95,13 @@ export function AuthScreen({ connector, initialSignUp = false, notice, onReplayI
    * take, and here is why.
    */
   notice?: { title: string; detail?: string | null } | null;
+  /**
+   * An emailed sign-in link opened the app but produced NO session (spent,
+   * expired, malformed). The screen flips to the email form and prefills the
+   * address so recovery is one tap (hadar 2026-09-08). `n` retriggers on every
+   * arrival - the screen may already be mounted when the link lands.
+   */
+  emailArrival?: { email: string; n: number } | null;
   /**
    * Which form to open on. The landing page has two buttons — "Get started" and
    * "Log in" — and before this prop existed they were two labels for one destination:
@@ -133,6 +141,13 @@ export function AuthScreen({ connector, initialSignUp = false, notice, onReplayI
     return () => clearInterval(id);
   }, [step, left]);
 
+  React.useEffect(() => {
+    if (!emailArrival) return;
+    setSignUp(false); setMethod('email'); setStep('form');
+    if (emailArrival.email) setEmail(emailArrival.email);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailArrival?.n]);
+
   const reset = () => setFail(null);
   /**
    * PINNED, not derived (hadar 2026-09-08: build 51's email link landed on the
@@ -155,6 +170,7 @@ export function AuthScreen({ connector, initialSignUp = false, notice, onReplayI
 
   const sendLink = async () => {
     if (!emailOk || busy) return;
+    void AsyncStorage.setItem('last_auth_email', email.trim()).catch(() => {});
     setBusy(true); reset();
     try {
       await connector.sendEmailLink(email.trim(), redirectTo);
@@ -200,6 +216,7 @@ export function AuthScreen({ connector, initialSignUp = false, notice, onReplayI
   // when they land. One path, so there is nothing extra to keep working.
   const startSignUp = async () => {
     if (!signUpOk || busy) return;
+    void AsyncStorage.setItem('last_auth_email', email.trim()).catch(() => {});
     setBusy(true); reset();
     try {
       await connector.sendEmailLink(email.trim(), redirectTo);
