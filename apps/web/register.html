@@ -280,6 +280,7 @@
       </label>
       <button class="go" id="fGo" disabled>Continue</button>
       <div class="err" id="fErr"></div>
+      <p class="fine" style="text-align:center"><a href="#" id="fReset">Not you? Start over</a></p>
     </div>
 
     <!-- ── about your business ── -->
@@ -301,6 +302,7 @@
       </select>
       <button class="go" id="aGo" disabled>Continue</button>
       <div class="err" id="aErr"></div>
+      <p class="fine" style="text-align:center"><a href="#" id="aReset">Not you? Start over</a></p>
     </div>
 
     <!-- ── how you start ── -->
@@ -527,15 +529,28 @@ const choosePlan = async (choice, thenHref) => {
   if (thenHref) { location.href = thenHref; return; }
   route(data?.user ?? (await supabase.auth.getUser()).data.user);
 };
+// Start-over escape: sign out and return to the form. Never let a signed-in but
+// wrong/incomplete visitor be trapped mid-onboarding (hadar 2026-09-09).
+const startOver = async (e) => { e.preventDefault(); try { await supabase.auth.signOut(); } catch {} location.reload(); };
+$('fReset').addEventListener('click', startOver);
+$('aReset').addEventListener('click', startOver);
 $('planSkip').addEventListener('click', (e) => { e.preventDefault(); void choosePlan('skipped', null); });
 $('planFree').addEventListener('click', () => void choosePlan('free', null));
 $('planPayg').addEventListener('click', () => void choosePlan('payg', 'https://approve.ezchangeorders.com/buy.html'));
 $('planCore').addEventListener('click', () => void choosePlan('core', 'https://approve.ezchangeorders.com/buy.html'));
 
-// LAST, after every handler above exists: route the already-signed-in visitor.
+// LAST, after every handler above exists: decide the opening screen.
+//
+// getUser() VALIDATES against the server (unlike getSession, which trusts a
+// possibly-revoked JWT still in localStorage). hadar 2026-09-09: a create-account
+// visit skipped the form and dropped onto "About your business" because the
+// browser held a stale session for a deleted account. A dead/foreign session is
+// signed out and the form shows; a live incomplete account resumes where it left
+// off; a brand-new visitor with no session sees the form.
 {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session) route(session.user);
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) { try { await supabase.auth.signOut(); } catch {} show('form'); }
+  else route(user);
 }
 </script>
 </body>
