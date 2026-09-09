@@ -93,7 +93,10 @@ BEGIN
                AND t.table_schema='public' AND t.table_type='BASE TABLE'
              WHERE c.table_schema='public' AND c.column_name=pair.col
     LOOP
-      EXECUTE format('DELETE FROM public.%I WHERE %I IN (%s)',
+      -- Cast the column to text: owner_id/id columns are uuid on some tables
+      -- and text on others, and the id sets are text — %I::text IN (...) matches
+      -- both without a per-table type dance.
+      EXECUTE format('DELETE FROM public.%I WHERE %I::text IN (%s)',
                      r.table_name, pair.col, pair.src);
     END LOOP;
   END LOOP;
