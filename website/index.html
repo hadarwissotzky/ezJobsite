@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="site-header">
@@ -23,12 +23,12 @@
       <a href="#how">How it works</a>
       <a href="#why">Why it pays</a>
       <a href="#language">Your language</a>
-      <a href="#questions">Questions</a>
+      <a href="#download">Get the app</a>
       <div class="language-toggle" role="group" aria-label="Website language">
         <button class="lang-button active" type="button" data-lang="en" aria-pressed="true">EN</button>
         <button class="lang-button" type="button" data-lang="es" aria-pressed="false">ES</button>
       </div>
-      <a class="nav-cta" href="#download">Download the app</a>
+      <a class="nav-cta" href="https://app.ezchangeorders.com/">Create account</a>
     </nav>
   </header>
 
@@ -36,28 +36,67 @@
     <section class="hero">
       <div class="hero-copy">
         <p class="eyebrow">Built for small residential contractors</p>
-        <h1>DON’T LET THE CHANGE <span>GET LOST.</span></h1>
-        <p class="hero-lede">Record the client conversation, add field notes, and take as many photos as you need. EZChangeOrder turns it all into a change order you can review and send for approval.</p>
+        <h1>DON’T DO EXTRA WORK ON A <span>VERBAL YES.</span></h1>
+        <p class="hero-lede">Capture the request while you’re standing on the job. Price it, send it, and get approval before the work starts.</p>
         <div class="hero-actions">
-          <a class="button button-dark" href="#download">Download the app</a>
+          <a class="button button-dark" href="https://app.ezchangeorders.com/">Create your account</a>
           <a class="text-link" href="#how">See how it works <span aria-hidden="true">↓</span></a>
         </div>
         <div class="promise" aria-label="Key benefits">
-          <span><b>1</b> Capture</span>
-          <span><b>2</b> Build</span>
-          <span><b>3</b> Approve</span>
+          <span><b>1</b> Record</span>
+          <span><b>2</b> Review</span>
+          <span><b>3</b> Send</span>
         </div>
       </div>
       <div class="hero-photo">
-        <img src="assets/hero-verbal-yes.png" alt="Residential contractor documenting a change on his phone at an open-wall remodel">
+        <img src="/assets/hero-verbal-yes.png" alt="Residential contractor documenting a change on his phone at an open-wall remodel">
         <div class="approval-chip"><span>✓</span> Approved · $3,850</div>
       </div>
     </section>
 
-    <section class="truth-strip" aria-label="The problem EZChangeOrder solves">
-      <p>Conversation + notes + photos</p>
-      <span class="strip-arrow" aria-hidden="true">→</span>
-      <p>One complete change order.</p>
+    <section class="simple-solution" aria-labelledby="simple-solution-title">
+      <div class="simple-solution-kicker">
+        <span>VOICE FIRST</span>
+        <span>SPANISH FIRST</span>
+        <span>NO TRAINING</span>
+      </div>
+      <p class="eyebrow light">The simple jobsite solution</p>
+      <h2 id="simple-solution-title">IF YOU CAN SEND A VOICE MESSAGE, YOU CAN USE EZCHANGEORDER.</h2>
+      <div class="simple-solution-bottom">
+        <p class="simple-bilingual">HABLA EN ESPAÑOL.<br><strong>SEND IT IN ENGLISH.</strong></p>
+        <p>Record the client conversation, add your notes and photos, and review what we build. No complicated forms. No new software to learn.</p>
+      </div>
+    </section>
+
+    <section class="value-section section" id="why">
+      <div class="value-intro">
+        <p class="eyebrow">The value</p>
+        <h2>KEEP MORE OF THE WORK YOU ALREADY DO.</h2>
+        <p>Small changes are still real labor, real materials, and real money. EZChangeOrder helps you turn what happened in the field into what gets approved and paid.</p>
+      </div>
+      <div class="value-grid">
+        <article class="value-card value-card-dark">
+          <span>01</span>
+          <h3>GET PAID FOR THE SMALL STUFF.</h3>
+          <p>Every extra outlet, trim run, and return trip has a price. Capture it before it disappears into the original job.</p>
+        </article>
+        <article class="value-card">
+          <span>02</span>
+          <h3>GET THE YES BEFORE THE WORK.</h3>
+          <p>Put the scope, price, and timing in front of the client or GC while the request is still fresh.</p>
+        </article>
+        <article class="value-card">
+          <span>03</span>
+          <h3>STOP REBUILDING THE STORY.</h3>
+          <p>When billing day comes, you are not searching texts or arguing from memory. The field record is already there.</p>
+        </article>
+        <article class="value-card value-card-accent">
+          <span>04</span>
+          <h3>GET YOUR EVENINGS BACK.</h3>
+          <p>Turn jobsite details into a draft before they become more office work after dinner.</p>
+        </article>
+      </div>
+      <p class="value-summary"><strong>MORE CAPTURED WORK.</strong><strong>FASTER DECISIONS.</strong><strong>FEWER PAYMENT ARGUMENTS.</strong><strong>LESS ADMIN.</strong></p>
     </section>
 
     <section class="workflow section" id="how">
@@ -70,7 +109,7 @@
       </div>
       <div class="workflow-layout">
         <div class="workflow-image">
-          <img src="assets/voice-capture.png" alt="Contractor recording an unexpected plumbing change while the app prepares a draft summary">
+          <img src="/assets/voice-capture.png" alt="Contractor recording an unexpected plumbing change while the app prepares a draft summary">
         </div>
         <ol class="steps">
           <li>
@@ -89,9 +128,21 @@
       </div>
     </section>
 
+    <section class="client-section section">
+      <div class="client-copy">
+        <p class="eyebrow">Clear for you. Clear for them.</p>
+        <h2>THE CLIENT GETS A PORTAL. YOU GET A CLEAR APPROVAL.</h2>
+        <p>Every change order opens in a simple client portal with the reason for the change, scope, exclusions, photos, price, schedule impact, questions, and approval. The client does not need to download an app.</p>
+        <div class="lock-note"><span aria-hidden="true">▣</span> Nothing is final until you send it.</div>
+      </div>
+      <div class="client-image">
+        <img src="/assets/change-order-flow.png" alt="Contractor using EZChangeOrder beside a clear priced change-order document">
+      </div>
+    </section>
+
     <section class="field-conversation section" aria-labelledby="field-conversation-title">
       <div class="field-conversation-photo">
-        <img src="assets/landscaping-conversation.webp" alt="Landscaping contractor recording a homeowner's requested change during a backyard conversation">
+        <img src="/assets/landscaping-conversation.webp" alt="Landscaping contractor recording a homeowner's requested change during a backyard conversation">
         <div class="field-recording" aria-label="Client conversation recording in progress">
           <span class="recording-dot" aria-hidden="true"></span>
           <div><strong>Client conversation</strong><small>Recording · 00:18</small></div>
@@ -101,13 +152,13 @@
       <div class="field-conversation-copy">
         <p class="eyebrow">The request happens on site</p>
         <h2 id="field-conversation-title">CAPTURE THE CONVERSATION WHILE YOU’RE STANDING THERE.</h2>
-        <p>The homeowner points to one more thing. Record the conversation, add a quick note, and take photos before you leave. We keep the whole request together and turn it into a change order.</p>
+        <p>The homeowner points to one more thing. Record it, add a note and photos, and keep the whole request together before you leave.</p>
         <blockquote>“Can you move this bed over and add pavers here?”</blockquote>
         <p class="permission-note">Record with permission where required.</p>
       </div>
     </section>
 
-    <section class="money-section" id="why">
+    <section class="money-section">
       <div class="money-copy">
         <p class="eyebrow light">Small requests add up</p>
         <h2>NO REQUEST IS TOO SMALL TO CAPTURE.</h2>
@@ -138,7 +189,7 @@
       <div class="subcontractor-copy">
         <p class="eyebrow">Built for subcontractors, too</p>
         <h2 id="subcontractor-title">THE WALL CLOSES. YOUR PROOF SHOULDN’T.</h2>
-        <p>The GC asks you to reroute a circuit or add another outlet after rough-in. You do the work now, but weeks later the direction is disputed or the approval is still “coming.” Record the conversation, notes, and photos before the work gets covered, then send a clear change order for approval.</p>
+        <p>The GC asks for a reroute after rough-in. Capture the direction before drywall covers the work, then send the change order for approval.</p>
         <div class="sub-pain-card">
           <span>THE FIELD PROMISE</span>
           <blockquote>“Do it now. We’ll sort out the change order later.”</blockquote>
@@ -146,7 +197,7 @@
         </div>
       </div>
       <div class="subcontractor-photo">
-        <img src="assets/electrician-gc-conversation.webp" alt="Electrician subcontractor recording a general contractor's added direction before an open wall is closed">
+        <img src="/assets/electrician-gc-conversation.webp" alt="Electrician subcontractor recording a general contractor's added direction before an open wall is closed">
         <div class="scope-capture-card">
           <span>EXTRA ELECTRICAL WORK</span>
           <strong>Captured before drywall</strong>
@@ -190,34 +241,22 @@
       <div class="shorts-grid">
         <article class="short-card">
           <video autoplay muted loop playsinline preload="metadata" aria-label="A verbal yes can become free work">
-            <source src="videos/verbal-yes.mp4" type="video/mp4">
+            <source src="/videos/verbal-yes.mp4" type="video/mp4">
           </video>
           <div><span>01 · NO REQUEST IS TOO SMALL</span><p>Capture every “while you’re here,” before the small asks add up.</p></div>
         </article>
         <article class="short-card">
           <video autoplay muted loop playsinline preload="metadata" aria-label="Speak Spanish and send a clear change order in English">
-            <source src="videos/native-language.mp4" type="video/mp4">
+            <source src="/videos/native-language.mp4" type="video/mp4">
           </video>
           <div><span>02 · USE YOUR LANGUAGE</span><p>Speak naturally. Send your client clear English.</p></div>
         </article>
         <article class="short-card portal-short">
           <video autoplay muted loop playsinline preload="metadata" aria-label="The homeowner client portal for reviewing a change order">
-            <source src="videos/client-portal.mp4" type="video/mp4">
+            <source src="/videos/client-portal.mp4" type="video/mp4">
           </video>
           <div><span>03 · THE CLIENT PORTAL</span><p>Your client reviews the scope, photos, price, and approval in one place.</p></div>
         </article>
-      </div>
-    </section>
-
-    <section class="client-section section">
-      <div class="client-copy">
-        <p class="eyebrow">Clear for you. Clear for them.</p>
-        <h2>THE CLIENT GETS A PORTAL. YOU GET A CLEAR APPROVAL.</h2>
-        <p>Every change order opens in a simple client portal with the reason for the change, scope, exclusions, photos, price, schedule impact, questions, and approval. The client does not need to download an app.</p>
-        <div class="lock-note"><span aria-hidden="true">▣</span> Nothing is final until you send it.</div>
-      </div>
-      <div class="client-image">
-        <img src="assets/change-order-flow.png" alt="Contractor using EZChangeOrder beside a clear priced change-order document">
       </div>
     </section>
 
@@ -230,13 +269,14 @@
           <span class="apple-mark" aria-hidden="true"></span>
           <span><small>GET THE APP FOR</small><strong>iPhone + iPad</strong></span>
         </a>
+        <a class="download-register" href="https://app.ezchangeorders.com/">Create your account →</a>
         <p class="download-note">Tap above and we’ll send you the download link.</p>
       </div>
       <div class="phone-stage" aria-label="EZChangeOrder app preview">
         <div class="phone-shadow"></div>
         <div class="download-phone">
           <div class="phone-speaker"></div>
-          <img src="assets/app-onboarding.png" alt="EZChangeOrder app showing the simple Record, Review, and Send workflow">
+          <img src="/assets/app-onboarding.png" alt="EZChangeOrder app showing the simple Record, Review, and Send workflow">
         </div>
         <div class="site-card site-card-one"><b>1</b><span>Record it<br><small>on the job</small></span></div>
         <div class="site-card site-card-two"><b>✓</b><span>Approved<br><small>in writing</small></span></div>
@@ -268,15 +308,15 @@
       <p class="eyebrow light">Never leave a change unaccounted for</p>
       <h2>CAPTURE EVERY CHANGE.<br>BIG OR SMALL.</h2>
       <p>We turn the field conversation, your notes, and your photos into a change order ready to send.</p>
-      <a class="button button-light" href="#download">Download the app</a>
+      <a class="button button-light" href="https://app.ezchangeorders.com/">Create your account</a>
     </section>
   </main>
 
   <footer>
     <a class="brand footer-brand" href="#top"><span class="brand-mark">EZ</span><span>ChangeOrder</span></a>
     <p>EZChangeOrder is a Hilo Ventures Studio product.</p>
-    <p>© 2026 Hilo Ventures Studio</p>
+    <p><a href="https://app.ezchangeorders.com/">Create account</a> · © 2026 Hilo Ventures Studio</p>
   </footer>
-  <script src="script.js"></script>
+  <script src="/script.js"></script>
 </body>
 </html>
