@@ -415,30 +415,25 @@ const oauth = (provider) => async () => {
 $('google').addEventListener('click', oauth('google'));
 $('apple').addEventListener('click', oauth('apple'));
 
-$('go').addEventListener('click', async () => {
+/**
+ * NOT A SEND (hadar 2026-09-08: "again just got [check your email] after the
+ * personal info page"). The reference flow asks everything BEFORE verifying;
+ * the form now stashes its answers and advances to About your business. The
+ * one OTP email goes out at the END, carrying every answer as metadata.
+ */
+let pending = null;
+$('go').addEventListener('click', () => {
   if (!ready()) return;
-  $('go').disabled = true; $('err').style.display = 'none';
-  const email = $('email').value.trim();
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: location.origin + location.pathname,
-      shouldCreateUser: true,
-      // Everything the app's onboarding would ask rides as metadata, so a web
-      // registrant's first sign-in can prefill instead of re-asking.
-      data: {
-        full_name: $('name').value.trim(),
-        company_name: $('company').value.trim(),
-        phone: '+1' + $('phone').value.replace(/\D/g, ''),
-        marketing_opt_in: $('optin').checked,
-        terms_accepted_at: new Date().toISOString(),
-        registered_via: 'web',
-      },
-    },
-  });
-  if (error) { fail('Could not send the link — ' + (error.message ?? 'try again in a moment.')); $('go').disabled = false; return; }
-  $('sentTo').textContent = 'We sent a sign-in link to ' + email + '.';
-  show('sent');
+  pending = {
+    email: $('email').value.trim(),
+    full_name: $('name').value.trim(),
+    company_name: $('company').value.trim(),
+    phone: '+1' + $('phone').value.replace(/\D/g, ''),
+    marketing_opt_in: $('optin').checked,
+    terms_accepted_at: new Date().toISOString(),
+    registered_via: 'web',
+  };
+  show('about');
 });
 
 // ── finish-your-profile (the OAuth path's first page) ───────────────────────
@@ -493,17 +488,36 @@ pick($('tradeChips'), TRADES, (v) => { aTrade = v; });
 pick($('crewSeg'), CREWS, (v) => { aCrew = v; });
 $('aGo').addEventListener('click', async () => {
   if (!aTrade || !aCrew) return;
+  const answers = { trade: aTrade, crew_size: aCrew, heard_about: $('heard').value || null };
+  // Pre-auth registration: hold the answers, keep walking. Signed-in visitor
+  // (OAuth, or a returner the router sent here): save to the account now.
+  if (pending) { Object.assign(pending, answers); show('plans'); return; }
   $('aGo').disabled = true;
-  const { data, error } = await supabase.auth.updateUser({ data: {
-    trade: aTrade, crew_size: aCrew, heard_about: $('heard').value || null,
-  }});
+  const { data, error } = await supabase.auth.updateUser({ data: answers });
   if (error) { $('aErr').textContent = 'Could not save — ' + error.message; $('aErr').style.display = 'block'; $('aGo').disabled = false; return; }
+  $('aGo').disabled = false;
   route(data.user);
 });
 
 // ── how you start. The paid buttons record the intent, then open the purchase
 // page - the same RevenueCat surface the app links out to. ──────────────────
 const choosePlan = async (choice, thenHref) => {
+  if (pending) {
+    // Pre-auth: THIS is where the one email finally goes out, carrying every
+    // answer from all three screens. A paid choice still registers - the
+    // purchase itself happens signed-in, on the purchase surface.
+    const { email, ...data } = pending;
+    data.plan_choice = choice;
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: location.origin + location.pathname,
+        shouldCreateUser: true, data },
+    });
+    if (error) { fail('Could not send the link — ' + (error.message ?? 'try again in a moment.')); show('form'); $('go').disabled = false; return; }
+    $('sentTo').textContent = 'We sent a sign-in link to ' + email + '.';
+    show('sent');
+    return;
+  }
   const { data } = await supabase.auth.updateUser({ data: { plan_choice: choice } });
   if (thenHref) { location.href = thenHref; return; }
   route(data?.user ?? (await supabase.auth.getUser()).data.user);
