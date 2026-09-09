@@ -49,3 +49,4 @@ apps/mobile/.shot.cjs
 
 # per-session AI tool state (codex session ids etc.)
 .context/
+.keys/
