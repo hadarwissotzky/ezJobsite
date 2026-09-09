@@ -114,6 +114,64 @@ export type ScheduleChoice = 'none' | 'adds' | 'tbd';
  * because an unpriced change order cannot be sent — but the SCREEN never refuses. It
  * disables the button and says why, which is a different thing from an error.
  */
+/* ─────────────────────────────── 6b — the draft ────────────────────────────── */
+
+/**
+ * The reveal (hadar 2026-09-08: "this is where the wow factor is"). The system
+ * shows what it BUILT from the recording - title, written scope, the price it
+ * heard - before asking the user for anything. Same shape as every screen in
+ * this flow: lead with what was produced, accept button last.
+ *
+ * The pipeline can still be writing when this mounts; App.tsx's 7-second draft
+ * poll refreshes the record underneath, so the scope text fills in live. The
+ * screen says so instead of pretending, and never blocks the Continue.
+ */
+export function StepDraft({ title, scope, priceMain, priceNote, schedule, onNext }: {
+  title: string;
+  /** The AI-written client-facing scope; null while the pipeline is still writing. */
+  scope: string | null;
+  /** A confirmed amount, rendered big. */
+  priceMain: string | null;
+  /** The unconfirmed alternative ("we heard $2,500 - you'll confirm it next"). */
+  priceNote: string | null;
+  schedule: string | null;
+  onNext: () => void;
+}) {
+  return (
+    <Page kicker="gs.d.kicker">
+      <Text style={st.lede}>{T('gs.d.lede')}</Text>
+      <View style={st.card}>
+        <Text style={st.rowLab}>{T('gs.r.co')}</Text>
+        <Text style={st.rowVal}>{title}</Text>
+        <View style={st.hr} />
+        <Text style={st.rowLab}>{T('gs.d.scope')}</Text>
+        {scope
+          ? <Text style={st.rowSub}>{scope}</Text>
+          : <Text style={st.draftBuilding}>{T('gs.d.building')}</Text>}
+        <View style={st.hr} />
+        <View style={st.money2}>
+          <View style={{ flex: 1 }}>
+            <Text style={st.rowLab}>{T('gs.r.price')}</Text>
+            {priceMain
+              ? <Text style={st.priceBig}>{priceMain}</Text>
+              : <Text style={st.rowSub}>{priceNote ?? T('gs.d.noPrice')}</Text>}
+          </View>
+          {!!schedule && (
+            <View style={{ flex: 1 }}>
+              <Text style={st.rowLab}>{T('gs.r.sched')}</Text>
+              <Text style={st.rowVal}>{schedule}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+      <Pressable style={st.cta} onPress={onNext} accessibilityRole="button">
+        <Text style={st.ctaT}>{T('gs.d.next')}</Text>
+        <Icon name="chevRight" size={18} color="#141210" />
+      </Pressable>
+    </Page>
+  );
+}
+
 export function StepGaps({
   amountText, onAmount, schedule, onSchedule, days, onDays, notes, onNotes, onNext,
   priceAlreadyKnown,
@@ -330,6 +388,7 @@ const st = StyleSheet.create({
   rowLab: { fontFamily: 'Inter_700Bold', fontSize: 11, color: '#7A736B',
     textTransform: 'uppercase', letterSpacing: 0.7 },
   rowVal: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: INK, marginTop: 4 },
+  draftBuilding: { fontSize: 16, fontStyle: 'italic', color: '#8a7a55', lineHeight: 23 },
   rowSub: { fontFamily: 'Inter_400Regular', fontSize: 13.5, color: '#5E5852', marginTop: 2 },
   hr: { height: 1, backgroundColor: '#EFE9E1', marginVertical: 14 },
   money2: { flexDirection: 'row', gap: 14 },

@@ -24,7 +24,7 @@ import { RecordConsent } from './src/ui/recordconsent';
 import { SETUP_ART, StepHowItWorks, StepLanguage, StepProfile, type Work } from './src/ui/setupflow';
 import { FirstExtra } from './src/ui/firstextra';
 import { GuidedCoach } from './src/ui/guidedcoach';
-import { StepDone, StepGaps, StepReview, StepTranscript,
+import { StepDone, StepDraft, StepGaps, StepReview, StepTranscript,
          type ScheduleChoice } from './src/ui/guidedsteps';
 import { COACH_PROMPTS } from './src/guidedflow';
 import { AuthScreen } from './src/ui/authscreen';
@@ -1227,7 +1227,7 @@ export default function App() {
    */
   const [guidedOn, setGuidedOn] = React.useState(false);
   /** Step 5/7/9/10's own screen, once the recording exists. Null = not in them. */
-  const [gStep, setGStep] = React.useState<null | 'transcript' | 'gaps' | 'review' | 'done'>(null);
+  const [gStep, setGStep] = React.useState<null | 'transcript' | 'draft' | 'gaps' | 'review' | 'done'>(null);
   const [gTranscript, setGTranscript] = React.useState<string | null>(null);
   const [gAmount, setGAmount] = React.useState('');
   const [gSched, setGSched] = React.useState<ScheduleChoice | null>(null);
@@ -10171,6 +10171,27 @@ const checkClientMessages = async () => {
           playing={gPlaying}
           onPlay={() => setGPlaying((v) => !v)}
           onEdit={() => { setGStep(null); openDetail('scope'); }}
+          onNext={() => setGStep('draft')}
+        />
+        </>
+      );
+    }
+    if (gStep === 'draft') {
+      // The reveal (hadar 2026-09-08). `hasWrittenScope` is the same signal the
+      // 7s draft poll stops on, so "built" here means the pipeline truly wrote
+      // the client-facing scope - not that a placeholder exists.
+      const built = hasWrittenScope(record.scopeOfWork, record.title);
+      return (
+        <>
+        {ackEl}
+        <StepDraft
+          title={record.title}
+          scope={built ? record.scopeOfWork : null}
+          priceMain={record.priced ? record.amount : null}
+          priceNote={record.priceHeard
+            ? T({ k: 'gs.d.heard', p: { amount: record.priceHeard } } as any)
+            : null}
+          schedule={scheduleSentence(co?.schedule_effect ?? null, co?.schedule_days ?? null)}
           onNext={() => setGStep('gaps')}
         />
         </>
