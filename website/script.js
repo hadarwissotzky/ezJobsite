@@ -50,6 +50,7 @@ const spanish = new Map(Object.entries({
   'VOICE FIRST': 'PRIMERO LA VOZ', 'SPANISH FIRST': 'PRIMERO EL ESPAÑOL', 'NO TRAINING': 'SIN CAPACITACIÓN',
   'The simple jobsite solution': 'La solución sencilla para la obra',
   'IF YOU CAN SEND A VOICE MESSAGE, YOU CAN USE EZCHANGEORDER.': 'SI PUEDES ENVIAR UN MENSAJE DE VOZ, PUEDES USAR EZCHANGEORDER.',
+  'IF YOU CAN SEND A VOICE MESSAGE, YOU CAN USE': 'SI PUEDES ENVIAR UN MENSAJE DE VOZ, PUEDES USAR',
   'HABLA EN ESPAÑOL.': 'HABLA EN ESPAÑOL.', 'SEND IT IN ENGLISH.': 'ENVÍALO EN INGLÉS.',
   'Record the client conversation, add your notes and photos, and review what we build. No complicated forms. No new software to learn.': 'Graba la conversación con el cliente, agrega tus notas y fotos, y revisa lo que creamos. Sin formularios complicados. Sin programas nuevos que aprender.',
   'Talk first. Edit after.': 'Habla primero. Edita después.',
