@@ -146,6 +146,39 @@
   .card {
     background: var(--white); border: 1px solid var(--line); border-radius: 13px; padding: 22px 20px;
   }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    padding: 11px 16px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--white); font-size: 15px; font-weight: 600; color: #343936;
+    cursor: pointer; font-family: inherit;
+  }
+  .chip.on { border: 1.5px solid var(--olive-dark); background: #e7eadd;
+    font-weight: 700; color: var(--olive-dark); }
+  .seg { display: flex; gap: 8px; }
+  .seg .chip { flex: 1; border-radius: 9px; text-align: center; min-height: 52px;
+    display: grid; place-items: center; padding: 0 8px; }
+  select.heard {
+    width: 100%; font: inherit; font-size: 16px; padding: 13px 14px;
+    border: 1px solid var(--line); border-radius: 9px; background: var(--white);
+    color: var(--ink); appearance: auto;
+  }
+  .plan {
+    background: var(--white); border: 1px solid var(--line); border-radius: 13px;
+    padding: 18px; margin-top: 12px;
+  }
+  .plan.star { border: 2px solid var(--olive-dark); box-shadow: 6px 7px 0 var(--mustard); }
+  .plan .top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .plan .nm { font-family: "Archivo Black", sans-serif; font-size: 17px; text-transform: uppercase; letter-spacing: -0.02em; }
+  .plan .pr { font-size: 14px; color: var(--muted); font-weight: 600; text-align: right; }
+  .plan p { margin: 8px 0 0; font-size: 14px; color: var(--muted); line-height: 1.5; }
+  .plan .act {
+    margin-top: 12px; display: grid; place-items: center; min-height: 48px;
+    border-radius: 9px; font-size: 15px; font-weight: 800; cursor: pointer;
+    border: 1.5px solid var(--ink); background: var(--white); color: var(--ink);
+  }
+  .plan .act.dark { background: var(--ink); color: #fff; border: 0; }
+  .skiprow { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+  .skiprow a { font-size: 14px; font-weight: 700; color: var(--muted); }
   /* ── phones: brand strip on top, form under it ── */
   @media (max-width: 860px) {
     .split { flex-direction: column; padding: 12px; gap: 0; }
@@ -228,6 +261,70 @@
         registration. The link is the password.</p>
     </div>
 
+    <!-- ── finish your profile (OAuth arrivals skipped the form) ── -->
+    <div class="box" id="finish" style="display:none">
+      <h1>Finish your profile.</h1>
+      <label for="fName">Full name</label>
+      <input id="fName" autocomplete="name" placeholder="First and last name">
+      <label for="fCompany">Company</label>
+      <input id="fCompany" autocomplete="organization" placeholder="Your company name">
+      <label for="fPhone">Phone</label>
+      <div class="phonewrap">
+        <span class="cc">+1</span>
+        <input id="fPhone" autocomplete="tel" inputmode="tel" placeholder="(555) 555-0100">
+      </div>
+      <label class="agree">
+        <input type="checkbox" id="fTerms">
+        <span>I agree to the <a href="https://approve.ezchangeorders.com/terms.html">Terms</a> and
+          <a href="https://approve.ezchangeorders.com/privacy.html">Privacy Policy</a>.</span>
+      </label>
+      <button class="go" id="fGo" disabled>Continue</button>
+      <div class="err" id="fErr"></div>
+    </div>
+
+    <!-- ── about your business ── -->
+    <div class="box" id="about" style="display:none">
+      <h1>About your business.</h1>
+      <label>Your trade</label>
+      <div class="chips" id="tradeChips"></div>
+      <label style="margin-top:18px">Who works with you?</label>
+      <div class="seg" id="crewSeg"></div>
+      <label for="heard" style="margin-top:18px">How did you hear about us?
+        <span style="font-weight:600">(optional)</span></label>
+      <select class="heard" id="heard">
+        <option value="">Choose one</option>
+        <option>A friend or another contractor</option>
+        <option>Search</option>
+        <option>Social media</option>
+        <option>App Store</option>
+        <option>Other</option>
+      </select>
+      <button class="go" id="aGo" disabled>Continue</button>
+      <div class="err" id="aErr"></div>
+    </div>
+
+    <!-- ── how you start ── -->
+    <div class="box" id="plans" style="display:none">
+      <div class="skiprow"><a href="#" id="planSkip">Skip this step</a></div>
+      <h1>Start free. Upgrade when it pays for itself.</h1>
+      <div class="plan">
+        <div class="top"><span class="nm">Free start</span><span class="pr">$0 &#183; the trial &#183; ends by itself</span></div>
+        <p>2 jobs &#183; 2 change orders &#183; 30 photos &#183; 30 min recording. The full flow, nothing held back. No credit card.</p>
+        <div class="act" id="planFree">Start free</div>
+      </div>
+      <div class="plan">
+        <div class="top"><span class="nm">Pay as you go</span><span class="pr">from $2.98 per change order</span></div>
+        <p>No monthly bill. 1 credit = 1 change order sent to sign. 3 for $18 &#183; 20 for $79 &#183; 50 for $149. Trial limits lift with your first pack.</p>
+        <div class="act" id="planPayg">Buy credits when needed</div>
+      </div>
+      <div class="plan star">
+        <div class="top"><span class="nm">Core</span><span class="pr">$19/mo billed annually ($229) &#183; $29 monthly</span></div>
+        <p>Unlimited jobs, change orders, photos and recording &#183; 3 seats &#183; 50 SMS binding signatures a month.</p>
+        <div class="act dark" id="planCore">Start with Core</div>
+      </div>
+      <p class="hint" style="text-align:center; margin-top:14px">One signed change order usually covers a year of Core.</p>
+    </div>
+
     <!-- ── registered ── -->
     <div class="box" id="welcome" style="display:none">
       <div class="tile">
@@ -256,15 +353,32 @@ const ANON_KEY = '__ANON_KEY__';
 const supabase = createClient(SUPABASE_URL, ANON_KEY);
 
 const $ = (id) => document.getElementById(id);
+
 const show = (id) => {
-  for (const s of ['form', 'sent', 'welcome']) $(s).style.display = s === id ? '' : 'none';
+  for (const s of ['form', 'sent', 'finish', 'about', 'plans', 'welcome']) {
+    document.getElementById(s).style.display = s === id ? '' : 'none';
+  }
 };
 
-// Arriving FROM the magic link or an OAuth redirect: supabase-js lifts the session
-// out of the URL on its own; a session means registration is complete.
-supabase.auth.onAuthStateChange((_ev, session) => { if (session) show('welcome'); });
-const { data: { session } } = await supabase.auth.getSession();
-if (session) show('welcome');
+/**
+ * THE ROUTER (onboarding v2, hadar 2026-09-08). A signed-in visitor sees the
+ * first step their ACCOUNT is still missing - so an OAuth arrival gets the
+ * profile form the four-field page never showed them, a form registrant skips
+ * straight to trade, and a returning visitor lands on Get the app. Every answer
+ * is user_metadata, which the app's first sign-in already restores from.
+ */
+const route = (user) => {
+  const m = user?.user_metadata ?? {};
+  if (!m.full_name || !m.company_name || !m.phone || !m.terms_accepted_at) {
+    if (m.full_name) $('fName').value = m.full_name;
+    if (m.company_name) $('fCompany').value = m.company_name;
+    show('finish'); fReady(); return;
+  }
+  if (!m.trade || !m.crew_size) { show('about'); return; }
+  if (!m.plan_choice) { show('plans'); return; }
+  show('welcome');
+};
+supabase.auth.onAuthStateChange((_ev, session) => { if (session) route(session.user); });
 
 const emailOk = () => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($('email').value.trim());
 // The same four answers the app's own onboarding collects (hadar, 2026-09-08:
@@ -324,6 +438,82 @@ $('go').addEventListener('click', async () => {
   $('sentTo').textContent = 'We sent a sign-in link to ' + email + '.';
   show('sent');
 });
+
+// ── finish-your-profile (the OAuth path's first page) ───────────────────────
+const fPhoneOk = () => ($('fPhone').value.replace(/\D/g, '').length === 10);
+const fReady = () => {
+  const ok = $('fName').value.trim().length >= 2 && $('fCompany').value.trim().length >= 2
+    && fPhoneOk() && $('fTerms').checked;
+  $('fGo').disabled = !ok; return ok;
+};
+$('fPhone').addEventListener('input', () => {
+  const d = $('fPhone').value.replace(/\D/g, '').slice(0, 10);
+  $('fPhone').value = d.length > 6 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`
+    : d.length > 3 ? `(${d.slice(0,3)}) ${d.slice(3)}` : d;
+});
+for (const id of ['fName', 'fCompany', 'fPhone']) $(id).addEventListener('input', fReady);
+$('fTerms').addEventListener('change', fReady);
+$('fGo').addEventListener('click', async () => {
+  if (!fReady()) return;
+  $('fGo').disabled = true;
+  const { data, error } = await supabase.auth.updateUser({ data: {
+    full_name: $('fName').value.trim(),
+    company_name: $('fCompany').value.trim(),
+    phone: '+1' + $('fPhone').value.replace(/\D/g, ''),
+    terms_accepted_at: new Date().toISOString(),
+    registered_via: 'web',
+  }});
+  if (error) { $('fErr').textContent = 'Could not save — ' + error.message; $('fErr').style.display = 'block'; $('fGo').disabled = false; return; }
+  route(data.user);
+});
+
+// ── about your business ─────────────────────────────────────────────────────
+const TRADES = ['General Contractor', 'Remodeling', 'Handyman', 'Plumbing', 'Electrical',
+  'HVAC', 'Roofing', 'Painting', 'Flooring', 'Concrete & Masonry', 'Landscaping',
+  'Carpentry & Framing', 'Other'];
+const CREWS = ['Just me', 'A small crew (2\u20135)', '6 or more'];
+let aTrade = null, aCrew = null;
+const pick = (wrap, items, set) => {
+  for (const label of items) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'chip'; b.textContent = label;
+    b.addEventListener('click', () => {
+      set(label);
+      for (const c of wrap.children) c.classList.toggle('on', c === b);
+      $('aGo').disabled = !(aTrade && aCrew);
+    });
+    wrap.appendChild(b);
+  }
+};
+pick($('tradeChips'), TRADES, (v) => { aTrade = v; });
+pick($('crewSeg'), CREWS, (v) => { aCrew = v; });
+$('aGo').addEventListener('click', async () => {
+  if (!aTrade || !aCrew) return;
+  $('aGo').disabled = true;
+  const { data, error } = await supabase.auth.updateUser({ data: {
+    trade: aTrade, crew_size: aCrew, heard_about: $('heard').value || null,
+  }});
+  if (error) { $('aErr').textContent = 'Could not save — ' + error.message; $('aErr').style.display = 'block'; $('aGo').disabled = false; return; }
+  route(data.user);
+});
+
+// ── how you start. The paid buttons record the intent, then open the purchase
+// page - the same RevenueCat surface the app links out to. ──────────────────
+const choosePlan = async (choice, thenHref) => {
+  const { data } = await supabase.auth.updateUser({ data: { plan_choice: choice } });
+  if (thenHref) { location.href = thenHref; return; }
+  route(data?.user ?? (await supabase.auth.getUser()).data.user);
+};
+$('planSkip').addEventListener('click', (e) => { e.preventDefault(); void choosePlan('skipped', null); });
+$('planFree').addEventListener('click', () => void choosePlan('free', null));
+$('planPayg').addEventListener('click', () => void choosePlan('payg', 'https://approve.ezchangeorders.com/buy.html'));
+$('planCore').addEventListener('click', () => void choosePlan('core', 'https://approve.ezchangeorders.com/buy.html'));
+
+// LAST, after every handler above exists: route the already-signed-in visitor.
+{
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) route(session.user);
+}
 </script>
 </body>
 </html>
