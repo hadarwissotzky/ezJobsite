@@ -424,19 +424,37 @@ $('apple').addEventListener('click', oauth('apple'));
  * the form now stashes its answers and advances to About your business. The
  * one OTP email goes out at the END, carrying every answer as metadata.
  */
-let pending = null;
-$('go').addEventListener('click', () => {
+$('go').addEventListener('click', async () => {
   if (!ready()) return;
-  pending = {
-    email: $('email').value.trim(),
-    full_name: $('name').value.trim(),
-    company_name: $('company').value.trim(),
-    phone: '+1' + $('phone').value.replace(/\D/g, ''),
-    marketing_opt_in: $('optin').checked,
-    terms_accepted_at: new Date().toISOString(),
-    registered_via: 'web',
-  };
-  show('about');
+  $('go').disabled = true; $('err').style.display = 'none';
+  const email = $('email').value.trim();
+  // ONE SEND, HERE, WITH ONLY THE ACCOUNT BASICS. Email verification comes first
+  // (hadar 2026-09-09: "a clear fix for those that never came to the app before").
+  // Trade / crew / plan are collected AFTER the link is clicked, in the signed-in
+  // session, by the router below - so a brand-new account always runs them once,
+  // in order, and there is no answer riding a throttled OTP.
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: location.origin + location.pathname,
+      shouldCreateUser: true,
+      data: {
+        full_name: $('name').value.trim(),
+        company_name: $('company').value.trim(),
+        phone: '+1' + $('phone').value.replace(/\D/g, ''),
+        marketing_opt_in: $('optin').checked,
+        terms_accepted_at: new Date().toISOString(),
+        registered_via: 'web',
+      },
+    },
+  });
+  if (error && !isRateLimit(error)) {
+    fail('Could not send the link — ' + (error.message ?? 'try again in a moment.'));
+    $('go').disabled = false; return;
+  }
+  $('sentTo').textContent = 'We sent a sign-in link to ' + email
+    + (error ? ' a moment ago — open it to continue.' : '.');
+  show('sent');
 });
 
 // ── finish-your-profile (the OAuth path's first page) ───────────────────────
@@ -492,9 +510,7 @@ pick($('crewSeg'), CREWS, (v) => { aCrew = v; });
 $('aGo').addEventListener('click', async () => {
   if (!aTrade || !aCrew) return;
   const answers = { trade: aTrade, crew_size: aCrew, heard_about: $('heard').value || null };
-  // Pre-auth registration: hold the answers, keep walking. Signed-in visitor
-  // (OAuth, or a returner the router sent here): save to the account now.
-  if (pending) { Object.assign(pending, answers); show('plans'); return; }
+  // Always signed-in here (about runs only post-link now). Save and advance.
   $('aGo').disabled = true;
   const { data, error } = await supabase.auth.updateUser({ data: answers });
   if (error) { $('aErr').textContent = 'Could not save — ' + error.message; $('aErr').style.display = 'block'; $('aGo').disabled = false; return; }
@@ -504,26 +520,9 @@ $('aGo').addEventListener('click', async () => {
 
 // ── how you start. The paid buttons record the intent, then open the purchase
 // page - the same RevenueCat surface the app links out to. ──────────────────
+// Always signed-in here (plans runs only post-link). Record the choice; a paid
+// choice opens the purchase surface, everything else lands on welcome.
 const choosePlan = async (choice, thenHref) => {
-  if (pending) {
-    // Pre-auth: THIS is where the one email finally goes out, carrying every
-    // answer from all three screens. A paid choice still registers - the
-    // purchase itself happens signed-in, on the purchase surface.
-    const { email, ...data } = pending;
-    data.plan_choice = choice;
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: location.origin + location.pathname,
-        shouldCreateUser: true, data },
-    });
-    if (error && !isRateLimit(error)) { fail('Could not send the link — ' + (error.message ?? 'try again in a moment.')); show('form'); $('go').disabled = false; return; }
-    // Rate-limited means a link went out moments ago and is valid — send them to
-    // the same check-your-email screen, no red box.
-    $('sentTo').textContent = 'Your sign-in link is on its way to ' + email
-      + (error ? ' — check your inbox (we sent one moments ago).' : '.');
-    show('sent');
-    return;
-  }
   const { data } = await supabase.auth.updateUser({ data: { plan_choice: choice } });
   if (thenHref) { location.href = thenHref; return; }
   route(data?.user ?? (await supabase.auth.getUser()).data.user);
