@@ -80,6 +80,7 @@ jobs:
           for f in website/index.html website/privacy.html website/terms.html \
                    website/sms.html website/support.html \
                    website/styles.css website/script.js \
+                   website/robots.txt website/sitemap.xml \
                    website/assets/hero-verbal-yes.webp website/assets/voice-capture.webp \
                    website/assets/landscaping-conversation.webp \
                    website/assets/electrician-gc-conversation.webp \
@@ -127,7 +128,8 @@ jobs:
           # sms.html samples all agree), so nothing addresses the bare domain.
           cp website/index.html website/privacy.html website/terms.html \
              website/sms.html website/support.html \
-             website/styles.css website/script.js _site/
+             website/styles.css website/script.js \
+             website/robots.txt website/sitemap.xml _site/
           # The landing page's stylesheet, script, images and clips (hadar,
           # 2026-09-08: the new main site). Static, no substitution.
           cp -R website/assets website/videos _site/
@@ -271,7 +273,8 @@ jobs:
           echo "$WWW_DEPLOY_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
           mkdir _www
-          cp website/index.html website/styles.css website/script.js _www/
+          cp website/index.html website/styles.css website/script.js \
+             website/robots.txt website/sitemap.xml _www/
           cp -R website/assets website/videos _www/
           echo 'www.ezchangeorders.com' > _www/CNAME
           touch _www/.nojekyll

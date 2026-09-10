@@ -1,0 +1,5 @@
+# EZChangeOrders — allow everything, point crawlers at the sitemap.
+User-agent: *
+Allow: /
+
+Sitemap: https://www.ezchangeorders.com/sitemap.xml
