@@ -81,6 +81,7 @@ jobs:
                    website/sms.html website/support.html \
                    website/styles.css website/script.js \
                    website/robots.txt website/sitemap.xml \
+                   website/favicon.ico website/apple-touch-icon.png \
                    website/assets/hero-verbal-yes.webp website/assets/voice-capture.webp \
                    website/assets/landscaping-conversation.webp \
                    website/assets/electrician-gc-conversation.webp \
@@ -129,7 +130,8 @@ jobs:
           cp website/index.html website/privacy.html website/terms.html \
              website/sms.html website/support.html \
              website/styles.css website/script.js \
-             website/robots.txt website/sitemap.xml _site/
+             website/robots.txt website/sitemap.xml \
+             website/favicon.ico website/apple-touch-icon.png _site/
           # The landing page's stylesheet, script, images and clips (hadar,
           # 2026-09-08: the new main site). Static, no substitution.
           cp -R website/assets website/videos _site/
@@ -213,7 +215,8 @@ jobs:
             # Every public page must answer 200. terms/privacy/sms are the A2P
             # campaign's filed URLs; a 404 here is a revoked campaign later.
             for p in index.html privacy.html terms.html sms.html support.html \
-                     styles.css script.js assets/hero-verbal-yes.webp \
+                     styles.css script.js favicon.ico apple-touch-icon.png \
+                     assets/hero-verbal-yes.webp \
                      assets/hero-verbal-yes-mobile.webp \
                      videos/verbal-yes.mp4 \
                      confirm.html ewa.js buy.html; do
@@ -274,7 +277,8 @@ jobs:
           ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
           mkdir _www
           cp website/index.html website/styles.css website/script.js \
-             website/robots.txt website/sitemap.xml _www/
+             website/robots.txt website/sitemap.xml \
+             website/favicon.ico website/apple-touch-icon.png _www/
           cp -R website/assets website/videos _www/
           echo 'www.ezchangeorders.com' > _www/CNAME
           touch _www/.nojekyll
