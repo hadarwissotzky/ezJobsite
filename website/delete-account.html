@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EZChangeOrders — Delete your account</title>
+<!--
+  ACCOUNT DELETION PAGE — written 2026-09-11 for the Google Play launch.
+
+  WHY: Google Play's Data safety form requires a public web URL where a user can
+  request deletion of their account and data without having the app installed.
+  Apple 5.1.1(v) is already met in-app (menu > Close my account, SQL 406 +
+  src/closeaccount.ts); this page is the web half both stores can point at.
+
+  THE WORDING OF "WHAT IS KEPT" MIRRORS set.closeBody IN src/i18n.ts ON PURPOSE.
+  Erasure hard-deletes content and media but keeps a hash + metadata stub (406), and
+  a client may already hold a signed copy. If 406 changes, change this page too.
+
+  This file is named in .github/workflows/deploy-confirm-page.yml (half-site guard,
+  build copy, live 200-check). A page not named there is never published.
+-->
+<style>
+  :root { color-scheme: light; }
+  body {
+    margin: 0 auto; max-width: 720px; padding: 32px 20px 64px;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #161918; background: #F5F1E8;
+  }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 32px 0 8px; }
+  .updated { color: #555B57; font-size: 14px; margin: 0 0 28px; }
+  ul, ol { padding-left: 20px; }
+  li { margin-bottom: 8px; }
+  a { color: #4E6243; }
+  .box {
+    background: #FBF8F1; border: 1px solid #D8D1C4; border-radius: 10px;
+    padding: 16px 18px; margin: 14px 0 22px;
+  }
+  .box a { font-weight: 600; }
+</style>
+  <link rel="canonical" href="https://www.ezchangeorders.com/delete-account.html">
+</head>
+<body>
+
+<h1>Delete your account</h1>
+<p class="updated">EZChangeOrders, operated by Hi/Lo Ventures Group · Last updated 11 September 2026</p>
+
+<p>You can delete your EZChangeOrders account and the data that goes with it at any
+time. You do not need to cancel anything else first, and you do not need to contact us
+if you can still open the app.</p>
+
+<h2>Delete it in the app</h2>
+<div class="box">
+<ol>
+  <li>Open EZChangeOrders and sign in.</li>
+  <li>Open the menu.</li>
+  <li>Scroll to the bottom and tap <strong>Close my account</strong>.</li>
+  <li>Read what will be deleted, then tap <strong>Delete everything</strong>.</li>
+</ol>
+<p>Deletion starts immediately and cannot be undone.</p>
+</div>
+
+<h2>Can't open the app? Ask us by email</h2>
+<p>Email <a href="mailto:hadar@streamlinesocial.com?subject=Delete%20my%20EZChangeOrders%20account">hadar@streamlinesocial.com</a>
+with the subject <em>Delete my EZChangeOrders account</em>. Send it from the email
+address on the account, or include the phone number you sign in with, so we can match
+it to your account. We will reply to confirm once the deletion is complete.</p>
+
+<h2>What is deleted</h2>
+<ul>
+  <li>Your account details — name, email address, phone number and company name.</li>
+  <li>Your jobs, change orders, prices and notes.</li>
+  <li>Your voice recordings and photos, and the locations stamped on them.</li>
+  <li>Client contact details you entered.</li>
+  <li>Your device's notification token.</li>
+  <li>The copy of all of this stored on your phone.</li>
+</ul>
+
+<h2>What is kept</h2>
+<ul>
+  <li>A record that each document existed — its date and a cryptographic fingerprint,
+      with no personal details — so an agreement that was already signed can still be
+      verified.</li>
+  <li>Any copy of a change order that a client already received. That copy is theirs.</li>
+  <li>Purchase records held by Apple or Google, under their own policies.</li>
+</ul>
+
+<h2>Subscriptions are separate</h2>
+<p>Deleting your account does not cancel a subscription billed by Apple or Google. Cancel
+it yourself so it does not renew:</p>
+<ul>
+  <li><strong>iPhone:</strong> Settings › your name › Subscriptions › EZChangeOrders.</li>
+  <li><strong>Android:</strong> Google Play Store › your profile icon › Payments and
+      subscriptions › Subscriptions › EZChangeOrders.</li>
+</ul>
+
+<h2>Delete some data without closing your account</h2>
+<p>To delete specific jobs, recordings or photos but keep your account, email
+<a href="mailto:hadar@streamlinesocial.com">hadar@streamlinesocial.com</a> and tell us
+what to remove.</p>
+
+<h2>More</h2>
+<ul>
+  <li><a href="privacy.html">Privacy Policy</a></li>
+  <li><a href="terms.html">Terms of Service</a></li>
+  <li><a href="support.html">Support</a></li>
+</ul>
+
+</body>
+</html>
