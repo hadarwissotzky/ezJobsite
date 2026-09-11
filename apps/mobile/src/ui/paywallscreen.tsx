@@ -10,7 +10,7 @@
  * 'ready'. Field-first design: one clear action per card, plain words, big targets.
  */
 import React from 'react';
-import {Linking,ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import {Linking,ActivityIndicator, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { t } from '../i18n';
 import { PLANS, PAID_TIERS, offeredTiers, type PlanId } from '../plans';
 import { billingStatus, manageSubscriptionUrl, packPrices, purchaseCredits, purchasePlan, restorePurchases } from '../billing';
@@ -612,7 +612,7 @@ export function PaywallScreen(props: {
               listing and the 10DLC campaign, so they must not depend on the env. */}
           <Text style={{ fontFamily: F.body, fontSize: 12, color: C.muted, textAlign: 'center',
             marginTop: 14, paddingHorizontal: 12, lineHeight: 17 }}>
-            {t('paywall.legal.renews')}
+            {t(Platform.OS === 'android' ? 'paywall.legal.renews.android' : 'paywall.legal.renews')}
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18, marginTop: 6,
             marginBottom: 8 }}>
