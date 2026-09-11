@@ -12,7 +12,7 @@
       "bundleIdentifier": "com.hilo.ezjobsite",
       "infoPlist": {
         "NSCameraUsageDescription": "EZjobsite uses the camera so you can snap a photo of a jobsite decision instead of writing it up.",
-        "NSPhotoLibraryUsageDescription": "EZChangeOrders attaches photos from your library to a change order as evidence \u2014 for example, adding a picture of a cracked pipe to the change order that bills the repair, so your client sees exactly what they are approving. Photos stay with that change order and are not used for anything else.",
+        "NSPhotoLibraryUsageDescription": "EZChangeOrders attaches photos from your library to a change order as evidence — for example, adding a picture of a cracked pipe to the change order that bills the repair, so your client sees exactly what they are approving. Photos stay with that change order and are not used for anything else.",
         "NSMicrophoneUsageDescription": "EZjobsite records what you say on site so nothing gets lost.",
         "NSLocationWhenInUseUsageDescription": "EZjobsite stamps each photo with where it was taken, so it is evidence of what happened on this job.",
         "NSSpeechRecognitionUsageDescription": "EZjobsite turns what you said into text on this phone, so your notes fill themselves in.",
@@ -50,14 +50,17 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.CAMERA"
       ],
-      "versionCode": 2,
+      "versionCode": 4,
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_AUDIO",
-        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -103,7 +106,8 @@
           "color": "#4E6243"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "./plugins/withoutMediaPlaybackService"
     ],
     "runtimeVersion": "1.1.0",
     "updates": {

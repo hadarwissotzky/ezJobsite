@@ -107,6 +107,21 @@ function knownProduct(productId: string): boolean {
 }
 
 /**
+ * Match a fetched StoreProduct to the product id we asked for.
+ *
+ * GOOGLE PLAY appends the base-plan id to a subscription's identifier: ask for
+ * `ezco_core_monthly` and RevenueCat hands back a product whose `.identifier` is
+ * `ezco_core_monthly:monthly` (`<subscriptionId>:<basePlanId>`). An exact-equality
+ * `find` therefore matches NOTHING on Android, so the fetch below returns undefined and
+ * the paywall reports every plan `product_unavailable` — the Android paywall cannot find
+ * its products. iOS returns the bare id, so the exact match still covers it. Consumable
+ * credit packs carry no base plan, so splitting on `:` is a no-op for them.
+ */
+function productMatches(p: { identifier: string }, productId: string): boolean {
+  return p.identifier === productId || p.identifier.split(':')[0] === productId;
+}
+
+/**
  * Buy an auto-renewable subscription by its store product id.
  *
  * REFUSES WHILE THE CUSTOMER IS ANONYMOUS (2026-08-13). `configureBilling` is called
@@ -130,7 +145,7 @@ export async function purchasePlan(productId: string): Promise<PurchaseResult> {
   }
   try {
     const products = await Purchases.getProducts([productId]);
-    const product = products.find((p) => p.identifier === productId);
+    const product = products.find((p) => productMatches(p, productId));
     // Not a crash: a product missing from the store is a config problem (not yet
     // "Ready to Submit" in App Store Connect), and the user should be told plainly.
     if (!product) return { ok: false, reason: 'failed', detail: 'product_unavailable' };
