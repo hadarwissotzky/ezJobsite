@@ -1303,6 +1303,8 @@ const EN: Record<string, string> = {
     + 'Two things stay behind: a record that each document existed (its date and a fingerprint, with no personal details), and any copy a client already received.',
   'set.closeHasPlan':
     'Your paid plan is billed by Apple and does not stop on its own. Cancel it in Settings › Apple Account › Subscriptions, or it keeps renewing.',
+  'set.closeHasPlan.android':
+    'Your paid plan is billed by Google Play and does not stop on its own. Cancel it in the Play Store › your profile › Payments and subscriptions › Subscriptions, or it keeps renewing.',
   'set.closeConfirm': 'Delete everything',
   'set.closeFailed': 'Could not close the account',
   'set.closedTitle': 'Your account is closed',
@@ -1457,7 +1459,7 @@ const EN: Record<string, string> = {
   'paywall.thanks': 'You’re all set — thank you. Your plan updates in a moment.',
   'paywall.manage': 'Change or cancel your plan',
   'paywall.restore': 'Restore purchase',
-  'paywall.legal.renews': 'Subscriptions renew automatically at the price shown until cancelled. Payment is charged to your Apple ID. Manage or cancel any time in your App Store subscription settings.',
+  'paywall.legal.renews': 'Subscriptions renew automatically at the price shown until cancelled. Payment is charged to your Apple ID. Manage or cancel any time in your App Store subscription settings.', 'paywall.legal.renews.android': 'Subscriptions renew automatically at the price shown until cancelled. Payment is charged to your Google Play account. Manage or cancel any time in your Google Play subscription settings.',
   'paywall.legal.terms': 'Terms of Use',
   'paywall.legal.privacy': 'Privacy Policy',
   'paywall.restoreNone': 'No purchase found to restore.',
@@ -3519,6 +3521,8 @@ const ES: Record<string, string> = {
     + 'Quedan dos cosas: un registro de que cada documento existió (su fecha y una huella digital, sin datos personales) y cualquier copia que un cliente ya haya recibido.',
   'set.closeHasPlan':
     'Apple cobra tu plan de pago y no se detiene solo. Cancélalo en Ajustes › Cuenta de Apple › Suscripciones, o seguirá renovándose.',
+  'set.closeHasPlan.android':
+    'Google Play cobra tu plan de pago y no se detiene solo. Cancélalo en Play Store › tu perfil › Pagos y suscripciones › Suscripciones, o seguirá renovándose.',
   'set.closeConfirm': 'Eliminar todo',
   'set.closeFailed': 'No se pudo cerrar la cuenta',
   'set.closedTitle': 'Tu cuenta está cerrada',
@@ -3617,7 +3621,7 @@ const ES: Record<string, string> = {
   'paywall.thanks': 'Listo — gracias. Tu plan se actualiza en un momento.',
   'paywall.manage': 'Cambiar o cancelar tu plan',
   'paywall.restore': 'Restaurar compra',
-  'paywall.legal.renews': 'Las suscripciones se renuevan automáticamente al precio mostrado hasta que las canceles. El cobro se hace a tu Apple ID. Adminístralas o cancélalas cuando quieras en la configuración de suscripciones del App Store.',
+  'paywall.legal.renews': 'Las suscripciones se renuevan automáticamente al precio mostrado hasta que las canceles. El cobro se hace a tu Apple ID. Adminístralas o cancélalas cuando quieras en la configuración de suscripciones del App Store.', 'paywall.legal.renews.android': 'Las suscripciones se renuevan automáticamente al precio mostrado hasta que las canceles. El cobro se hace a tu cuenta de Google Play. Adminístralas o cancélalas cuando quieras en la configuración de suscripciones de Google Play.',
   'paywall.legal.terms': 'Términos de uso',
   'paywall.legal.privacy': 'Política de privacidad',
   'paywall.restoreNone': 'No se encontró ninguna compra para restaurar.',

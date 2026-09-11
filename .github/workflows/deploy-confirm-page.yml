@@ -78,7 +78,7 @@ jobs:
       - name: Refuse to publish a half-site
         run: |
           for f in website/index.html website/privacy.html website/terms.html \
-                   website/sms.html website/support.html \
+                   website/sms.html website/support.html website/delete-account.html \
                    website/styles.css website/script.js \
                    website/robots.txt website/sitemap.xml \
                    website/favicon.ico website/apple-touch-icon.png \
@@ -128,7 +128,7 @@ jobs:
           # approval link is built as /confirm.html?t=… (mobile, worker and the
           # sms.html samples all agree), so nothing addresses the bare domain.
           cp website/index.html website/privacy.html website/terms.html \
-             website/sms.html website/support.html \
+             website/sms.html website/support.html website/delete-account.html \
              website/styles.css website/script.js \
              website/robots.txt website/sitemap.xml \
              website/favicon.ico website/apple-touch-icon.png _site/
@@ -214,7 +214,7 @@ jobs:
             ok=yes
             # Every public page must answer 200. terms/privacy/sms are the A2P
             # campaign's filed URLs; a 404 here is a revoked campaign later.
-            for p in index.html privacy.html terms.html sms.html support.html \
+            for p in index.html privacy.html terms.html sms.html support.html delete-account.html \
                      styles.css script.js favicon.ico apple-touch-icon.png \
                      assets/hero-verbal-yes.webp \
                      assets/hero-verbal-yes-mobile.webp \
