@@ -11172,7 +11172,7 @@ const checkClientMessages = async () => {
       title={T('set.closeTitle')}
       body={planId === 'free'
         ? T('set.closeBody')
-        : `${T('set.closeBody')}\n\n${T('set.closeHasPlan')}`}
+        : `${T('set.closeBody')}\n\n${T(Platform.OS === 'android' ? 'set.closeHasPlan.android' : 'set.closeHasPlan')}`}
       confirmLabel={T('set.closeConfirm')}
       cancelLabel={T('common.cancel')}
       busy={closeAcct.busy}
