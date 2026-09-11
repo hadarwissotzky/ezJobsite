@@ -720,8 +720,11 @@ export function FusedCapture({
    *  so it ties to this moment of the narration like any snap. */
   const pickFromGallery = async () => {
     try {
-      const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!p.granted) return;
+      // No permission request: launchImageLibraryAsync opens the Android system
+      // Photo Picker (PickVisualMedia) / iOS PHPicker, which need no permission.
+      // Gating on requestMediaLibraryPermissionsAsync() would silently fail on
+      // Android <=12, where it asks for READ/WRITE_EXTERNAL_STORAGE — permissions
+      // we deliberately block for Play (app.json blockedPermissions).
       const r = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'], allowsMultipleSelection: true, quality: 0.8,
       });
