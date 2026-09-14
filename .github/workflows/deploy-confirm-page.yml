@@ -79,7 +79,7 @@ jobs:
         run: |
           for f in website/index.html website/privacy.html website/terms.html \
                    website/sms.html website/support.html website/delete-account.html \
-                   website/styles.css website/script.js \
+                   website/styles.css website/script.js website/analytics.js \
                    website/robots.txt website/sitemap.xml \
                    website/favicon.ico website/apple-touch-icon.png \
                    website/assets/hero-verbal-yes.webp website/assets/voice-capture.webp \
@@ -129,7 +129,7 @@ jobs:
           # sms.html samples all agree), so nothing addresses the bare domain.
           cp website/index.html website/privacy.html website/terms.html \
              website/sms.html website/support.html website/delete-account.html \
-             website/styles.css website/script.js \
+             website/styles.css website/script.js website/analytics.js \
              website/robots.txt website/sitemap.xml \
              website/favicon.ico website/apple-touch-icon.png _site/
           # The landing page's stylesheet, script, images and clips (hadar,
@@ -276,7 +276,7 @@ jobs:
           echo "$WWW_DEPLOY_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
           mkdir _www
-          cp website/index.html website/styles.css website/script.js \
+          cp website/index.html website/styles.css website/script.js website/analytics.js \
              website/robots.txt website/sitemap.xml \
              website/favicon.ico website/apple-touch-icon.png _www/
           cp -R website/assets website/videos _www/
