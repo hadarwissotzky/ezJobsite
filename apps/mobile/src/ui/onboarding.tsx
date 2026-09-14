@@ -458,7 +458,7 @@ const st = StyleSheet.create({
    * `paddingBottom` is NOT for the bar — the ridge is drawn inside the page and carries
    * the last 92pt itself. It clears the home indicator only.
    */
-  cover: { paddingTop: A(96), paddingBottom: 8, minHeight: height },
+  cover: { paddingTop: A(64), paddingBottom: 8, minHeight: height },
   coverBody: { paddingHorizontal: A(50) },
   // Top-right, bleeding off both edges, exactly as the artwork crops it.
   coverArt: { position: 'absolute', top: 0, right: 0, width: A(382), height: A(830) },
@@ -484,11 +484,11 @@ const st = StyleSheet.create({
   markT: { fontFamily: 'Oswald_700Bold', fontSize: A(54), color: FOREST, letterSpacing: -0.3 },
 
   // ── headlines ──
-  headWrap: { marginBottom: 4 },
+  headWrap: { marginBottom: 4, paddingTop: A(10) },
   // Ink, not white, and it runs across the photograph — the left fade is what carries
   // it. maxWidth is the artwork's column: the break after "EXTRA WORK" is a design
   // decision, not wherever the box happens to run out.
-  coverHead: { fontFamily: 'Oswald_700Bold', fontSize: A(100), lineHeight: A(98),
+  coverHead: { fontFamily: 'Oswald_700Bold', fontSize: A(100), lineHeight: A(106),
     color: INK, textTransform: 'uppercase', letterSpacing: -0.6, maxWidth: A(430) },
   pageHead: { fontFamily: 'Oswald_700Bold', fontSize: 38, lineHeight: 43, color: '#131110',
     textTransform: 'uppercase', letterSpacing: -0.2 },
