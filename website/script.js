@@ -85,7 +85,7 @@ const spanish = new Map(Object.entries({
   'Your change-order tool goes where you go': 'Tu herramienta va contigo',
   'GET THE YES.': 'OBTÉN EL SÍ.', 'GET IT IN WRITING.': 'PONLO POR ESCRITO.', 'GET PAID.': 'COBRA.',
   'Capture the change before you leave the room. EZChangeOrder is designed for quick, one-handed use on real residential jobsites.': 'Registra el cambio antes de salir del cuarto. EZChangeOrder está diseñado para usarse rápido y con una mano en obras residenciales reales.',
-  'GET THE APP FOR': 'DESCARGA PARA', 'Tap above and we’ll send you the download link.': 'Toca arriba y te enviaremos el enlace de descarga.',
+  'DOWNLOAD ON THE': 'DESCARGA EN EL', 'Free to start. On the App Store for iPhone and iPad.': 'Gratis para empezar. En el App Store para iPhone y iPad.',
   'Record it': 'Grábalo', 'on the job': 'en la obra', 'Approved': 'Aprobado', 'in writing': 'por escrito',
   'Straight answers': 'Respuestas claras',
   'MADE FOR THE WAY SMALL JOBS ACTUALLY RUN.': 'HECHO PARA COMO REALMENTE FUNCIONAN LOS TRABAJOS PEQUEÑOS.',
