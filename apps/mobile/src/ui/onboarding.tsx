@@ -53,7 +53,7 @@ import {
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
 import { Icon } from './icon';
-import { t as T } from '../i18n';
+import { t as T, type Lang } from '../i18n';
 
 const { width, height } = Dimensions.get('window');
 
@@ -182,7 +182,13 @@ function Wordmark() {
   );
 }
 
-export function Onboarding({ onDone }: { onDone: (intent?: 'signup' | 'login') => void }) {
+export function Onboarding({ onDone, lang, onLang }: {
+  onDone: (intent?: 'signup' | 'login') => void;
+  /** Which language is live, so the chip can show which one is selected. */
+  lang?: Lang;
+  /** Picking a language here applies it immediately and remembers it. */
+  onLang?: (l: Lang) => void;
+}) {
   const ref = React.useRef<ScrollView>(null);
   const [i, setI] = React.useState(0);
   const go = (n: number) => {
@@ -285,9 +291,26 @@ export function Onboarding({ onDone }: { onDone: (intent?: 'signup' | 'login') =
               artwork carries seven flags; `Lang` is 'en' | 'es' and `DICT` has two
               dictionaries, so five of those would be a promise broken on the next
               screen. Words rather than flags because a flag is a country. */}
+          {/* A CONTROL, NOT A BADGE (2026-09-18). These were `View`s: the cover
+              advertised "Español" to a man who could not read the rest of the
+              screen, and did nothing when he tapped it. The dictionaries were
+              always complete — the only thing missing was a way in. The live one
+              carries the forest border so the pair reads as a switch with a
+              position, not two labels. Language is resolved from the handset
+              before this screen paints (`deviceLang`), so this is the CORRECTION
+              for the bilingual case — a phone set to English by a man who would
+              rather work in Spanish — not the primary way in. */}
           <View style={st.langRow}>
-            <View style={st.langChip}><Text style={st.langT}>English</Text></View>
-            <View style={st.langChip}><Text style={st.langT}>Español</Text></View>
+            {(['en', 'es'] as const).map((l) => (
+              <Pressable key={l} onPress={() => onLang?.(l)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: lang === l }}
+                style={[st.langChip, lang === l && st.langChipOn]}>
+                <Text style={[st.langT, lang === l && st.langTOn]}>
+                  {l === 'en' ? 'English' : 'Español'}
+                </Text>
+              </Pressable>
+            ))}
           </View>
 
           <View style={st.promises}>
@@ -507,8 +530,12 @@ const st = StyleSheet.create({
   // ── the two languages ──
   langRow: { flexDirection: 'row', gap: A(14), marginTop: A(44) },
   langChip: { borderWidth: 1, borderColor: '#D8D1C4', backgroundColor: '#FFFDF8',
-    borderRadius: A(14), paddingHorizontal: A(22), paddingVertical: A(11) },
+    borderRadius: A(14), paddingHorizontal: A(22), paddingVertical: A(11),
+    // 44pt is the floor for a control somebody taps with a glove on.
+    minHeight: 44, justifyContent: 'center' },
+  langChipOn: { borderWidth: 2, borderColor: FOREST, backgroundColor: '#FFFFFF' },
   langT: { fontFamily: 'Inter_600SemiBold', fontSize: A(26), color: '#3D3733' },
+  langTOn: { fontFamily: 'Inter_700Bold', color: FOREST },
 
   // ── the three glyphs ──
   steps: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center',

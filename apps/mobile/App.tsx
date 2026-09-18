@@ -250,6 +250,7 @@ import { captureStatus, levelColor, screenStatus } from './src/status';
 import { FIRST_RUN_TAPS, firstExtraSeen, isFirstRun, markFirstExtraSeen, markFirstRunDone,
          nextStep, resetFirstRunFlags, savedLang, saveLang } from './src/firstrun';
 import { getProfile, hasProfile as hasProfileFn, saveLangToAccount, saveProfile } from './src/profile';
+import { deviceLang } from './src/devicelang';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          playCapture, stopPlayback, type Note } from './src/annotate';
 import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
@@ -6085,7 +6086,14 @@ const checkClientMessages = async () => {
       const sl = await savedLang(db);
       // Restore the display language a returning user already chose. Language is now
       // part of the profile form, not a gate, so there's no separate "picked" flag.
-      if (sl) { setLang(sl); setLangState(sl); }
+      //
+      // NO SAVED CHOICE -> READ THE HANDSET. Without this the app opened in English
+      // for a contractor whose phone is entirely in Spanish, and the Spanish copy
+      // that already exists was unreachable until he found a profile form five
+      // screens later. The detected value is NOT persisted: only an explicit pick
+      // is his choice, so a phone switched to Spanish next week still follows.
+      const boot = sl ?? deviceLang();
+      if (boot) { setLang(boot); setLangState(boot); }
       setFirstRun(await isFirstRun(db));
       setFirstExtra(!(await firstExtraSeen(db)));
       setHasProfile(await hasProfileFn(db));
@@ -7746,7 +7754,7 @@ const checkClientMessages = async () => {
     // ONE way in that ignored which button was pressed — so testing "Log in" through it
     // would always have landed on sign-up and looked like the routing was broken.
     return (
-      <Onboarding onDone={(intent) => {
+      <Onboarding lang={lang} onLang={(l) => { setLang(l); setLangState(l); void saveLang(db, l); }} onDone={(intent) => {
         setAuthIntent(intent ?? 'signup');
         setForceIntro(false);
       }} />
@@ -7770,7 +7778,7 @@ const checkClientMessages = async () => {
     if (session === null) {
       if (!seenOnboarding) {
         return (
-          <Onboarding onDone={(intent) => {
+          <Onboarding lang={lang} onLang={(l) => { setLang(l); setLangState(l); void saveLang(db, l); }} onDone={(intent) => {
             // Remembered so the landing page shows ONCE, and the intent is carried into
             // the form so "Log in" opens the log-in form rather than sign-up.
             setAuthIntent(intent ?? 'signup');
