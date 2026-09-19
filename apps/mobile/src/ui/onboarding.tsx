@@ -31,7 +31,7 @@
  */
 import React from 'react';
 import {
-  Dimensions, Image, Pressable, ScrollView, StyleSheet, Text, View,
+  Dimensions, Image, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View,
 } from 'react-native';
 
 import { t as T, type Lang } from '../i18n';
@@ -39,6 +39,20 @@ import { t as T, type Lang } from '../i18n';
 const { width } = Dimensions.get('window');
 /** The comps' ruler: every measurement is taken at 390pt and scaled from there. */
 const S = (n: number) => Math.round((n * width) / 390 * 10) / 10;
+
+/**
+ * CLEARS THE STATUS BAR (hadar, 2026-09-18: "the top header is too high up and
+ * being hidden under the time and wifi").
+ *
+ * There is no `react-native-safe-area-context` in this app — setupflow.tsx solves
+ * the same problem with a flat `paddingTop: 64` and says so — so the inset is
+ * computed rather than measured. It is NOT run through `S()`: a status bar is a
+ * fixed physical strip, and scaling it by screen WIDTH would under-pad the narrow
+ * phones that need it most. Android reports its own height; iOS has no such API
+ * without the missing package, so 60 covers the Dynamic Island (~59) and is
+ * generous on the older notch (~47).
+ */
+const TOP_INSET = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) + 12 : 60;
 
 const CREAM = '#F7F5F0';
 const INK = '#161918';
@@ -51,7 +65,6 @@ const OCHRE = '#C08A2B';
 const SAND = '#EFE7D9';
 const MUTED = '#555B57';
 const BODY = '#3A403C';
-const LINE = '#E4DED4';
 
 /* ------------------------------------------------------------------ chrome -- */
 
@@ -389,7 +402,7 @@ const st = StyleSheet.create({
   // ── chrome ──
   chrome: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: S(22), paddingTop: S(14), paddingBottom: S(10),
+    paddingHorizontal: S(22), paddingTop: TOP_INSET, paddingBottom: S(10),
   },
   mark: { flexDirection: 'row', alignItems: 'center', gap: S(9) },
   markTile: {
