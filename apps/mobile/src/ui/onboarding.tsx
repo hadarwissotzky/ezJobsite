@@ -1,615 +1,578 @@
 /**
- * First open — the four-page landing a newcomer sees before any account exists.
+ * THE FIRST-RUN INTRO — four pages, shown once to a logged-out device.
  *
- * hadar's designs, 2026-08-12. It replaced four centred emoji-and-paragraph slides on a
- * white page. That version was an explainer; this one is a PITCH, and the difference is
- * not decoration:
+ * Rewritten 2026-09-18 from hadar's comps. The old version made its case with
+ * three icon discs per page (camera / mic / pin, then mic / sparkle / doc, then
+ * plane / bubble / check) over a small device photo: it NAMED what the app does
+ * and showed almost none of it. The four pages now carry a single argument —
+ * the moment, what he says, what he gets, what his client does — and each shows
+ * the artefact instead of captioning it.
  *
- *   * IT LEADS WITH THE FEAR, NOT THE FEATURE. "Get the yes before you do the extra
- *     work" is the contractor's actual problem in his own words. "Capture it in the
- *     moment" — the old first slide — describes a mechanism to a man who has not yet
- *     been told why he should care.
- *   * IT SHOWS HIM THE APP. Pages 2-4 each carry a real screen: the recorder, the draft
- *     it becomes, the approval his client signs. The ICP is explicitly someone for whom
- *     software is not second nature (CLAUDE.md §1) — he decides from a picture of the
- *     thing working, not from a paragraph promising it will.
- *   * THE THREE PAGES ARE THE THREE STEPS, in order, and they are the product: record
- *     on site → we turn it into a change order → get the yes before you do the work.
+ * ─── WHY THE PHONES ARE DRAWN, NOT PASTED ──────────────────────────────────────
+ * The comps are rendered PNGs with their text baked in. Shipping them would have
+ * been a morning's work instead of a day's, and it would have put an English
+ * phone screen in front of a Spanish-speaking contractor — on the one screen
+ * whose job is to prove the app speaks his language. Over half the workforce in
+ * drywall, plaster, roofing, painting and flooring is foreign-born. So every word
+ * inside every mockup is an i18n key and every frame is a View. The one image
+ * that survives is the contractor himself (`heroCutout.png`), which carries no
+ * text and therefore no language.
  *
- * ─── ONE GROUND (2026-08-26) ────────────────────────────────────────────────────
- * The cover used to be dark over a full-bleed photograph, on the argument that a cover
- * has to stop someone. It is cream now, because hadar's App Store artwork is — and the
- * artwork is the stronger argument: the same photograph reads as a jobsite rather than a
- * mood when it is not sitting under an 80% scrim, and the headline gets to be ink at
- * poster size instead of white at 38pt. It also ends the seam. Pages 2-4 were already
- * cream, and the two grounds meant the first swipe changed the whole world.
+ * ─── SCALED, NOT FIXED ─────────────────────────────────────────────────────────
+ * The comps are drawn at 390pt. `S()` scales everything from that, so the
+ * composition holds on a 375pt SE and a 430pt Max rather than being tuned for one
+ * device and drifting on the rest. Read `S(20)` as "20 points at comp width".
  *
- * Gold survives as the accent — the rule under the headline — but it is no longer the
- * primary: on cream the ink button is the loudest thing that can be pressed, and it is.
- *
- * ─── ASSETS ─────────────────────────────────────────────────────────────────────
- * `assets/onboard/*` are all cut from hadar's drops:
- *   * the nine step icons are circular crops with alpha, taken from `onboarding-Icons.png`
- *     (the second sheet, which carries the GOLD accents the first strips lacked — the
- *     sparkle's star, the plane, the chat bubble, the approve disc). Circles rather than
- *     squares because the source sits on black and a square shows its corners on cream.
- *   * the three cover icons are the same sheet's gold line art, recoloured flat with
- *     alpha from luminance. Flat-with-alpha is what lets the cover tint them WHITE for
- *     the forest discs it draws them in now; the gold is still what pages 2-4 use.
- *   * `onboard/coverHero.jpg` is the cover photograph, cut out of the App Store artwork
- *     itself (`assets/appstore/…_852x1846.png`) rather than shot separately, so the man
- *     and the framing are the ones hadar signed off. See the note in that folder's
- *     README: the file it came from is a downscaled copy, so this cut is roughly 2x and
- *     wants re-cutting from the 1290x2796 export when that lands.
- *   * the three phone mockups are border-flood-keyed off white, so the screenshots' own
- *     white areas survive the key.
- * `assets/onboard-hero.png` (2.1MB) was orphaned by this redesign and is DELETED with
- * it (code review 2026-09-07) — the cover photograph is `onboard/coverHero.jpg` above.
+ * ─── THE PAGES STILL SCROLL ────────────────────────────────────────────────────
+ * Each page is a ScrollView, as before. A short device cannot fit a full page and
+ * the alternative — shrinking type until it fits — fails the person this app is
+ * for. The footer (dots + action) is pinned outside the scroller so the way
+ * forward is never the thing that scrolled away.
  */
 import React from 'react';
 import {
   Dimensions, Image, Pressable, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
-import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
-import { Icon } from './icon';
 import { t as T, type Lang } from '../i18n';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
+/** The comps' ruler: every measurement is taken at 390pt and scaled from there. */
+const S = (n: number) => Math.round((n * width) / 390 * 10) / 10;
 
-/**
- * THE ARTWORK'S RULER.
- *
- * hadar's cover file is 852pt wide (`assets/appstore/EZChangeOrder_DontDoExtraWork_B`).
- * Every measurement on page 1 is taken off that file and passed through here, so the
- * composition holds its proportions on a 375pt SE and a 430pt Max instead of being tuned
- * for one device and drifting on the rest. Read `A(100)` as "100 artwork points".
- */
-const A = (n: number) => Math.round((n * width) / 852 * 10) / 10;
-
-/** Bright gold — the cover only, where it sits on near-black. */
-const GOLD = '#EDB93F';
-/** The cream pages' accent. The bright gold goes muddy beside black type on cream;
- *  this is the same hue carried down until it holds its own against the headline. */
-const OCHRE = '#C08A2B';
-const INK = '#0C0D0D';
-/** The artwork's forest green — the logo tile, the promise discs, the wordmark. */
-const FOREST = '#1A4A2F';
 const CREAM = '#F7F5F0';
+const INK = '#161918';
+/** The deep forest of the app icon — wordmark tile, document header, approve. */
+const FOREST = '#2F5233';
+/** The button green. Lighter than FOREST so a full-width bar does not read as a hole. */
+const GREEN = '#3E5A38';
+/** The accent on cream. The cover's bright gold goes muddy beside black type. */
+const OCHRE = '#C08A2B';
+const SAND = '#EFE7D9';
+const MUTED = '#555B57';
+const BODY = '#3A403C';
+const LINE = '#E4DED4';
+
+/* ------------------------------------------------------------------ chrome -- */
 
 /**
- * THE MOCKUP'S WIDTH (hadar, 2026-08-12: "the slides are misaligned").
+ * THE HEADER IS ON EVERY PAGE, AND SO IS THE LANGUAGE SWITCH.
  *
- * It was `width: '100%'` with `resizeMode="cover"`, so the phone was drawn 375pt wide,
- * bleeding to both edges — where the design insets it to roughly 71% of the screen with
- * clear margins either side. Measured off the sheet: the mockup spans ~300px inside a
- * ~420px phone frame. `cover` made it worse by scaling to FILL a 375-wide box, blowing
- * the device up to 696pt tall so the window showed only its top half.
+ * It used to be two `View`s halfway down page one: the cover advertised "Español"
+ * to a man who could not read the screen it sat on, and did nothing when he
+ * tapped it. Language is resolved from the handset before any of this paints
+ * (`devicelang.ts`), so this is the CORRECTION — for the bilingual case, a phone
+ * set to English by someone who would rather work in Spanish — and it is present
+ * on all four pages because the page he doubts is not necessarily the first one.
  */
-const PHONE_W = Math.round(width * 0.65);
-
-/** A headline line and whether it is the accented one. Written as lines rather than
- *  wrapped, so the colour break lands on the phrase the design chose and not wherever
- *  the box happens to run out. */
-type Line = { k: string; gold?: boolean };
-
-type Slide = {
-  head: Line[];
-  body: string;
-  /** The three glyphs under the body, with their captions. */
-  steps: { src: any; label: string }[];
-  /** Slide 2 draws arrows between the steps — it is a PIPELINE, not a list. */
-  arrows?: boolean;
-  phone: any;
-  /** width/height of the mockup FILE. The three are not the same shape (their source
-   *  crops differed), so a single ratio would squash one of them. */
-  phoneAspect: number;
-};
-
-const SLIDES: Slide[] = [
-  {
-    head: [{ k: 'ob.s1h1' }, { k: 'ob.s1h2', gold: true }],
-    body: 'ob.s1b',
-    steps: [
-      { src: require('../../assets/onboard/obPhotos.png'), label: 'ob.s1a' },
-      { src: require('../../assets/onboard/obVoice.png'), label: 'ob.s1b2' },
-      { src: require('../../assets/onboard/obLocation.png'), label: 'ob.s1c' },
-    ],
-    phone: require('../../assets/onboard/phone1.png'),
-    phoneAspect: 760 / 1410,
-  },
-  {
-    head: [{ k: 'ob.s2h1' }, { k: 'ob.s2h2', gold: true }, { k: 'ob.s2h3', gold: true }],
-    body: 'ob.s2b',
-    arrows: true,
-    steps: [
-      { src: require('../../assets/onboard/obRecord.png'), label: 'ob.s2a' },
-      { src: require('../../assets/onboard/obBuild.png'), label: 'ob.s2b2' },
-      { src: require('../../assets/onboard/obDocument.png'), label: 'ob.s2c' },
-    ],
-    phone: require('../../assets/onboard/phone2.png'),
-    phoneAspect: 760 / 1563,
-  },
-  {
-    head: [{ k: 'ob.s3h1' }, { k: 'ob.s3h2', gold: true }],
-    body: 'ob.s3b',
-    steps: [
-      { src: require('../../assets/onboard/obSend.png'), label: 'ob.s3a' },
-      { src: require('../../assets/onboard/obDiscuss.png'), label: 'ob.s3b2' },
-      { src: require('../../assets/onboard/obApprove.png'), label: 'ob.s3c' },
-    ],
-    phone: require('../../assets/onboard/phone3.png'),
-    phoneAspect: 760 / 1415,
-  },
-];
-
-const PAGES = 1 + SLIDES.length;
-
-/**
- * The cover's three promises. ART, not the kit's stroke glyphs (2026-08-12) — hadar's
- * icon sheet carries gold-drawn versions of exactly these three, and the drawn shield
- * has a check inside it that the kit's plain shield does not. The kit stays the right
- * answer for chrome that changes colour with state; this is a fixed marketing lockup,
- * so it uses the drawn art it was designed with.
- */
-const COVER_PROMISES: { src: any; title: string; body: string }[] = [
-  { src: require('../../assets/onboard/obShield.png'), title: 'ob.p1t', body: 'ob.p1b' },
-  { src: require('../../assets/onboard/obClock.png'), title: 'ob.p2t', body: 'ob.p2b' },
-  { src: require('../../assets/onboard/obDoc.png'), title: 'ob.p3t', body: 'ob.p3b' },
-];
-
-/**
- * The wordmark, as the artwork draws it: the app's own mark, white, in a forest tile.
- *
- * `android-icon-monochrome.png` is the white cut that already ships for the Android
- * adaptive icon — the same artwork as the store listing's tile, so this is the real mark
- * rather than a drawing of one. It replaces the hand-built speech bubble, which predates
- * the current logo and was the only place in the app still using it.
- *
- * ONE TREATMENT ON ALL FOUR PAGES. The old mark had a light and a dark variant because
- * the cover was dark; every page is cream now, so a variant would be a switch with one
- * position.
- */
-function Wordmark() {
+function Chrome({ lang, onLang }: { lang?: Lang; onLang?: (l: Lang) => void }) {
   return (
-    <View style={st.mark}>
-      <View style={st.markTile}>
-        <Image source={require('../../assets/android-icon-monochrome.png')}
-          style={st.markGlyph} resizeMode="contain" />
+    <View style={st.chrome}>
+      <View style={st.mark}>
+        <View style={st.markTile}>
+          <Image source={require('../../assets/android-icon-monochrome.png')}
+            style={st.markGlyph} resizeMode="contain" />
+        </View>
+        <Text style={st.markT}>EZChangeOrders</Text>
       </View>
-      <Text style={st.markT}>EZChangeOrders</Text>
+      <View style={st.langRow}>
+        {(['en', 'es'] as const).map((l) => (
+          <Pressable key={l} onPress={() => onLang?.(l)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: lang === l }}
+            style={[st.langChip, lang === l && st.langChipOn]}>
+            <Text style={[st.langT, lang === l && st.langTOn]}>
+              {l === 'en' ? 'EN' : 'ES'}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
     </View>
   );
 }
 
+/** The dots + the one action. Pinned below the scroller on every page. */
+function Foot({ i, label, onPress }: { i: number; label: string; onPress: () => void }) {
+  return (
+    <View style={st.foot}>
+      <View style={st.dots}>
+        {[0, 1, 2, 3].map((d) => (
+          <View key={d} style={[st.dot, d === i && st.dotOn]} />
+        ))}
+      </View>
+      <Pressable style={st.cta} accessibilityRole="button" onPress={onPress}>
+        <Text style={st.ctaT}>{label}</Text>
+        <Text style={st.ctaArrow}>→</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+/** A page's eyebrow + two-tone headline + body, shared by pages 2-4. */
+function Head({ eyebrow, h1, h2, body }: {
+  eyebrow: string; h1: string; h2: string; body: string;
+}) {
+  return (
+    <>
+      <Text style={st.eyebrow}>{T(eyebrow)}</Text>
+      <Text style={st.head}>{T(h1)}</Text>
+      <Text style={[st.head, { color: OCHRE }]}>{T(h2)}</Text>
+      <Text style={st.lede}>{T(body)}</Text>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------- the devices -- */
+
+/**
+ * A phone, drawn. `dark` flips it to the recorder's near-black.
+ *
+ * Deliberately NOT a picture of a phone: see the file header. The bezel is a
+ * rounded View with the screen inset; nothing here is an image, so nothing here
+ * is stuck in one language.
+ */
+function Device({ dark, children }: { dark?: boolean; children: React.ReactNode }) {
+  return (
+    <View style={st.device}>
+      <View style={[st.screen, dark && { backgroundColor: '#131110' }]}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
+/** Page 2's recorder: a live waveform, his own words, and the controls. */
+function Recorder() {
+  // Fixed bars rather than a live meter: this is a still of the screen, and a
+  // running animation on an intro page is motion competing with the copy.
+  const bars = [8, 18, 30, 44, 24, 38, 52, 20, 34, 12, 26, 42, 16, 30, 22, 36, 14, 9];
+  return (
+    <Device dark>
+      <View style={st.recBody}>
+        <View style={st.recTop}>
+          <View style={st.recDot} />
+          <Text style={st.recLabel}>{T('ob.recording')} · 0:38</Text>
+        </View>
+        <View style={st.wave}>
+          {bars.map((h, n) => (
+            <View key={n} style={[st.bar, { height: S(h) },
+              h > 32 ? { backgroundColor: '#D9A02B' }
+                : h > 18 ? { backgroundColor: '#93A68C' } : null]} />
+          ))}
+        </View>
+        <Text style={st.recQuote}>{T('ob.recQuote')}</Text>
+        <View style={st.recCtrls}>
+          <View style={st.recCtrl}>
+            <View style={st.recSmall}><View style={st.glyphCam} /></View>
+            <Text style={st.recCtrlT}>{T('ob.addPhoto')}</Text>
+          </View>
+          <View style={st.recCtrl}>
+            <View style={st.recBig}>
+              <View style={st.pauseBar} /><View style={st.pauseBar} />
+            </View>
+            <Text style={st.recCtrlT}> </Text>
+          </View>
+          <View style={st.recCtrl}>
+            <View style={st.recSmall}><View style={st.glyphStop} /></View>
+            <Text style={st.recCtrlT}>{T('ob.stopRec')}</Text>
+          </View>
+        </View>
+      </View>
+    </Device>
+  );
+}
+
+/** Page 3's document — itemised scope, an exclusion, and priced lines. */
+function Draft() {
+  const scope = ['ob.sc1', 'ob.sc2', 'ob.sc3'];
+  const prices: [string, string, string][] = [
+    ['ob.p1', 'ob.p1q', '$500'],
+    ['ob.p2', 'ob.p2q', '$300'],
+  ];
+  return (
+    <Device>
+      <View style={st.docNav}>
+        <Text style={st.docNavT}>{T('ob.docNav')}</Text>
+      </View>
+      <View style={st.docBody}>
+        <View style={st.docHead}>
+          <Text style={st.docCompany}>Alvarez Electric</Text>
+          <Text style={st.docCo}>{T('ob.docCo')}</Text>
+        </View>
+
+        <Text style={st.docLabel}>{T('ob.docScope')}</Text>
+        {scope.map((k, n) => (
+          <View key={k} style={st.scopeRow}>
+            <View style={st.scopeNum}><Text style={st.scopeNumT}>{n + 1}</Text></View>
+            <Text style={st.scopeT}>{T(k)}</Text>
+          </View>
+        ))}
+
+        <Text style={st.docLabel}>{T('ob.docNot')}</Text>
+        <View style={st.notRow}>
+          <View style={st.dash} />
+          <Text style={st.notT}>{T('ob.ni1')}</Text>
+        </View>
+
+        <View style={st.priceBox}>
+          <Text style={st.priceHead}>{T('ob.docPrice')}</Text>
+          {prices.map(([k, q, amt]) => (
+            <View key={k} style={st.priceRow}>
+              <View style={st.priceCol}>
+                <Text style={st.priceT}>{T(k)}</Text>
+                <Text style={st.priceQ}>{T(q)}</Text>
+              </View>
+              <Text style={st.priceAmt}>{amt}</Text>
+            </View>
+          ))}
+          <View style={[st.priceRow, st.totalRow]}>
+            <Text style={st.totalT}>{T('ob.total')}</Text>
+            <Text style={st.totalAmt}>$800</Text>
+          </View>
+        </View>
+      </View>
+    </Device>
+  );
+}
+
+/** Page 4: the client's text, beside the page it opens. */
+function ClientPair() {
+  return (
+    <View style={st.pair}>
+      <View style={st.smsWrap}>
+        <Device>
+          <View style={st.smsBody}>
+            <View style={st.smsAvatar}><Text style={st.smsAvatarT}>AC</Text></View>
+            <Text style={st.smsWho}>Alvarez Electric</Text>
+            <View style={st.bubbleIn}>
+              <Text style={st.smsT}>{T('ob.smsMsg')}</Text>
+              <Text style={st.smsLink}>ezchangeorders.com/a7fQ2</Text>
+            </View>
+          </View>
+        </Device>
+      </View>
+      <View style={st.appWrap}>
+        <Device>
+          <View style={st.appBody}>
+            <Text style={st.appCompany}>Alvarez Electric</Text>
+            <Text style={st.appCo}>{T('ob.docCo')}</Text>
+            <View style={st.appLines}>
+              <Text style={st.appLine}>{T('ob.sc1')}</Text>
+              <Text style={st.appLine}>{T('ob.sc2')}</Text>
+            </View>
+            <View style={st.appTotalRow}>
+              <Text style={st.totalT}>{T('ob.total')}</Text>
+              <Text style={st.totalAmt}>$800</Text>
+            </View>
+            <View style={st.approveBtn}>
+              <Text style={st.approveT}>✓  {T('ob.approveBtn')}</Text>
+            </View>
+            <Text style={st.askQ}>{T('ob.askQ')}</Text>
+          </View>
+        </Device>
+      </View>
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------------ screen -- */
+
+const PAGES = 4;
+
 export function Onboarding({ onDone, lang, onLang }: {
   onDone: (intent?: 'signup' | 'login') => void;
-  /** Which language is live, so the chip can show which one is selected. */
+  /** Which language is live, so the header chip shows which one is selected. */
   lang?: Lang;
-  /** Picking a language here applies it immediately and remembers it. */
+  /** Picking a language applies it immediately and remembers it. */
   onLang?: (l: Lang) => void;
 }) {
   const ref = React.useRef<ScrollView>(null);
   const [i, setI] = React.useState(0);
-  const go = (n: number) => {
-    ref.current?.scrollTo({ x: width * n, animated: true });
-    setI(n);
-  };
-  // DEV ONLY — drive the pager from the Metro inspector, so reviewing all four pages
-  // costs the user nothing. Paired with App.tsx's `__shot()`: jump, capture, repeat.
-  React.useEffect(() => {
-    if (__DEV__) (globalThis as any).__introPage = (n: number) => go(n);
-  }, []);
+  const go = (n: number) => ref.current?.scrollTo({ x: n * width, animated: true });
+
+  const page = (n: number, body: React.ReactNode, label: string) => (
+    <View style={[st.page, { width }]}>
+      <Chrome lang={lang} onLang={onLang} />
+      <ScrollView style={st.scroll} contentContainerStyle={st.scrollBody}
+        showsVerticalScrollIndicator={false}>
+        {body}
+      </ScrollView>
+      <Foot i={n} label={T(label)}
+        onPress={() => (n === PAGES - 1 ? onDone('signup') : go(n + 1))} />
+    </View>
+  );
 
   return (
     <View style={st.c}>
-      {/* THE PHOTOGRAPH BELONGS TO PAGE 1 NOW, not to the root.
-
-          It used to be the root background with the cream pages painted over it, because
-          the cover was dark and full-bleed: a page-sized image inside the pager slides
-          with the finger, and a backdrop that tracks the swipe reads as a bug. The cover
-          is cream too since the 2026-08-26 artwork, and the photograph is no longer a
-          backdrop — it is one element in the top-right corner of the first page. So it
-          SHOULD travel with that page, and living inside it is what makes it do that. */}
-
-      <ScrollView
-        ref={ref}
-        horizontal
-        pagingEnabled
+      <ScrollView ref={ref} horizontal pagingEnabled
         showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={(e) => setI(Math.round(e.nativeEvent.contentOffset.x / width))}
-      >
-        {/* ── PAGE 1 — the cover ──
-             hadar's App Store artwork, 2026-08-26
-             (`assets/appstore/EZChangeOrder_DontDoExtraWork_B_852x1846.png`), built as a
-             screen rather than pasted in as one: the file is 852x1846, near enough a
-             phone at 390pt, so the composition reproduces at 1:1 and only needs the
-             controls a first-open page has to carry and a poster does not.
+        onMomentumScrollEnd={(e) =>
+          setI(Math.round(e.nativeEvent.contentOffset.x / width))}>
 
-             THE TEXT STAYS TEXT. Shipping the artwork as an image would have been a
-             two-line change and it would have broken Spanish outright — every word here
-             is already an i18n key, and `ob.lede` and the three promises are the
-             artwork's own copy, verbatim. Only the headline was rewritten, and it fits
-             `ob.h1`..`ob.h4` one line per key. */}
-        <ScrollView style={{ width }} contentContainerStyle={st.cover}
-          showsVerticalScrollIndicator={false}>
-          {/* The photograph, cut from the artwork, bleeding off the top and right. The
-              two gradients are what let the headline cross it: one fading it into the
-              cream on the LEFT where the type sits, one on the BOTTOM so it hands over
-              to the page rather than stopping on an edge. SVG for the same reason the
-              old scrim used it — react-native-svg is already here and
-              expo-linear-gradient is not. */}
-          <View style={st.coverArt} pointerEvents="none">
-            <Image source={require('../../assets/onboard/coverHero.jpg')}
-              style={st.coverPhoto} resizeMode="cover" />
-            <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
-              <Defs>
-                <LinearGradient id="fadeL" x1="1" y1="0" x2="0" y2="0">
-                  <Stop offset="0" stopColor={CREAM} stopOpacity="0" />
-                  <Stop offset="0.76" stopColor={CREAM} stopOpacity="0" />
-                  <Stop offset="0.91" stopColor={CREAM} stopOpacity="0.6" />
-                  <Stop offset="1" stopColor={CREAM} stopOpacity="0.96" />
-                </LinearGradient>
-                <LinearGradient id="fadeD" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor={CREAM} stopOpacity="0" />
-                  <Stop offset="0.70" stopColor={CREAM} stopOpacity="0" />
-                  <Stop offset="0.88" stopColor={CREAM} stopOpacity="0.86" />
-                  <Stop offset="1" stopColor={CREAM} stopOpacity="1" />
-                </LinearGradient>
-              </Defs>
-              <Rect x="0" y="0" width="100%" height="100%" fill="url(#fadeL)" />
-              <Rect x="0" y="0" width="100%" height="100%" fill="url(#fadeD)" />
-            </Svg>
-          </View>
-
-          {/* The device mockup — `onboard/phone1.png`, the same file page 2 uses. It is
-              the artwork's own phone, so nothing here is a redraw of a screen. */}
-          <Image source={require('../../assets/onboard/phone1.png')}
-            style={st.coverPhone} resizeMode="contain" />
-
-          {/* THE GUTTER LIVES HERE, NOT ON THE SCROLL CONTAINER.
-
-              Whether an absolutely-positioned child is offset by its parent's padding is
-              exactly the kind of thing that differs between Yoga versions, and the
-              photograph and the device both depend on `right: 0` and `left:` meaning the
-              SCREEN edge. Padding the flowing content instead makes that unambiguous:
-              the two absolute elements measure against the full width, and nothing about
-              the bleed rests on a layout detail that could change under us. */}
-          <View style={st.coverBody}>
-          <Wordmark />
-
-          <View style={st.headWrap}>
+        {/* ── 1 · THE MOMENT ──────────────────────────────────────────────────
+            The three things a client actually says, over the man they are said
+            to. Recognition, not explanation: he knows this conversation, and the
+            page's whole job is to say we have stood on that jobsite too. */}
+        {page(0, (
+          <>
             <Text style={st.coverHead}>{T('ob.h1')}</Text>
             <Text style={st.coverHead}>{T('ob.h2')}</Text>
-            <Text style={st.coverHead}>{T('ob.h3')}</Text>
-            <Text style={st.coverHead}>{T('ob.h4')}</Text>
-          </View>
-          <View style={[st.rule, { backgroundColor: GOLD }]} />
-          <Text style={st.coverLede}>{T('ob.lede')}</Text>
-
-          {/* THE TWO LANGUAGES THE APP ACTUALLY SHIPS (hadar, 2026-08-26). The later
-              artwork carries seven flags; `Lang` is 'en' | 'es' and `DICT` has two
-              dictionaries, so five of those would be a promise broken on the next
-              screen. Words rather than flags because a flag is a country. */}
-          {/* A CONTROL, NOT A BADGE (2026-09-18). These were `View`s: the cover
-              advertised "Español" to a man who could not read the rest of the
-              screen, and did nothing when he tapped it. The dictionaries were
-              always complete — the only thing missing was a way in. The live one
-              carries the forest border so the pair reads as a switch with a
-              position, not two labels. Language is resolved from the handset
-              before this screen paints (`deviceLang`), so this is the CORRECTION
-              for the bilingual case — a phone set to English by a man who would
-              rather work in Spanish — not the primary way in. */}
-          <View style={st.langRow}>
-            {(['en', 'es'] as const).map((l) => (
-              <Pressable key={l} onPress={() => onLang?.(l)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: lang === l }}
-                style={[st.langChip, lang === l && st.langChipOn]}>
-                <Text style={[st.langT, lang === l && st.langTOn]}>
-                  {l === 'en' ? 'English' : 'Español'}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <View style={st.promises}>
-            {COVER_PROMISES.map((p, n) => (
-              <View key={p.title} style={[st.promise, n > 0 && st.promiseRule]}>
-                <View style={st.promiseDisc}>
-                  <Image source={p.src} style={st.promiseIcon} resizeMode="contain"
-                    tintColor="#FFFFFF" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={st.promiseT}>{T(p.title)}</Text>
-                  <Text style={st.promiseB}>{T(p.body)}</Text>
-                </View>
+            <Text style={[st.coverHead, { color: GREEN }]}>{T('ob.h3')}</Text>
+            <View style={st.rule} />
+            <Text style={st.lede}>{T('ob.lede')}</Text>
+            <View style={st.heroWrap}>
+              <Image source={require('../../assets/onboard/heroCutout.png')}
+                style={st.hero} resizeMode="contain" />
+              <View style={st.bubbles}>
+                {['ob.b1', 'ob.b2', 'ob.b3'].map((k, n) => (
+                  <View key={k} style={[st.bubble, n === 1 && st.bubbleIndent]}>
+                    <Text style={st.bubbleT}>{T(k)}</Text>
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
-
-          <View style={st.captureChip}>
-            <Icon name="approved" size={17} color={FOREST} />
-            <View style={{ flex: 1 }}>
-              <Text style={st.captureT}>{T('ob.captureH')}</Text>
-              <Text style={st.captureB}>{T('ob.captureB')}</Text>
             </View>
-          </View>
-
-          <View style={st.coverFoot}>
-            <Pressable style={st.cta} accessibilityRole="button" onPress={() => onDone('signup')}>
-              <Text style={st.ctaT}>{T('ob.start')}</Text>
-              {/* The arrow is on the design's button and it earns its place: it says
-                  FORWARD, which is the one thing a first-time user needs to know about
-                  the only control on the screen. */}
-              <Text style={st.ctaArrow}>→</Text>
-            </Pressable>
-            {/* TWO DIFFERENT DESTINATIONS, not two labels for one. A returning user who
-                taps "Log in" and lands on a sign-up form has been told the app forgot
-                him. `intent` is what keeps them apart. */}
-            <Pressable style={st.login} accessibilityRole="button" onPress={() => onDone('login')}>
+            <Pressable accessibilityRole="button" onPress={() => onDone('login')}
+              style={st.login}>
               <Text style={st.loginT}>
                 {T('ob.haveAccount')} <Text style={st.loginLink}>{T('ob.login')}</Text>
               </Text>
             </Pressable>
-          </View>
-          </View>
+          </>
+        ), 'ob.showMe')}
 
-          {/* The ridge and treeline the artwork closes on. Drawn, not imported: it is
-              flat shapes, and an image would be one more file to keep in step with the
-              page's cream. */}
-          <Svg width={width} height={92} style={st.ridge}>
-            <Path d={`M0 56 L${width * 0.12} 25 L${width * 0.22} 54 L${width * 0.31} 17
-                      L${width * 0.45} 58 L${width * 0.54} 35 L${width * 0.67} 64
-                      L${width * 0.79} 29 L${width * 0.90} 58 L${width} 38 L${width} 92 L0 92 Z`}
-              fill="#E0DACE" />
-            <Path d={`M0 72 L${width * 0.10} 50 L${width * 0.19} 70 L${width * 0.30} 44
-                      L${width * 0.42} 72 L${width * 0.54} 52 L${width * 0.66} 76
-                      L${width * 0.78} 50 L${width * 0.89} 74 L${width} 56 L${width} 92 L0 92 Z`}
-              fill="#D2CBBC" />
-          </Svg>
-        </ScrollView>
-
-        {/* ── PAGES 2-4 — the three steps, on the app's own cream ── */}
-        {SLIDES.map((sl) => (
-          <View key={sl.body} style={[st.page, { width }]}>
-            <ScrollView contentContainerStyle={st.pageBody} showsVerticalScrollIndicator={false}>
-              <Wordmark />
-              <View style={st.headWrap}>
-                {sl.head.map((ln) => (
-                  <Text key={ln.k} style={[st.pageHead, ln.gold && { color: OCHRE }]}>
-                    {T(ln.k)}
-                  </Text>
+        {/* ── 2 · WHAT HE DOES ───────────────────────────────────────────────── */}
+        {page(1, (
+          <>
+            <Head eyebrow="ob.e1" h1="ob.n1h1" h2="ob.n1h2" body="ob.n1b" />
+            <Recorder />
+            <View style={st.stuckBox}>
+              <Text style={st.stuckLabel}>{T('ob.stuck')}</Text>
+              <View style={st.chips}>
+                {['ob.q1', 'ob.q2', 'ob.q3'].map((k) => (
+                  <View key={k} style={st.chip}><Text style={st.chipT}>{T(k)}</Text></View>
                 ))}
               </View>
-              <Text style={st.pageLede}>{T(sl.body)}</Text>
+            </View>
+          </>
+        ), 'ob.next')}
 
-              <View style={st.steps}>
-                {sl.steps.map((s, n) => (
-                  <React.Fragment key={s.label}>
-                    {sl.arrows && n > 0 && <Text style={st.arrow}>→</Text>}
-                    <View style={st.step}>
-                      {/* THE CIRCLE IS DRAWN, NOT PART OF THE ART. The sliced icons
-                          used to carry their own disc — the same cream as the page — so
-                          on a cream slide the circle simply disappeared. The glyphs are
-                          keyed to transparent now and this View is the disc, in a colour
-                          the app controls. */}
-                      <View style={st.stepDisc}>
-                        <Image source={s.src} style={st.stepGlyph} resizeMode="contain" />
-                      </View>
-                      <Text style={st.stepT}>{T(s.label)}</Text>
-                    </View>
-                  </React.Fragment>
-                ))}
-              </View>
+        {/* ── 3 · WHAT HE GETS ───────────────────────────────────────────────── */}
+        {page(2, (
+          <>
+            <Head eyebrow="ob.e2" h1="ob.n2h1" h2="ob.n2h2" body="ob.n2b" />
+            <Draft />
+          </>
+        ), 'ob.next')}
 
-              {/* Anchored to the TOP and allowed to run off the bottom of the screen, as
-                  drawn: the phone is a glimpse of the app, not a spec sheet, and showing
-                  the whole device would shrink the screen inside it to nothing. */}
-              <View style={st.phoneWrap}>
-                {/* EXPLICIT WIDTH AND HEIGHT, not width + aspectRatio.
-                    The aspectRatio version rendered the device at the full content
-                    width and hugely magnified — the box ended up 311pt wide (the
-                    container's width) instead of the 244 the style asked for, and with
-                    `contain` filling that box the phone blew up until only its notch
-                    and title fit the window. Two numbers, both computed, nothing left
-                    for the layout to derive. */}
-                <Image source={sl.phone} resizeMode="contain"
-                  style={{ width: PHONE_W, height: Math.round(PHONE_W / sl.phoneAspect) }} />
-              </View>
-            </ScrollView>
-          </View>
-        ))}
+        {/* ── 4 · WHAT THEY DO ───────────────────────────────────────────────── */}
+        {page(3, (
+          <>
+            <Head eyebrow="ob.e3" h1="ob.n3h1" h2="ob.n3h2" body="ob.n3b" />
+            <ClientPair />
+            <View style={st.sealed}>
+              <Text style={st.sealedH}>{T('ob.sealedH')}</Text>
+              <Text style={st.sealedB}>{T('ob.sealedB')}</Text>
+            </View>
+          </>
+        ), 'ob.writeFirst')}
       </ScrollView>
-
-      {/* ── ONE BAR FOR ALL FOUR PAGES ──
-          It sits OVER the pager so it does not slide with a page, and it is the ONLY
-          place dots are drawn. Giving the cream pages their own footer would mean two
-          dot rails that have to be kept in step — and the one that drifts is the one
-          nobody notices. On the cover it is dots alone (its own Get started sits in the
-          page); on the steps it grows Back and Next around them. */}
-      <View style={[st.bar, i > 0 && st.barCream]}>
-        {i > 0 ? (
-          <Pressable onPress={() => go(i - 1)} hitSlop={12} accessibilityRole="button">
-            <Text style={st.back}>{T('ob.back')}</Text>
-          </Pressable>
-        ) : <View style={st.barSpacer} />}
-
-        {/* ABSOLUTELY CENTRED, so the labels either side can size themselves.
-            They used to be pinned to 64pt each to keep the dots in the middle — and the
-            last page's "Get started" is two words, so it wrapped. The dots own the
-            centre of the bar outright now and nothing has to be measured against them. */}
-        <View style={st.dotsWrap} pointerEvents="none">
-          <View style={st.dots}>
-            {Array.from({ length: PAGES }, (_, d) => (
-              <View key={d} style={[
-                st.dot,
-                // One treatment for all four: the cover is cream now, and the white
-                // dots it used to need were invisible the moment it stopped being dark.
-                { backgroundColor: 'rgba(19,17,16,0.18)' },
-                d === i && { backgroundColor: OCHRE },
-              ]} />
-            ))}
-          </View>
-        </View>
-
-        {i > 0 ? (
-          <Pressable
-            onPress={() => (i === PAGES - 1 ? onDone('signup') : go(i + 1))}
-            hitSlop={12} accessibilityRole="button">
-            <Text style={st.next} numberOfLines={1}>
-              {T(i === PAGES - 1 ? 'ob.start' : 'ob.next')}
-            </Text>
-          </Pressable>
-        ) : <View style={st.barSpacer} />}
-      </View>
     </View>
   );
 }
 
 const st = StyleSheet.create({
   c: { flex: 1, backgroundColor: CREAM },
+  page: { flex: 1, backgroundColor: CREAM },
+  scroll: { flex: 1 },
+  scrollBody: { paddingHorizontal: S(22), paddingBottom: S(16) },
 
-  /**
-   * THE COVER'S GEOMETRY, SCALED OFF THE ARTWORK.
-   *
-   * The file is 852 wide, the screen is `width`, so every number below is the artwork's
-   * own measurement times `A`. That is the whole reason the page looks like the poster
-   * rather than like an interpretation of it: the left column, the photograph and the
-   * device all land where hadar put them, at any screen size.
-   *
-   * `paddingBottom` is NOT for the bar — the ridge is drawn inside the page and carries
-   * the last 92pt itself. It clears the home indicator only.
-   */
-  cover: { paddingTop: A(64), paddingBottom: 8, minHeight: height },
-  coverBody: { paddingHorizontal: A(50) },
-  // Top-right, bleeding off both edges, exactly as the artwork crops it.
-  coverArt: { position: 'absolute', top: 0, right: 0, width: A(382), height: A(830) },
-  coverPhoto: { width: '100%', height: '100%' },
-  /**
-   * The device sits OVER the photograph and beside the left column — the artwork's one
-   * piece of overlap, and what stops the page reading as two stacked halves.
-   *
-   * `left`, not `right`: the column's width is what it must clear, and pinning it to the
-   * left edge of its own gap keeps that relationship on a narrow screen instead of
-   * letting the two slide into each other.
-   */
-  coverPhone: { position: 'absolute', left: A(378), top: A(780),
-    width: A(434), height: A(434) / (760 / 1410) },
-  page: { backgroundColor: CREAM },
-  pageBody: { paddingHorizontal: 32, paddingTop: 62, paddingBottom: 76 },
-
-  // ── wordmark ──
-  mark: { flexDirection: 'row', alignItems: 'center', gap: A(24), marginBottom: A(66) },
-  markTile: { width: A(76), height: A(76), borderRadius: A(20), backgroundColor: FOREST,
-    alignItems: 'center', justifyContent: 'center' },
-  markGlyph: { width: A(54), height: A(54) },
-  markT: { fontFamily: 'Oswald_700Bold', fontSize: A(54), color: FOREST, letterSpacing: -0.3 },
-
-  // ── headlines ──
-  headWrap: { marginBottom: 4, paddingTop: A(10) },
-  // Ink, not white, and it runs across the photograph — the left fade is what carries
-  // it. maxWidth is the artwork's column: the break after "EXTRA WORK" is a design
-  // decision, not wherever the box happens to run out.
-  coverHead: { fontFamily: 'Oswald_700Bold', fontSize: A(100), lineHeight: A(106),
-    color: INK, textTransform: 'uppercase', letterSpacing: -0.6, maxWidth: A(430) },
-  pageHead: { fontFamily: 'Oswald_700Bold', fontSize: 38, lineHeight: 43, color: '#131110',
-    textTransform: 'uppercase', letterSpacing: -0.2 },
-  rule: { width: A(135), height: A(9), borderRadius: 2, marginTop: A(48), marginBottom: A(36) },
-  // maxWidth is what makes it break where the design breaks it — three short lines
-  // clear of the subject, not two that run across his chest.
-  // maxWidth 155 is what breaks it into the design's THREE short lines, clear of the
-  // subject — at any wider it runs across his chest as two.
-  coverLede: { fontFamily: 'Inter_400Regular', fontSize: A(35), lineHeight: A(50),
-    color: '#3D3733', maxWidth: A(300) },
-  // maxWidth 186 is measured, and it is what produces the design's line breaks:
-  // "Snap photos and say what / changed. No forms. / No typing on the jobsite."
-  pageLede: { fontFamily: 'Inter_400Regular', fontSize: 15, lineHeight: 23,
-    color: '#3B3733', marginBottom: 22 },
-
-  // ── the two languages ──
-  langRow: { flexDirection: 'row', gap: A(14), marginTop: A(44) },
-  langChip: { borderWidth: 1, borderColor: '#D8D1C4', backgroundColor: '#FFFDF8',
-    borderRadius: A(14), paddingHorizontal: A(22), paddingVertical: A(11),
-    // 44pt is the floor for a control somebody taps with a glove on.
-    minHeight: 44, justifyContent: 'center' },
-  langChipOn: { borderWidth: 2, borderColor: FOREST, backgroundColor: '#FFFFFF' },
-  langT: { fontFamily: 'Inter_600SemiBold', fontSize: A(26), color: '#3D3733' },
-  langTOn: { fontFamily: 'Inter_700Bold', color: FOREST },
-
-  // ── the three glyphs ──
-  steps: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center',
-    marginBottom: 16 },
-  step: { alignItems: 'center', width: 85 },
-  stepDisc: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#EFE7D9',
-    alignItems: 'center', justifyContent: 'center' },
-  stepGlyph: { width: 30, height: 30 },
-  stepT: { fontFamily: 'Inter_400Regular', fontSize: 12, color: '#3B3733', marginTop: 10,
-    textAlign: 'center' },
-  // Vertically centred on the DISC, not on the whole item — the captions sit below and
-  // an arrow aligned to the block would float under the circles.
-  arrow: { fontSize: 16, color: '#8A827A', marginTop: 20 },
-
-  // ── the phone ──
-  // FIXED WINDOW, TOP-ALIGNED. The window height is constant so the page does not jump
-  // between slides; the image draws at its true aspect and the window clips the BOTTOM
-  // of the device, which is the crop the design uses. `contain`, not `cover`: with an
-  // explicit width and aspect there is nothing left to fill, and `cover` would only
-  // reintroduce the scaling that caused this.
-  phoneWrap: { height: 342, overflow: 'hidden', alignItems: 'center',
-    justifyContent: 'flex-start' },
-
-  // ── the cover's promises ──
-  // A NARROW COLUMN, RULED. The artwork stops this list well short of the device and
-  // divides the three with hairlines rather than gaps; both are what keep it from
-  // colliding with the phone on a 375pt screen.
-  promises: { marginTop: A(48), width: A(300) },
-  promise: { flexDirection: 'row', alignItems: 'flex-start', gap: A(18),
-    paddingVertical: A(20) },
-  promiseRule: { borderTopWidth: 1, borderTopColor: '#DFD9CF' },
-  // A FILLED FOREST PUCK, not the old gold ring: on cream a ring reads as an empty
-  // shape, and the artwork's discs are the one solid mark down the left column.
-  promiseDisc: { width: A(62), height: A(62), borderRadius: A(31), backgroundColor: FOREST,
-    alignItems: 'center', justifyContent: 'center' },
-  promiseIcon: { width: A(32), height: A(32) },
-  promiseT: { fontFamily: 'Inter_700Bold', fontSize: A(27), color: FOREST,
-    textTransform: 'uppercase', letterSpacing: 0.4 },
-  promiseB: { fontFamily: 'Inter_400Regular', fontSize: A(25), lineHeight: A(33),
-    color: '#3D3733', marginTop: 2 },
-
-  // ── "Capture it on site." ──
-  captureChip: { flexDirection: 'row', alignItems: 'flex-start', gap: A(20),
-    backgroundColor: '#EFE9DF', borderRadius: A(22), padding: A(26),
-    marginTop: A(40), width: A(300) },
-  captureT: { fontFamily: 'Inter_700Bold', fontSize: A(29), color: FOREST },
-  captureB: { fontFamily: 'Inter_400Regular', fontSize: A(28), color: '#3D3733', marginTop: 1 },
-
-  // ── the ask ──
-  coverFoot: { marginTop: A(56) },
-  // INK, NOT GOLD. On the dark cover gold was the only thing bright enough to be the
-  // one control; on cream it is the quietest fill on the page. The artwork puts nothing
-  // here at all — it is a poster — so this follows the app's own primary instead.
-  cta: { flexDirection: 'row', gap: 11, minHeight: 55, borderRadius: 13,
-    backgroundColor: INK, alignItems: 'center', justifyContent: 'center' },
-  ctaT: { fontFamily: 'Inter_700Bold', fontSize: 16.5, color: '#FFFFFF' },
-  ctaArrow: { fontSize: 17, color: '#FFFFFF', marginTop: -2 },
-  login: { alignItems: 'center', paddingVertical: 13 },
-  loginT: { fontFamily: 'Inter_400Regular', fontSize: 14.5, color: '#3D3733' },
-  loginLink: { fontFamily: 'Inter_700Bold', color: FOREST },
-  // The ridge closes the page. Negative margins cancel `cover`'s gutter so it runs edge
-  // to edge, and it is the last child, so it also supplies the bottom padding.
-  ridge: { marginTop: A(60), marginBottom: -8 },
-
-  // ── the one bar ──
-  bar: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 58,
+  // ── chrome ──
+  chrome: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20 },
-  barCream: { backgroundColor: CREAM },
-  barSpacer: { width: 1 },
-  back: { fontFamily: 'Inter_400Regular', fontSize: 17, color: '#6B625B' },
-  next: { fontFamily: 'Inter_700Bold', fontSize: 17, color: OCHRE },
-  dotsWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center',
-    justifyContent: 'center' },
-  dots: { flexDirection: 'row', gap: 9 },
-  dot: { width: 9, height: 9, borderRadius: 4.5 },
+    paddingHorizontal: S(22), paddingTop: S(14), paddingBottom: S(10),
+  },
+  mark: { flexDirection: 'row', alignItems: 'center', gap: S(9) },
+  markTile: {
+    width: S(26), height: S(26), borderRadius: S(7), backgroundColor: FOREST,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  markGlyph: { width: S(16), height: S(16) },
+  markT: { fontFamily: 'Inter_700Bold', fontSize: S(17), color: FOREST, letterSpacing: -0.3 },
+  langRow: { flexDirection: 'row', backgroundColor: SAND, borderRadius: S(9), padding: S(3), gap: S(2) },
+  langChip: {
+    // 44 is the floor for something tapped with a glove on.
+    minHeight: 44, minWidth: S(44), paddingHorizontal: S(12), borderRadius: S(7),
+    alignItems: 'center', justifyContent: 'center',
+  },
+  langChipOn: { backgroundColor: '#FFFDF9', borderWidth: 1.4, borderColor: GREEN },
+  langT: { fontFamily: 'Inter_600SemiBold', fontSize: S(14), color: '#7A736B' },
+  langTOn: { fontFamily: 'Inter_700Bold', color: INK },
+
+  // ── type ──
+  coverHead: {
+    fontFamily: 'Oswald_700Bold', fontSize: S(37), lineHeight: S(39), color: INK,
+    textTransform: 'uppercase', letterSpacing: -0.3,
+  },
+  eyebrow: {
+    fontFamily: 'Inter_700Bold', fontSize: S(11), color: GREEN, letterSpacing: 1.1,
+    textTransform: 'uppercase', marginTop: S(8),
+  },
+  head: {
+    fontFamily: 'Oswald_700Bold', fontSize: S(34), lineHeight: S(37), color: INK,
+    textTransform: 'uppercase', letterSpacing: -0.3, marginTop: S(2),
+  },
+  rule: { width: S(58), height: S(4), borderRadius: 2, backgroundColor: OCHRE, marginTop: S(15) },
+  lede: { fontFamily: 'Inter_400Regular', fontSize: S(15.5), lineHeight: S(22), color: BODY, marginTop: S(12) },
+
+  // ── cover ──
+  heroWrap: { height: S(300), marginTop: S(12), marginHorizontal: -S(22), justifyContent: 'center' },
+  hero: { position: 'absolute', left: -S(34), bottom: -S(10), width: S(300), height: S(330) },
+  bubbles: { alignItems: 'flex-end', gap: S(11), paddingRight: S(16) },
+  bubble: {
+    backgroundColor: '#FFFFFF', borderRadius: S(15), borderBottomRightRadius: S(4),
+    paddingVertical: S(11), paddingHorizontal: S(15), maxWidth: S(182),
+    shadowColor: '#141313', shadowOpacity: 0.16, shadowRadius: S(10),
+    shadowOffset: { width: 0, height: S(4) }, elevation: 3,
+  },
+  bubbleIndent: { marginRight: S(16) },
+  bubbleT: { fontFamily: 'Inter_400Regular', fontSize: S(14.5), lineHeight: S(19), color: '#2C2A27' },
+  login: { alignItems: 'center', paddingVertical: S(14), marginTop: S(4) },
+  loginT: { fontFamily: 'Inter_400Regular', fontSize: S(14.5), color: BODY },
+  loginLink: { fontFamily: 'Inter_700Bold', color: GREEN },
+
+  // ── device ──
+  device: {
+    alignSelf: 'center', width: S(272), backgroundColor: '#141414', borderRadius: S(34),
+    padding: S(9), marginTop: S(16),
+    shadowColor: '#141313', shadowOpacity: 0.22, shadowRadius: S(18),
+    shadowOffset: { width: 0, height: S(10) }, elevation: 6,
+  },
+  screen: { backgroundColor: '#FFFFFF', borderRadius: S(26), overflow: 'hidden' },
+
+  // ── recorder ──
+  recBody: { padding: S(16), gap: S(13) },
+  recTop: { flexDirection: 'row', alignItems: 'center', gap: S(8) },
+  recDot: { width: S(9), height: S(9), borderRadius: S(5), backgroundColor: '#E0503A' },
+  recLabel: { fontFamily: 'Inter_700Bold', fontSize: S(12.5), color: '#F2EFE8', letterSpacing: 0.5 },
+  wave: { flexDirection: 'row', alignItems: 'center', gap: S(3), height: S(52) },
+  bar: { flex: 1, borderRadius: 2, backgroundColor: '#5E6A5A' },
+  recQuote: { fontFamily: 'Inter_400Regular', fontSize: S(14), lineHeight: S(20), color: CREAM },
+  recCtrls: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', gap: S(24) },
+  recCtrl: { alignItems: 'center', gap: S(6) },
+  recSmall: {
+    width: S(46), height: S(46), borderRadius: S(23), backgroundColor: '#2A2E2B',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  recBig: {
+    width: S(64), height: S(64), borderRadius: S(32), backgroundColor: '#D9A02B',
+    alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: S(5),
+  },
+  pauseBar: { width: S(5), height: S(20), borderRadius: 2, backgroundColor: '#131110' },
+  glyphCam: { width: S(18), height: S(14), borderRadius: S(3), borderWidth: 1.8, borderColor: '#EFE7D9' },
+  glyphStop: { width: S(15), height: S(15), borderRadius: S(3), backgroundColor: '#EFE7D9' },
+  recCtrlT: { fontFamily: 'Inter_400Regular', fontSize: S(11.5), color: '#9A9F99' },
+
+  stuckBox: { backgroundColor: SAND, borderRadius: S(12), padding: S(13), marginTop: S(14) },
+  stuckLabel: {
+    fontFamily: 'Inter_700Bold', fontSize: S(10.5), color: MUTED,
+    letterSpacing: 0.8, textTransform: 'uppercase',
+  },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: S(7), marginTop: S(9) },
+  chip: { backgroundColor: '#E7EDE3', borderRadius: S(8), paddingVertical: S(8), paddingHorizontal: S(12) },
+  chipT: { fontFamily: 'Inter_600SemiBold', fontSize: S(13), color: BODY },
+
+  // ── the draft ──
+  docNav: { paddingVertical: S(11), borderBottomWidth: 1, borderBottomColor: '#EFECE6' },
+  docNavT: {
+    fontFamily: 'Inter_700Bold', fontSize: S(12), color: INK, textAlign: 'center',
+    letterSpacing: 0.7, textTransform: 'uppercase',
+  },
+  docBody: { padding: S(12), gap: S(9) },
+  docHead: { backgroundColor: FOREST, borderRadius: S(9), padding: S(10) },
+  docCompany: {
+    fontFamily: 'Oswald_700Bold', fontSize: S(15), color: '#FFFFFF',
+    textTransform: 'uppercase', letterSpacing: 0.3,
+  },
+  docCo: { fontFamily: 'Inter_400Regular', fontSize: S(11), color: '#CBD8C8', marginTop: 1 },
+  docLabel: {
+    fontFamily: 'Inter_700Bold', fontSize: S(10), color: MUTED,
+    letterSpacing: 0.9, textTransform: 'uppercase', marginTop: S(3),
+  },
+  scopeRow: { flexDirection: 'row', gap: S(8), alignItems: 'flex-start' },
+  scopeNum: {
+    width: S(16), height: S(16), borderRadius: S(4), backgroundColor: SAND,
+    alignItems: 'center', justifyContent: 'center', marginTop: 1,
+  },
+  scopeNumT: { fontFamily: 'Inter_700Bold', fontSize: S(9.5), color: BODY },
+  scopeT: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: S(12), lineHeight: S(16.5), color: INK },
+  notRow: { flexDirection: 'row', gap: S(8), alignItems: 'flex-start' },
+  dash: { width: S(10), height: 2, borderRadius: 1, backgroundColor: '#8A8F8B', marginTop: S(7) },
+  notT: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: S(12), lineHeight: S(16.5), color: BODY },
+
+  priceBox: { borderWidth: 1, borderColor: '#D8D1C4', borderRadius: S(10), paddingHorizontal: S(11), paddingBottom: S(3) },
+  priceHead: {
+    fontFamily: 'Inter_700Bold', fontSize: S(10), color: MUTED, letterSpacing: 0.9,
+    textTransform: 'uppercase', marginTop: S(9), marginBottom: S(1),
+  },
+  priceRow: {
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+    gap: S(10), paddingVertical: S(7), borderTopWidth: 1, borderTopColor: '#D8D1C4',
+  },
+  priceCol: { flex: 1, minWidth: 0 },
+  priceT: { fontFamily: 'Inter_400Regular', fontSize: S(12.5), lineHeight: S(17), color: INK },
+  priceQ: { fontFamily: 'Inter_400Regular', fontSize: S(11), color: MUTED, fontStyle: 'italic', marginTop: 1 },
+  priceAmt: { fontFamily: 'Inter_600SemiBold', fontSize: S(13), color: INK, fontVariant: ['tabular-nums'] },
+  // Set apart by a heavier rule, the way a receipt sets it apart.
+  totalRow: { borderTopWidth: 1.5, alignItems: 'center' },
+  totalT: { fontFamily: 'Inter_700Bold', fontSize: S(13), color: INK },
+  totalAmt: { fontFamily: 'Oswald_700Bold', fontSize: S(18), color: INK, fontVariant: ['tabular-nums'] },
+
+  // ── the client pair ──
+  pair: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', marginTop: S(4) },
+  smsWrap: { width: S(132), marginRight: -S(10), marginTop: S(22) },
+  appWrap: { width: S(166), zIndex: 2 },
+  smsBody: { padding: S(9), alignItems: 'center', gap: S(5) },
+  smsAvatar: {
+    width: S(24), height: S(24), borderRadius: S(12), backgroundColor: '#D8D1C4',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  smsAvatarT: { fontFamily: 'Inter_700Bold', fontSize: S(9), color: BODY },
+  smsWho: { fontFamily: 'Inter_600SemiBold', fontSize: S(10), color: INK },
+  bubbleIn: {
+    backgroundColor: '#EFECE6', borderRadius: S(11), borderBottomLeftRadius: S(3),
+    padding: S(8), marginTop: S(3), alignSelf: 'stretch',
+  },
+  smsT: { fontFamily: 'Inter_400Regular', fontSize: S(10.5), lineHeight: S(14.5), color: INK },
+  smsLink: { fontFamily: 'Inter_600SemiBold', fontSize: S(10), color: GREEN, marginTop: S(4) },
+  appBody: { padding: S(11), gap: S(7) },
+  appCompany: { fontFamily: 'Inter_700Bold', fontSize: S(13), color: INK },
+  appCo: { fontFamily: 'Inter_400Regular', fontSize: S(10.5), color: MUTED, marginTop: -S(4) },
+  appLines: { gap: S(4) },
+  appLine: { fontFamily: 'Inter_400Regular', fontSize: S(10), lineHeight: S(14), color: BODY },
+  appTotalRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderTopWidth: 1.5, borderTopColor: '#D8D1C4', paddingTop: S(7),
+  },
+  approveBtn: {
+    backgroundColor: FOREST, borderRadius: S(8), minHeight: S(38),
+    alignItems: 'center', justifyContent: 'center',
+  },
+  approveT: { fontFamily: 'Inter_700Bold', fontSize: S(12), color: '#FFFFFF' },
+  askQ: { fontFamily: 'Inter_600SemiBold', fontSize: S(10.5), color: MUTED, textAlign: 'center' },
+
+  sealed: { backgroundColor: '#E7EDE3', borderRadius: S(12), padding: S(13), marginTop: S(14) },
+  sealedH: { fontFamily: 'Inter_700Bold', fontSize: S(13), lineHeight: S(18), color: INK },
+  sealedB: { fontFamily: 'Inter_400Regular', fontSize: S(13), lineHeight: S(18), color: INK },
+
+  // ── foot ──
+  foot: { paddingHorizontal: S(22), paddingTop: S(10), paddingBottom: S(24), gap: S(14) },
+  dots: { flexDirection: 'row', justifyContent: 'center', gap: S(7) },
+  dot: { width: S(7), height: S(7), borderRadius: S(4), backgroundColor: 'rgba(19,17,16,0.18)' },
+  dotOn: { backgroundColor: OCHRE },
+  cta: {
+    flexDirection: 'row', gap: S(10), minHeight: 56, borderRadius: S(11),
+    backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center',
+  },
+  ctaT: { fontFamily: 'Inter_700Bold', fontSize: S(17), color: '#FFFFFF' },
+  ctaArrow: { fontSize: S(18), color: '#FFFFFF', marginTop: -2 },
 });
