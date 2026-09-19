@@ -92,14 +92,59 @@ function Chrome({ lang, onLang }: { lang?: Lang; onLang?: (l: Lang) => void }) {
         {(['en', 'es'] as const).map((l) => (
           <Pressable key={l} onPress={() => onLang?.(l)}
             accessibilityRole="button"
+            // The LANGUAGE, not the country: a screen reader must not announce
+            // "Mexico" to somebody choosing Spanish.
+            accessibilityLabel={l === 'en' ? 'English' : 'Español'}
             accessibilityState={{ selected: lang === l }}
             style={[st.langChip, lang === l && st.langChipOn]}>
-            <Text style={[st.langT, lang === l && st.langTOn]}>
-              {l === 'en' ? 'EN' : 'ES'}
-            </Text>
+            <Flag lang={l} />
           </Pressable>
         ))}
       </View>
+    </View>
+  );
+}
+
+
+/**
+ * THE TWO FLAGS, DRAWN AS VIEWS.
+ *
+ * NOT EMOJI. Regional-indicator flag emoji are absent from the system font on
+ * most Android builds — the OS falls back to rendering the two letters, so the
+ * flag switch would silently turn back into the "EN / ES" it replaced, on the
+ * half of the fleet we can least afford to get wrong.
+ *
+ * WHICH FLAG IS A REAL COST, and it is worth stating where it is made. This
+ * screen used to read "English / Español" on purpose (hadar, 2026-08-26: "words
+ * rather than flags because a flag is a country"). Spanish is the language of
+ * some twenty countries; Mexico stands in for all of them here because it is the
+ * largest origin group in US residential construction, and a Salvadoran or
+ * Guatemalan contractor is being asked to read past a flag that is not his. The
+ * accessibility label says the LANGUAGE, not the country, so a screen reader
+ * still announces "Español".
+ */
+function Flag({ lang }: { lang: Lang }) {
+  if (lang === 'es') {
+    // Mexico: three vertical bands. The arms in the white band are illegible at
+    // this size, so they are left out rather than rendered as a smudge.
+    return (
+      <View style={[st.flag, st.flagRow]}>
+        <View style={[st.flagBand, { backgroundColor: '#006847' }]} />
+        <View style={[st.flagBand, { backgroundColor: '#FFFFFF' }]} />
+        <View style={[st.flagBand, { backgroundColor: '#CE1126' }]} />
+      </View>
+    );
+  }
+  // United States: stripes with the canton. Thirteen stripes and fifty stars do
+  // not survive 22pt, so it is seven stripes and a plain canton — read at a
+  // glance, which is the whole job of a flag on a chip.
+  return (
+    <View style={st.flag}>
+      {[0, 1, 2, 3, 4, 5, 6].map((n) => (
+        <View key={n} style={[st.flagStripe,
+          { backgroundColor: n % 2 === 0 ? '#B22234' : '#FFFFFF' }]} />
+      ))}
+      <View style={st.flagCanton} />
     </View>
   );
 }
@@ -418,8 +463,19 @@ const st = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   langChipOn: { backgroundColor: '#FFFDF9', borderWidth: 1.4, borderColor: GREEN },
-  langT: { fontFamily: 'Inter_600SemiBold', fontSize: S(14), color: '#7A736B' },
-  langTOn: { fontFamily: 'Inter_700Bold', color: INK },
+  // The unselected flag is dimmed rather than greyed: desaturating a flag makes it
+  // look broken, while opacity reads as "not the one you are on".
+  flag: {
+    width: S(26), height: S(18), borderRadius: S(3), overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(19,17,16,0.22)',
+  },
+  flagRow: { flexDirection: 'row' },
+  flagBand: { flex: 1, height: '100%' },
+  flagStripe: { flex: 1, width: '100%' },
+  flagCanton: {
+    position: 'absolute', top: 0, left: 0, width: '42%', height: '54%',
+    backgroundColor: '#3C3B6E',
+  },
 
   // ── type ──
   coverHead: {
