@@ -183,197 +183,31 @@ function Head({ eyebrow, h1, h2, body }: {
 /* ------------------------------------------------------------- the devices -- */
 
 /**
- * A phone, drawn. `dark` flips it to the recorder's near-black.
+ * THE PHONES ARE HADAR'S OWN RENDERS, NOT DRAWINGS (2026-09-18).
  *
- * Deliberately NOT a picture of a phone: see the file header. The bezel is a
- * rounded View with the screen inset; nothing here is an image, so nothing here
- * is stuck in one language.
- */
-function Device({ dark, chrome, children }: {
-  dark?: boolean; chrome?: boolean; children: React.ReactNode;
-}) {
-  const fg = dark ? '#FFFFFF' : INK;
-  return (
-    <View style={st.device}>
-      <View style={[st.screen, dark && { backgroundColor: '#131110' }]}>
-        {chrome && (
-          /* THE STATUS BAR IS PART OF THE DRAWING, not the real one. This is a
-             PICTURE of a phone inside a marketing page — the same convention the
-             app's own store artwork uses — so the strip and the island belong to
-             the illustration. Nothing here overlaps the device's real status bar,
-             which is far above, outside this card. */
-          <View style={st.statusBar}>
-            <Text style={[st.statusTime, { color: fg }]}>9:41</Text>
-            <View style={st.island} />
-            <View style={st.statusIcons}>
-              {[3, 5, 7, 9].map((h) => (
-                <View key={h} style={[st.sigBar, { height: S(h), backgroundColor: fg }]} />
-              ))}
-              <View style={[st.wifi, { borderBottomColor: fg }]} />
-              <View style={[st.battery, { borderColor: fg }]}>
-                <View style={[st.batteryFill, { backgroundColor: fg }]} />
-              </View>
-            </View>
-          </View>
-        )}
-        {children}
-      </View>
-    </View>
-  );
-}
-
-/**
- * Page 2's recorder — the app's own capture screen, drawn.
+ * I built these as Views first so every word inside them would translate, and
+ * twice shipped something that did not look like the comps. hadar: "still not
+ * right — I gave you images, can you stay true to the images I gave you." The
+ * comps win. They are his artwork, they are what the product should look like,
+ * and a hand-drawn approximation that misses is worth less than a picture that
+ * lands.
  *
- * THE WAVEFORM IS THE POINT OF THE PICTURE. Forty-one thin bars under a bell
- * envelope, not a dozen fat ones: a voice note looks like a voice, and the
- * earlier chunky version read as a bar chart. Colour runs grey → gold → white →
- * grey across the span so the middle carries the weight, which is how a level
- * meter actually looks mid-sentence.
+ * WHAT THIS COSTS, STATED PLAINLY: the text INSIDE these three phones is baked
+ * into the pixels, so it stays English when the app is in Spanish. Everything
+ * AROUND them still switches — headline, eyebrow, body, the prompt chips, the
+ * sealed strip, the buttons. The fix is a Spanish render of these same three
+ * images, dropped in beside the English ones and picked by `lang`; PHONES is
+ * shaped so that is a one-line change rather than a rewrite.
+ *
+ * The outer white was flood-filled to transparent from the border, so interior
+ * whites — the document body, the iMessage panel — survive and the phones sit
+ * directly on the cream with no card behind them.
  */
-function Recorder() {
-  const N = 41;
-  const bars = Array.from({ length: N }, (_, n) => {
-    const t = (n - (N - 1) / 2) / ((N - 1) / 2);        // -1 … 0 … 1
-    const bell = Math.exp(-(t * t) * 2.6);               // fat in the middle
-    // A little tooth so it reads as speech rather than a smooth hill.
-    const tooth = 1 - 0.26 * (n % 3 === 0 ? 1 : n % 2 === 0 ? 0.45 : 0);
-    const h = S(7) + S(45) * bell * tooth;
-    const c = n < N * 0.24 ? '#6E6E6E'
-      : n < N * 0.5 ? '#E8B32B'
-      : n < N * 0.72 ? '#FFFFFF' : '#6E6E6E';
-    return { h, c };
-  });
-  return (
-    <Device dark chrome>
-      <View style={st.recBody}>
-        <View style={st.recTop}>
-          <View style={st.recDot} />
-          <Text style={st.recLabel}>{T('ob.recording')} · 0:38</Text>
-        </View>
-        <View style={st.wave}>
-          {bars.map((b, n) => (
-            <View key={n} style={[st.bar, { height: b.h, backgroundColor: b.c }]} />
-          ))}
-        </View>
-        <Text style={st.recQuote}>{T('ob.recQuote')}</Text>
-        <View style={st.recCtrls}>
-          <View style={st.recCtrl}>
-            <View style={st.recSmall}>
-              {/* A camera, not a rounded box: body, lens, and the little hump. */}
-              <View style={st.camBump} />
-              <View style={st.camBody}><View style={st.camLens} /></View>
-            </View>
-            <Text style={st.recCtrlT}>{T('ob.addPhoto')}</Text>
-          </View>
-          <View style={st.recCtrl}>
-            <View style={st.recBig}>
-              <View style={st.pauseBar} /><View style={st.pauseBar} />
-            </View>
-            <Text style={st.recCtrlT}> </Text>
-          </View>
-          <View style={st.recCtrl}>
-            <View style={st.recSmall}><View style={st.glyphStop} /></View>
-            <Text style={st.recCtrlT}>{T('ob.stopRec')}</Text>
-          </View>
-        </View>
-      </View>
-    </Device>
-  );
-}
-
-/** Page 3's document — itemised scope, an exclusion, and priced lines. */
-function Draft() {
-  const scope = ['ob.sc1', 'ob.sc2', 'ob.sc3'];
-  const prices: [string, string, string][] = [
-    ['ob.p1', 'ob.p1q', '$500'],
-    ['ob.p2', 'ob.p2q', '$300'],
-  ];
-  return (
-    <Device>
-      <View style={st.docNav}>
-        <Text style={st.docNavT}>{T('ob.docNav')}</Text>
-      </View>
-      <View style={st.docBody}>
-        <View style={st.docHead}>
-          <Text style={st.docCompany}>Alvarez Electric</Text>
-          <Text style={st.docCo}>{T('ob.docCo')}</Text>
-        </View>
-
-        <Text style={st.docLabel}>{T('ob.docScope')}</Text>
-        {scope.map((k, n) => (
-          <View key={k} style={st.scopeRow}>
-            <View style={st.scopeNum}><Text style={st.scopeNumT}>{n + 1}</Text></View>
-            <Text style={st.scopeT}>{T(k)}</Text>
-          </View>
-        ))}
-
-        <Text style={st.docLabel}>{T('ob.docNot')}</Text>
-        <View style={st.notRow}>
-          <View style={st.dash} />
-          <Text style={st.notT}>{T('ob.ni1')}</Text>
-        </View>
-
-        <View style={st.priceBox}>
-          <Text style={st.priceHead}>{T('ob.docPrice')}</Text>
-          {prices.map(([k, q, amt]) => (
-            <View key={k} style={st.priceRow}>
-              <View style={st.priceCol}>
-                <Text style={st.priceT}>{T(k)}</Text>
-                <Text style={st.priceQ}>{T(q)}</Text>
-              </View>
-              <Text style={st.priceAmt}>{amt}</Text>
-            </View>
-          ))}
-          <View style={[st.priceRow, st.totalRow]}>
-            <Text style={st.totalT}>{T('ob.total')}</Text>
-            <Text style={st.totalAmt}>$800</Text>
-          </View>
-        </View>
-      </View>
-    </Device>
-  );
-}
-
-/** Page 4: the client's text, beside the page it opens. */
-function ClientPair() {
-  return (
-    <View style={st.pair}>
-      <View style={st.smsWrap}>
-        <Device>
-          <View style={st.smsBody}>
-            <View style={st.smsAvatar}><Text style={st.smsAvatarT}>AC</Text></View>
-            <Text style={st.smsWho}>Alvarez Electric</Text>
-            <View style={st.bubbleIn}>
-              <Text style={st.smsT}>{T('ob.smsMsg')}</Text>
-              <Text style={st.smsLink}>ezchangeorders.com/a7fQ2</Text>
-            </View>
-          </View>
-        </Device>
-      </View>
-      <View style={st.appWrap}>
-        <Device>
-          <View style={st.appBody}>
-            <Text style={st.appCompany}>Alvarez Electric</Text>
-            <Text style={st.appCo}>{T('ob.docCo')}</Text>
-            <View style={st.appLines}>
-              <Text style={st.appLine}>{T('ob.sc1')}</Text>
-              <Text style={st.appLine}>{T('ob.sc2')}</Text>
-            </View>
-            <View style={st.appTotalRow}>
-              <Text style={st.totalT}>{T('ob.total')}</Text>
-              <Text style={st.totalAmt}>$800</Text>
-            </View>
-            <View style={st.approveBtn}>
-              <Text style={st.approveT}>✓  {T('ob.approveBtn')}</Text>
-            </View>
-            <Text style={st.askQ}>{T('ob.askQ')}</Text>
-          </View>
-        </Device>
-      </View>
-    </View>
-  );
-}
+const PHONES = {
+  record: require('../../assets/onboard/obRecord.png'),
+  draft: require('../../assets/onboard/obDraft.png'),
+  approve: require('../../assets/onboard/obApprove.png'),
+} as const;
 
 /* ------------------------------------------------------------------ screen -- */
 
@@ -444,7 +278,7 @@ export function Onboarding({ onDone, lang, onLang }: {
         {page(1, (
           <>
             <Head eyebrow="ob.e1" h1="ob.n1h1" h2="ob.n1h2" body="ob.n1b" />
-            <Recorder />
+            <Image source={PHONES.record} style={st.shotRecord} resizeMode="contain" />
             <View style={st.stuckBox}>
               <Text style={st.stuckLabel}>{T('ob.stuck')}</Text>
               <View style={st.chips}>
@@ -460,7 +294,7 @@ export function Onboarding({ onDone, lang, onLang }: {
         {page(2, (
           <>
             <Head eyebrow="ob.e2" h1="ob.n2h1" h2="ob.n2h2" body="ob.n2b" />
-            <Draft />
+            <Image source={PHONES.draft} style={st.shotDraft} resizeMode="contain" />
           </>
         ), 'ob.next')}
 
@@ -468,7 +302,7 @@ export function Onboarding({ onDone, lang, onLang }: {
         {page(3, (
           <>
             <Head eyebrow="ob.e3" h1="ob.n3h1" h2="ob.n3h2" body="ob.n3b" />
-            <ClientPair />
+            <Image source={PHONES.approve} style={st.shotApprove} resizeMode="contain" />
             <View style={st.sealed}>
               <Text style={st.sealedH}>{T('ob.sealedH')}</Text>
               <Text style={st.sealedB}>{T('ob.sealedB')}</Text>
@@ -717,6 +551,12 @@ const st = StyleSheet.create({
   sealed: { backgroundColor: '#E7EDE3', borderRadius: S(12), padding: S(13), marginTop: S(14) },
   sealedH: { fontFamily: 'Inter_700Bold', fontSize: S(13), lineHeight: S(18), color: INK },
   sealedB: { fontFamily: 'Inter_400Regular', fontSize: S(13), lineHeight: S(18), color: INK },
+
+  // Sized so each phone lands whole above the footer on a 390x844 comp; the page
+  // scrolls, so a shorter handset reveals the rest rather than cropping it away.
+  shotRecord: { alignSelf: 'center', width: S(258), height: S(430), marginTop: S(14) },
+  shotDraft: { alignSelf: 'center', width: S(250), height: S(481), marginTop: S(10) },
+  shotApprove: { alignSelf: 'center', width: S(340), height: S(303), marginTop: S(10) },
 
   // ── foot ──
   foot: { paddingHorizontal: S(22), paddingTop: S(10), paddingBottom: S(24), gap: S(14) },
