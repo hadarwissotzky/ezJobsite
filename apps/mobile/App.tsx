@@ -251,6 +251,7 @@ import { FIRST_RUN_TAPS, firstExtraSeen, isFirstRun, markFirstExtraSeen, markFir
          nextStep, resetFirstRunFlags, savedLang, saveLang } from './src/firstrun';
 import { getProfile, hasProfile as hasProfileFn, saveLangToAccount, saveProfile } from './src/profile';
 import { deviceLang } from './src/devicelang';
+import { useSlide, SlideView } from './src/ui/slide';
 import { addNote, drainNoteOutbox, ensureAnnotationSchema, noteCounts, notesFor,
          playCapture, stopPlayback, type Note } from './src/annotate';
 import { addTag, drainTagOutbox, ensureTagSchema, projectTags, retractTag,
@@ -4736,6 +4737,13 @@ const checkClientMessages = async () => {
   // kept alongside it so refresh() can re-derive the record while it is open — a
   // record that cannot change is a record that can lie about what is owed.
   const [record, setRecord] = React.useState<ExtraRecord | null>(null);
+  /**
+   * PUSH/POP FOR THE RECORD (hadar, 2026-09-18). Keyed on the open record's id, so
+   * it slides in when a change order is opened AND re-slides when one record opens
+   * another. Must live out here with the other hooks: the screen itself is an early
+   * return, and a hook inside that `if` would change the hook count between renders.
+   */
+  const recordSlide = useSlide(record?.id ?? null);
 
   /**
    * HOISTED TO THE HOOK REGION (hadar, 2026-09-03: "right after the log in -- the app
@@ -4958,6 +4966,9 @@ const checkClientMessages = async () => {
     reading: VoicePriceReading | null;
     rewrite: RewriteState;
   }>(null);
+  /** Same push/pop for the photos sub-screen, which is the one detail field that
+   *  is still a full screen rather than a bottom drawer. */
+  const photosSlide = useSlide(detail?.field === 'photos' ? `photos:${record?.id ?? ''}` : null);
   /** The record's photo lightbox, hoisted so the Photos & proof subscreen — a
    *  sibling early-return in the cascade — opens the SAME viewer instead of
    *  growing a second one. */
@@ -10173,7 +10184,7 @@ const checkClientMessages = async () => {
       // own add tile on a frozen record.
       const mayAppend = stageOf(record.status) !== 'locked';
       return (
-        <>
+        <SlideView style={photosSlide.style}>
           <PhotosAndProof
             status={record.status}
             photos={record.photos.map((p) => ({
@@ -10196,7 +10207,7 @@ const checkClientMessages = async () => {
             onPressPhoto={(p) => setZoomUri(p.uri)}
             onAddPhoto={mayAppend ? () => augmentExtra(record.id) : undefined}
             onAddVoiceNote={mayAppend ? () => augmentExtra(record.id) : undefined}
-            onBack={back}
+            onBack={() => photosSlide.back(back)}
           />
           {/* The record's own lightbox, mounted here too: this guard returns before
               RecordScreen renders, so without it a tile on this screen would open
@@ -10204,7 +10215,7 @@ const checkClientMessages = async () => {
           <PhotoLightbox uri={zoomUri}
             uris={record.photos.filter((p) => p.present).map((p) => p.uri)}
             onClose={() => setZoomUri(null)} />
-        </>
+        </SlideView>
       );
     }
 
@@ -10494,7 +10505,7 @@ const checkClientMessages = async () => {
       </>
     ) : null;
     return (
-      <>
+      <SlideView style={recordSlide.style}>
       {clientSheet}
       {sheets}
       <RecordScreen
@@ -10548,7 +10559,7 @@ const checkClientMessages = async () => {
         thread={recordThread}
         openQuestions={questions[record.id] ?? 0}
         undelivered={recordUndelivered}
-        onBack={closeRecord}
+        onBack={() => recordSlide.back(closeRecord)}
         onCapture={() => augmentExtra(record.id)}
         // The composer's own mic used to point here too. It does not any more: it runs
         // live dictation into the reply field (livedictation.ts), which is what a
@@ -10991,7 +11002,7 @@ const checkClientMessages = async () => {
       {ackEl}
       {/* The no-reception bar, same as the main screens (hadar, 2026-09-06: inform the user in similar fashion when there is no reception). Info only — pointerEvents none. */}
       {offlineEl}
-      </>
+      </SlideView>
     );
   }
 
