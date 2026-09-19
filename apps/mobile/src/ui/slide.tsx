@@ -36,6 +36,7 @@
  */
 import React from 'react';
 import { Animated, Dimensions, Easing } from 'react-native';
+import type { StyleProp, ViewStyle } from 'react-native';
 
 /** Durations from the platform's own push/pop, which is what a phone user's eye
  *  is calibrated to. Out is shorter than in: leaving should feel immediate. */
@@ -47,6 +48,26 @@ export type Slide = {
   style: { flex: 1; transform: { translateX: Animated.Value }[] };
   /** Slide the screen off to the right, THEN run the real back handler. */
   back: (done: () => void) => void;
+  /**
+   * PUT THE SCREEN BACK AT REST. Called by `SlideView` when it MOUNTS, which is
+   * the event the top-level hook cannot see.
+   *
+   * A screen in this ladder unmounts whenever a child screen covers it, and comes
+   * back when the child closes — without its `activeKey` ever changing, so the
+   * entrance effect does not re-run. The Animated.Value survives that gap, but
+   * `useNativeDriver` means the value JS knows about is NOT the one the UI thread
+   * is showing: a native animation never writes its frames back to JS, so after an
+   * entrance the JS copy still reads `width` — off-stage. React Native restores it
+   * asynchronously when the node detaches, and if that restore has not landed by
+   * the time the view re-attaches, the screen re-mounts a full width to the right
+   * of the phone and the user is looking at an empty page with no way back.
+   *
+   * So the wrapper says "I am on screen" and we park it, but ONLY when this key's
+   * entrance has already played — on a genuine open the entrance effect owns the
+   * position and parking here first would flash the screen at its destination for
+   * a frame before it slid in.
+   */
+  rest: () => void;
 };
 
 /**
@@ -69,9 +90,16 @@ export function useSlide(activeKey: string | null): Slide {
   // and a stale width leaves the screen parked short of the edge.
   const width = Dimensions.get('window').width;
   const x = React.useRef(new Animated.Value(activeKey === null ? width : 0)).current;
+  /** The key whose entrance has already run. Null means "nothing is on stage". */
+  const played = React.useRef<string | null>(null);
+  const keyRef = React.useRef(activeKey);
+  keyRef.current = activeKey;
 
   React.useEffect(() => {
-    if (activeKey === null) return;          // closed: nothing to bring on stage
+    // Closing clears the record of what played, so re-opening the SAME screen gets
+    // its entrance back instead of being parked at rest by `rest()` below.
+    if (activeKey === null) { played.current = null; return; }
+    played.current = activeKey;
     x.setValue(width);                       // start off the right edge, every time
     const a = Animated.timing(x, {
       toValue: 0,
@@ -83,18 +111,53 @@ export function useSlide(activeKey: string | null): Slide {
     return () => a.stop();
   }, [activeKey, x, width]);
 
+  const rest = React.useCallback(() => {
+    if (keyRef.current !== null && played.current === keyRef.current) x.setValue(0);
+  }, [x]);
+
   const back = React.useCallback((done: () => void) => {
+    /**
+     * `done()` RUNS EXACTLY ONCE, AND IT RUNS EVEN IF NOTHING CALLS US BACK.
+     *
+     * The completion callback of a native-driven animation comes back across the
+     * bridge, and the screen it is closing has already slid off the phone by then:
+     * if that message is lost or arrives late, the user is left staring at an empty
+     * page. A stuck screen is a far worse bug than a skipped transition, so the
+     * timer is the floor — whichever arrives first wins, and the other is dropped.
+     */
+    let fired = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      if (fired) return;
+      fired = true;
+      if (timer !== undefined) clearTimeout(timer);
+      done();
+    };
+    timer = setTimeout(finish, OUT_MS + 400);
     Animated.timing(x, {
       toValue: width,
       duration: OUT_MS,
       easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
       // See the header: fire regardless of `finished`.
-    }).start(() => done());
+    }).start(finish);
   }, [x, width]);
 
-  return { style: { flex: 1, transform: [{ translateX: x }] }, back };
+  return { style: { flex: 1, transform: [{ translateX: x }] }, back, rest };
 }
 
-/** Re-exported so a screen branch needs one import, not two. */
-export const SlideView = Animated.View;
+/**
+ * The wrapper every sliding screen returns. It exists as a component rather than a
+ * bare `Animated.View` for one reason: something has to notice the MOUNT, which is
+ * what `rest()` above is for.
+ */
+export function SlideView({ slide, style, children }: {
+  slide: Slide;
+  style?: StyleProp<ViewStyle>;
+  children: React.ReactNode;
+}) {
+  const restRef = React.useRef(slide.rest);
+  restRef.current = slide.rest;
+  React.useLayoutEffect(() => { restRef.current(); }, []);
+  return <Animated.View style={[style, slide.style]}>{children}</Animated.View>;
+}

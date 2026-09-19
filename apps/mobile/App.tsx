@@ -10161,77 +10161,6 @@ const checkClientMessages = async () => {
     }
   };
 
-  /**
-   * SPEC-extra-lifecycle-v1 — the extra's detail SUBSCREENS (extradetails.tsx).
-   *
-   * WHERE THIS GUARD SITS, AND WHY IT SITS THERE. Directly ABOVE `if (record)`: a
-   * subscreen is strictly a child of an open record and renders that record's data,
-   * so it has to win the frame while it is open — below `record` the cascade's first
-   * truthy guard would swallow it and the tap would do nothing visible. It is ANDed
-   * with `record` and `recordLc` for the same reason a guard should never be able to
-   * fire without its data: without them there is nothing to render but a blank
-   * screen. It sits BELOW `thread` because a thread opened from the ledger is a
-   * different stack and must not be covered by this one.
-   */
-  if (record && recordLc && detail) {
-    const co = recordLc.co;
-    const back = () => setDetail(null);
-    const d = detail;
-
-    if (d.field === 'photos') {
-      // Appending evidence is legal in Stages 1 and 2 (the augment log is
-      // append-only and never touches the frozen instrument) and forbidden once the
-      // record is sealed — REQ-LC30, the same rule the kit follows when it omits its
-      // own add tile on a frozen record.
-      const mayAppend = stageOf(record.status) !== 'locked';
-      return (
-        <SlideView style={photosSlide.style}>
-          <PhotosAndProof
-            status={record.status}
-            photos={record.photos.map((p) => ({
-              key: p.captureId, uri: p.uri, present: p.present, at: p.at,
-              // The real stamp (mandate #9). `record.ts` now selects gps_lat/gps_lng
-              // and formats them; the hardcoded `null` that used to sit here made
-              // this screen say "No location was recorded" about every photo on
-              // every extra — a specific false claim, on the one screen whose job is
-              // proving the evidence.
-              place: p.place,
-            }))}
-            truncated={record.photosTruncated}
-            capturedAt={record.capturedAt}
-            capturedPlace={record.capturedPlace}
-            // No column stores "best photo" anywhere in this build (grepped:
-            // is_cover/best_photo/cover_photo/hero_photo — zero hits), so the choosing
-            // mode is not offered. A control with nowhere to write is worse than no
-            // control: it would look like it saved.
-            bestKey={null}
-            onPressPhoto={(p) => setZoomUri(p.uri)}
-            onAddPhoto={mayAppend ? () => augmentExtra(record.id) : undefined}
-            onAddVoiceNote={mayAppend ? () => augmentExtra(record.id) : undefined}
-            onBack={() => photosSlide.back(back)}
-          />
-          {/* The record's own lightbox, mounted here too: this guard returns before
-              RecordScreen renders, so without it a tile on this screen would open
-              nothing. One component, two mount points — never two viewers. */}
-          <PhotoLightbox uri={zoomUri}
-            uris={record.photos.filter((p) => p.present).map((p) => p.uri)}
-            onClose={() => setZoomUri(null)} />
-        </SlideView>
-      );
-    }
-
-
-    // description · cost · schedule · billing · exclusions are NOT full screens any
-    // more (hadar, 2026-07-31): each opens a focused BOTTOM DRAWER over the record.
-    // Falling through here — rather than returning a screen — is what lets the record
-    // stay visible behind the sheet.
-    //
-    // THE ONE-WRITE RULE IS UNCHANGED, and it is the reason each sheet's save merges
-    // into the SAME draft before writing: `priceDraftExtra` puts all four fields on
-    // one row in a single guarded UPDATE, so every sheet commits the full set with its
-    // own field replaced. Four sheets, still one write.
-  }
-
 
   /**
    * GUIDED STEPS 5, 7, 9 AND 10.
@@ -10505,8 +10434,72 @@ const checkClientMessages = async () => {
         />}
       </>
     ) : null;
+
+    /**
+     * SPEC-extra-lifecycle-v1 — "Photos & proof", the one detail field that is still
+     * a full screen rather than a bottom drawer.
+     *
+     * IT IS AN OVERLAY OVER THE RECORD, NOT A SIBLING EARLY RETURN (hadar,
+     * 2026-09-18: "I am in CO details, I click on photos, then I click the back
+     * button and it is an empty screen"). It used to be its own `if` above
+     * `if (record)`, which unmounted the record while it was open — fine when the
+     * screens hard-cut, fatal once Back animates: the outgoing screen slides off to
+     * the right over NOTHING, because the record it is revealing does not exist
+     * again until the animation's completion callback flips the state. What the
+     * user sees for the length of that slide — and for as long as the callback
+     * takes to come back across the bridge — is a blank page.
+     *
+     * Mounted here the record stays live underneath, so the push covers it and the
+     * pop uncovers it, which is what a push and a pop are. It also means the record
+     * never unmounts, so its own Animated.Value is never re-attached from a stale
+     * JS copy left off-stage by a native-driven entrance (see `slide.tsx`).
+     *
+     * Absolutely positioned and rendered LAST so it covers the record and its
+     * sheets; `detail` holds one field at a time, so a sheet and this can never be
+     * open together.
+     */
+    const photosOverlay = detail?.field === 'photos' ? (
+      <SlideView slide={photosSlide} style={StyleSheet.absoluteFill}>
+        <PhotosAndProof
+          status={record.status}
+          photos={record.photos.map((p) => ({
+            key: p.captureId, uri: p.uri, present: p.present, at: p.at,
+            // The real stamp (mandate #9). `record.ts` now selects gps_lat/gps_lng
+            // and formats them; the hardcoded `null` that used to sit here made
+            // this screen say "No location was recorded" about every photo on
+            // every extra — a specific false claim, on the one screen whose job is
+            // proving the evidence.
+            place: p.place,
+          }))}
+          truncated={record.photosTruncated}
+          capturedAt={record.capturedAt}
+          capturedPlace={record.capturedPlace}
+          // No column stores "best photo" anywhere in this build (grepped:
+          // is_cover/best_photo/cover_photo/hero_photo — zero hits), so the choosing
+          // mode is not offered. A control with nowhere to write is worse than no
+          // control: it would look like it saved.
+          bestKey={null}
+          onPressPhoto={(p) => setZoomUri(p.uri)}
+          // Appending evidence is legal in Stages 1 and 2 (the augment log is
+          // append-only and never touches the frozen instrument) and forbidden once
+          // the record is sealed — REQ-LC30, the same rule the kit follows when it
+          // omits its own add tile on a frozen record.
+          onAddPhoto={stageOf(record.status) !== 'locked' ? () => augmentExtra(record.id) : undefined}
+          onAddVoiceNote={stageOf(record.status) !== 'locked' ? () => augmentExtra(record.id) : undefined}
+          onBack={() => photosSlide.back(() => setDetail(null))}
+        />
+        {/* This screen's own lightbox. RecordScreen has one too, but it is mounted
+            underneath this overlay and would open behind it — one viewer each, never
+            two on screen at once, because only one of the two screens is on top. */}
+        <PhotoLightbox uri={zoomUri}
+          uris={record.photos.filter((p) => p.present).map((p) => p.uri)}
+          onClose={() => setZoomUri(null)} />
+      </SlideView>
+    ) : null;
+
     return (
-      <SlideView style={recordSlide.style}>
+      <>
+      <SlideView slide={recordSlide}>
       {clientSheet}
       {sheets}
       <RecordScreen
@@ -11004,6 +10997,8 @@ const checkClientMessages = async () => {
       {/* The no-reception bar, same as the main screens (hadar, 2026-09-06: inform the user in similar fashion when there is no reception). Info only — pointerEvents none. */}
       {offlineEl}
       </SlideView>
+      {photosOverlay}
+      </>
     );
   }
 
