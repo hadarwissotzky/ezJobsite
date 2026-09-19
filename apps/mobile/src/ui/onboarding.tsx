@@ -189,39 +189,81 @@ function Head({ eyebrow, h1, h2, body }: {
  * rounded View with the screen inset; nothing here is an image, so nothing here
  * is stuck in one language.
  */
-function Device({ dark, children }: { dark?: boolean; children: React.ReactNode }) {
+function Device({ dark, chrome, children }: {
+  dark?: boolean; chrome?: boolean; children: React.ReactNode;
+}) {
+  const fg = dark ? '#FFFFFF' : INK;
   return (
     <View style={st.device}>
       <View style={[st.screen, dark && { backgroundColor: '#131110' }]}>
+        {chrome && (
+          /* THE STATUS BAR IS PART OF THE DRAWING, not the real one. This is a
+             PICTURE of a phone inside a marketing page — the same convention the
+             app's own store artwork uses — so the strip and the island belong to
+             the illustration. Nothing here overlaps the device's real status bar,
+             which is far above, outside this card. */
+          <View style={st.statusBar}>
+            <Text style={[st.statusTime, { color: fg }]}>9:41</Text>
+            <View style={st.island} />
+            <View style={st.statusIcons}>
+              {[3, 5, 7, 9].map((h) => (
+                <View key={h} style={[st.sigBar, { height: S(h), backgroundColor: fg }]} />
+              ))}
+              <View style={[st.wifi, { borderBottomColor: fg }]} />
+              <View style={[st.battery, { borderColor: fg }]}>
+                <View style={[st.batteryFill, { backgroundColor: fg }]} />
+              </View>
+            </View>
+          </View>
+        )}
         {children}
       </View>
     </View>
   );
 }
 
-/** Page 2's recorder: a live waveform, his own words, and the controls. */
+/**
+ * Page 2's recorder — the app's own capture screen, drawn.
+ *
+ * THE WAVEFORM IS THE POINT OF THE PICTURE. Forty-one thin bars under a bell
+ * envelope, not a dozen fat ones: a voice note looks like a voice, and the
+ * earlier chunky version read as a bar chart. Colour runs grey → gold → white →
+ * grey across the span so the middle carries the weight, which is how a level
+ * meter actually looks mid-sentence.
+ */
 function Recorder() {
-  // Fixed bars rather than a live meter: this is a still of the screen, and a
-  // running animation on an intro page is motion competing with the copy.
-  const bars = [8, 18, 30, 44, 24, 38, 52, 20, 34, 12, 26, 42, 16, 30, 22, 36, 14, 9];
+  const N = 41;
+  const bars = Array.from({ length: N }, (_, n) => {
+    const t = (n - (N - 1) / 2) / ((N - 1) / 2);        // -1 … 0 … 1
+    const bell = Math.exp(-(t * t) * 2.6);               // fat in the middle
+    // A little tooth so it reads as speech rather than a smooth hill.
+    const tooth = 1 - 0.26 * (n % 3 === 0 ? 1 : n % 2 === 0 ? 0.45 : 0);
+    const h = S(7) + S(45) * bell * tooth;
+    const c = n < N * 0.24 ? '#6E6E6E'
+      : n < N * 0.5 ? '#E8B32B'
+      : n < N * 0.72 ? '#FFFFFF' : '#6E6E6E';
+    return { h, c };
+  });
   return (
-    <Device dark>
+    <Device dark chrome>
       <View style={st.recBody}>
         <View style={st.recTop}>
           <View style={st.recDot} />
           <Text style={st.recLabel}>{T('ob.recording')} · 0:38</Text>
         </View>
         <View style={st.wave}>
-          {bars.map((h, n) => (
-            <View key={n} style={[st.bar, { height: S(h) },
-              h > 32 ? { backgroundColor: '#D9A02B' }
-                : h > 18 ? { backgroundColor: '#93A68C' } : null]} />
+          {bars.map((b, n) => (
+            <View key={n} style={[st.bar, { height: b.h, backgroundColor: b.c }]} />
           ))}
         </View>
         <Text style={st.recQuote}>{T('ob.recQuote')}</Text>
         <View style={st.recCtrls}>
           <View style={st.recCtrl}>
-            <View style={st.recSmall}><View style={st.glyphCam} /></View>
+            <View style={st.recSmall}>
+              {/* A camera, not a rounded box: body, lens, and the little hump. */}
+              <View style={st.camBump} />
+              <View style={st.camBody}><View style={st.camLens} /></View>
+            </View>
             <Text style={st.recCtrlT}>{T('ob.addPhoto')}</Text>
           </View>
           <View style={st.recCtrl}>
@@ -511,30 +553,73 @@ const st = StyleSheet.create({
 
   // ── device ──
   device: {
-    alignSelf: 'center', width: S(272), backgroundColor: '#141414', borderRadius: S(34),
+    // A HAIRLINE OF LIGHT ON THE RIM. Without it a dark bezel around a dark screen
+    // is one black shape and the illustration stops reading as a phone at all —
+    // which is exactly how the first attempt failed.
+    alignSelf: 'center', width: S(272), backgroundColor: '#1B1B1B', borderRadius: S(34),
+    borderWidth: S(1.2), borderColor: '#3A3A3A',
     padding: S(9), marginTop: S(16),
     shadowColor: '#141313', shadowOpacity: 0.22, shadowRadius: S(18),
     shadowOffset: { width: 0, height: S(10) }, elevation: 6,
   },
   screen: { backgroundColor: '#FFFFFF', borderRadius: S(26), overflow: 'hidden' },
 
+  // ── the drawn phone's own chrome ──
+  statusBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: S(18), paddingTop: S(11), paddingBottom: S(4),
+  },
+  statusTime: { fontFamily: 'Inter_700Bold', fontSize: S(12), letterSpacing: -0.2 },
+  island: {
+    position: 'absolute', top: S(7), alignSelf: 'center',
+    width: S(74), height: S(21), borderRadius: S(11), backgroundColor: '#000000',
+  },
+  statusIcons: { flexDirection: 'row', alignItems: 'flex-end', gap: S(4) },
+  sigBar: { width: S(2.5), borderRadius: 1 },
+  // A SOLID FAN, not an arc. The usual trick — a circle showing only two borders,
+  // rotated 45° — renders as a crescent at this size and reads as a broken moon.
+  wifi: {
+    width: 0, height: 0, marginLeft: S(3), marginBottom: S(1),
+    borderLeftWidth: S(6), borderRightWidth: S(6), borderBottomWidth: S(8.5),
+    borderLeftColor: 'transparent', borderRightColor: 'transparent',
+  },
+  battery: {
+    width: S(18), height: S(9.5), borderRadius: S(2.6), borderWidth: S(1.2),
+    padding: S(1.2), marginLeft: S(2),
+  },
+  batteryFill: { flex: 1, borderRadius: S(1) },
+
+  // ── the camera glyph ──
+  camBump: {
+    position: 'absolute', top: S(12), width: S(8), height: S(3),
+    borderTopLeftRadius: S(2), borderTopRightRadius: S(2), backgroundColor: '#EFE7D9',
+  },
+  camBody: {
+    width: S(20), height: S(15), borderRadius: S(4), borderWidth: S(1.7),
+    borderColor: '#EFE7D9', alignItems: 'center', justifyContent: 'center', marginTop: S(3),
+  },
+  camLens: {
+    width: S(7), height: S(7), borderRadius: S(4), borderWidth: S(1.5), borderColor: '#EFE7D9',
+  },
   // ── recorder ──
   recBody: { padding: S(16), gap: S(13) },
-  recTop: { flexDirection: 'row', alignItems: 'center', gap: S(8) },
+  recTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S(8) },
   recDot: { width: S(9), height: S(9), borderRadius: S(5), backgroundColor: '#E0503A' },
   recLabel: { fontFamily: 'Inter_700Bold', fontSize: S(12.5), color: '#F2EFE8', letterSpacing: 0.5 },
-  wave: { flexDirection: 'row', alignItems: 'center', gap: S(3), height: S(52) },
-  bar: { flex: 1, borderRadius: 2, backgroundColor: '#5E6A5A' },
-  recQuote: { fontFamily: 'Inter_400Regular', fontSize: S(14), lineHeight: S(20), color: CREAM },
+  wave: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S(1.6), height: S(56) },
+  bar: { width: S(3), borderRadius: S(1.5), backgroundColor: '#6E6E6E' },
+  recQuote: { fontFamily: 'Inter_400Regular', fontSize: S(13.5), lineHeight: S(19), color: CREAM, textAlign: 'center' },
   recCtrls: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', gap: S(24) },
   recCtrl: { alignItems: 'center', gap: S(6) },
   recSmall: {
-    width: S(46), height: S(46), borderRadius: S(23), backgroundColor: '#2A2E2B',
+    width: S(46), height: S(46), borderRadius: S(23), backgroundColor: '#2C2C2C',
     alignItems: 'center', justifyContent: 'center',
   },
   recBig: {
-    width: S(64), height: S(64), borderRadius: S(32), backgroundColor: '#D9A02B',
-    alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: S(5),
+    width: S(64), height: S(64), borderRadius: S(32), backgroundColor: '#E8B32B',
+    alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: S(6),
+    // The pale ring the comp draws around the live button.
+    borderWidth: S(2), borderColor: 'rgba(255,255,255,0.85)',
   },
   pauseBar: { width: S(5), height: S(20), borderRadius: 2, backgroundColor: '#131110' },
   glyphCam: { width: S(18), height: S(14), borderRadius: S(3), borderWidth: 1.8, borderColor: '#EFE7D9' },
