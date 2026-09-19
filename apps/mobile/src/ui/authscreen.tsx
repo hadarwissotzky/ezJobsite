@@ -76,7 +76,7 @@ function classify(e: any, phase: 'send' | 'verify' | 'oauth'): Fail {
 
 const emailLooksReal = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
 
-export function AuthScreen({ connector, initialSignUp = false, notice, emailArrival, onReplayIntro }: {
+export function AuthScreen({ connector, initialSignUp = false, notice, emailArrival, onReplayIntro, devTools = false }: {
   connector: SupabaseConnector;
   /**
    * A REFUSAL THAT HAPPENED AFTER THE CODE WAS ACCEPTED — shown here because there
@@ -110,8 +110,17 @@ export function AuthScreen({ connector, initialSignUp = false, notice, emailArri
    * other caller is unchanged.
    */
   initialSignUp?: boolean;
-  /** DEV ONLY: clears the seen-intro flag and re-renders the landing pages. */
+  /** DEVELOPERS ONLY: clears the seen-intro flag and re-renders the landing pages. */
   onReplayIntro?: () => void;
+  /**
+   * Whether this account may see developer affordances. Was `__DEV__`, which is
+   * compiled OUT of a release build — so on TestFlight the replay button did not
+   * exist, and the only ways back to the intro were a reinstall (which takes the
+   * local capture database, outbox included) or a debugger over Metro. The flag
+   * comes from `developer_user`, an RLS-guarded row for this account, so it stays
+   * invisible to real users on the same binary.
+   */
+  devTools?: boolean;
 }) {
   const [method, setMethod] = React.useState<Method>('phone');
   const [step, setStep] = React.useState<Step>('form');
@@ -498,7 +507,7 @@ export function AuthScreen({ connector, initialSignUp = false, notice, emailArri
             straight here. The only other ways to see it were a reinstall (which takes
             the local capture database with it) or a debugger attached over Metro.
             `__DEV__` strips this from any release build. */}
-        {__DEV__ && onReplayIntro && (
+        {devTools && onReplayIntro && (
           <Pressable style={st.devRow} onPress={onReplayIntro} accessibilityRole="button">
             <Text style={st.devT}>Show intro again (dev)</Text>
           </Pressable>

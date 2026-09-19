@@ -7804,6 +7804,7 @@ const checkClientMessages = async () => {
           notice={authNotice}
           emailArrival={emailArrival}
           initialSignUp={authIntent !== 'login'}
+          devTools={devTools}
           onReplayIntro={() => { void forgetSeenOnboarding(); setSeen(false); }}
         />
       );
