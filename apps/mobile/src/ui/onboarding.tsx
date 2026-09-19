@@ -255,8 +255,8 @@ export function Onboarding({ onDone, lang, onLang }: {
             <View style={st.rule} />
             <Text style={st.lede}>{T('ob.lede')}</Text>
             <View style={st.heroWrap}>
-              <Image source={require('../../assets/onboard/heroCutout.png')}
-                style={st.hero} resizeMode="contain" />
+              <Image source={require('../../assets/onboard/heroShot.jpg')}
+                style={st.hero} resizeMode="cover" />
               <View style={st.bubbles}>
                 {['ob.b1', 'ob.b2', 'ob.b3'].map((k, n) => (
                   <View key={k} style={[st.bubble, n === 1 && st.bubbleIndent]}>
@@ -370,9 +370,17 @@ const st = StyleSheet.create({
   lede: { fontFamily: 'Inter_400Regular', fontSize: S(15.5), lineHeight: S(22), color: BODY, marginTop: S(12) },
 
   // ── cover ──
-  heroWrap: { height: S(300), marginTop: S(12), marginHorizontal: -S(22), justifyContent: 'center' },
-  hero: { position: 'absolute', left: -S(34), bottom: -S(10), width: S(300), height: S(330) },
-  bubbles: { alignItems: 'flex-end', gap: S(11), paddingRight: S(16) },
+  // A FULL-BLEED PHOTO, not a cut-out (2026-09-18). The previous art was a figure
+  // on transparency, so it stood on the cream; this is a whole jobsite scene, so
+  // it runs edge to edge and the page hands over to it rather than floating it.
+  // Mirrored in the asset itself rather than with a transform: scaleX(-1) flips
+  // the bubbles' shadows and anything else that ever lands inside this wrapper.
+  heroWrap: {
+    height: S(300), marginTop: S(12), marginHorizontal: -S(22),
+    justifyContent: 'center', overflow: 'hidden',
+  },
+  hero: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
+  bubbles: { alignItems: 'flex-end', gap: S(11), paddingRight: S(16), zIndex: 1 },
   bubble: {
     backgroundColor: '#FFFFFF', borderRadius: S(15), borderBottomRightRadius: S(4),
     paddingVertical: S(11), paddingHorizontal: S(15), maxWidth: S(182),
