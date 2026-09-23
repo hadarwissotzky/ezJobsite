@@ -51,3 +51,8 @@ apps/mobile/.shot.cjs
 .context/
 .keys/
 apps/mobile/google-play-service-account.json
+
+# Per-machine Claude Code settings (local permission grants, tokens). The shared
+# gate lives in .claude/settings.json and IS tracked.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
