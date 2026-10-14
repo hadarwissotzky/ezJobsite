@@ -22,4 +22,35 @@
   window.gtag = gtag;
   gtag('js', new Date());
   gtag('config', ID);
+
+  /*
+   * Click events — one delegated listener, so new links are tracked without touching
+   * the HTML. `location` says WHICH button: nav, hero, download, start (final CTA),
+   * footer… taken from the nearest nav/footer or the section's id (or first class).
+   *   create_account_click — any link to app.ezchangeorders.com
+   *   app_store_click      — the App Store badge
+   *   section_link_click   — in-page links like "See how it works" (#how)
+   *   language_switch      — the EN / ES toggle
+   */
+  function where(el) {
+    var box = el.closest('nav, footer, section');
+    if (!box) return 'other';
+    if (box.tagName !== 'SECTION') return box.tagName.toLowerCase();
+    return box.id || box.classList[0] || 'section';
+  }
+  document.addEventListener('click', function (e) {
+    var lang = e.target.closest('.lang-button');
+    if (lang) { gtag('event', 'language_switch', { language: lang.dataset.lang }); return; }
+    var a = e.target.closest('a[href]');
+    if (!a) return;
+    var href = a.getAttribute('href');
+    var text = a.textContent.trim().slice(0, 100);
+    if (a.hostname === 'app.ezchangeorders.com') {
+      gtag('event', 'create_account_click', { location: where(a), link_text: text });
+    } else if (a.hostname === 'apps.apple.com') {
+      gtag('event', 'app_store_click', { location: where(a) });
+    } else if (href.charAt(0) === '#' && href.length > 1) {
+      gtag('event', 'section_link_click', { section: href.slice(1), location: where(a), link_text: text });
+    }
+  });
 })();
