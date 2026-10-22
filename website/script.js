@@ -85,7 +85,7 @@ const spanish = new Map(Object.entries({
   'Your change-order tool goes where you go': 'Tu herramienta va contigo',
   'GET THE YES.': 'OBTÉN EL SÍ.', 'GET IT IN WRITING.': 'PONLO POR ESCRITO.', 'GET PAID.': 'COBRA.',
   'Capture the change before you leave the room. EZChangeOrder is designed for quick, one-handed use on real residential jobsites.': 'Registra el cambio antes de salir del cuarto. EZChangeOrder está diseñado para usarse rápido y con una mano en obras residenciales reales.',
-  'DOWNLOAD ON THE': 'DESCARGA EN EL', 'Free to start. On the App Store for iPhone and iPad.': 'Gratis para empezar. En el App Store para iPhone y iPad.',
+  'DOWNLOAD ON THE': 'DESCARGA EN EL', 'GET IT ON': 'DISPONIBLE EN', 'Get the app': 'Descarga la app', 'Get the free app': 'Descarga la app gratis', 'Or use it on the web': 'O úsala en la web', 'Or use it on the web →': 'O úsala en la web →', 'Free to start. You only pay when your client signs.': 'Gratis para empezar. Solo pagas cuando tu cliente firma.', 'Free to start. You only pay when your client signs. iPhone, iPad and Android.': 'Gratis para empezar. Solo pagas cuando tu cliente firma. iPhone, iPad y Android.', 'Free change order form': 'Formulario gratis de orden de cambio', 'What does it cost?': '¿Cuánto cuesta?', 'It is free to start. After that you buy change-order credits that never expire, or subscribe for unlimited. A credit is only used when your client signs.': 'Es gratis para empezar. Después compras créditos de órdenes de cambio que no vencen, o te suscribes para uso ilimitado. Un crédito solo se usa cuando tu cliente firma.', 'I just need a paper change order form.': 'Solo necesito un formulario de orden de cambio en papel.', 'Free to start. On the App Store for iPhone and iPad.': 'Gratis para empezar. En el App Store para iPhone y iPad.',
   'Record it': 'Grábalo', 'on the job': 'en la obra', 'Approved': 'Aprobado', 'in writing': 'por escrito',
   'Straight answers': 'Respuestas claras',
   'MADE FOR THE WAY SMALL JOBS ACTUALLY RUN.': 'HECHO PARA COMO REALMENTE FUNCIONAN LOS TRABAJOS PEQUEÑOS.',
@@ -180,6 +180,21 @@ const spanish = new Map(Object.entries({
   ,'BIG OR SMALL.': 'GRANDE O PEQUEÑO.'
   ,'We turn the field conversation, your notes, and your photos into a change order ready to send.': 'Convertimos la conversación en obra, tus notas y tus fotos en una orden de cambio lista para enviar.'
 }));
+
+/*
+ * Store routing. Every primary "Get the app" link carries data-store="<location>" and
+ * ships pointing at the App Store (so it works with JS off). On Android we swap in the
+ * Play listing so the tap lands on an install button instead of an iOS page. Both links
+ * carry the location as a campaign tag — App Store `ct` (needs `pt`, the provider token
+ * from App Store Connect → Campaigns) and a Play install referrer — so downloads from
+ * each button show up in App Store Connect › Sources › Campaigns and Play Console.
+ */
+const isAndroid = /android/i.test(navigator.userAgent);
+const playLink = (loc) => 'https://play.google.com/store/apps/details?id=com.hilo.ezjobsite&referrer='
+  + encodeURIComponent(`utm_source=ezchangeorders.com&utm_medium=website&utm_campaign=site-${loc}`);
+if (isAndroid) {
+  document.querySelectorAll('a[data-store]').forEach((a) => { a.href = playLink(a.dataset.store); });
+}
 
 const originalText = new WeakMap();
 const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
