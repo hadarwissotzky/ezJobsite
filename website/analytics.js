@@ -28,7 +28,8 @@
    * the HTML. `location` says WHICH button: nav, hero, download, start (final CTA),
    * footer… taken from the nearest nav/footer or the section's id (or first class).
    *   create_account_click — any link to app.ezchangeorders.com
-   *   app_store_click      — the App Store badge
+   *   app_store_click      — any App Store link (badge, hero/nav/final "Get the app")
+ *   play_store_click     — the Google Play badge, or any data-store link on Android
    *   section_link_click   — in-page links like "See how it works" (#how)
    *   language_switch      — the EN / ES toggle
    */
@@ -49,6 +50,8 @@
       gtag('event', 'create_account_click', { location: where(a), link_text: text });
     } else if (a.hostname === 'apps.apple.com') {
       gtag('event', 'app_store_click', { location: where(a) });
+    } else if (a.hostname === 'play.google.com') {
+      gtag('event', 'play_store_click', { location: where(a) });
     } else if (href.charAt(0) === '#' && href.length > 1) {
       gtag('event', 'section_link_click', { section: href.slice(1), location: where(a), link_text: text });
     }

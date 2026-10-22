@@ -79,6 +79,7 @@ jobs:
         run: |
           for f in website/index.html website/privacy.html website/terms.html \
                    website/sms.html website/support.html website/delete-account.html \
+                   website/change-order-form.html \
                    website/styles.css website/script.js website/analytics.js \
                    website/robots.txt website/sitemap.xml \
                    website/favicon.ico website/apple-touch-icon.png \
@@ -129,6 +130,7 @@ jobs:
           # sms.html samples all agree), so nothing addresses the bare domain.
           cp website/index.html website/privacy.html website/terms.html \
              website/sms.html website/support.html website/delete-account.html \
+             website/change-order-form.html \
              website/styles.css website/script.js website/analytics.js \
              website/robots.txt website/sitemap.xml \
              website/favicon.ico website/apple-touch-icon.png _site/

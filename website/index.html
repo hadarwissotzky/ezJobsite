@@ -14,6 +14,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
   <link rel="canonical" href="https://www.ezchangeorders.com/">
+  <meta name="apple-itunes-app" content="app-id=6795239468">
   <script defer src="/analytics.js"></script>
 </head>
 <body>
@@ -27,12 +28,11 @@
       <a href="#how">How it works</a>
       <a href="#why">Why it pays</a>
       <a href="#language">Your language</a>
-      <a href="#download">Get the app</a>
       <div class="language-toggle" role="group" aria-label="Website language">
         <button class="lang-button active" type="button" data-lang="en" aria-pressed="true">EN</button>
         <button class="lang-button" type="button" data-lang="es" aria-pressed="false">ES</button>
       </div>
-      <a class="nav-cta" href="https://app.ezchangeorders.com/">Create account</a>
+      <a class="nav-cta" data-store="nav" href="https://apps.apple.com/us/app/ezchangeorders/id6795239468?pt=485134&amp;ct=site-nav&amp;mt=8">Get the app</a>
     </nav>
   </header>
 
@@ -43,9 +43,10 @@
         <h1>DON’T DO EXTRA WORK ON A <span>VERBAL YES.</span></h1>
         <p class="hero-lede">Capture the request while you’re standing on the job. Price it, send it, and get approval before the work starts.</p>
         <div class="hero-actions">
-          <a class="button button-dark" href="https://app.ezchangeorders.com/">Create your account</a>
-          <a class="text-link" href="#how">See how it works <span aria-hidden="true">↓</span></a>
+          <a class="button button-dark" data-store="hero" href="https://apps.apple.com/us/app/ezchangeorders/id6795239468?pt=485134&amp;ct=site-hero&amp;mt=8">Get the free app</a>
+          <a class="text-link" href="https://app.ezchangeorders.com/">Or use it on the web</a>
         </div>
+        <p class="hero-note">Free to start. You only pay when your client signs.</p>
         <div class="promise" aria-label="Key benefits">
           <span><b>1</b> Record</span>
           <span><b>2</b> Review</span>
@@ -278,12 +279,18 @@
         <p class="eyebrow light">Your change-order tool goes where you go</p>
         <h2>CAPTURE IT.<br>TURN IT INTO A CO.<br>SEND IT.</h2>
         <p>Bring the entire field record with you: the client conversation, your notes, and every useful photo. EZChangeOrder is designed for quick, one-handed use on real residential jobsites.</p>
-        <a class="app-store-button" href="https://apps.apple.com/us/app/ezchangeorders/id6795239468" target="_blank" rel="noopener" aria-label="Download EZChangeOrders on the App Store">
-          <span class="apple-mark" aria-hidden="true"></span>
-          <span><small>DOWNLOAD ON THE</small><strong>App Store</strong></span>
-        </a>
-        <a class="download-register" href="https://app.ezchangeorders.com/">Create your account →</a>
-        <p class="download-note">Free to start. On the App Store for iPhone and iPad.</p>
+        <div class="store-buttons">
+          <a class="app-store-button" href="https://apps.apple.com/us/app/ezchangeorders/id6795239468?pt=485134&amp;ct=site-download&amp;mt=8" target="_blank" rel="noopener" aria-label="Download EZChangeOrders on the App Store">
+            <span class="apple-mark" aria-hidden="true"></span>
+            <span><small>DOWNLOAD ON THE</small><strong>App Store</strong></span>
+          </a>
+          <a class="app-store-button" href="https://play.google.com/store/apps/details?id=com.hilo.ezjobsite&amp;referrer=utm_source%3Dezchangeorders.com%26utm_medium%3Dwebsite%26utm_campaign%3Dsite-download" target="_blank" rel="noopener" aria-label="Get EZChangeOrders on Google Play">
+            <span class="apple-mark" aria-hidden="true"></span>
+            <span><small>GET IT ON</small><strong>Google Play</strong></span>
+          </a>
+        </div>
+        <a class="download-register" href="https://app.ezchangeorders.com/">Or use it on the web →</a>
+        <p class="download-note">Free to start. You only pay when your client signs. iPhone, iPad and Android.</p>
       </div>
       <div class="phone-stage" aria-label="EZChangeOrder app preview">
         <div class="phone-shadow"></div>
@@ -317,6 +324,14 @@
           <summary>Does the homeowner need the app?<span>+</span></summary>
           <p>No. They receive a simple client page where they can review the change, ask a question, and approve.</p>
         </details>
+        <details>
+          <summary>What does it cost?<span>+</span></summary>
+          <p>It is free to start. After that you buy change-order credits that never expire, or subscribe for unlimited. A credit is only used when your client signs.</p>
+        </details>
+        <details>
+          <summary>I just need a paper change order form.<span>+</span></summary>
+          <p>Use our <a href="/change-order-form.html">free printable change order form</a>. When you are ready to stop chasing signatures, send the same thing from your phone.</p>
+        </details>
       </div>
     </section>
 
@@ -324,14 +339,15 @@
       <p class="eyebrow light">Never leave a change unaccounted for</p>
       <h2>CAPTURE EVERY CHANGE.<br>BIG OR SMALL.</h2>
       <p>We turn the field conversation, your notes, and your photos into a change order ready to send.</p>
-      <a class="button button-light" href="https://app.ezchangeorders.com/">Create your account</a>
+      <a class="button button-light" data-store="start" href="https://apps.apple.com/us/app/ezchangeorders/id6795239468?pt=485134&amp;ct=site-start&amp;mt=8">Get the free app</a>
+      <p class="final-web"><a href="https://app.ezchangeorders.com/">Or use it on the web</a></p>
     </section>
   </main>
 
   <footer>
     <a class="brand footer-brand" href="#top"><span class="brand-mark">EZ</span><span>ChangeOrder</span></a>
     <p>EZChangeOrder is a Hilo Ventures Studio product.</p>
-    <p><a href="https://app.ezchangeorders.com/">Create account</a> · © 2026 Hilo Ventures Studio</p>
+    <p><a href="/change-order-form.html">Free change order form</a> · <a href="https://app.ezchangeorders.com/">Create account</a> · © 2026 Hilo Ventures Studio</p>
   </footer>
   <script src="/script.js"></script>
 </body>
